@@ -11,7 +11,6 @@
 <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
-<body>
 <div class="wrap">
   <h1><span class="h1-dot"></span>Character Voice Generator</h1>
   <div class="sub" id="taglineSub">Axis-based, per-trait conflict-aware, intensity &amp; rarity-weighted selection.</div>
@@ -170,6 +169,20 @@
             <option value="scholar">Weary Scholar</option>
             <option value="noble">Cold Noble</option>
             <option value="child">Wide-eyed Child</option>
+            <option value="burntIdealist">Burnt-Out Idealist</option>
+            <option value="charmingManipulator">Charming Manipulator</option>
+            <option value="grievingParent">Grieving Parent</option>
+            <option value="reluctantSecond">Reluctant Second-in-Command</option>
+            <option value="cheerfulSociopath">Cheerful Sociopath</option>
+            <option value="furiousCaretaker">Quietly Furious Caretaker</option>
+            <option value="washedUpProdigy">Washed-Up Prodigy</option>
+            <option value="companyLoyalist">Company Loyalist</option>
+            <option value="blackSheep">Black-Sheep Returnee</option>
+            <option value="compulsiveFixer">Compulsive Fixer</option>
+            <option value="undiscussedSurvivor">Survivor Who Won't Discuss It</option>
+            <option value="workaholicAvoiding">Workaholic Avoiding a Diagnosis</option>
+            <option value="formerTrueBeliever">Former True Believer</option>
+            <option value="goldenChild">Golden Child</option>
           </select>
         </div>
         <div class="field">
@@ -351,6 +364,9 @@
         <button class="btn-secondary" onclick="window.print()">Print</button>
         <button class="btn-secondary" onclick="saveCharacter(this)">Save Character</button>
         <button class="btn-secondary" onclick="generateFoil()">⚔ Generate Foil</button>
+        <label style="display:inline-flex;align-items:center;gap:5px;font-size:.85rem;font-weight:500;">
+          <input type="checkbox" id="foilOpposeComposure">Foils should also clash under pressure
+        </label>
       </div>
       <div class="savedList" id="savedList"></div>
     </div>
@@ -363,12 +379,13 @@
         <div class="archetypeTag" id="archetypeTag"></div>
       </div>
       <div class="charMeta" id="charMetaLine"></div>
+      <div id="noveltyReadout" style="display:none;"></div>
       <div id="insightPanel" style="display:none;"></div>
       <details class="legendBox" id="sheetLegend">
         <summary>What the markings on each trait mean</summary>
         <div class="legendGrid">
           <div><b>●●●○○ dots</b> — intensity, 1–5. How strongly the trait shows. Low-intensity traits are background texture; high-intensity ones dominate a scene.</div>
-          <div><b>common / signature</b> — how distinctive the trait is. "Signature" traits are rarer and more defining; "common" ones are ordinary human behaviour.</div>
+          <div><b>common / signature</b> — how distinctive the trait is. "Signature" traits are sharply defining and read as specific to this character; "common" ones are ordinary human behaviour. Note that signature entries outnumber common ones in the bank, so the rarity preference weights each pool by its own size rather than treating the labels as frequencies.</div>
           <div><b>lock</b> — pin this exact trait so regenerating or rerolling the sheet won't replace it.</div>
           <div><b>pin</b> — different from lock: keeps this slot's <i>intensity target</i> fixed (shown as a number, e.g. "pinned 3.4") so future generations and rerolls keep drawing from around that level even as sliders move elsewhere — but the actual trait can still vary. Use +/− to nudge the pinned level. Lock overrides pin if both are set.</div>
           <div><b>active range</b> — the exact span of slider magnitude this specific trait can be drawn at. Outside that window it's never eligible, however the dice fall. The tick mark shows the slot's current target inside that window.</div>
@@ -451,7 +468,7 @@
     </div>
   </div>
 
-  <div class="footerNote">Traits drawn from a curated bank of 1,177 verbosity, vocabulary, grammar, and mannerism entries. Intensity, rarity, and conflict polarity are heuristically scored — a starting point, not gospel.</div>
+  <div class="footerNote" id="footerTraitCount">Intensity, rarity, and conflict polarity are heuristically scored — a starting point, not gospel.</div>
 </div>
 
 <script src="js/app.js" defer></script>

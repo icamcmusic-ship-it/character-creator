@@ -239,6 +239,29 @@
   .warnBox:not(.show) { display:none; }
   .warnBox.show { display:block; }
   .warnBox ul { margin:8px 0 0; padding-left:18px; }
+  .warnBox li { margin-bottom:5px; }
+  .conflictCount { font-weight:500; opacity:.8; }
+  .conflictTier {
+    display:inline-block; font-size:.7rem; font-weight:700; text-transform:uppercase;
+    letter-spacing:.04em; padding:1px 6px; border-radius:999px; margin-right:5px;
+    border:1px solid currentColor;
+  }
+  .conflictTier-jarring  { color:var(--bubblegum); }
+  .conflictTier-strong   { color:#a8630b; }
+  .conflictTier-moderate { color:var(--dusk-blue); }
+  .conflictTier-mild     { color:var(--muted); }
+  .conflictNote { opacity:.75; font-style:italic; }
+
+  .noveltyBox {
+    margin:10px 0 4px; padding:9px 13px; border-radius:var(--radius-sm);
+    font-size:.82rem; border:1.5px solid var(--border); background:var(--panel);
+    border-left-width:4px;
+  }
+  .noveltyBox .noveltyNote { opacity:.8; }
+  .novelty-very     { border-left-color:var(--bubblegum); }
+  .novelty-somewhat { border-left-color:var(--golden); }
+  .novelty-mostly   { border-left-color:var(--dusk-blue-mid); }
+  .novelty-distinct { border-left-color:var(--emerald-deep); }
 
   .footerNote { color:var(--muted); font-size:.78rem; margin-top:26px; text-align:center; }
   .savedList { margin-top:12px; font-size:.83rem; color:var(--muted); }
