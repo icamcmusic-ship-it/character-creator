@@ -51,6 +51,11 @@
     <button id="tabRelBtn" role="tab" aria-selected="false" aria-controls="view-rel" tabindex="-1" onclick="switchTab('rel')">Relationships</button>
   </div>
   <div id="toastHost" class="toastHost" aria-live="polite"></div>
+  <!-- renderSheet replaces #sheetBody wholesale, which a screen reader has no reason to
+       notice: nothing moves focus and no live region announces it, so a generate reads
+       as nothing happening at all. Announce the result here instead of making the whole
+       sheet a live region, which would re-read forty cards on every reroll. -->
+  <div id="srAnnounce" class="srOnly" role="status" aria-live="polite" aria-atomic="true"></div>
 
   <div id="view-single" class="viewSection active" role="tabpanel" aria-labelledby="tabSingleBtn">
     <div class="controls">
@@ -86,6 +91,24 @@
           <input type="range" id="composureSlider" min="-100" max="100" value="0" step="1" oninput="onSliderChange()">
           <div class="scaleLabels"><span>Calm</span><span>Mixed</span><span>Erratic</span></div>
           <div class="sliderVal" id="composureVal">0</div>
+        </div>
+      </div>
+      <!-- Promoted out of the Advanced panel. These two are the dials that most directly
+           answer "everything I generate feels the same", and both were hidden behind a
+           switch most users never flip — so the shipping configuration was the one with
+           every anti-sameness control switched off and out of sight. -->
+      <div class="row">
+        <div class="field" style="max-width:230px;">
+          <label for="divergence">Surprise me</label>
+          <input type="range" id="divergence" min="0" max="1" value="0.15" step="0.05" oninput="onSliderChange()">
+          <div class="scaleLabels"><span>Never</span><span>Sometimes</span><span>Often</span></div>
+          <div class="sub" style="margin:2px 0 0;">How often a trait is drawn against the character's grain.</div>
+        </div>
+        <div class="field" style="max-width:230px;">
+          <label for="rangeFocus">How strictly sliders decide</label>
+          <input type="range" id="rangeFocus" min="0" max="1" value="0.62" step="0.01" oninput="onSliderChange()">
+          <div class="scaleLabels"><span>Loosely</span><span>Strictly</span></div>
+          <div class="sub" style="margin:2px 0 0;">Loose gives more variety; strict makes the sliders dictate.</div>
         </div>
       </div>
       <div class="sub" id="suggestNote" style="display:none; color:var(--accent2); margin:-4px 0 12px;"></div>
@@ -382,16 +405,6 @@
           <div class="field" style="max-width:160px;">
             <label>Boost strength</label>
             <input type="number" id="affinityBoost" value="2.5" min="0" max="10" step="0.5" oninput="onSliderChange()">
-          </div>
-          <div class="field" style="max-width:200px;">
-            <label>Slider precision</label>
-            <input type="range" id="rangeFocus" min="0" max="1" value="0.62" step="0.01" oninput="onSliderChange()">
-            <div class="scaleLabels"><span>Loose (more variety)</span><span>Tight (sliders dictate)</span></div>
-          </div>
-          <div class="field" style="max-width:200px;">
-            <label for="divergence">Surprise me <span class="sub" style="text-transform:none;">— how often a trait is drawn against the character's grain</span></label>
-            <input type="range" id="divergence" min="0" max="1" value="0.15" step="0.05" oninput="onSliderChange()">
-            <div class="scaleLabels"><span>Never</span><span>Often</span></div>
           </div>
           <div class="field" style="max-width:200px;">
             <label for="profileWeight">Profile weight (Motivation, Values, etc.)</label>

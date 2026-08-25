@@ -356,6 +356,16 @@
     .axisTitle::before { background:#333; }
     .traitCard { border-left-color:#999; background:#fafafa; }
     .traitName { color:#000; }
+    /* The sheet's own collapsible groups printed collapsed — the print rules hid the
+       app chrome but never opened the content, so a printed sheet could be missing most
+       of the character. Force every <details> inside the sheet open, and undo the
+       compact mode's clamping so nothing is cut off mid-line on paper. */
+    .sheet details, .sheet details[open] { display:block !important; }
+    .sheet details > summary { display:block !important; list-style:none; font-weight:600; }
+    .sheet details > *:not(summary) { display:revert !important; }
+    body.compact .traitDesc, body.compact .traitEx { display:block !important; }
+    .traitCard, .axisGroup, .castCard { break-inside:avoid; page-break-inside:avoid; }
+    .axisTitle { break-after:avoid; page-break-after:avoid; }
   }
 
   @media (max-width: 640px) {
@@ -570,6 +580,21 @@
   body.on-single-tab .stickyBar { display:flex; }
   .stickyBar button { padding:9px 18px; font-size:.82rem; }
   .stickySeed { margin-left:auto; font-family:var(--font-mono); font-size:.7rem; color:var(--muted); }
+
+  /* Flash the slots a regeneration moved. One pass, then it settles — the card keeps
+     the class but the animation only runs on the element's first paint, so a re-render
+     of the same sheet does not re-flash. */
+  @keyframes flashChanged {
+    0%   { background:rgba(184,134,11,.22); border-left-color:var(--golden); }
+    60%  { background:rgba(184,134,11,.10); }
+    100% { background:transparent; }
+  }
+  .traitCard.justChanged { animation:flashChanged 1.4s ease-out 1; }
+  @media (prefers-reduced-motion: reduce) {
+    /* No animation, but the information must not be lost — keep a static marker. */
+    .traitCard.justChanged { animation:none; border-left-color:var(--golden); }
+  }
+  @media print { .traitCard.justChanged { animation:none; } }
 
   @media print { .stickyBar, .toastHost, .emptyState, .headerRow { display:none !important; } }
 

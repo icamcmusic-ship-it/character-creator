@@ -125,8 +125,14 @@ function traitCardHTML(id, s, includeControls, showDiff, accent){
   const diff = showDiff ? diffLog[id] : null;
   const style = accent ? ` style="--section-accent:${escHTML(accent)}"` : ``;
   const history = includeControls && rerollHistory[id] && rerollHistory[id].length;
+  // Flash slots that a full regeneration actually moved. renderChangeList already knew
+  // WHICH slots changed but only reported it in a collapsed list; the highlight was
+  // wired for per-slot rerolls and never applied on a full regenerate, so after pressing
+  // Generate the user had forty cards and no idea which were new. Purely a CSS
+  // animation keyed off the class, so it plays once per render and needs no timer.
+  const changedClass = (showDiff && changedSlots.has(id)) ? ' justChanged' : '';
   return `
-    <div class="traitCard${s.wildcard ? ' wildcardCard' : ''}"${style}>
+    <div class="traitCard${s.wildcard ? ' wildcardCard' : ''}${changedClass}"${style}>
       <div class="traitMain">
         <div class="traitName">${escHTML(t.trait)}
           <span class="rarityBadge rarity-${tier}" title="${escHTML(RARITY_TIER_HINT[tier]||'')}">${escHTML(RTIER_LABEL[tier]||tier)}</span>
@@ -240,6 +246,17 @@ function renderSheet(){
     div.innerHTML = inner;
     body.appendChild(div);
   });
+
+  /* Announce the result. renderSheet replaces #sheetBody wholesale and nothing moves
+     focus, so to a screen reader a generate is indistinguishable from nothing happening.
+     A short summary in a live region says what arrived without re-reading forty cards. */
+  (function announceSheet(){
+    const live = document.getElementById('srAnnounce');
+    if (!live) return;
+    const filled = Object.values(state).filter(s=> s && s.trait).length;
+    const name = charMeta.name || "Character";
+    live.textContent = `${name} generated — ${filled} traits across ${groups.filter(g=>g.ids.length).length} sections.`;
+  })();
 
   // Coherence score + soft tension notes
   const co = coherenceScore(state);
@@ -359,6 +376,13 @@ function sectionGlyph(title){ return SECTION_GLYPHS[title] || "◆"; }
    data was already being tracked for per-slot rerolls (diffLog); it just never
    survived a full regeneration. */
 let lastSheetTraits = null;   // slotId -> trait name, as of the previous generation
+let changedSlots = new Set();  // slotIds a full regeneration moved, for the flash highlight
+function markChangedSlots(){
+  changedSlots = new Set();
+  if (!lastSheetTraits) return;
+  const now = snapshotSheetTraits(state);
+  Object.keys(now).forEach(k=>{ if (lastSheetTraits[k] !== now[k]) changedSlots.add(k); });
+}
 function snapshotSheetTraits(st){
   const m = {};
   Object.entries(st || {}).forEach(([k,v])=>{ if (v && v.trait) m[k] = v.trait.trait; });

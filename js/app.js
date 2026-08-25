@@ -290,6 +290,27 @@ function onSliderChange(){
   if (_previewTimer) clearTimeout(_previewTimer);
   _previewTimer = setTimeout(updateHeavyPreview, 80);
 }
+/* Every range input has a visible <label for>, but a screen reader announces the VALUE
+   as the bare number — "minus thirty-five" — which is exactly the part of these controls
+   that means nothing on its own. The resolved word is already computed for the sighted
+   readout; aria-valuetext puts the same word in the accessibility tree. */
+const VOICE_SLIDER_WORDS = {
+  verbositySlider: ["almost silent","terse","fairly terse","balanced","fairly voluble","voluble","torrential"],
+  registerSlider:  ["very blunt","blunt","fairly plain","neutral","fairly formal","elaborate","highly ornate"],
+  composureSlider: ["very steady","steady","fairly steady","mixed","somewhat volatile","volatile","highly erratic"],
+};
+function voiceSliderWord(id, raw){
+  const words = VOICE_SLIDER_WORDS[id];
+  if (!words) return String(raw);
+  // -100..100 across seven bands, with the middle band covering the real neutral zone
+  const idx = clamp(Math.round((raw + 100) / 200 * (words.length - 1)), 0, words.length - 1);
+  return words[idx];
+}
+function setValueText(id, text){
+  const el = document.getElementById(id);
+  if (el && el.setAttribute) el.setAttribute('aria-valuetext', text);
+}
+
 function updateSliderReadouts(){
   const vRaw = intVal('verbositySlider', 0);
   const rRaw = intVal('registerSlider', 0);
@@ -297,12 +318,26 @@ function updateSliderReadouts(){
   document.getElementById('verbosityVal').textContent = vRaw;
   document.getElementById('registerVal').textContent = rRaw;
   document.getElementById('composureVal').textContent = cRaw;
+  [['verbositySlider',vRaw],['registerSlider',rRaw],['composureSlider',cRaw]].forEach(([id,raw])=>{
+    setValueText(id, `${raw} — ${voiceSliderWord(id, raw)}`);
+  });
+  const dv = document.getElementById('divergence');
+  if (dv){
+    const v = parseFloat(dv.value) || 0;
+    setValueText('divergence', v < 0.08 ? "never" : v < 0.3 ? "sometimes" : v < 0.6 ? "often" : "very often");
+  }
+  const rf = document.getElementById('rangeFocus');
+  if (rf){
+    const v = parseFloat(rf.value);
+    setValueText('rangeFocus', v >= 0.75 ? "sliders decide strictly" : v >= 0.45 ? "sliders decide fairly strictly" : "sliders decide loosely");
+  }
   PERSONALITY_AXES.forEach(axis=>{
     const el = document.getElementById('pers_'+axis.id);
     const out = document.getElementById('persVal_'+axis.id);
     if (el && out){
       const raw = parseInt(el.value, 10) || 0;
       out.textContent = raw + " · " + axisReadout(axis, raw);
+      setValueText('pers_'+axis.id, `${raw} — ${axisReadout(axis, raw)}`);
       out.classList.toggle('inNeutral', Math.abs(raw) < 14);
     }
     // Show whether this axis actually made it into the last generated sheet. With
@@ -365,6 +400,24 @@ function updateHeavyPreview(){
 // Live explanation of what the three voice sliders are currently targeting, in the
 // same units the trait cards use. Without this the new continuous range engine is
 // invisible: you'd feel the difference between 35 and 45 but never see why.
+/* The readout stated the numeric band and nothing else: "targets intensity 2.41,
+   accepts 2.06–2.76" is precise and tells a novelist nothing about what will come out.
+   All three of the missing pieces were already computed elsewhere — which pool the
+   slider selects, and FREQ_BUDGET's plain-English frequency for an intensity. Join
+   them, so the readout answers "what will this slider actually do". */
+function budgetPhraseFor(target){
+  const b = FREQ_BUDGET[clamp(Math.round(target), 1, 5)] || FREQ_BUDGET[3];
+  return b.label;
+}
+// Which pool each voice slider resolves to at its current position. Mirrors the
+// branch conditions in pickVerbositySlot / pickRegisterSlot rather than guessing.
+function voicePoolNameFor(id, level){
+  if (id === 'verbositySlider') return level <= -0.12 ? "Minimal & Ultra-Brief"
+    : level >= 0.12 ? "High-Volume & Wordy (sometimes Repetitive & Circular)" : "Pacing & Situation-Driven";
+  if (id === 'registerSlider') return level >= 0.12 ? "Stylized & Elaborate"
+    : level <= -0.12 ? "Register & Formality Spectrum (informal end)" : "Register & Formality Spectrum";
+  return null;   // composure drives grammar/mannerism weighting rather than one pool
+}
 function updateRangeReadout(){
   const box = document.getElementById('rangeReadout');
   if (!box) return;
@@ -372,15 +425,20 @@ function updateRangeReadout(){
   const rows = [
     ['Verbosity','verbositySlider'], ['Register','registerSlider'], ['Composure','composureSlider']
   ].map(([label,id])=>{
-    const raw = Math.abs(intVal(id, 0));
+    const rawSigned = intVal(id, 0);
+    const raw = Math.abs(rawSigned);
     const t = targetFromMag(raw);
     const lo = Math.max(1, t - half).toFixed(2), hi = Math.min(5, t + half).toFixed(2);
-    return `<div><b>${label}:</b> targets intensity <b>${t.toFixed(2)}</b> · accepts ${lo}–${hi}</div>`;
+    const pool = voicePoolNameFor(id, rawToLevel(rawSigned));
+    const poolBit = pool ? ` draws from <b>${escHTML(pool)}</b>,` : ``;
+    return `<div><b>${label}</b> at ${rawSigned}:${poolBit} targeting intensity <b>${t.toFixed(2)}</b> `
+         + `— roughly "${escHTML(budgetPhraseFor(t))}" <span class="sub">(accepts ${lo}–${hi})</span></div>`;
   });
   const pw = document.getElementById('profileWeight');
   if (pw){
     const t = targetFromMag(parseInt(pw.value)||0);
-    rows.push(`<div><b>Profile weight:</b> targets intensity <b>${t.toFixed(2)}</b></div>`);
+    rows.push(`<div><b>Profile weight</b> at ${pw.value}: targeting intensity <b>${t.toFixed(2)}</b> `
+            + `— roughly "${escHTML(budgetPhraseFor(t))}" across Motivation, Values, Role and the rest.</div>`);
   }
   rows.push(`<div class="sub" style="margin:6px 0 0;">Window half-width ${half.toFixed(2)} — narrower means the sliders dictate more tightly and results vary less.</div>`);
   box.innerHTML = rows.join("");

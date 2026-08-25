@@ -231,6 +231,7 @@ function runGeneration(){
 function _runGeneration(){
   snapshotHistory();
   diffLog = {};
+  changedSlots = new Set();   // recomputed once the new state is in place
   // Per-slot UI state belongs to the previous character, not this one.
   rerollExclusions = {};
   rerollHistory = {};
@@ -336,6 +337,10 @@ function _runGeneration(){
   // tells you how much moved, never what.
   lastSheetTraits = Object.keys(state).length ? snapshotSheetTraits(state) : null;
   state = newState;
+  // Which slots this generation actually moved — drives the per-card flash. Set here
+  // rather than inside renderSheet so only a full regeneration highlights, and a later
+  // reroll or a re-render of the same sheet doesn't re-flash everything.
+  markChangedSlots();
   // Record which slider positions produced this state, so a future undo (which
   // restores the state that came BEFORE the next generation) can also restore
   // the sliders that actually match it.
