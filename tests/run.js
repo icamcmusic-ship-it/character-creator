@@ -31,6 +31,11 @@ const ctx = loadEngine([
   'PROFILE_SECTIONS','WEIGHT_MATRIX','traitPos','magFromPos','targetFromMag','targetFromLevel',
   'buildCharacterState','pickInRange','byFilter','catsOf','mulberry32','hashSeedString',
   'rollCharacterVariants','coherenceScore','checkConflictsFor','PRESENTATION_VARIANTS',
+  'RTIER_ORDER','RTIER_SCORE','rarityTier','withCharacterVariants','withSavedVariants',
+  'charVariants','VARIANT_ODDS','POL_COUNTS','polNormalise','poolFloorTarget','rangeSelect',
+  'rarityNorm','proximityWeights','profileTarget','applyBudgets','budgetCapacity',
+  'BUDGET_GROUPS','BUDGET_PRESETS','applyBudgetPreset','clearBudgets','rarityCaps',
+  'intensityCaps','budgetMode','lastBudgetReport','SECTION_OF_CATEGORY','forgetSlotDraws',
   'rarityTier','rarityWeight','rarityPrefValue','polarityFit','buildContextBias','parseAgeHint',
   'traitBand','CURVE_EXP','clamp','SECTION_COLORS','loudnessCheck','recentPenalty',
   'rememberGeneration','forgetRecentTraits','_drawUnique','_buildUsedIds','explainWhyNot',
@@ -61,8 +66,9 @@ check('intensities are integers 1-5', ()=>{
   const bad = T.filter(t => !Number.isInteger(t.intensity) || t.intensity < 1 || t.intensity > 5);
   assert(!bad.length, bad.length + ' out of range');
 });
-check('rarity is one of the two declared classes', ()=>{
-  const bad = T.filter(t => t.rarity !== 'common' && t.rarity !== 'signature');
+check('rarity is one of the four authored tiers', ()=>{
+  const valid = new Set(A.RTIER_ORDER);
+  const bad = T.filter(t => !valid.has(t.rarity));
   assert(!bad.length, bad.length + ' unknown rarities');
 });
 check('every pol key is a known axis', ()=>{
@@ -170,25 +176,75 @@ check('the eased curve keeps intensity 4+ in the top of the dial', ()=>{
 });
 
 group('Rarity tiers');
-check('every trait resolves to one of three tiers', ()=>{
+check('every trait resolves to one of four tiers', ()=>{
   const counts = {};
   T.forEach(t=>{ counts[t.rtier] = (counts[t.rtier]||0)+1; });
-  assert(Object.keys(counts).sort().join(',') === 'common,distinctive,signature', JSON.stringify(counts));
-  return Object.entries(counts).map(([k,v])=>`${k} ${Math.round(100*v/T.length)}%`).join(', ');
+  assert(Object.keys(counts).sort().join(',') === 'common,distinctive,signature,uncommon', JSON.stringify(counts));
+  return A.RTIER_ORDER.map(k=>`${k} ${Math.round(100*counts[k]/T.length)}%`).join(', ');
 });
-check('signature is now genuinely the minority tier', ()=>{
+/* The four-way split is now AUTHORED data, so it can drift with every content pass —
+   which is the point, but it means it needs a guard. The bounds are deliberately wide:
+   this is here to catch a migration that went wrong or a content pass that quietly
+   turned the bank into one tier again, not to freeze the distribution. The target
+   shares the tier definitions imply are roughly 35/33/22/10; the derivational
+   migration landed at 22/28/33/16, and closing that gap is a hand pass, trait by
+   trait, which this test is designed to permit rather than block. */
+check('the four-way rarity distribution stays within tolerance', ()=>{
+  const share = tier => T.filter(t=>t.rtier===tier).length / T.length;
+  const bounds = {common:[0.15,0.45], uncommon:[0.20,0.45], distinctive:[0.15,0.40], signature:[0.05,0.25]};
+  Object.entries(bounds).forEach(([tier,[lo,hi]])=>{
+    const v = share(tier);
+    assert(v >= lo && v <= hi, `${tier} at ${Math.round(100*v)}% is outside ${Math.round(100*lo)}-${Math.round(100*hi)}%`);
+  });
+  return A.RTIER_ORDER.map(t=>`${t} ${Math.round(100*share(t))}%`).join(', ');
+});
+check('rarity is no longer a function of intensity', ()=>{
+  /* The whole point of the migration. Under the old derived scheme rtier was
+     determined by (rarity, intensity), so a quiet signature trait could not exist and
+     "an ordinary person with one startling verbal habit" was inexpressible. Every tier
+     must now be reachable at every intensity. */
+  const grid = {};
+  T.forEach(t=>{ grid[t.rtier + '@' + t.intensity] = (grid[t.rtier + '@' + t.intensity]||0)+1; });
+  const missing = [];
+  A.RTIER_ORDER.forEach(tier=>{
+    for (let i = 1; i <= 5; i++) if (!grid[tier + '@' + i]) missing.push(tier + '@i' + i);
+  });
+  assert(!missing.length, 'unreachable combinations: ' + missing.join(', '));
+  return Object.keys(grid).length + ' of 20 tier/intensity combinations populated';
+});
+check('signature is genuinely the minority tier', ()=>{
   const sig = T.filter(t=>t.rtier === 'signature').length;
   assert(sig / T.length < 0.25, Math.round(100*sig/T.length) + '% is still signature');
 });
 check('rarity preference is symmetric around balanced', ()=>{
   const common = T.find(t=>t.rtier==='common'), sig = T.find(t=>t.rtier==='signature');
-  const norm = {common:10, distinctive:10, signature:10};
+  const norm = {common:10, uncommon:10, distinctive:10, signature:10};
   const a = A.rarityWeight(common, -1, norm) / A.rarityWeight(sig, -1, norm);
   const b = A.rarityWeight(sig, 1, norm) / A.rarityWeight(common, 1, norm);
   assert(Math.abs(a - b) < 1e-9, a + ' vs ' + b);
 });
-check('legacy string preferences still resolve', ()=>{
-  assert(A.rarityPrefValue('balanced') === 0 && A.rarityPrefValue('common') === -1 && A.rarityPrefValue('signature') === 1);
+check('the two middle tiers sit between the poles, in order', ()=>{
+  const norm = {common:10, uncommon:10, distinctive:10, signature:10};
+  const w = tier => A.rarityWeight({rtier:tier, rarity:tier}, 1, norm);
+  assert(w('common') < w('uncommon') && w('uncommon') < w('distinctive') && w('distinctive') < w('signature'),
+    A.RTIER_ORDER.map(t=>`${t} ${w(t).toFixed(3)}`).join(' '));
+});
+check('per-pool normalisation lifts thin classes without letting them dominate', ()=>{
+  /* Full 1/size equalisation handed a two-member class in a twenty-trait pool five and
+     a half times an average trait's weight, which is what put one Motivation trait in
+     89 of 300 default characters. Damped normalisation must still lift the thin class
+     (otherwise it does nothing) but must not invert the ordering by a wide margin. */
+  const norm = {signature:11, distinctive:7, uncommon:2};
+  const per = tier => A.rarityWeight({rtier:tier, rarity:tier}, 0, norm);
+  assert(per('uncommon') > per('signature'), 'thin class is not lifted at all');
+  assert(per('uncommon') / per('signature') < 3, 'thin class still dominates: ' + (per('uncommon')/per('signature')).toFixed(2) + 'x');
+  return (per('uncommon')/per('signature')).toFixed(2) + 'x lift for a 2-member class over an 11-member one';
+});
+check('tier names and legacy strings both resolve as preferences', ()=>{
+  assert(A.rarityPrefValue('balanced') === 0, 'balanced');
+  assert(A.rarityPrefValue('common') === -1 && A.rarityPrefValue('signature') === 1, 'poles');
+  assert(Math.abs(A.rarityPrefValue('uncommon') - (-0.33)) < 1e-9, 'uncommon');
+  assert(Math.abs(A.rarityPrefValue('distinctive') - 0.33) < 1e-9, 'distinctive');
 });
 
 group('Polarity');
@@ -482,9 +538,19 @@ check('at neutral sliders no profile category dominates its section', ()=>{
      unscaled cascade; the floor catches the sharper half of the bug, a category nothing
      links into, which is how Secure and Skeptic ended up structurally starved rather
      than merely unlucky. Bounds are loose enough to absorb sampling noise at this N and
-     tight enough that the measured pre-fix numbers fail them. */
-  const N = 300;
+     tight enough that the measured pre-fix numbers fail them.
+
+     Seeded, and N raised. A seven-way split at N=300 puts about 43 characters in each
+     bucket, whose sampling spread alone is wide enough to cross the 0.55 floor every
+     few runs on a category that is perfectly healthy — so the check was failing
+     intermittently on noise and telling nobody anything when it did. Measured over
+     1,500 characters the real shares sit at 10-18% against a 14% uniform, comfortably
+     inside the band; the seed makes that reproducible rather than probable. */
+  const N = 1200;
   const counts = {};
+  const _rnd = Math.random;
+  Math.random = A.mulberry32(0x5eed1);
+  try {
   for (let i=0;i<N;i++){
     const o = {}; A.PERSONALITY_AXES.forEach(a=> o[a.id] = 0);
     A.rollCharacterVariants();
@@ -496,6 +562,7 @@ check('at neutral sliders no profile category dominates its section', ()=>{
       if (c) ((counts[ps.id] = counts[ps.id] || {}))[c] = (counts[ps.id][c]||0) + 1;
     });
   }
+  } finally { Math.random = _rnd; }
   const bad = [];
   Object.entries(counts).forEach(([id, c])=>{
     const ps = A.PROFILE_SECTIONS.find(p=>p.id===id);

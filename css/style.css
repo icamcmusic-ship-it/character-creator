@@ -557,10 +557,37 @@
   body.compact-sheet .traitCard { padding:7px 11px; margin-bottom:4px; }
   body.compact-sheet .traitName { font-size:.92rem; }
 
-  /* ---------- Rarity tiers + outlier badge ---------- */
+  /* ---------- Rarity tiers + outlier badge ----------
+     Four authored tiers now, ordered common -> uncommon -> distinctive -> signature,
+     with the visual weight rising alongside. The tier name is always spelled out on
+     the badge, so the colour is reinforcement rather than the only carrier. */
   .rarityBadge.rarity-signature { color:#fff; background:var(--golden-deep); border-color:var(--golden-deep); }
   .rarityBadge.rarity-distinctive { color:var(--dusk-blue); background:var(--dusk-blue-light); border-color:var(--dusk-blue-mid); }
+  .rarityBadge.rarity-uncommon { color:var(--emerald-deep); background:var(--emerald-light); border-color:var(--emerald); }
   .rarityBadge.rarity-common { color:var(--muted); }
+  /* ---------- Budgets panel ---------- */
+  .budgetGrid { display:flex; flex-direction:column; gap:6px; margin-top:4px; }
+  .budgetRow { display:flex; align-items:center; gap:8px; }
+  .budgetRow.budgetRowTotal { border-top:1px solid var(--line); padding-top:8px; margin-top:2px; font-weight:600; }
+  .budgetRow .budgetLabel { flex:1 1 auto; margin:0; font-size:.78rem; text-transform:none; letter-spacing:0; }
+  .budgetRow input[type=number] { flex:0 0 82px; max-width:82px; }
+  .budgetMeter {
+    flex:0 0 96px; display:flex; align-items:center; gap:6px;
+    font-family:var(--font-mono); font-size:.62rem; color:var(--muted);
+  }
+  .budgetMeter i {
+    display:block; height:4px; border-radius:999px; background:var(--golden);
+    flex:0 0 auto; min-width:2px; max-width:40px;
+  }
+  .budgetMeter b { font-weight:600; white-space:nowrap; }
+  .wildBadge.budgetBadge { background:var(--golden-deep); border-color:var(--golden-deep); }
+
+  /* Stands in for the Toss button on a slot the user required by name, where a reroll
+     has nothing to draw. Same footprint as the button so the strip doesn't reflow. */
+  .slotNote {
+    font-family:var(--font-mono); font-size:.62rem; text-transform:uppercase; letter-spacing:.05em;
+    color:var(--muted); align-self:center; padding:0 4px; cursor:help;
+  }
   .wildBadge {
     font-family:var(--font-mono); font-size:.58rem; text-transform:uppercase; letter-spacing:.06em;
     padding:2px 8px; border-radius:999px; margin-left:8px; vertical-align:middle; font-weight:700;

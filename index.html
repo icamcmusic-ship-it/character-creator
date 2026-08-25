@@ -211,6 +211,34 @@
       </details>
 
       <details class="advanced advOnly" style="margin:0 0 14px;">
+        <summary>Budgets — rarity caps &amp; intensity ceilings</summary>
+        <div class="sub" style="margin:10px 0;">Constraints say <i>what</i> can appear. Budgets say <i>how much</i>. Both run after the draw, so nothing here distorts the weighting or the <b>why?</b> explanations — a budget adjusts the result and tells you it did. Slots you locked, pinned or required are never modified, but they still <i>spend</i> the budget, so you can see when you've spent it yourself.</div>
+
+        <div class="row">
+          <div class="field" style="max-width:340px;">
+            <label>Rarity caps — most cards of each kind on one sheet</label>
+            <div id="rarityCapGrid" class="budgetGrid"></div>
+          </div>
+          <div class="field" style="max-width:420px;">
+            <label>Intensity budget — most total intensity per group</label>
+            <div id="intensityCapGrid" class="budgetGrid"></div>
+          </div>
+          <div class="field" style="max-width:260px;">
+            <label for="budgetMode">When a budget is exceeded</label>
+            <select id="budgetMode" onchange="onBudgetModeChange()">
+              <option value="redraw" selected>Redraw quieter</option>
+              <option value="drop">Drop the loudest</option>
+              <option value="warn">Warn only</option>
+            </select>
+            <label style="margin-top:10px;">Presets</label>
+            <div class="actionRow" id="budgetPresetRow"></div>
+            <button class="btn-secondary" style="margin-top:6px;" onclick="clearBudgetsUI()">Clear all budgets</button>
+          </div>
+        </div>
+        <div id="budgetChips" style="margin-top:10px; display:flex; flex-wrap:wrap; gap:6px;"></div>
+      </details>
+
+      <details class="advanced advOnly" style="margin:0 0 14px;">
         <summary>Why didn't I get a particular trait?</summary>
         <div class="sub" style="margin:10px 0;">The per-card <b>why?</b> panel explains a pick. This explains an absence — which constraint, presentation lock, or active-range window is standing in the way, and what to move.</div>
         <div class="row">
@@ -292,7 +320,7 @@
           <label for="rarityPref">Trait rarity preference</label>
           <input type="range" id="rarityPref" min="-1" max="1" value="0" step="0.05" oninput="onSliderChange()">
           <div class="scaleLabels"><span>Ordinary</span><span>Balanced</span><span>Sharply defining</span></div>
-          <div class="sub" style="margin:4px 0 0;">Three tiers now, not two: <b>common</b>, <b>distinctive</b>, and a genuinely rare <b>signature</b> (distinctive <i>and</i> loud enough to define a voice). Continuous, like everything else.</div>
+          <div class="sub" style="margin:4px 0 0;">Four authored tiers: <b>common</b> (texture, not identity) &middot; <b>uncommon</b> (noticeable, unremarkable) &middot; <b>distinctive</b> (a reader would remember it) &middot; <b>signature</b> (defines the voice; two is a caricature). Rarity now answers <i>how many people are like this</i> and intensity answers <i>how loudly it shows</i> — they used to be the same number wearing two hats, which is why a quiet signature trait was unreachable.</div>
         </div>
       </div>
       <div class="row">
@@ -346,8 +374,19 @@
         <label style="margin:0; text-transform:none; font-size:.85rem; color:var(--text);" for="avoidRecentToggle">Avoid recent traits — softly penalise anything drawn in your last few characters</label>
       </div>
       <div class="stressToggleRow checkboxRow advOnly" style="margin-top:8px;">
-        <input type="checkbox" id="wildcardToggle">
-        <label style="margin:0; text-transform:none; font-size:.85rem; color:var(--text);" for="wildcardToggle">Add "the one thing that doesn't fit" — one slot drawn against the grain, ignoring your slider posture</label>
+        <!-- On by default. This is the strongest anti-staleness tool in the app and it
+             shipped switched off, behind Tinker Mode, on a single slot — the same
+             mistake the divergence and avoid-recent defaults already had corrected. -->
+        <input type="checkbox" id="wildcardToggle" checked>
+        <label style="margin:0; text-transform:none; font-size:.85rem; color:var(--text);" for="wildcardToggle">Add "the one thing that doesn't fit" — slots drawn against the grain, ignoring your slider posture</label>
+      </div>
+      <div class="stressToggleRow checkboxRow advOnly" style="margin-top:8px;">
+        <div class="field" style="max-width:230px;">
+          <label for="wildcardCount">How many outliers</label>
+          <input type="range" id="wildcardCount" min="0" max="3" value="1" step="1" oninput="onSliderChange()">
+          <div class="scaleLabels"><span>0</span><span>1</span><span>2</span><span>3</span></div>
+          <div class="sub" style="margin:2px 0 0;">Outliers can now land in the deep profile sections too — "the devoted caretaker whose actual vice is gambling" is a better outlier than "the terse person who sometimes rambles".</div>
+        </div>
       </div>
 
       <div class="stressToggleRow checkboxRow advOnly" style="margin-top:8px;">

@@ -123,7 +123,7 @@ function bandHTML(t, slot){
   </div>`;
 }
 
-const RTIER_LABEL = {common:"common", distinctive:"distinctive", signature:"signature"};
+const RTIER_LABEL = {common:"common", uncommon:"uncommon", distinctive:"distinctive", signature:"signature"};
 
 function traitCardHTML(id, s, includeControls, showDiff, accent, tagLabel){
   // BUG FIX: several code paths could produce a slot with a null trait (an empty
@@ -156,6 +156,7 @@ function traitCardHTML(id, s, includeControls, showDiff, accent, tagLabel){
           <span class="intensityDots" title="Intensity ${t.intensity}/5 (continuous position ${traitPos(t).toFixed(2)})"><span aria-hidden="true">${intensityDots(t.intensity)}</span><span class="srOnly">intensity ${t.intensity} of 5</span></span>
           ${s.wildcard ? `<span class="wildBadge" title="Deliberately drawn against the grain — see 'the one thing that doesn't fit'">outlier</span>` : ``}
           ${s.derived ? `<span class="wildBadge" style="background:var(--emerald-deep);border-color:var(--emerald-deep);" title="Derived from this character's psychology rather than a slider">derived</span>` : ``}
+          ${s.budgeted ? `<span class="wildBadge budgetBadge" title="${escHTML(s.budgetWhy || 'Adjusted to fit a budget you set')}">budgeted</span>` : ``}
         </div>
         <div class="traitCat">${escHTML(t.category)}</div>
         <div class="traitDesc">${escHTML(t.desc)}</div>
@@ -167,7 +168,12 @@ function traitCardHTML(id, s, includeControls, showDiff, accent, tagLabel){
       </div>
       ${includeControls ? `
       <div class="slotBtns">
-        <button class="rerollBtn" onclick="rerollSlot('${escAttr(id)}')" title="Draw a different trait for this slot (never repeats one you've already rejected here)"><span aria-hidden="true">✕</span> Toss</button>
+        ${s.required && id.startsWith("req_")
+          /* "Always include this exact trait" is the user's own instruction — there is
+             nothing for a reroll to draw, so the control says what would actually
+             change it rather than rendering a button that cannot work. */
+          ? `<span class="slotNote" title="This trait is here because you required it by name. Remove the constraint to change it.">required by name</span>`
+          : `<button class="rerollBtn" onclick="rerollSlot('${escAttr(id)}')" title="Draw a different trait for this slot (never repeats one you've already rejected here)"><span aria-hidden="true">✕</span> Toss</button>`}
         <button class="lockBtn ${lockedClass}" onclick="toggleLock('${escAttr(id)}')" title="Keep this trait through rerolls and regeneration" aria-pressed="${s.locked?'true':'false'}"><span aria-hidden="true">📌</span> ${s.locked ? "Kept" : "Keep"}</button>
         <div class="pinRow">
           <button class="pinBtn ${pinnedTargets[id]!==undefined ? "pinned" : ""}" onclick="togglePin('${escAttr(id)}')" title="Pin this slot's intensity target (not the exact trait) so future generations/rerolls stay near this level even as sliders move elsewhere" aria-pressed="${pinnedTargets[id]!==undefined?'true':'false'}">${pinnedTargets[id]!==undefined ? "pinned "+pinnedTargets[id].toFixed(1) : "pin"}</button>
@@ -179,9 +185,10 @@ function traitCardHTML(id, s, includeControls, showDiff, accent, tagLabel){
     </div>`;
 }
 const RARITY_TIER_HINT = {
-  common: "Ordinary human behaviour — texture, not identity.",
-  distinctive: "Specific enough to notice, not loud enough to define the voice on its own.",
-  signature: "Distinctive AND loud: this is one of the two or three things that define the voice.",
+  common:      "Ordinary human behaviour — texture, not identity.",
+  uncommon:    "Noticeable, but not remarkable. Good for building a specific person out of small parts.",
+  distinctive: "A reader would remember this about the character.",
+  signature:   "Defines the voice. Two of these is a caricature.",
 };
 function titleForSlotId(id){
   if (id.startsWith("app_")) return "Appearance";
@@ -406,8 +413,12 @@ function renderSheet(){
         </div>
       </div><div class="coherenceNote">${co.label} (${co.reinforced} of ${co.total} picks reinforced. A random character with these same settings would score about ${co.basePct}%, and with only ${co.total} picks that baseline itself carries a &plusmn;${co.baseBand}-point 95% band — so a lift smaller than that isn't a real difference.)</div>`;
     }
-    // Caricature guard — the compound effect the per-trait frequency budget can't see.
-    const loud = loudnessCheck(state);
+    h += budgetReportHTML();
+    /* Caricature guard — the compound effect the per-trait frequency budget can't see.
+       Redundant once an intensity budget is set: the budget answers the same question
+       ("is this sheet louder than you asked for?") with a number the user chose, and
+       the report above already says what it did about it. */
+    const loud = intensityBudgetSet() ? null : loudnessCheck(state);
     if (loud){
       h += `<div class="tensionBlock" style="border-left-color:var(--bubblegum);"><div class="tensionTitle" style="color:var(--bubblegum);">Loud in ${loud.count} directions</div><div style="margin:6px 0;">${loud.note}</div></div>`;
     }
@@ -461,6 +472,7 @@ function renderSheet(){
   }
 
   renderChangeList();
+  refreshBudgetMeters();
 
   if (pressureState){
     const pbody = document.getElementById('pressureBody');
@@ -711,6 +723,12 @@ function captureSettings(){
       requiredCategories: [...requiredCategories],
       exclusivePairs: exclusivePairs.map(p=>p.slice()),
       categoryTiers: [...categoryTiers.entries()],
+      // Budgets are non-DOM state like the constraint sets, so they take the same
+      // route and inherit workspace persistence, character export and archetype
+      // setups for free.
+      rarityCaps: Object.assign({}, rarityCaps),
+      intensityCaps: Object.assign({}, intensityCaps),
+      budgetMode,
     },
     rerollExclusions: excl,
   };
@@ -739,12 +757,161 @@ function restoreSettings(s){
   requiredCategories = (c.requiredCategories || []).slice();
   exclusivePairs   = (c.exclusivePairs || []).map(p=>p.slice());
   categoryTiers    = new Map(c.categoryTiers || []);
+  clearBudgets();
+  Object.assign(rarityCaps, c.rarityCaps || {});
+  intensityCaps    = Object.assign({}, c.intensityCaps || {});
+  budgetMode       = c.budgetMode || 'redraw';
+  if (typeof refreshBudgetUI === 'function') refreshBudgetUI();
   rerollExclusions = {};
   Object.entries(s.rerollExclusions || {}).forEach(([k,v])=>{ rerollExclusions[k] = new Set(v); });
   refreshConstraintChips();
+  if (typeof refreshBudgetChips === 'function') refreshBudgetChips();
   if (typeof togglePersonalityPanel === 'function') togglePersonalityPanel();
   if (typeof toggleExamples === 'function') toggleExamples();
   invalidateSliderCache();
+}
+
+/* ================= BUDGETS UI =================
+   Built from BUDGET_GROUPS / RTIER_ORDER rather than hand-written markup, so adding a
+   tier or a group needs no HTML change and the panel can never disagree with what the
+   engine actually enforces. */
+function buildBudgetUI(){
+  const rg = document.getElementById('rarityCapGrid');
+  if (rg){
+    rg.innerHTML = RTIER_ORDER.map(tier=>`
+      <div class="budgetRow">
+        <label for="cap_${tier}" class="budgetLabel"><span class="rarityBadge rarity-${tier}">${escHTML(RTIER_LABEL[tier])}</span></label>
+        <input type="number" id="cap_${tier}" min="0" max="60" step="1" placeholder="no cap"
+               aria-label="Maximum ${escHTML(RTIER_LABEL[tier])} cards on one sheet"
+               oninput="onRarityCapChange('${tier}')">
+      </div>`).join("");
+  }
+  const ig = document.getElementById('intensityCapGrid');
+  if (ig){
+    ig.innerHTML = BUDGET_GROUPS.map(g=>`
+      <div class="budgetRow${g.id==='sheet' ? ' budgetRowTotal' : ''}">
+        <label for="icap_${g.id}" class="budgetLabel">${escHTML(g.label)}</label>
+        <input type="number" id="icap_${g.id}" min="0" max="400" step="1" placeholder="off"
+               aria-label="Maximum total intensity for ${escHTML(g.label)}"
+               oninput="onIntensityCapChange('${g.id}')">
+        <span class="budgetMeter" id="imeter_${g.id}"><i></i><b></b></span>
+      </div>`).join("");
+  }
+  const pr = document.getElementById('budgetPresetRow');
+  if (pr){
+    pr.innerHTML = Object.entries(BUDGET_PRESETS).map(([k,p])=>
+      `<button class="btn-secondary" onclick="useBudgetPreset('${k}')">${escHTML(p.label)}</button>`).join("");
+  }
+  refreshBudgetUI();
+}
+// Push engine state back into the controls (used after import, load, preset, reset).
+function refreshBudgetUI(){
+  RTIER_ORDER.forEach(t=>{
+    const el = document.getElementById('cap_'+t);
+    if (el) el.value = rarityCaps[t] == null ? "" : rarityCaps[t];
+  });
+  BUDGET_GROUPS.forEach(g=>{
+    const el = document.getElementById('icap_'+g.id);
+    if (el) el.value = intensityCaps[g.id] == null ? "" : intensityCaps[g.id];
+  });
+  const m = document.getElementById('budgetMode');
+  if (m) m.value = budgetMode;
+  refreshBudgetChips();
+  refreshBudgetMeters();
+}
+// Live "N of M possible" readouts, so a typed number has a scale attached.
+function refreshBudgetMeters(){
+  const cap = (typeof budgetCapacity === 'function') ? budgetCapacity(state) : {};
+  BUDGET_GROUPS.forEach(g=>{
+    const el = document.getElementById('imeter_'+g.id);
+    if (!el) return;
+    const c = cap[g.id];
+    if (!c || !c.slots){ el.hidden = true; return; }
+    el.hidden = false;
+    const set = intensityCaps[g.id];
+    const shown = set == null ? c.typical : set;
+    el.querySelector('i').style.width = Math.min(100, c.max ? (100*shown/c.max) : 0) + '%';
+    el.querySelector('b').textContent = `${c.typical} of ${c.max}`;
+    el.title = `${c.slots} slot${c.slots===1?'':'s'} on this sheet, currently totalling ${c.typical} intensity out of a possible ${c.max}.`;
+  });
+}
+const _capNum = el => {
+  const v = (el.value || "").trim();
+  if (v === "") return null;
+  const n = parseInt(v, 10);
+  return Number.isNaN(n) ? null : Math.max(0, n);
+};
+function onRarityCapChange(tier){
+  const el = document.getElementById('cap_'+tier);
+  if (el) rarityCaps[tier] = _capNum(el);
+  refreshBudgetChips(); savePrefs();
+}
+function onIntensityCapChange(id){
+  const el = document.getElementById('icap_'+id);
+  if (el){
+    const n = _capNum(el);
+    if (n == null) delete intensityCaps[id]; else intensityCaps[id] = n;
+  }
+  refreshBudgetChips(); refreshBudgetMeters(); savePrefs();
+}
+function onBudgetModeChange(){
+  const m = document.getElementById('budgetMode');
+  if (m) budgetMode = m.value;
+  refreshBudgetChips(); savePrefs();
+}
+function useBudgetPreset(key){
+  if (!applyBudgetPreset(key)) return;
+  refreshBudgetUI(); savePrefs();
+  toast(`Budget preset: ${BUDGET_PRESETS[key].label}. Generate to apply it.`);
+}
+function clearBudgetsUI(){
+  clearBudgets();
+  refreshBudgetUI(); savePrefs();
+  toast("Budgets cleared.");
+}
+function refreshBudgetChips(){
+  const box = document.getElementById('budgetChips');
+  if (!box) return;
+  let h = "";
+  RTIER_ORDER.forEach(t=>{
+    if (rarityCaps[t] == null) return;
+    h += `<span class="chip chip-tier">max ${rarityCaps[t]} ${escHTML(RTIER_LABEL[t])} <b onclick="clearOneBudget('rarity','${t}')" title="Remove">&times;</b></span>`;
+  });
+  BUDGET_GROUPS.forEach(g=>{
+    if (intensityCaps[g.id] == null) return;
+    h += `<span class="chip chip-tier">${escHTML(g.label)} intensity &le; ${intensityCaps[g.id]} <b onclick="clearOneBudget('intensity','${g.id}')" title="Remove">&times;</b></span>`;
+  });
+  if (h && budgetMode !== 'redraw') h += `<span class="chip chip-ban">over budget: ${budgetMode === 'drop' ? 'drop the loudest' : 'warn only'}</span>`;
+  box.innerHTML = h || '<span class="sub" style="margin:0;">No budgets set — every draw stands as dealt.</span>';
+}
+function clearOneBudget(kind, key){
+  if (kind === 'rarity') rarityCaps[key] = null; else delete intensityCaps[key];
+  refreshBudgetUI(); savePrefs();
+}
+
+/* The app's whole character is that it explains itself, so a budget that silently
+   swapped traits would be the first mechanism that doesn't. Every substitution is
+   listed, and every unmet cap is stated as unmet rather than quietly dropped. */
+function intensityBudgetSet(){
+  return typeof BUDGET_GROUPS !== 'undefined' && BUDGET_GROUPS.some(g => intensityCaps[g.id] != null);
+}
+function budgetReportHTML(){
+  const r = lastBudgetReport;
+  if (!r || !r.active) return "";
+  const bits = [];
+  Object.entries(r.rarity).forEach(([tier, info])=>{
+    if (info.unmet) bits.push(`<div><b>${escHTML(RTIER_LABEL[tier]||tier)}</b> is capped at ${info.cap} but ${info.unmet} more ${info.unmet===1?'is':'are'} still on the sheet — the slots holding them are locked, pinned or required, or their categories have nothing else to offer.</div>`);
+    else bits.push(`<div>${escHTML(RTIER_LABEL[tier]||tier)}: <b>${info.count > info.cap ? info.cap : info.count}</b> of ${info.cap} allowed.</div>`);
+  });
+  Object.entries(r.intensity).forEach(([, info])=>{
+    bits.push(`<div>${escHTML(info.label)}: <b>${info.total}</b> of ${info.cap} intensity${info.unmet ? ` — <b>over budget</b>, and nothing quieter was available to redraw into. That is a gap in the trait bank for those categories, not a setting you can fix.` : ``}.</div>`);
+  });
+  if (r.actions.length){
+    bits.push(`<div style="margin-top:6px;"><b>${r.actions.length} adjustment${r.actions.length===1?'':'s'}:</b></div><ul style="margin:4px 0 0 16px;">` +
+      r.actions.map(a=> `<li>${escHTML(a.from)} &rarr; ${a.to ? escHTML(a.to) : '<i>removed</i>'} <span class="sub" style="display:inline;margin:0;">(${escHTML(a.why)})</span></li>`).join("") + `</ul>`);
+  }
+  if (!bits.length) return "";
+  return `<div class="tensionBlock" style="border-left-color:var(--golden); margin-top:10px;"><div class="tensionTitle" style="color:var(--golden-deep);">Budget adjustments</div>${bits.join("")}</div>`;
 }
 
 function exportCharacterJSON(){
@@ -809,7 +976,7 @@ function importCharacterJSON(fileInput){
       // characters keep working with reroll/pin/why (which need live trait objects)
       // and quietly survive trait-text updates between app versions. Unmatched ids
       // (removed traits) keep their embedded copy, flagged so the user knows.
-      const byId = new Map(TRAITS.map(t=>[t.id,t]));
+      const byId = TRAITS_BY_ID;   // PERF: was rebuilding the 7,073-entry map per import
       let orphans = 0;
       const relink = (st)=>{ if(!st) return st;
         Object.values(st).forEach(s=>{

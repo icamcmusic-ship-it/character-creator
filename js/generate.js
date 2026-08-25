@@ -311,7 +311,13 @@ function _runGeneration(){
     rollCharacterVariants(); // inside the seeded block, so seeds reproduce variants too
     newState0 = buildCharacterState({verbLevel, regLevel, compLevel, mannerCount, rarityPref,
       vocabPref: arch?arch.vocabPref:null, vocabCount, personalityOverrides: archOverrides});
-    newState = applyExclusivePairs(applyRequiredTraits(applyPinnedTargets(newState0, rarityPref)), rarityPref);
+    // Order matters and is stated once, here: pins are honoured first, then budgets
+    // constrain what the draw produced, then explicit "always include" constraints go
+    // in last so a named requirement can never be evicted by a quantity.
+    newState = applyExclusivePairs(
+      applyRequiredTraits(
+        applyBudgets(applyPinnedTargets(newState0, rarityPref), rarityPref)),
+      rarityPref);
     // BUG FIX: the pressure sheet used to be built AFTER the finally block restored
     // Math.random, so "same seed + same settings = the exact same character" — which
     // the UI states outright — was false for every character generated with Under
@@ -381,44 +387,83 @@ function _runGeneration(){
   return true;
 }
 
+/* Every trait id currently seated on the sheet, excluding one slot. _buildUsedIds is
+   reset per build and consulted only by _drawUnique/seatUnique, so it says nothing at
+   all about the sheet an hour into a rerolling session — which is how tossing a
+   Vocabulary card could hand back the trait already sitting in Register (both draw
+   from Vocabulary Traits), or the same Personality trait already seated in that axis's
+   second facet. Deriving the set live at mutation time is both correct and cheap; the
+   build-scoped global can't be made to answer this question. */
+function seatedTraitIds(exceptSlotId){
+  const seen = new Set();
+  Object.keys(state).forEach(id=>{
+    if (id === exceptSlotId) return;
+    const s2 = state[id];
+    if (s2 && s2.trait) seen.add(s2.trait.id);
+  });
+  return seen;
+}
+
+/* Constraints that used to run only at build time. A reroll could seat trait B while
+   trait A was already on the sheet and the pair was declared mutually exclusive — the
+   chip still read "never together" while both cards sat there — and tossing the only
+   card in a required category left the constraint quietly unsatisfied. Re-running both
+   after a mutation costs one pass over the sheet and keeps the chips honest. */
+function reapplyConstraintsAfterMutation(){
+  const rarityPref = document.getElementById('rarityPref')
+    ? document.getElementById('rarityPref').value : 0;
+  try {
+    state = applyExclusivePairs(applyRequiredTraits(state), rarityPref);
+  } catch(e){ console.error(e); }
+}
+
 function rerollSlot(slotId){
   const old = state[slotId];
   // BUG FIX: snapshotHistory() ran before the lock check and before validating the
   // slot, so rerolling a locked (or missing) slot pushed a junk no-op entry onto
   // the undo stack. Validate first, snapshot only once we know we'll change something.
   if (!old || !old.trait || old.locked) return;
-  snapshotHistory();
-  // Per-slot history, so a reroll is reversible without unwinding the whole sheet:
-  // rerollExclusions remembers what you rejected, but there was no way back to it if
-  // the third draw turned out worse than the first.
-  if (!rerollHistory[slotId]) rerollHistory[slotId] = [];
-  rerollHistory[slotId].push(old);
-  if (rerollHistory[slotId].length > 12) rerollHistory[slotId].shift();
+  /* BUG FIX: a required slot rendered a Toss button that could not work — req_* is
+     the user's own "always include this exact trait", so there is nothing to draw.
+     Say so instead of failing silently. */
+  if (old.required && slotId.startsWith("req_")){
+    toast("This trait is here because you required it by name — remove the constraint to change it.", "warn");
+    return;
+  }
   const rarityPref = document.getElementById('rarityPref').value;
   // Reroll always operates on the single main-character UI, so the live DOM sliders
   // ARE the correct source for trait-level polarity affinity here (no per-call
   // overrides needed, unlike cast/foil generation).
   setAffinityVec(null);
+  // Everything already on the sheet, so a reroll can't hand back a trait seated
+  // somewhere else. Computed before the draw, excluding this slot's own trait
+  // (which the exclusion set below handles, with a different meaning).
+  const seated = seatedTraitIds(slotId);
 
   // Remember what we're rejecting so repeated rerolls stop cycling back to it.
   // BUG FIX: exclusions were keyed on the trait NAME, but several trait names are
   // reused across sections ("Deflect-with-humour", "Slightly reserved"), so passing
   // on one silently blacklisted unrelated traits elsewhere. Key on id.
   if (!rerollExclusions[slotId]) rerollExclusions[slotId] = new Set();
-  rerollExclusions[slotId].add(old.trait.id);
   const excluded = rerollExclusions[slotId];
   // Re-draw up to a bounded number of times rather than filtering the pool, because
   // the pick functions own their own weighting/intensity logic and we don't want to
   // duplicate it here. If a category is nearly exhausted we give up and allow a
   // repeat rather than looping forever or returning nothing.
   const drawFresh = (fn) => {
-    let cand = null;
+    let cand = null, firstUnseated = null;
     for (let i = 0; i < 32; i++){
       cand = fn();
       if (!cand || !cand.trait) break;
-      if (!excluded.has(cand.trait.id)) return cand;
+      const rejected = excluded.has(cand.trait.id) || cand.trait.id === old.trait.id;
+      const duplicate = seated.has(cand.trait.id);
+      if (!rejected && !duplicate) return cand;
+      // A near-exhausted pool may have nothing that satisfies both. Preferring a
+      // previously-rejected trait over a duplicate is the right order: a repeat you
+      // passed on is a disappointment, a trait seated twice on one sheet is a bug.
+      if (!duplicate && !firstUnseated) firstUnseated = cand;
     }
-    return cand;
+    return firstUnseated || (cand && !seated.has(cand.trait.id) ? cand : null);
   };
   const rawOf = id => { const el = document.getElementById(id); return el ? parseInt(el.value) : 0; };
 
@@ -438,10 +483,22 @@ function rerollSlot(slotId){
   } else if (slotId === "grammar"){
     const currentProfileCats = {};
     PROFILE_SECTIONS.forEach(ps=>{ const s = state["prof_"+ps.id+"_0"]; if (s && s.trait) currentProfileCats[ps.id] = s.trait.category; });
+    // BUG FIX: pickGrammarSlot's signature is (verb, comp, reg, rarityPref,
+    // profileCats, overrides) and this called it one argument short, so `overrides`
+    // arrived undefined and accumulateBoost silently fell back to live DOM reads.
+    // That happens to be correct for the main character — a reroll always operates on
+    // it — but it is the exact shape of bug the buildStressVariant comment records as
+    // having "quietly defeated most of the point of the sheet". Pass the resolved
+    // overrides explicitly so it is true by construction rather than by coincidence.
+    const liveOverrides = {};
+    PERSONALITY_AXES.forEach(a=>{ liveOverrides[a.id] = rawOf('pers_'+a.id); });
+    liveOverrides.__verbLevel = rawToLevel(rawOf('verbositySlider'));
+    liveOverrides.__regLevel  = rawToLevel(rawOf('registerSlider'));
+    liveOverrides.__compLevel = rawToLevel(rawOf('composureSlider'));
     replacement = drawFresh(()=>pickGrammarSlot(
       rawToLevel(rawOf('verbositySlider')),
       rawToLevel(rawOf('composureSlider')),
-      rawToLevel(rawOf('registerSlider')), rarityPref, currentProfileCats));
+      rawToLevel(rawOf('registerSlider')), rarityPref, currentProfileCats, liveOverrides));
   } else if (slotId.startsWith("vocab")){
     // Rerolls now honour the slot's own intensity target, so a reroll stays inside
     // the band the sliders asked for instead of dropping back to a flat random draw.
@@ -462,15 +519,60 @@ function rerollSlot(slotId){
     const axisId = slotId.replace("pers_","").replace(/__2$/,"");
     const axis = PERSONALITY_AXES.find(a=>a.id===axisId);
     if (axis) replacement = drawFresh(()=>pickPersonalitySlot(axis, rawToLevel(rawOf('pers_'+axisId)), rarityPref));
+  } else if (slotId.startsWith("app_")){
+    /* BUG FIX: renderSheet gives every card the full control strip, but rerollSlot
+       only ever branched on the voice, profile and personality families — so Toss on
+       an Appearance card (a section that is ON by default) fell through to the bail-out
+       below and did nothing at all, with no feedback. Everything the draw needs is
+       already on the slot: same section and category, same intensity target. */
+    const cat = old.trait.category, tgt = old.target;
+    replacement = drawFresh(()=>({slotId, locked:false, label: old.label, derived: old.derived,
+      target: tgt, trait: pickInRange(byFilter("Appearance", cat), rarityPref, tgt, 3)}));
+  } else if (slotId.startsWith("wild_")){
+    // The outlier's whole premise is "a category chosen at random" — so rerolling it
+    // draws a new category too, rather than another sample of the same one.
+    replacement = drawFresh(()=>pickWildcardSlot(rarityPref));
+  } else if (slotId.startsWith("reqcat_")){
+    // "At least one from this category" mandates the category, not the trait — so a
+    // reroll stays inside the category and redraws within it.
+    const cat = old.trait.category;
+    const pool = byFilter(old.trait.section, cat);
+    replacement = drawFresh(()=>({slotId, locked:true, required:true, label: old.label,
+      target: old.target, trait: pool.length ? pickInRange(pool, rarityPref, profileTarget(), 4) : null}));
   }
-  // BUG FIX: an unrecognised slotId (or an exhausted pool) left `replacement`
-  // undefined, and this assigned it straight into state — blanking the slot and
-  // throwing on the next render. Bail out instead and leave the slot intact.
-  if (!replacement || !replacement.trait){ history.pop(); return; }
+  /* BUG FIX: an unrecognised slotId (or an exhausted pool) left `replacement`
+     undefined, and this assigned it straight into state — blanking the slot and
+     throwing on the next render. Bail out instead and leave the slot intact — and say
+     something, because a button that silently does nothing reads as a broken button. */
+  if (!replacement || !replacement.trait){
+    toast("Nothing left to draw for this slot — everything in its pool is already on the sheet or has been passed on.", "warn");
+    return;
+  }
+  /* Snapshot AFTER the draw succeeds. This used to snapshot first and history.pop() on
+     failure, which is only correct while nothing else can push in between — true when
+     it was written, fragile now. Computing the replacement first removes the ordering
+     assumption entirely. */
+  snapshotHistory();
+  // Per-slot history, so a reroll is reversible without unwinding the whole sheet:
+  // rerollExclusions remembers what you rejected, but there was no way back to it if
+  // the third draw turned out worse than the first.
+  if (!rerollHistory[slotId]) rerollHistory[slotId] = [];
+  rerollHistory[slotId].push(old);
+  if (rerollHistory[slotId].length > 12) rerollHistory[slotId].shift();
+  // Remember what we're rejecting so repeated rerolls stop cycling back to it.
+  excluded.add(old.trait.id);
   if (old.trait.id !== replacement.trait.id){
     diffLog[slotId] = {from: old.trait.trait, to: replacement.trait.trait};
   }
+  /* BUG FIX: pickPersonalitySlot returns slotId "pers_<axis>" with no __2 suffix, so
+     rerolling a second facet wrote an object whose own slotId disagreed with the key it
+     was stored under, and silently dropped the "— second facet" label. Rendering keys
+     off the map key so the buttons kept working, but anything reading slot.slotId was
+     wrong. Restore the slot's own identity after the draw. */
+  replacement.slotId = slotId;
+  if (old.label && /second facet/.test(old.label)) replacement.label = old.label;
   state[slotId] = replacement;
+  reapplyConstraintsAfterMutation();
   renderSheet(); checkConflicts();
 }
 
@@ -482,11 +584,18 @@ function rerollBack(slotId){
   if (!hist || !hist.length){ toast("Nothing to step back to in this slot.", "warn"); return; }
   const prev = hist.pop();
   if (!prev || !prev.trait) return;
+  // The trait you tossed here may have been drawn into a different slot since. Stepping
+  // back to it would seat it twice on one sheet, so refuse rather than duplicate.
+  if (seatedTraitIds(slotId).has(prev.trait.id)){
+    toast(`"${prev.trait.trait}" has since been drawn into another slot — stepping back would put it on the sheet twice.`, "warn");
+    return;
+  }
   snapshotHistory();
   if (rerollExclusions[slotId]) rerollExclusions[slotId].delete(prev.trait.id);
   const cur = state[slotId];
   if (cur && cur.trait) diffLog[slotId] = {from: cur.trait.trait, to: prev.trait.trait};
   state[slotId] = prev;
+  reapplyConstraintsAfterMutation();
   renderSheet(); checkConflicts();
 }
 
@@ -533,12 +642,24 @@ function adjustPin(slotId, delta){
   // taking effect on the next full generate/reroll.
   const s = state[slotId];
   if (s && s.trait){
-    const pool = byFilter(s.trait.section, s.trait.category);
+    /* BUG FIX: this drew with a bare pickInRange, consulting neither the slot's own
+       rejection memory nor the rest of the sheet — so a single nudge could hand back a
+       trait you had explicitly tossed thirty seconds earlier, or one already seated
+       elsewhere. Filter the pool up front rather than redrawing blind. */
+    const seated = seatedTraitIds(slotId);
+    const excluded = rerollExclusions[slotId] || new Set();
+    const full = byFilter(s.trait.section, s.trait.category);
+    const clean = full.filter(t => !seated.has(t.id) && !excluded.has(t.id));
+    // A nudge must always be able to move, so fall back through the constraints in
+    // order of how much they matter: never seat a duplicate, but a rejected trait is
+    // better than a pin control that does nothing.
+    const pool = clean.length ? clean : full.filter(t => !seated.has(t.id));
     const rarityPref = document.getElementById('rarityPref').value;
-    const picked = pickInRange(pool, rarityPref, pinnedTargets[slotId], 3);
+    const picked = pool.length ? pickInRange(pool, rarityPref, pinnedTargets[slotId], 3) : null;
     if (picked && picked.id !== s.trait.id){ diffLog[slotId] = {from:s.trait.trait, to:picked.trait}; }
     if (picked){ state[slotId] = {...s, target: pinnedTargets[slotId], pinned:true, trait: picked}; }
     else { state[slotId].target = pinnedTargets[slotId]; state[slotId].pinned = true; }
+    reapplyConstraintsAfterMutation();
   }
   renderSheet();
 }
