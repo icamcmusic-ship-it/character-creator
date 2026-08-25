@@ -1155,7 +1155,8 @@ function coherenceAsking(co){
   // Divergence 0 means "never diverge", so the implied ask is maximum coherence.
   const asked = Math.round(100 * (1 - div));
   const gap = Math.abs(co.pct - asked);
-  if (!co.significant) return `${escHTML(co.label)} You asked for about ${asked}% (Surprise me at ${div.toFixed(2)}); this sheet came out at ${co.pct}%, which is within the noise for a sheet this size either way.`;
+  // co.label already says "within the noise" in this branch, so don't say it twice.
+  if (!co.significant) return `You asked for about ${asked}% coherence (Surprise me at ${div.toFixed(2)}) and this sheet came out at ${co.pct}% &mdash; but with this many picks that gap is inside the noise either way, so it isn't a real difference.`;
   if (gap <= 12) return `You asked for about ${asked}% coherence (Surprise me at ${div.toFixed(2)}); this sheet came out at ${co.pct}% — close to where you set it.`;
   return `You asked for about ${asked}% coherence (Surprise me at ${div.toFixed(2)}); this sheet came out at ${co.pct}%. ${co.pct > asked ? 'Tighter than you asked — raise Surprise me if you want more friction.' : 'Looser than you asked — lower Surprise me, or raise Boost strength, to pull it together.'}`;
 }

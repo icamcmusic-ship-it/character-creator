@@ -640,11 +640,14 @@
   .budgetRow { display:flex; align-items:center; gap:8px; }
   .budgetRow.budgetRowTotal { border-top:1px solid var(--line); padding-top:8px; margin-top:2px; font-weight:600; }
   .budgetRow .budgetLabel { flex:1 1 auto; margin:0; font-size:.78rem; text-transform:none; letter-spacing:0; }
-  .budgetRow input[type=number] { flex:0 0 82px; max-width:82px; }
+  .budgetRow input[type=number] { flex:0 0 96px; max-width:96px; text-align:center; }
   .budgetMeter {
     flex:0 0 96px; display:flex; align-items:center; gap:6px;
     font-family:var(--font-mono); font-size:.62rem; color:var(--muted);
   }
+  /* display:flex above wins over the [hidden] attribute's display:none, so an empty
+     meter rendered as a stray sliver instead of disappearing. */
+  .budgetMeter[hidden] { display:none; }
   .budgetMeter i {
     display:block; height:4px; border-radius:999px; background:var(--golden);
     flex:0 0 auto; min-width:2px; max-width:40px;
