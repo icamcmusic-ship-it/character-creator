@@ -34,7 +34,8 @@ const ctx = loadEngine([
   'rarityTier','rarityWeight','rarityPrefValue','polarityFit','buildContextBias','parseAgeHint',
   'traitBand','CURVE_EXP','clamp','SECTION_COLORS','loudnessCheck','recentPenalty',
   'rememberGeneration','forgetRecentTraits','_drawUnique','_buildUsedIds','explainWhyNot',
-  'MOOD_TAG_STATS','TIER_TAG_STATS','divergenceLevel',
+  'MOOD_TAG_STATS','TIER_TAG_STATS','divergenceLevel','AXES','CROSSLINK_STRENGTH','slotCat','rangeSelect','captureSettings','restoreSettings',
+  'bannedCategories','requiredTraitIds','exclusivePairs','SETTING_FIELDS','SETTING_TOGGLES','validateSheetPayload','compressSlots','expandSlots','TRAITS_BY_ID','emergentArchetypeName',
 ]);
 const A = ctx.api;
 const T = A.TRAITS;
@@ -335,15 +336,385 @@ check('every context rule names categories that exist', ()=>{
   assert(!bad.length, 'unknown categories in context rules: ' + [...new Set(bad)].join(', '));
 });
 
+group('Coverage invariants');
+// Each of these encodes a bug that shipped: a silently-unmapped axis, a target the
+// picker aimed outside its own pool, a category no code path could reach, and an
+// opposition table with holes. They are cheap and they are the only thing that makes
+// "we fixed it consistently" checkable rather than a claim.
+
+check('every personality axis has a polarity code', ()=>{
+  // curiosity was the missing one, and nothing failed loudly: the pole-tagging pass,
+  // the affinity vector, conflict detection, archetype fidelity and the radar chart
+  // all just quietly skipped it.
+  const missing = A.PERSONALITY_AXES.filter(a=> !A.AXIS_TO_POLCODE[a.id]).map(a=>a.id);
+  assert(!missing.length, 'axes with no polarity code: ' + missing.join(', '));
+  const unlabelled = Object.values(A.AXIS_TO_POLCODE).filter(c=> !A.AXIS_LABELS[c]);
+  assert(!unlabelled.length, 'polarity codes with no label: ' + unlabelled.join(', '));
+  return A.PERSONALITY_AXES.length + ' axes';
+});
+
+check('both poles of every personality axis are polarity-tagged', ()=>{
+  // The real symptom of the missing code: Curiosity's two poles sat at 19% and 2%
+  // tagged while every other pole pair was at 100%.
+  const weak = [];
+  A.PERSONALITY_AXES.forEach(a=>{
+    const code = A.AXIS_TO_POLCODE[a.id];
+    if (!code) return;
+    [a.pos, a.neg].forEach(cat=>{
+      const pool = T.filter(t=>t.category === cat);
+      if (!pool.length) return;
+      const tagged = pool.filter(t=> t.pol && t.pol[code]).length;
+      if (tagged / pool.length < 0.75) weak.push(`${cat} ${tagged}/${pool.length}`);
+    });
+  });
+  assert(!weak.length, 'poles under 75% tagged: ' + weak.join(' | '));
+});
+
+check('a draw never targets outside its own pool', ()=>{
+  /* S1-A: rangeSelect widened its band on COUNT but never checked WHERE the candidates
+     sat, so a target below a pool's minimum left every candidate on one side of it and
+     the proximity falloff went monotonic. Assert on the window rangeSelect actually
+     returns — its centre must lie inside the pool's span, and the eligible slice must
+     have material on both sides of that centre wherever the pool allows. Checking the
+     returned trait instead would prove nothing: the pick always comes from the pool. */
+  const bad = [];
+  A.CATS_BY_SECTION.forEach((cats, section)=>{
+    cats.forEach(cat=>{
+      const pool = A.byFilter(section, cat);
+      if (pool.length < 4) return;
+      let lo = Infinity, hi = -Infinity;
+      pool.forEach(t=>{ const p = A.traitPos(t); if(p<lo)lo=p; if(p>hi)hi=p; });
+      [0, 25, 55, 80, 100].forEach(mag=>{
+        const sel = A.rangeSelect(pool, A.targetFromMag(mag), 4);
+        if (sel.target < lo - 1e-6 || sel.target > hi + 1e-6){
+          bad.push(`${cat}@${mag}: centre ${sel.target.toFixed(2)} outside span [${lo.toFixed(2)}, ${hi.toFixed(2)}]`);
+          return;
+        }
+        /* The collapse signature is a centre sitting clear of ALL its candidates: that
+           is what turns the two-sided falloff monotonic and makes the nearest trait win
+           every draw. A centre that merely lands in a gap between candidates is fine —
+           sparse pools have gaps — so allow a half-position of slack rather than
+           demanding a trait strictly on each side. */
+        const positions = sel.list.map(t=> A.traitPos(t));
+        const lmin = Math.min(...positions), lmax = Math.max(...positions);
+        if (sel.target < lmin - 0.5 || sel.target > lmax + 0.5)
+          bad.push(`${cat}@${mag}: centre ${sel.target.toFixed(2)} clear of all ${sel.list.length} candidates [${lmin.toFixed(2)}, ${lmax.toFixed(2)}]`);
+      });
+    });
+  });
+  assert(!bad.length, bad.length + ' one-sided or out-of-span windows: ' + bad.slice(0,4).join('; '));
+});
+
+check('a thin pool with an unreachable target still spreads its draws', ()=>{
+  /* The regression that matters isn't "does it crash", it's "does it return the same
+     trait every time". Motivation & Wound is drawAll, so its three 20-trait pools
+     appear on EVERY sheet; before the fix The Need returned one trait 81% of the time
+     and five distinct traits in three thousand draws. Assert the distribution, not the
+     mechanism, so any future change to the weighting has to keep the property. */
+  const thin = [['Motivation & Wound','The Need (what would actually help)'],
+                ['Motivation & Wound','The Ghost (who or what it\'s attached to)'],
+                ['Motivation & Wound','The Defence (what they built on top)']];
+  const bad = [];
+  thin.forEach(([sec,cat])=>{
+    const pool = A.byFilter(sec, cat);
+    if (pool.length < 5) return;
+    const counts = new Map();
+    for (let i=0;i<1200;i++){
+      const t = A.pickInRange(pool, 'balanced', A.targetFromMag(62));
+      if (t) counts.set(t.id, (counts.get(t.id)||0)+1);
+    }
+    const top = Math.max(...counts.values()) / 1200;
+    if (counts.size < 8) bad.push(`${cat}: only ${counts.size} distinct in 1200 draws`);
+    if (top > 0.55) bad.push(`${cat}: top trait takes ${(top*100).toFixed(0)}%`);
+  });
+  assert(!bad.length, bad.join('; '));
+});
+
+check('every category is reachable by some pick path', ()=>{
+  /* "Repetitive & Circular" held 48 authored traits that no normal path could draw:
+     AXES named four of its section's five categories. Approximate reachability as
+     "named by AXES, or belongs to a section the generator draws by category" — enough
+     to catch a whole category being orphaned by an incomplete lookup table. */
+  const named = new Set();
+  Object.values(A.AXES).forEach(ax=> named.add(ax.section + '||' + ax.category));
+  const drawnByCategory = new Set(['Vocabulary Traits','Mannerisms','Dialogue Grammar Traits','Appearance']);
+  A.PROFILE_SECTIONS.forEach(ps=> drawnByCategory.add(ps.section));
+  A.PERSONALITY_AXES.forEach(a=> [a.pos,a.neg,a.mid].forEach(c=>{ if(c) named.add('Personality Traits||'+c); }));
+  const orphans = [];
+  A.CATS_BY_SECTION.forEach((cats, section)=>{
+    cats.forEach(cat=>{
+      if (drawnByCategory.has(section)) return;
+      if (named.has(section + '||' + cat)) return;
+      orphans.push(section + ' :: ' + cat);
+    });
+  });
+  assert(!orphans.length, 'unreachable categories: ' + orphans.join(' | '));
+});
+
+check('every profile category is a cross-link target, not only a source', ()=>{
+  // Skeptic and Secure could once only arrive by slider: nothing in WEIGHT_MATRIX
+  // linked into them, so at neutral sliders they were structurally starved.
+  const targets = new Set();
+  const walk = m => Object.entries(m||{}).forEach(([k,v])=>{
+    if (k === 'pos' || k === 'neg') walk(v);
+    else if (v && typeof v === 'object') Object.keys(v).forEach(f=>targets.add(f.toLowerCase()));
+  });
+  Object.values(A.WEIGHT_MATRIX).forEach(walk);
+  const missing = [];
+  A.PROFILE_SECTIONS.forEach(ps=>{
+    if (ps.drawAll) return;   // drawAll sections take every category, so nothing to steer
+    A.catsOf(ps.section).forEach(c=>{
+      if (![...targets].some(f=> c.toLowerCase().includes(f))) missing.push(ps.id + ':' + c);
+    });
+  });
+  assert(!missing.length, 'categories nothing links into: ' + missing.join(' | '));
+});
+
+check('at neutral sliders no profile category dominates its section', ()=>{
+  /* With every slider centred, nothing the user did should be steering the result — but
+     resolved-category cross-links were applied at full weight while axis contributions
+     were scaled by slider strength, so the cascade was the only signal in play and it
+     decided the character outright. Measured: Outsider took 29% of a seven-way Social
+     Role split, Disorganized 32% of a four-way Attachment split, and Secure 12% — the
+     last because no cross-link pointed at it at all.
+
+     Assert the property rather than the mechanism, at BOTH ends. The ceiling catches an
+     unscaled cascade; the floor catches the sharper half of the bug, a category nothing
+     links into, which is how Secure and Skeptic ended up structurally starved rather
+     than merely unlucky. Bounds are loose enough to absorb sampling noise at this N and
+     tight enough that the measured pre-fix numbers fail them. */
+  const N = 300;
+  const counts = {};
+  for (let i=0;i<N;i++){
+    const o = {}; A.PERSONALITY_AXES.forEach(a=> o[a.id] = 0);
+    A.rollCharacterVariants();
+    const st = A.buildCharacterState({verbLevel:0, regLevel:0, compLevel:0, mannerCount:2,
+      vocabCount:2, rarityPref:'balanced', vocabPref:null, personalityOverrides:o});
+    A.PROFILE_SECTIONS.forEach(ps=>{
+      if (ps.drawAll) return;
+      const c = A.slotCat(st["prof_"+ps.id+"_0"]);
+      if (c) ((counts[ps.id] = counts[ps.id] || {}))[c] = (counts[ps.id][c]||0) + 1;
+    });
+  }
+  const bad = [];
+  Object.entries(counts).forEach(([id, c])=>{
+    const ps = A.PROFILE_SECTIONS.find(p=>p.id===id);
+    const nCats = A.catsOf(ps.section).length;
+    const total = Object.values(c).reduce((a,b)=>a+b,0);
+    if (!total || nCats < 2) return;
+    const uniform = 1 / nCats;
+    A.catsOf(ps.section).forEach(cat=>{
+      const share = (c[cat] || 0) / total;
+      if (share > uniform * 1.9)
+        bad.push(`${id}:${cat} took ${(share*100).toFixed(0)}% of a ${nCats}-way split (uniform ${(uniform*100).toFixed(0)}%)`);
+      if (share < uniform * 0.55)
+        bad.push(`${id}:${cat} starved at ${(share*100).toFixed(0)}% of a ${nCats}-way split (uniform ${(uniform*100).toFixed(0)}%)`);
+    });
+  });
+  assert(!bad.length, bad.join('; '));
+  return Object.keys(counts).length + ' sections checked';
+});
+
+group('Workspace persistence');
+check('every workspace control survives a capture/restore round-trip', ()=>{
+  /* The old preference layer persisted a hand-maintained list of twelve static control
+     ids. Everything else was lost on reload: all thirteen personality sliders, the
+     three voice sliders, every sec_/type_/pw_ control (built at runtime, so a static
+     list could never have covered them), and the entire constraint set — the highest
+     effort state in the app. Preferences now serialise through captureSettings /
+     restoreSettings, the same pair the character-export format uses, so this asserts
+     the property both features depend on. */
+  const doc = ctx.document;
+  ['verbositySlider','registerSlider','composureSlider'].forEach(id=> doc._set(id, {value:'0', type:'range'}));
+  A.PERSONALITY_AXES.forEach(a=> doc._set('pers_'+a.id, {value:'0', type:'range'}));
+  A.PROFILE_SECTIONS.forEach(ps=>{
+    doc._set('sec_'+ps.id, {checked:true});
+    doc._set('pw_'+ps.id, {value:'', tagName:'SELECT', options:[{value:''},{value:'70'}]});
+  });
+
+  const axis = A.PERSONALITY_AXES[0], secA = A.PROFILE_SECTIONS[0], secB = A.PROFILE_SECTIONS[1];
+  doc.getElementById('pers_'+axis.id).value = '-80';
+  doc.getElementById('verbositySlider').value = '45';
+  doc.getElementById('pw_'+secA.id).value = '70';
+  doc.getElementById('sec_'+secB.id).checked = false;
+  A.bannedCategories.add('Cruel & Barbed');
+  A.requiredTraitIds.push(T[5].id);
+  A.exclusivePairs.push([T[1].id, T[2].id]);
+
+  const snap = JSON.parse(JSON.stringify(A.captureSettings()));
+
+  // wipe the workspace the way a reload does
+  doc.getElementById('pers_'+axis.id).value = '0';
+  doc.getElementById('verbositySlider').value = '0';
+  doc.getElementById('pw_'+secA.id).value = '';
+  doc.getElementById('sec_'+secB.id).checked = true;
+  A.bannedCategories.clear();
+  A.requiredTraitIds.length = 0;
+  A.exclusivePairs.length = 0;
+
+  A.restoreSettings(snap);
+
+  assert(doc.getElementById('pers_'+axis.id).value === '-80', 'personality slider lost');
+  assert(doc.getElementById('verbositySlider').value === '45', 'voice slider lost');
+  assert(doc.getElementById('pw_'+secA.id).value === '70', 'profile weight lost');
+  assert(doc.getElementById('sec_'+secB.id).checked === false, 'section toggle lost');
+  // restoreSettings REASSIGNS the constraint collections rather than mutating them, so
+  // read them back through a fresh capture — a reference held from before the restore
+  // points at the discarded Set.
+  const after = A.captureSettings().constraints;
+  assert(after.bannedCategories.includes('Cruel & Barbed'), 'banned category lost');
+  assert(after.requiredTraitIds.length === 1, 'required trait lost');
+  assert(after.exclusivePairs.length === 1, 'exclusive pair lost');
+
+  A.restoreSettings({constraints:{}});   // leave the workspace clean for later tests
+  return 'sliders, sections, constraints';
+});
+
+check('import validation accepts real sheets and rejects malformed ones', ()=>{
+  /* The format string was the only check an imported file faced, so a file that claimed
+     the right format and then carried a malformed state crashed in renderSheet — after
+     snapshotHistory had run and the globals had been replaced. Validation now runs
+     before anything is touched, so it has to accept everything the app itself writes. */
+  const st = A.buildCharacterState({verbLevel:0.5, regLevel:-0.5, compLevel:0.5,
+    mannerCount:2, vocabCount:2, rarityPref:'balanced', vocabPref:null});
+  const good = {format:'character-voice-sheet', state:st, charMeta:{name:'x'}};
+  A.validateSheetPayload(good);                       // a real export must pass
+  A.validateSheetPayload({format:'character-voice-sheet'});          // minimal file
+  A.validateSheetPayload({format:'character-voice-sheet', state:{}}); // empty sheet
+  // trait:null and an empty slot are both legitimate states the engine produces
+  A.validateSheetPayload({format:'character-voice-sheet', state:{a:{trait:null}, b:null}});
+
+  const rejects = [
+    ['state is a string',   {state:'nope'}],
+    ['state is an array',   {state:[1,2]}],
+    ['slot is a string',    {state:{a:'nope'}}],
+    ['trait is a string',   {state:{a:{trait:'nope'}}}],
+    ['trait has no id',     {state:{a:{trait:{trait:'x',category:'y',section:'z'}}}}],
+    ['trait has no text',   {state:{a:{trait:{id:1,category:'y',section:'z'}}}}],
+    ['settings not object', {settings:'nope'}],
+    ['pressure not object', {pressureState:'nope'}],
+  ];
+  const missed = [];
+  rejects.forEach(([label, extra])=>{
+    try { A.validateSheetPayload(Object.assign({format:'character-voice-sheet'}, extra)); missed.push(label); }
+    catch(e){ /* expected */ }
+  });
+  assert(!missed.length, 'accepted malformed payloads: ' + missed.join(', '));
+  return rejects.length + ' malformed shapes rejected';
+});
+
+check('undo round-trips a sheet without losing or duplicating traits', ()=>{
+  /* Undo stored fifteen full deep copies, embedding a complete trait record in every one
+     of ~37 slots per snapshot for traits that are live in TRAITS and never change. Now
+     it stores ids and re-links. The property that must hold either way: what comes back
+     out of undo is what went in. */
+  const st = A.buildCharacterState({verbLevel:0.5, regLevel:-0.5, compLevel:0.5,
+    mannerCount:3, vocabCount:2, rarityPref:'balanced', vocabPref:null});
+  const before = Object.entries(st).filter(([,v])=>v && v.trait).map(([k,v])=>k+'='+v.trait.id).sort();
+  assert(before.length > 5, 'built a sheet with almost nothing on it');
+
+  const round = A.expandSlots(A.compressSlots(st));
+  const after = Object.entries(round).filter(([,v])=>v && v.trait).map(([k,v])=>k+'='+v.trait.id).sort();
+  assert(before.join('|') === after.join('|'), 'slot/trait mapping changed across a round-trip');
+  // re-linked, not copied: the sheet must point back at the live pool so reroll, pin and
+  // the why-panel keep working on an undone character
+  Object.values(round).forEach(v=>{
+    if (v && v.trait) assert(A.TRAITS_BY_ID.get(v.trait.id) === v.trait, 'slot holds a detached trait copy');
+  });
+  // a trait no longer in the pool keeps its embedded text rather than vanishing
+  const orphan = {a:{trait:{id:-999, trait:'gone', category:'c', section:'s', intensity:3, rarity:'common'}}};
+  const kept = A.expandSlots(A.compressSlots(orphan));
+  assert(kept.a.trait && kept.a.trait.trait === 'gone', 'an orphaned trait was dropped by undo');
+  // null slots and trait:null survive untouched
+  const empties = A.expandSlots(A.compressSlots({a:null, b:{trait:null}}));
+  assert(empties.a === null && empties.b.trait === null, 'empty slots did not survive');
+  return before.length + ' slots';
+});
+
+check('emergent names are deterministic per profile and varied across profiles', ()=>{
+  /* The name keyed off two of the seven profile facts, and the exact-name table hit on
+     400 rolls out of 400 — so the compositional branch was unreachable and Humor and
+     Vices, the two most texture-carrying facts, could never affect the name. 400
+     characters produced 35 distinct names. Assert both halves of the fix: the same
+     sheet must still always show the same name, and the spread must stay wide. */
+  const mk = (over) => {
+    const o = {}; A.PERSONALITY_AXES.forEach(a=> o[a.id] = 0);
+    A.rollCharacterVariants();
+    return A.buildCharacterState({verbLevel:0, regLevel:0, compLevel:0, mannerCount:2,
+      vocabCount:2, rarityPref:'balanced', vocabPref:null, personalityOverrides:Object.assign(o, over||{})});
+  };
+  const st = mk();
+  const first = A.emergentArchetypeName(st);
+  for (let i=0;i<5;i++){
+    const again = A.emergentArchetypeName(st);
+    assert(again && first && again.name === first.name,
+      `same sheet named differently: "${first && first.name}" then "${again && again.name}"`);
+  }
+
+  const names = new Map();
+  for (let i=0;i<250;i++){
+    const n = A.emergentArchetypeName(mk());
+    if (n) names.set(n.name, (names.get(n.name)||0)+1);
+  }
+  const top = Math.max(...names.values());
+  assert(names.size >= 100, `only ${names.size} distinct names in 250 characters`);
+  assert(top / 250 < 0.12, `one name took ${(top/250*100).toFixed(0)}% of 250 characters`);
+  return names.size + ' distinct in 250';
+});
+
+check('the caricature guard responds to the character, not the slider position', ()=>{
+  /* A flat "three or more loud traits" threshold made this a readout of where the
+     sliders were: 0/400 at neutral and 400/400 at extreme, mean 16.7 loud traits. It now
+     scores against what these settings should have produced. The property: it must fire
+     sometimes at neutral (where three loud traits really is the tail) and must NOT fire
+     routinely at the extremes (where loud is what was asked for). */
+  const run = (v) => {
+    let fired = 0;
+    const N = 300;
+    for (let i=0;i<N;i++){
+      const o = {}; A.PERSONALITY_AXES.forEach(a=> o[a.id] = v ? (i%2 ? v : -v) : 0);
+      A.rollCharacterVariants();
+      const st = A.buildCharacterState({verbLevel: v/50*(i%2?1:-1), regLevel:0, compLevel:0,
+        mannerCount:3, vocabCount:2, rarityPref:'balanced', vocabPref:null, personalityOverrides:o});
+      if (A.loudnessCheck(st)) fired++;
+    }
+    return fired / N;
+  };
+  const neutral = run(0), extreme = run(100);
+  assert(neutral > 0 && neutral < 0.20,
+    `at neutral sliders the guard fired on ${(neutral*100).toFixed(1)}% of sheets — it should flag the tail, not nothing and not everything`);
+  assert(extreme < 0.20,
+    `at extreme sliders the guard fired on ${(extreme*100).toFixed(1)}% of sheets — loud is what was asked for there`);
+  return `neutral ${(neutral*100).toFixed(1)}%, extreme ${(extreme*100).toFixed(1)}%`;
+});
+
 group('Anti-repetition memory');
 check('a remembered trait is penalised, an unseen one is not', ()=>{
+  // recentPenalty only applies while a build has enabled it, and the flag is resolved
+  // once per build rather than per draw — so drive it through the real path: set the
+  // toggle, run a build, then check. Asserts BOTH directions, because the toggle now
+  // ships on and a test that only checks the off case would have quietly stopped
+  // testing anything the moment that default flipped.
+  const t = T[10], unseen = T[11];
+  const build = () => A.buildCharacterState({verbLevel:0, regLevel:0, compLevel:0,
+    mannerCount:1, vocabCount:1, rarityPref:'balanced', vocabPref:null});
+
+  ctx.document._set('avoidRecentToggle', {checked:false});
   A.forgetRecentTraits();
-  const t = T[10];
   A.rememberGeneration({a:{trait:t}});
-  // recentPenalty only applies while a build has enabled it; the flag lives in the
-  // engine and defaults off, so this asserts the memory itself is wired.
+  build();
   assert(A.recentPenalty(t) === 1, 'penalty applied while the toggle is off');
+
+  ctx.document._set('avoidRecentToggle', {checked:true});
   A.forgetRecentTraits();
+  A.rememberGeneration({a:{trait:t}});
+  build();
+  assert(A.recentPenalty(t) < 1, 'remembered trait was not penalised while the toggle is on');
+  assert(A.recentPenalty(unseen) === 1, 'an unseen trait was penalised');
+
+  A.forgetRecentTraits();
+  ctx.document._set('avoidRecentToggle', {checked:false});
+  return 'both directions';
 });
 
 group('Explanations');
@@ -365,6 +736,22 @@ check('the secondary-tier pass tagged what it listed', ()=>{
   assert(A.TIER_TAG_STATS && A.TIER_TAG_STATS.matched > 0, JSON.stringify(A.TIER_TAG_STATS));
   return A.TIER_TAG_STATS.matched + '/' + A.TIER_TAG_STATS.listed;
 });
+
+/* Bank figures, printed every run. Comments across the codebase cited the bank size as
+   6,452 / 4,358 / 2,094 / 1,900 / 1,649 / 1,400 at various points, all of them stale and
+   none of them agreeing. Printing the live numbers where they are read on every test run
+   is cheaper than a doc-generation step and harder to ignore than a comment. */
+(function bankStats(){
+  const bySection = new Map(), byRarity = {};
+  T.forEach(t=>{
+    bySection.set(t.section, (bySection.get(t.section)||0)+1);
+    byRarity[t.rarity] = (byRarity[t.rarity]||0)+1;
+  });
+  let cats = 0; A.CATS_BY_SECTION.forEach(c=> cats += c.length);
+  console.log('\n\x1b[2mBank: ' + T.length.toLocaleString() + ' traits · ' + bySection.size +
+    ' sections · ' + cats + ' categories · ' +
+    Object.entries(byRarity).map(([k,v])=>v.toLocaleString()+' '+k).join(' / ') + '\x1b[0m');
+})();
 
 console.log('\n' + (failed ? '\x1b[31m' : '\x1b[32m') + passed + ' passed, ' + failed + ' failed\x1b[0m');
 if (failed){

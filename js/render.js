@@ -16,8 +16,21 @@ function toast(message, kind, ms){
   close.onclick = ()=> el.remove();
   el.appendChild(close);
   host.appendChild(el);
-  setTimeout(()=>{ el.classList.add('toastOut'); setTimeout(()=>el.remove(), 300); }, ms || 3200);
-  while (host.children.length > 4) host.removeChild(host.firstChild);
+  /* A failed import, an exhausted pool and a successful save all presented identically
+     and all auto-dismissed after about three seconds — so the one class of message the
+     user actually needed to read was the one most likely to vanish before they looked
+     up. Warnings now stay until dismissed. The call sites that already passed a longer
+     ms for the important ones were only ever approximating this. */
+  const persist = (kind === 'warn');
+  if (persist) el.dataset.persist = "1";
+  else setTimeout(()=>{ el.classList.add('toastOut'); setTimeout(()=>el.remove(), 300); }, ms || 3200);
+  // Only evict auto-dismissing toasts on overflow: dropping an undismissed failure to
+  // make room for a success notice would reintroduce exactly the problem above.
+  while (host.children.length > 4){
+    const evictable = [...host.children].find(c=> !c.dataset.persist);
+    if (!evictable) break;
+    evictable.remove();
+  }
 }
 
 // A skeleton, shown for the frame between pressing Generate and the build finishing.
@@ -125,8 +138,14 @@ function traitCardHTML(id, s, includeControls, showDiff, accent){
   const diff = showDiff ? diffLog[id] : null;
   const style = accent ? ` style="--section-accent:${escHTML(accent)}"` : ``;
   const history = includeControls && rerollHistory[id] && rerollHistory[id].length;
+  // Flash slots that a full regeneration actually moved. renderChangeList already knew
+  // WHICH slots changed but only reported it in a collapsed list; the highlight was
+  // wired for per-slot rerolls and never applied on a full regenerate, so after pressing
+  // Generate the user had forty cards and no idea which were new. Purely a CSS
+  // animation keyed off the class, so it plays once per render and needs no timer.
+  const changedClass = (showDiff && changedSlots.has(id)) ? ' justChanged' : '';
   return `
-    <div class="traitCard${s.wildcard ? ' wildcardCard' : ''}"${style}>
+    <div class="traitCard${s.wildcard ? ' wildcardCard' : ''}${changedClass}"${style}>
       <div class="traitMain">
         <div class="traitName">${escHTML(t.trait)}
           <span class="rarityBadge rarity-${tier}" title="${escHTML(RARITY_TIER_HINT[tier]||'')}">${escHTML(RTIER_LABEL[tier]||tier)}</span>
@@ -192,6 +211,108 @@ function toggleCompact(){
   document.body.classList.toggle('compact-sheet', !!(on && on.checked));
 }
 
+/* ================= SUMMARY CARD =================
+   A default build produces 37 populated slots, and at profileDepth 4 it passes forty.
+   Collapse and compact both exist but default to expanded, so the first thing a new
+   character presented was five screens of cards with no entry point — the user had to
+   read all of it to learn anything about who this person is.
+
+   Everything here is already computed and already on the page somewhere: the emergent
+   name is in the archetype tag, the fingerprint and coherence are down in the insight
+   panel, the loud traits are the caricature guard's input. What was missing was a place
+   that answers "who is this" in five lines before the detail starts. This is a reading
+   order change, not new analysis.
+
+   Deliberately NOT collapsing every group by default alongside this: that would change
+   how the sheet behaves for people who already use it, and the summary on its own
+   supplies the entry point that was actually missing. */
+function summaryCardHTML(){
+  const slots = Object.values(state).filter(s=> s && s.trait);
+  if (!slots.length) return "";
+
+  const emergent = (typeof emergentArchetypeName === 'function') ? emergentArchetypeName(state) : null;
+  // "Unnamed Character" is the generator's placeholder, not a name the user chose — an
+  // emergent title says far more, so it takes the headline when there is no real name.
+  const named = charMeta.name && charMeta.name !== "Unnamed Character" ? charMeta.name : null;
+  const title = named || (emergent && emergent.name) || "This character";
+  const sub = (emergent && named) ? emergent.name : "";
+
+  // The loudest traits are the sheet's own headline: highest intensity first, and among
+  // equals prefer the deeper sections over a mannerism, since "what they want" carries
+  // further than "taps the table".
+  const weightOfSection = sec =>
+    sec === "Motivation & Wound" ? 3 :
+    (sec === "Personality Traits" || sec === "Values & Moral Line" || sec === "Conflict & Stress Response") ? 2 : 1;
+  const loudest = slots.slice()
+    .sort((a,b)=> (b.trait.intensity - a.trait.intensity)
+               || (weightOfSection(b.trait.section) - weightOfSection(a.trait.section)))
+    .slice(0, 3);
+
+  let h = `<div class="summaryCard">
+    <div class="summaryHead">
+      <div class="summaryName">${escHTML(title)}</div>
+      ${sub ? `<div class="summarySub">${escHTML(sub)}</div>` : ``}
+    </div>`;
+
+  if (loudest.length){
+    h += `<ul class="summaryTraits">` + loudest.map(s=>
+      `<li><b>${escHTML(s.trait.trait)}</b> <span class="summaryCat">${escHTML(s.trait.category)}</span></li>`
+    ).join("") + `</ul>`;
+  }
+
+  const fp = (typeof voiceFingerprint === 'function') ? voiceFingerprint(state, charMeta) : "";
+  if (fp) h += `<div class="summaryVoice">${escHTML(fp)}</div>`;
+
+  const co = (typeof coherenceScore === 'function') ? coherenceScore(state) : null;
+  const bits = [];
+  if (co) bits.push(`Coherence <b>${co.pct}%</b>${co.significant ? ` (${co.lift>=0?'+':''}${co.lift} vs chance)` : ` (within noise)`}`);
+  bits.push(`<b>${slots.length}</b> traits below`);
+  h += `<div class="summaryMeta">${bits.join(" · ")}</div>`;
+
+  const why = whyThisCharacterHTML();
+  if (why) h += why;
+
+  return h + `</div>`;
+}
+
+/* The per-slot "why?" panel is the best thing in the UI and it is per-slot and
+   collapsed: it can tell you why ONE trait arrived but never why this character did.
+   The signals are already resolved during a build — the pushed sliders, the archetype,
+   the resolved profile categories, the context bias — so this is a matter of naming
+   the loudest three rather than computing anything new. */
+function whyThisCharacterHTML(){
+  const drivers = [];
+
+  const pushed = PERSONALITY_AXES
+    .map(a=>{ const el = document.getElementById('pers_'+a.id); return {a, raw: el ? (parseInt(el.value,10)||0) : 0}; })
+    .filter(x=> Math.abs(x.raw) >= 25)
+    .sort((x,y)=> Math.abs(y.raw) - Math.abs(x.raw))
+    .slice(0, 3);
+  pushed.forEach(x=> drivers.push(`<b>${escHTML(x.a.label)}</b> at ${x.raw}`));
+
+  if (charMeta.archetypeLabel && charMeta.archetypeLabel !== "Imported" && !drivers.length)
+    drivers.push(`the <b>${escHTML(charMeta.archetypeLabel)}</b> archetype`);
+
+  if (charMeta.contextNotes && charMeta.contextNotes.length)
+    drivers.push(`context read as <b>${escHTML(charMeta.contextNotes.join(", "))}</b>`);
+
+  // drawAll sections (Motivation & Wound) take one trait from EVERY category, so naming
+  // the first of them as what the section "resolved to" states a choice that was never
+  // made. Only the sections that actually pick a category belong here.
+  const chosen = PROFILE_SECTIONS.filter(ps=> !ps.drawAll).map(ps=>{
+    const c = slotCat(state["prof_"+ps.id+"_0"]);
+    return c ? `${ps.label}: ${c}` : null;
+  }).filter(Boolean);
+  const profBits = chosen.slice(0, 3);
+
+  if (!drivers.length && !profBits.length) return "";
+  let h = `<details class="summaryWhy"><summary>Why this character?</summary><div>`;
+  if (drivers.length) h += `<div>Strongest signals: ${drivers.join("; ")}.</div>`;
+  if (profBits.length) h += `<div style="margin-top:5px;">Resolved to ${escHTML(profBits.join(" · "))}${chosen.length>profBits.length?", and more below":""}. Each of those then biased the ones after it.</div>`;
+  h += `<div class="sub" style="margin-top:6px;">Every individual card has its own <b>why?</b> button with the full reasoning for that one trait.</div>`;
+  return h + `</div></details>`;
+}
+
 function renderSheet(){
   const sheet = document.getElementById('sheet');
   sheet.classList.add('show');
@@ -206,6 +327,7 @@ function renderSheet(){
 
   const body = document.getElementById('sheetBody');
   body.innerHTML = "";
+  body.innerHTML = summaryCardHTML();
   const profGroups = PROFILE_SECTIONS.map(ps=>({
     title: ps.label,
     ids: Object.keys(state).filter(k=>k.startsWith("prof_"+ps.id+"_"))
@@ -240,6 +362,17 @@ function renderSheet(){
     div.innerHTML = inner;
     body.appendChild(div);
   });
+
+  /* Announce the result. renderSheet replaces #sheetBody wholesale and nothing moves
+     focus, so to a screen reader a generate is indistinguishable from nothing happening.
+     A short summary in a live region says what arrived without re-reading forty cards. */
+  (function announceSheet(){
+    const live = document.getElementById('srAnnounce');
+    if (!live) return;
+    const filled = Object.values(state).filter(s=> s && s.trait).length;
+    const name = charMeta.name || "Character";
+    live.textContent = `${name} generated — ${filled} traits across ${groups.filter(g=>g.ids.length).length} sections.`;
+  })();
 
   // Coherence score + soft tension notes
   const co = coherenceScore(state);
@@ -359,6 +492,13 @@ function sectionGlyph(title){ return SECTION_GLYPHS[title] || "◆"; }
    data was already being tracked for per-slot rerolls (diffLog); it just never
    survived a full regeneration. */
 let lastSheetTraits = null;   // slotId -> trait name, as of the previous generation
+let changedSlots = new Set();  // slotIds a full regeneration moved, for the flash highlight
+function markChangedSlots(){
+  changedSlots = new Set();
+  if (!lastSheetTraits) return;
+  const now = snapshotSheetTraits(state);
+  Object.keys(now).forEach(k=>{ if (lastSheetTraits[k] !== now[k]) changedSlots.add(k); });
+}
 function snapshotSheetTraits(st){
   const m = {};
   Object.entries(st || {}).forEach(([k,v])=>{ if (v && v.trait) m[k] = v.trait.trait; });
@@ -605,6 +745,36 @@ function exportCharacterJSON(){
   downloadText(JSON.stringify(payload, null, 2), name + ".character.json");
   toast("Exported " + name + ".character.json");
 }
+/* Structural validation for an imported sheet. Deliberately permissive about what it
+   does not know — unknown keys and missing optional blocks are fine, since files written
+   by older and newer builds both have to import — and strict only about the shapes the
+   render path will actually dereference. */
+function validateSheetPayload(p){
+  const isPlainObject = v => v && typeof v === 'object' && !Array.isArray(v);
+  if (!isPlainObject(p)) throw new Error("File does not contain a character object.");
+  if (p.state !== undefined && !isPlainObject(p.state)) throw new Error("The `state` block is not an object.");
+  if (p.pressureState != null && !isPlainObject(p.pressureState)) throw new Error("The `pressureState` block is not an object.");
+  if (p.charMeta != null && !isPlainObject(p.charMeta)) throw new Error("The `charMeta` block is not an object.");
+  if (p.settings != null && !isPlainObject(p.settings)) throw new Error("The `settings` block is not an object.");
+  const checkSlots = (st, label) => {
+    if (!isPlainObject(st)) return;
+    Object.entries(st).forEach(([slotId, slot])=>{
+      if (slot === null) return;                       // a legitimately empty slot
+      if (!isPlainObject(slot)) throw new Error(`${label} slot "${slotId}" is not an object.`);
+      if (slot.trait == null) return;                  // trait:null is legitimate too
+      if (!isPlainObject(slot.trait)) throw new Error(`${label} slot "${slotId}" has a malformed trait.`);
+      if (slot.trait.id === undefined) throw new Error(`${label} slot "${slotId}" has a trait with no id.`);
+      // relink() replaces matched traits wholesale, but an orphan keeps its embedded
+      // copy and is rendered from it — so an orphan must carry the fields the card reads.
+      ['trait','category','section'].forEach(k=>{
+        if (typeof slot.trait[k] !== 'string') throw new Error(`${label} slot "${slotId}" has a trait with no ${k}.`);
+      });
+    });
+  };
+  checkSlots(p.state, "state");
+  checkSlots(p.pressureState, "pressureState");
+}
+
 function importCharacterJSON(fileInput){
   const file = fileInput.files && fileInput.files[0];
   if (!file) return;
@@ -613,6 +783,13 @@ function importCharacterJSON(fileInput){
     try {
       const p = JSON.parse(reader.result);
       if (p.format !== "character-voice-sheet") throw new Error("Not a character sheet file.");
+      /* The format string was the only check, so a file that said the right thing and
+         then carried a malformed `state` — a string, an array, slots with no trait
+         object — got all the way to renderSheet and threw there, AFTER snapshotHistory
+         had run and the globals had been overwritten. The user lost their character to
+         a bad file and got a crash instead of a message. Validate the shape first, while
+         nothing has been touched yet. */
+      validateSheetPayload(p);
       // Re-link every imported trait to the live TRAITS pool by id, so imported
       // characters keep working with reroll/pin/why (which need live trait objects)
       // and quietly survive trait-text updates between app versions. Unmatched ids
@@ -704,6 +881,7 @@ function sheetToHTML(st, meta, pState){
   groupOf(st).forEach((slots, title)=>{
     h += `<h2 style="font-family:Georgia,serif;font-size:1.05em;border-bottom:1px solid #ccc;padding-bottom:2px;margin:16px 0 6px;">${esc(title)}</h2>`;
     slots.forEach(s=>{
+      if (!s || !s.trait) return;   // exhausted pool / older save — skip, don't crash the export
       h += `<p style="margin:6px 0;"><b>${esc(s.trait.trait)}</b> <span style="color:#888;font-size:.85em;">(${esc(s.trait.category)} · intensity ${s.trait.intensity}/5 · ${esc(s.trait.rarity)})</span><br>${esc(s.trait.desc)}<br><i style="color:#555;">"${esc(s.trait.example)}"</i></p>`;
     });
   });

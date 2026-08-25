@@ -356,6 +356,16 @@
     .axisTitle::before { background:#333; }
     .traitCard { border-left-color:#999; background:#fafafa; }
     .traitName { color:#000; }
+    /* The sheet's own collapsible groups printed collapsed — the print rules hid the
+       app chrome but never opened the content, so a printed sheet could be missing most
+       of the character. Force every <details> inside the sheet open, and undo the
+       compact mode's clamping so nothing is cut off mid-line on paper. */
+    .sheet details, .sheet details[open] { display:block !important; }
+    .sheet details > summary { display:block !important; list-style:none; font-weight:600; }
+    .sheet details > *:not(summary) { display:revert !important; }
+    body.compact .traitDesc, body.compact .traitEx { display:block !important; }
+    .traitCard, .axisGroup, .castCard { break-inside:avoid; page-break-inside:avoid; }
+    .axisTitle { break-after:avoid; page-break-after:avoid; }
   }
 
   @media (max-width: 640px) {
@@ -440,6 +450,56 @@
   }
   .emptyState b { color:var(--text); font-family:var(--font-display); font-size:1.05rem; }
   .emptyState p { max-width:560px; margin:8px auto 0; line-height:1.7; }
+  .emptyPresets { display:flex; flex-wrap:wrap; gap:8px; justify-content:center; margin-top:4px; }
+  .emptyPresets button {
+    padding:8px 14px; border-radius:999px; cursor:pointer;
+    border:1px solid var(--border-strong); background:var(--panel); color:var(--text);
+    font-size:.82rem; font-family:inherit;
+  }
+  .emptyPresets button:hover { border-color:var(--golden-deep); color:var(--golden-deep); background:var(--golden-light); }
+
+  /* ---------- Name dialog (replaces prompt) ---------- */
+  .nameDialog {
+    border:1px solid var(--border-strong); border-radius:10px; padding:0;
+    background:var(--panel); color:var(--text); max-width:min(420px, 92vw); width:100%;
+  }
+  .nameDialog::backdrop { background:rgba(34,54,74,.42); }
+  .nameDialog form { padding:18px 20px; display:flex; flex-direction:column; gap:10px; }
+  .nameDialog label { font-size:.88rem; font-weight:600; }
+  .nameDialog input {
+    padding:9px 11px; border:1px solid var(--border-strong); border-radius:6px;
+    font-family:inherit; font-size:.95rem; background:var(--panel2); color:var(--text);
+  }
+  .nameDialogBtns { display:flex; gap:8px; justify-content:flex-end; margin-top:2px; }
+  .nameDialogBtns button {
+    padding:8px 16px; border-radius:6px; cursor:pointer; font-family:inherit; font-size:.85rem;
+    border:1px solid var(--border-strong); background:var(--panel2); color:var(--text);
+  }
+  .nameDialogBtns button.primary { background:var(--dusk-blue); border-color:var(--dusk-blue); color:#fff; }
+
+  /* ---------- Summary card ---------- */
+  .summaryCard {
+    border:1px solid var(--border-strong); border-left:4px solid var(--golden-deep);
+    background:var(--panel2); border-radius:10px; padding:16px 18px; margin:0 0 18px;
+  }
+  .summaryHead { display:flex; flex-wrap:wrap; align-items:baseline; gap:10px; }
+  .summaryName { font-family:var(--font-display); font-size:1.25rem; color:var(--text); }
+  .summarySub { font-size:.85rem; color:var(--golden-deep); font-style:italic; }
+  .summaryTraits { list-style:none; margin:10px 0 0; padding:0; display:grid; gap:4px; }
+  .summaryTraits li { font-size:.92rem; line-height:1.5; }
+  .summaryCat { color:var(--muted); font-size:.78rem; }
+  .summaryVoice {
+    margin-top:11px; padding:9px 12px; border-left:2px solid var(--emerald);
+    background:var(--emerald-light); border-radius:0 6px 6px 0;
+    font-style:italic; line-height:1.65; font-size:.88rem;
+  }
+  .summaryMeta { margin-top:10px; font-size:.78rem; color:var(--muted); font-family:var(--font-mono); }
+  .summaryWhy { margin-top:10px; font-size:.84rem; }
+  .summaryWhy > summary { cursor:pointer; color:var(--dusk-blue); font-weight:600; }
+  .summaryWhy > div { margin-top:7px; line-height:1.65; }
+  body.compact-sheet .summaryVoice { display:none; }
+  @media print { .summaryWhy { display:block !important; } .summaryWhy > div { display:block !important; } }
+  @media (max-width: 600px) { .summaryCard { padding:13px 14px; } .summaryName { font-size:1.1rem; } }
 
   /* ---------- Grouped personality sliders + neutral band ---------- */
   .persGroup { margin-bottom:18px; }
@@ -571,6 +631,21 @@
   .stickyBar button { padding:9px 18px; font-size:.82rem; }
   .stickySeed { margin-left:auto; font-family:var(--font-mono); font-size:.7rem; color:var(--muted); }
 
+  /* Flash the slots a regeneration moved. One pass, then it settles — the card keeps
+     the class but the animation only runs on the element's first paint, so a re-render
+     of the same sheet does not re-flash. */
+  @keyframes flashChanged {
+    0%   { background:rgba(184,134,11,.22); border-left-color:var(--golden); }
+    60%  { background:rgba(184,134,11,.10); }
+    100% { background:transparent; }
+  }
+  .traitCard.justChanged { animation:flashChanged 1.4s ease-out 1; }
+  @media (prefers-reduced-motion: reduce) {
+    /* No animation, but the information must not be lost — keep a static marker. */
+    .traitCard.justChanged { animation:none; border-left-color:var(--golden); }
+  }
+  @media print { .traitCard.justChanged { animation:none; } }
+
   @media print { .stickyBar, .toastHost, .emptyState, .headerRow { display:none !important; } }
 
   /* ---------- Mobile ---------- */
@@ -593,6 +668,25 @@
   @media (max-width: 460px) {
     .persGroupGrid { grid-template-columns:1fr; }
     h1 { font-size:1.45rem; }
+  }
+
+  /* The trait card packs a name, a rarity badge, intensity dots, the active-range track
+     and five buttons into one row. That is fine on a desktop and unusable on a phone:
+     below 600px every one of those competes for about 320 usable pixels and the buttons
+     end up too small to hit. Give the card the full width for its content, let the
+     controls wrap into a real touch-sized row underneath, and drop the band TRACK (a
+     graphic that needs width to say anything) in favour of the numbers it encodes,
+     which stay readable at any size. */
+  @media (max-width: 600px) {
+    .traitCard { flex-direction:column; align-items:stretch; gap:8px; }
+    .traitMain { width:100%; }
+    .slotBtns {
+      flex-direction:row; flex-wrap:wrap; align-items:center; justify-content:flex-start;
+      width:100%; gap:6px;
+    }
+    .slotBtns button { min-height:34px; padding:6px 11px; }
+    .bandTrack { display:none; }
+    .bandRow { flex-wrap:wrap; font-size:.72rem; }
   }
 
   /* File-input buttons are <label>s, and the global `label` rule (mono, uppercase,

@@ -1,7 +1,12 @@
 /* Service worker: the app ships ~3MB of JavaScript, nearly all of it the trait bank,
    and every visit re-downloaded the lot. Cache-first for the shell, with a version
    stamp so a deploy invalidates it. The app works fine without this — registration
-   is best-effort and every handler falls back to the network. */
+   is best-effort and every handler falls back to the network.
+
+   The version stamp below is rewritten to the commit SHA by the deploy workflow. It
+   was previously the literal "v1" and nothing bumped it, which made the activate-time
+   purge below dead code and left returning users on stale JS; the stale-while-revalidate
+   path covered for it, one load late, every time. */
 const CACHE = 'character-voice-v1';
 const ASSETS = [
   './',

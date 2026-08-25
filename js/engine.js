@@ -6,14 +6,17 @@ const AXES = {
   verbosityLow:  {section:"Verbosity Traits", category:"Minimal & Ultra-Brief"},
   pacing:        {section:"Verbosity Traits", category:"Pacing & Situation-Driven"},
   stylized:      {section:"Verbosity Traits", category:"Stylized & Elaborate"},
+  circular:      {section:"Verbosity Traits", category:"Repetitive & Circular"},
 };
 // ---------- Indexed lookups (built once) ----------
-// TRAITS has ~1900 entries and every pick used to re-scan the whole array with
+// TRAITS has ~7,000 entries and every pick used to re-scan the whole array with
 // .filter(). Build the two maps a lookup actually needs, once, at load.
+const TRAITS_BY_ID = new Map();       // id -> trait (undo/import re-linking)
 const TRAITS_BY_KEY = new Map();      // "section||category" -> trait[]
 const CATS_BY_SECTION = new Map();    // section -> category[] (first-seen order)
 (function indexTraits(){
   TRAITS.forEach(t=>{
+    TRAITS_BY_ID.set(t.id, t);
     const key = t.section + "||" + t.category;
     if (!TRAITS_BY_KEY.has(key)) TRAITS_BY_KEY.set(key, []);
     TRAITS_BY_KEY.get(key).push(t);
@@ -87,7 +90,7 @@ const PRESENTATION_VARIANTS = {
    Tagged conservatively by pattern — only unambiguous symptom-shaped names, which
    deliberately excludes adjectival forms like "Adventure-seeking" or "Principled
    truth-teller" that read as dispositions despite similar morphology. This catches
-   the clearest cases rather than guessing at 1,400 traits; broadening it is a
+   the clearest cases rather than guessing across the whole bank; broadening it is a
    dedicated data pass, not something a regex should be trusted to finish.
 
    Effect: secondary traits are progressively down-weighted as the intensity target
@@ -362,7 +365,8 @@ const AXIS_LABELS = {
   vol:"volume/wordiness", pace:"pacing", form:"formality", warm:"emotional warmth",
   hon:"honesty", asrt:"assertiveness", ego:"self-confidence", agr:"agreeableness",
   man:"manners", disc:"discipline", rebel:"rebelliousness", emo:"emotional openness",
-  intel:"analytical thinking", pos:"optimism", act:"physical energy", mood:"current mood"
+  intel:"analytical thinking", pos:"optimism", act:"physical energy", mood:"current mood",
+  cur:"curiosity"
 };
 
 const STRESS_KEYWORDS = /panic|adrenaline|breathless|explosive|pressure|urgent|stammer|shock|tension|rapid-fire|combat|erratic|feverish|danger/i;
@@ -521,7 +525,7 @@ function bandHalf(){
   if (_bandHalfMemo !== null) return _bandHalfMemo;
   if (!_rangeFocusEl) _rangeFocusEl = document.getElementById('rangeFocus');
   const el = _rangeFocusEl;
-  const focus = el ? clamp(parseFloat(el.value), 0, 1) : 0.62;
+  const focus = clamp(floatVal(el, 0.62), 0, 1);
   return (_bandHalfMemo = 1.35 - 1.0 * focus); // 1.35 (loose) .. 0.35 (tight)
 }
 
@@ -543,7 +547,13 @@ function traitBand(t, half){
    Keep a rolling window of the traits recently generated and softly penalise them.
    Soft on purpose: a penalty, never an exclusion, so a trait your sliders point
    straight at can still win — it just has to earn it against fresher material. */
-const RECENT_WINDOW = 6;          // how many past characters are remembered
+// Widened from 6 to 12, and the toggle now ships ON. Every anti-staleness mechanism in
+// the app defaulted to off, which meant the SHIPPING configuration was the maximally
+// convergent one and each counterweight was opt-in behind an Advanced panel. This one
+// is a soft multiplicative penalty and can never make a trait impossible — a trait the
+// sliders point straight at still wins, it just has to earn it against fresher material
+// — so there is no reason for it to be off by default.
+const RECENT_WINDOW = 12;         // how many past characters are remembered
 const RECENT_PENALTY = 0.4;       // multiplier applied to a trait seen in that window
 let recentTraitIds = [];          // array of Sets, newest last
 function rememberGeneration(st){
@@ -556,7 +566,7 @@ function rememberGeneration(st){
 function forgetRecentTraits(){ recentTraitIds = []; }
 function avoidRecentEnabled(){
   const el = document.getElementById('avoidRecentToggle');
-  return el ? !!el.checked : false;
+  return el ? !!el.checked : true;   // default-on; see RECENT_WINDOW above
 }
 let _avoidRecentActive = false;   // resolved once per build, not per draw
 function recentPenalty(t){
@@ -571,15 +581,72 @@ function recentPenalty(t){
 // thin to draw from. `widened` is surfaced in the UI so a sparse category is
 // visible as a data gap rather than silently behaving like a loose one.
 function rangeSelect(pool, target, minCount){
-  const need = Math.min(minCount || 4, pool.length);
-  let half = bandHalf(), widened = false, list = [];
+  /* TARGET CLAMPING. The widening loop below reacts to how MANY candidates it found,
+     never to WHERE they sit. When the target falls outside the pool's actual span —
+     which happens constantly on the 20-trait Motivation pools, whose lowest entry is
+     already above the default target — every candidate lies on the same side of it,
+     the proximity falloff in pickInRange stops being a two-sided bell and becomes
+     monotonic, and the draw degenerates into "always return the lowest trait in the
+     pool". Measured before this fix: The Need returned 5 distinct traits in 3,000
+     draws, one of them 81% of the time, on a section drawn on every single sheet.
+     Pull the target into the span first, so the falloff always has material on both
+     sides of it. `clamped` is surfaced so the underlying data gap stays visible in
+     the UI rather than being silently smoothed away. */
+  let lo = Infinity, hi = -Infinity;
+  for (const t of pool){ const p = traitPos(t); if (p < lo) lo = p; if (p > hi) hi = p; }
+  const clampedTarget = clamp(target, lo, hi);
+  const clamped = Math.abs(clampedTarget - target) > 1e-9;
+  /* A clamped target means the pool cannot serve the intensity that was asked for.
+     Precision about WHERE inside the pool to draw is therefore false precision — the
+     honest answer is "the nearest end of this pool", and the nearest end is a region,
+     not a point. So widen the requirement as well as the target: ask for a real slice
+     of the pool rather than the bare four candidates the tight band would return.
+     Without this, clamping alone still bottoms out on the same handful of traits,
+     because the band is narrow independently of where its centre sits. */
+  const wantCount = clamped ? Math.max(6, Math.ceil(pool.length * 0.35)) : (minCount || 4);
+  const need = Math.min(wantCount, pool.length);
+  /* BOUNDARY REFLECTION. Clamping fixes a target that sits outside the pool; it does
+     nothing for one that sits just inside the edge, which is the far more common case
+     and the one that actually bites. The Need's lowest trait is at 2.40 and the default
+     target is 2.41: technically inside the span, so nothing clamps, but the window
+     [2.06, 2.76] spends half its width on empty space below the pool and the draw is
+     left choosing between the five intensity-2 entries that remain.
+
+     Treat the window like a smoothing kernel at a domain boundary: whatever width
+     falls off the end of the pool is added back on the other side, so the eligible
+     slice keeps its intended WIDTH instead of silently shrinking to whatever happens
+     to survive the truncation. Deliberately asymmetric rather than just "widen both
+     ways" — that would drag an on-target draw off its target. Here the centre of mass
+     moves only as far as the missing material forces it to. */
+  let half = bandHalf(), widened = false, list = [], loEdge = 0, hiEdge = 0;
+  const window = () => {
+    const spill = {below: Math.max(0, (clampedTarget - half) - lo), above: Math.max(0, hi - (clampedTarget + half))};
+    // reflect only the width that overhangs the pool, and only into a side that has room
+    const overBelow = Math.max(0, lo - (clampedTarget - half));
+    const overAbove = Math.max(0, (clampedTarget + half) - hi);
+    loEdge = clampedTarget - half - Math.min(overAbove, spill.below);
+    hiEdge = clampedTarget + half + Math.min(overBelow, spill.above);
+    // Trim to the pool's own span. The reflected width has already been added to the
+    // opposite side, so the window keeps its intended size; leaving the overhang in
+    // place would only drag the reported centre out past the last real trait, which is
+    // the same off-pool centre this whole block exists to prevent.
+    loEdge = Math.max(loEdge, lo); hiEdge = Math.min(hiEdge, hi);
+    return pool.filter(t => { const p = traitPos(t); return p >= loEdge && p <= hiEdge; });
+  };
   for (let i = 0; i < 7; i++){
-    list = pool.filter(t => Math.abs(traitPos(t) - target) <= half);
+    list = window();
     if (list.length >= need) break;
     half *= 1.45; widened = true;
   }
-  if (!list.length){ list = pool.slice(); half = 5; widened = true; }
-  return {list, half, widened};
+  if (!list.length){ list = pool.slice(); half = 5; loEdge = lo; hiEdge = hi; widened = true; }
+  /* The proximity falloff in pickInRange measures distance from centre against `half`.
+     Once the window is reflected it is no longer centred on clampedTarget, so report
+     the window's own midpoint and half-width — otherwise traits in the reflected part
+     read as further from centre than they are and the collapse returns by the back
+     door. */
+  const centre = (loEdge + hiEdge) / 2;
+  const effHalf = Math.max((hiEdge - loEdge) / 2, 1e-6);
+  return {list, half: effHalf, widened, target: centre, clamped, requested: target};
 }
 
 // Distance-weighted draw: traits sitting exactly on the target are far likelier
@@ -600,17 +667,40 @@ function rangeSelect(pool, target, minCount){
 // by construction, so precision buys nothing and the concentration just made slider 0
 // return the same few traits — measured: 6 distinct in 50 rolls even after the pool
 // grew. A gentler exponent there trades precision (irrelevant) for variety (the point).
+/* The proximity component of the draw weight, factored out so the picker and anything
+   that needs to REASON about the picker (expectedLoudCount) share one definition rather
+   than keeping two that drift. Rarity, tier, affinity and recency stay in pickInRange:
+   they are per-draw context, not a property of the window. */
+function proximityWeights(list, centre, half, flatten){
+  const exp = flatten ? 0.8 : clamp(0.9 + list.length/40, 0.9, 2.4);
+  const floor = flatten ? 0.03 : (0.03 + 0.9/Math.max(4, list.length));
+  return list.map(t => {
+    const d = Math.abs(traitPos(t) - centre) / half;      // 0 at centre, 1 at edge
+    return floor + Math.pow(1 - Math.min(d, 0.9999), exp); // smooth falloff
+  });
+}
+
 function pickInRange(pool, rarityPref, target, minCount, flatten){
   if (!pool || !pool.length) return null;
   if (target === undefined || target === null) return pickWeighted(pool, rarityPref);
-  const {list, half} = rangeSelect(pool, target, minCount);
+  const sel = rangeSelect(pool, target, minCount);
+  const {list, half} = sel;
+  // Draw against the CLAMPED target (see rangeSelect): weighting against a target the
+  // pool cannot reach is what collapsed the thin pools.
+  const centre = sel.target;
   const aff = affinityStrength();
-  const exp = flatten ? 0.8 : 2.4;
+  /* ADAPTIVE FALLOFF. The 2.4 exponent and the 0.03 floor were both tuned against the
+     50-120-trait bipolar personality pools, where they are right: that sharpness is
+     what makes slider -35 and -45 feel different. On a 20-trait pool the same numbers
+     are a scalpel used as an axe — 0.03 is about a thirtieth of an on-target trait's
+     weight, so everything off-centre is effectively excluded, and with only a handful
+     of candidates in the band there is nothing left to vary. Scale both with pool
+     size: small pools flatten and lift their tail automatically, large ones keep the
+     precision they were tuned for. */
   const norm = rarityNorm(list);
-  const weights = list.map(t => {
-    const d = Math.abs(traitPos(t) - target) / half;      // 0 at centre, 1 at edge
-    const prox = Math.pow(1 - Math.min(d, 0.9999), exp);  // smooth falloff
-    let w = (0.03 + prox) * rarityWeight(t, rarityPref, norm) * tierWeight(t, target);
+  const prox = proximityWeights(list, centre, half, flatten);
+  const weights = list.map((t, i) => {
+    let w = prox[i] * rarityWeight(t, rarityPref, norm) * tierWeight(t, centre);
     if (aff > 0 && CURRENT_AFFINITY_VEC){
       const fit = polarityFit(t, CURRENT_AFFINITY_VEC); // -1..1, 0 if untagged
       if (fit) w *= clamp(1 + aff*fit, 0.15, 3);
@@ -670,12 +760,21 @@ const WEIGHT_MATRIX = {
     neg:{ grammar:{"Turn-Taking Grammar":TIER_WEAK}, stress:{"Fight":TIER_WEAK}, role:{"Instigator":TIER_MODERATE}, humor:{"Cruel & Barbed":TIER_MODERATE} }
   },
   manners: {
+    /* Both poles previously boosted "Register & Formality Spectrum" at the same tier,
+       so Manners had exactly zero directional effect on vocabulary — and boostedVocabCats
+       already boosts Register unconditionally for |regLevel| >= 1, making the entry
+       redundant as well as inert. Crude manners pull toward blunt, audible speech and
+       away from the mannerisms that mark social boundaries; polite manners keep the
+       register link. */
     pos:{ vocab:{"Register & Formality Spectrum":TIER_STRONG}, manner:{"Social & Boundary Mannerisms":TIER_MODERATE} },
-    neg:{ vocab:{"Register & Formality Spectrum":TIER_STRONG} }
+    neg:{ vocab:{"Directness & Literalness":TIER_MODERATE,"Phonetic & Auditory Qualities":TIER_WEAK}, humor:{"Cruel & Barbed":TIER_WEAK} }
   },
   discipline: {
     pos:{ grammar:{"Structural Shifts":TIER_MODERATE}, vices:{"Restraint & Discipline":TIER_STRONG}, values:{"Rigid & Principled":TIER_WEAK} },
-    neg:{ vices:{"Compulsion & Ritual":TIER_MODERATE,"Risk & Escape":TIER_MODERATE}, stress:{"Freeze":TIER_WEAK} }
+    // "Avoidance & Procrastination" was a cross-link source but the target of nothing,
+    // so it could only ever arrive by an unguided roll. Low discipline is its most
+    // obvious upstream cause.
+    neg:{ vices:{"Compulsion & Ritual":TIER_MODERATE,"Risk & Escape":TIER_MODERATE,"Avoidance & Procrastination":TIER_MODERATE}, stress:{"Freeze":TIER_WEAK} }
   },
   rebelliousness: {
     pos:{ vocab:{"Register & Formality Spectrum":TIER_MODERATE}, role:{"Instigator":TIER_STRONG}, humor:{"Absurd & Chaotic":TIER_MODERATE} },
@@ -690,8 +789,9 @@ const WEIGHT_MATRIX = {
     neg:{ vocab:{"Directness & Literalness":TIER_WEAK} }
   },
   positivity: {
-    pos:{ humor:{"Warm & Playful":TIER_MODERATE} },
-    neg:{ humor:{"Humorless & Absent":TIER_MODERATE} }
+    // Same gap on the Values side: "Idealistic & Visionary" had no inbound link at all.
+    pos:{ humor:{"Warm & Playful":TIER_MODERATE}, values:{"Idealistic & Visionary":TIER_MODERATE} },
+    neg:{ humor:{"Humorless & Absent":TIER_MODERATE}, values:{"Pragmatic & Flexible":TIER_WEAK} }
   },
   activeness: {
     pos:{ manner:{"Postural & Spatial Dynamics":TIER_MODERATE,"Gestural & Kinetic Integration":TIER_MODERATE}, grammar:{"Spoken Compression":TIER_WEAK} },
@@ -774,27 +874,47 @@ const WEIGHT_MATRIX = {
   // do they hold onto, once the stress response is actually running" — which is a far
   // more interesting output than "they talk faster", and the reason the pressure sheet
   // is no longer voice-only.
+  /* Attachment was decided almost entirely by stress at neutral sliders, and the four
+     stress responses pointed at only three of the four attachment styles: Fight and
+     Freeze BOTH fed Disorganized while Secure was the target of no stress link at all.
+     That is why Disorganized took 32% of a four-way split and Secure 12%. Fight moved
+     onto Secure — meeting a threat head-on is at least as consistent with secure
+     attachment as with disorganized, and it leaves one stress response feeding each
+     style. */
   "stress:Fight (attack the threat)": { vocab:{"Affective & Emotional Intensity":TIER_WEAK},
     role:{"Instigator":TIER_STRONG,"Leader":TIER_MODERATE}, values:{"Self-Interested":TIER_WEAK},
-    attachment:{"Disorganized":TIER_WEAK} },
+    attachment:{"Secure":TIER_WEAK} },
   "stress:Flight (remove yourself)": { grammar:{"Spoken Compression":TIER_WEAK},
     role:{"Outsider":TIER_STRONG}, values:{"Pragmatic & Flexible":TIER_WEAK},
     attachment:{"Avoidant":TIER_STRONG} },
+  /* Same asymmetry as attachment above, in Social Role. Flight and Freeze BOTH fed
+     Outsider while Skeptic and Connector were the target of no stress link at all, so at
+     neutral sliders — where stress is the only signal actually firing — Outsider took
+     24% of a seven-way split and those two sat near 9%. Freeze moved onto Skeptic (a
+     freeze response is watching and doubting rather than acting, which is what the
+     Skeptic role describes) and Fawn gained Connector, social glue being the same
+     impulse as appeasement pointed outward. Every role now has some stress inbound. */
   "stress:Freeze (shut down)": { grammar:{"Disfluencies & Flow":TIER_MODERATE},
-    role:{"Outsider":TIER_MODERATE}, values:{"Pragmatic & Flexible":TIER_WEAK},
+    role:{"Skeptic":TIER_MODERATE}, values:{"Pragmatic & Flexible":TIER_WEAK},
     attachment:{"Disorganized":TIER_MODERATE} },
   "stress:Fawn (appease the threat)": { vocab:{"Pragmatic Focus & Speech Functions":TIER_WEAK},
-    role:{"Peacemaker":TIER_STRONG,"Caretaker":TIER_MODERATE}, values:{"Loyalty-Bound":TIER_MODERATE},
+    role:{"Peacemaker":TIER_STRONG,"Caretaker":TIER_MODERATE,"Connector":TIER_WEAK}, values:{"Loyalty-Bound":TIER_MODERATE},
     attachment:{"Anxious":TIER_STRONG} },
 };
 
 // Guarded: this is called from pickCategoryWeighted, which runs on every category
 // draw, including from code paths that have no DOM at all (tests, and any future
 // headless use). An unguarded dereference here took the whole build down.
-function AFFINITY(){
-  const el = document.getElementById('affinityBoost');
-  return el ? (parseFloat(el.value) || 0) : 2.5;
+// `parseFloat(el.value) || 0` read an emptied number field as 0, which for this dial
+// means "switch off all category steering" — a silent, invisible mode change from a
+// cleared input. Fall back to the default the same way intVal does.
+function floatVal(idOrEl, fallback){
+  const el = typeof idOrEl === 'string' ? document.getElementById(idOrEl) : idOrEl;
+  if (!el) return fallback;
+  const n = parseFloat(el.value);
+  return Number.isFinite(n) ? n : fallback;
 }
+function AFFINITY(){ return floatVal('affinityBoost', 2.5); }
 
 function persLevel(id, overrides){
   const raw = (overrides && overrides[id] !== undefined) ? overrides[id] : (()=>{
@@ -867,11 +987,44 @@ function polFitNote(t){
 }
 
 // Returns a short human sentence explaining why this slot landed where it did.
+/* The comment on rangeSelect has always claimed `widened` is "surfaced in the UI so a
+   sparse category is visible as a data gap rather than silently behaving like a loose
+   one". It never was — nothing read the flag. Now that rangeSelect also reports when it
+   had to CLAMP a target into the pool's span, both facts matter enough to say out loud:
+   a clamped target means the pool has no content at the intensity you asked for, and
+   the honest response is to show that rather than to quietly serve the nearest thing.
+
+   Recomputed here rather than threaded through every pick site: the slot already knows
+   its pool and its target, so this is the same question asked again, not a second
+   source of truth. */
+function dataGapNote(s){
+  if (!s || !s.trait || s.target === undefined || s.target === null) return "";
+  const pool = byFilter(s.trait.section, s.trait.category);
+  if (pool.length < 2) return "";
+  const sel = rangeSelect(pool, s.target, 4);
+  if (!sel.clamped && !sel.widened) return "";
+  const bits = [];
+  if (sel.clamped){
+    let lo = Infinity, hi = -Infinity;
+    pool.forEach(t=>{ const p = traitPos(t); if(p<lo)lo=p; if(p>hi)hi=p; });
+    const edge = s.target < lo ? `floor of ${lo.toFixed(2)}` : `ceiling of ${hi.toFixed(2)}`;
+    bits.push(`your target of <b>${s.target.toFixed(2)}</b> is outside this category's ${edge}, so the draw was clamped to the nearest end`);
+  }
+  if (sel.widened) bits.push(`the eligible band had to be widened to find enough candidates`);
+  return `<div class="whyExcl"><b>Data gap.</b> ${bits.join(", and ")}. This category is thin at the intensity you asked for — the pick is the closest available, not an exact match.</div>`;
+}
+
 function explainPick(slotId, s){
+  const gap = dataGapNote(s);
+  return gap + _explainPickInner(slotId, s);
+}
+
+function _explainPickInner(slotId, s){
   if (!s || !s.trait) return "";
   const cat = s.trait.category;
   const currentProfileCats = {};
-  PROFILE_SECTIONS.forEach(ps=>{ const p = state["prof_"+ps.id+"_0"]; if (p) currentProfileCats[ps.id] = p.trait.category; });
+  // slotCat: prof_ slots can hold trait:null, same guard as everywhere else.
+  PROFILE_SECTIONS.forEach(ps=>{ const c = slotCat(state["prof_"+ps.id+"_0"]); if (c) currentProfileCats[ps.id] = c; });
 
   const pinNote = pinnedTargets[slotId] !== undefined
     ? `<div class="whyExcl" style="border-left-color:var(--golden-deep); background:rgba(184,134,11,.08);"><b>Pinned</b> at intensity <b>${pinnedTargets[slotId].toFixed(1)}</b> — this overrides whatever the sliders below would otherwise target. Unpin to let it follow them again.</div>`
@@ -931,6 +1084,12 @@ function explainPick(slotId, s){
   return pinNote + `"${cat}" was favoured here by <b>${lead}</b>${bySource.size>3?`, plus ${bySource.size-3} weaker signal${bySource.size-3>1?"s":""}`:""}. The combined strength of those signals set the intensity target, and the trait was drawn from inside that window.${bandNote(s.trait, s.target)}${polNote}`;
 }
 
+/* How hard an already-resolved profile fact constrains the ones resolved after it.
+   1.0 restores the old behaviour (a resolved fact outweighs the baseline 7.25 : 1);
+   0 makes sections independent. 0.45 keeps the correlations legible in the output
+   while leaving room for a neutral roll to land somewhere the cascade didn't choose. */
+const CROSSLINK_STRENGTH = 0.45;
+
 function accumulateBoost(kind, profileCats, overrides){
   const m = new Map();
   const add = (frag, s) => { if(!frag || s<=0) return; m.set(frag, (m.get(frag)||0) + s); };
@@ -946,13 +1105,26 @@ function accumulateBoost(kind, profileCats, overrides){
     Object.entries(kindMap).forEach(([frag,w]) => add(frag, w*strength));
   });
   if (profileCats){
+    /* CROSS-LINK SCALING. Axis contributions above are multiplied by
+       strengthFromLevel(level), so a centred slider contributes nothing — that is what
+       makes "neutral" mean neutral. Resolved-category cross-links were added at full
+       declared weight instead, and since sections resolve in sequence, at neutral
+       sliders this cascade was the ONLY signal in play and therefore decided the whole
+       character. Measured over 400 neutral characters: Outsider took 29% of Social Role
+       against a uniform 14%, and Disorganized 32% of Attachment against 25%, purely
+       because stress:Flight -> role:Outsider and stress:Freeze -> attachment:Disorganized
+       fire unconditionally. A STRONG cross-link outweighed the baseline 7.25 : 1.
+
+       These links are real and should still pull; they just should not be the loudest
+       voice in a room where nobody has spoken. Scale them so a resolved fact nudges
+       what follows rather than dictating it. */
     Object.entries(profileCats).forEach(([sectionId,cat])=>{
       if (!cat) return;
       const entry = WEIGHT_MATRIX[sectionId+':'+cat];
       if (!entry) return;
       const kindMap = entry[kind];
       if (!kindMap) return;
-      Object.entries(kindMap).forEach(([frag,w]) => add(frag, w));
+      Object.entries(kindMap).forEach(([frag,w]) => add(frag, w * CROSSLINK_STRENGTH));
     });
   }
   return m;
@@ -1004,7 +1176,7 @@ function boostedMannerCats(compLevel, regLevel, profileCats, overrides){
 
 // ---------- Weighted random helpers ----------
 
-// The trait bank skews ~2:1 toward "signature" over "common" (4,358 vs 2,094). With a
+// The trait bank skews ~2:1 toward "signature" over "common" (4,742 vs 2,331). With a
 // flat per-trait weight of 1, "Balanced" silently inherited that skew — even a balanced
 // pick drew mostly signature material, and "Favor common" was pulling a 3x multiplier
 // against a pool where common was already the minority, so it under-delivered.
@@ -1016,11 +1188,11 @@ function boostedMannerCats(compLevel, regLevel, profileCats, overrides){
 // a lot from the global mix, so a single global divisor over- or under-corrects
 // depending on which category is being sampled.
 /* ================= THREE RARITY TIERS =================
-   The bank declares only two classes and 68% of it is "signature" (4,358 vs 2,094).
+   The bank declares only two classes and 67% of it is "signature" (4,742 vs 2,331).
    When two thirds of everything is billed as sharply defining, nothing is: the badge
    stopped carrying information long before the pool got this big.
 
-   Derive a third tier instead of re-tagging 6,452 entries by hand. The rule is a
+   Derive a third tier instead of re-tagging 7,073 entries by hand. The rule is a
    single readable claim — a signature trait is one that is both distinctive AND loud
    enough to actually define the voice — so:
 
@@ -1210,7 +1382,31 @@ function buildContextBias(contextText, ageText){
   });
   return {bias: CONTEXT_BIAS, nudge: CONTEXT_AXIS_NUDGE, notes: CONTEXT_BIAS_NOTES, age};
 }
+/* A slot can legitimately hold trait:null — an exhausted pool, a banned-out category,
+   or a save file written by an older build. Three separate crashes (axisProfile,
+   buildStressVariant, checkEnsembleBalance) have each been fixed in place with their
+   own inline guard; this is the same guard, named once, so the next reader of a slot
+   reaches for it instead of rediscovering the bug. */
+function slotCat(slot){ return slot && slot.trait ? slot.trait.category : null; }
+
 function clearContextBias(){ CONTEXT_BIAS = new Map(); CONTEXT_AXIS_NUDGE = {}; CONTEXT_BIAS_NOTES = []; }
+/* BUG FIX. CONTEXT_BIAS is module-level and is read inside pickCategoryWeighted, but it
+   was only ever cleared by resetAllToDefaults. So generating one character with the
+   context "ex-military smuggler" left military+criminal multipliers (x2.2 / x0.45)
+   armed for everything generated afterwards: every member of a cast, every foil, every
+   gap-filler silently inherited a bias with nothing on screen saying so. The gap-filler
+   was the worst of it — its entire job is to break up clustering, and it was being
+   handed the bias that caused the clustering.
+
+   Save/restore rather than a bare clear: the single-character sheet's bias is still
+   live state that the "why this trait" panel reads back, so these generators must
+   leave it exactly as they found it. */
+function withoutContextBias(fn){
+  const savedBias = CONTEXT_BIAS, savedNudge = CONTEXT_AXIS_NUDGE, savedNotes = CONTEXT_BIAS_NOTES;
+  clearContextBias();
+  try { return fn(); }
+  finally { CONTEXT_BIAS = savedBias; CONTEXT_AXIS_NUDGE = savedNudge; CONTEXT_BIAS_NOTES = savedNotes; }
+}
 function contextMultiplier(cat){ return CONTEXT_BIAS.get(cat) || 1; }
 
 // ---------- Real per-trait conflict detection via polarity vectors ----------
@@ -1301,11 +1497,21 @@ function axisLevel(axisId, overrides){
 const AXIS_TO_POLCODE = {
   friendliness:'warm', honesty:'hon', assertiveness:'asrt', confidence:'ego',
   agreeableness:'agr', manners:'man', discipline:'disc', rebelliousness:'rebel',
-  emotionalcapacity:'emo', intelligence:'intel', positivity:'pos', activeness:'act'
+  emotionalcapacity:'emo', intelligence:'intel', positivity:'pos', activeness:'act',
+  /* BUG FIX. Curiosity was the one personality axis with no polarity code, and the
+     omission was invisible because every consumer degrades silently: the pole-tagging
+     pass skipped both Curiosity categories (19%/2% tagged against 100% everywhere
+     else), liveAxisVector never carried it so the slider could not steer any trait
+     choice, checkConflictsFor could never see a curiosity contradiction, and the radar
+     chart — which derives its spokes from Object.values(AXIS_TO_POLCODE) — drew twelve
+     of thirteen axes. Twelve of the 28 archetypes set curiosity; archetypeFidelity
+     dropped all of them on a `if (!code) return`. This is precisely the failure the
+     `mood` fix block above describes, one axis short. */
+  curiosity:'cur'
 };
 /* ================= PERSONALITY POLE POLARITY =================
    The trait-level affinity system reads `pol`, and 54% of Personality Traits — the
-   largest section in the bank, 1,649 entries — carried an empty vector. That is the
+   largest section in the bank, 2,013 entries — carried an empty vector. That is the
    section where posture SHOULD bite hardest, and it was the section the mechanism
    could least see: within "Honesty — Deceptive & Evasive", an untagged majority was
    drawn essentially at random with respect to how far the user had pushed Honesty.
@@ -1394,9 +1600,7 @@ function liveAxisVector(overrides){
 // from the same "Boost strength" dial that already scales category-level boosting —
 // one dial, two effects, both meaning "how hard do sliders steer content."
 function affinityStrength(){
-  const el = document.getElementById('affinityBoost');
-  const v = el ? parseFloat(el.value) || 0 : 2.5;
-  return v * 0.16;
+  return floatVal('affinityBoost', 2.5) * 0.16;   // see AFFINITY() on the fallback
 }
 
 // -1..1: how well a trait's own declared polarity agrees with the current combined
@@ -1844,6 +2048,21 @@ const ARCH_NOUN = {
   "Fight (attack the threat)":["Fighter"], "Flight (remove yourself)":["Runner"],
   "Freeze (shut down)":["Stillness"], "Fawn (appease the threat)":["Appeaser"],
   "Connector":["Connector","Bridge","Networker"],
+  /* Only Role and Stress supplied nouns, so every composed name had the same shape and
+     the four other profile facts could contribute an adjective at most. Values,
+     Attachment, Humor and Vices now supply nouns too. */
+  "Rigid & Principled":["Zealot","Absolutist","Oath-Keeper"], "Pragmatic & Flexible":["Operator","Fixer","Broker"],
+  "Loyalty-Bound":["Retainer","Hand","Sworn Friend"], "Self-Interested":["Opportunist","Climber","Free Agent"],
+  "Idealistic & Visionary":["Believer","Visionary","Dreamer"],
+  "Secure":["Anchor","Constant"], "Anxious":["Worrier","Hoverer"],
+  "Avoidant":["Recluse","Absentee"], "Disorganized":["Weathervane","Contradiction"],
+  "Dry & Deadpan":["Straight Face","Dry Wit"], "Self-Deprecating":["Punchline","Apologist"],
+  "Cruel & Barbed":["Blade","Needler"], "Warm & Playful":["Warmth","Delight"],
+  "Absurd & Chaotic":["Riot","Loose Cannon"], "Humorless & Absent":["Stone Face","Sober Judge"],
+  "Intellectual & Wordplay":["Wordsmith","Punster"],
+  "Substance & Consumption":["Drinker","Indulgent"], "Compulsion & Ritual":["Ritualist","Counter"],
+  "Risk & Escape":["Gambler","Bolter"], "Restraint & Discipline":["Ascetic","Abstainer"],
+  "Avoidance & Procrastination":["Postponer","Deferrer"],
 };
 // Deterministic when a seed is given (mulberry32 PRNG off a string hash), otherwise
 // falls back to Math.random(). Lets any caller opt into repeatable output — e.g. the
@@ -1863,21 +2082,49 @@ function pickFrom(arr, seed){
   return arr[Math.floor(rand()*arr.length)];
 }
 function emergentArchetypeName(st){
-  const catOf = id => (st["prof_"+id+"_0"] ? st["prof_"+id+"_0"].trait.category : null);
+  const catOf = id => slotCat(st["prof_"+id+"_0"]);
   const values = catOf("values"), role = catOf("role"), stress = catOf("stress");
   const attach = catOf("attachment"), humor = catOf("humor"), vices = catOf("vices");
-  if (values && role && ARCH_NAMES[values+"|"+role]) return {name:ARCH_NAMES[values+"|"+role], exact:true};
-  if (stress && role && ARCH_NAMES[stress+"|"+role]) return {name:ARCH_NAMES[stress+"|"+role], exact:true};
-  if (attach && role && ARCH_NAMES[attach+"|"+role]) return {name:ARCH_NAMES[attach+"|"+role], exact:true};
-  // compose — seeded off the actual chosen categories, so the same profile always
-  // composes the same name instead of re-rolling a different one on every render.
+  /* The name keyed off Values+Role, then Stress+Role, then Attachment+Role. Measured
+     over 400 characters: the exact table hit 400 times out of 400, so the compositional
+     branch below was unreachable in practice and the name depended on exactly two of
+     the seven profile facts. Humor and Vices — the two that carry the most texture —
+     could never affect it. 400 characters produced 35 distinct names.
+
+     The hand-written exact names are better writing than anything composition produces,
+     so they keep priority; they just no longer take every single roll. The coin is
+     seeded on the WHOLE profile, so it stays deterministic per character (the same
+     sheet always shows the same name) while two characters who share Values and Role
+     but differ in Humor or Vices can now diverge. */
   const seed = [values, role, stress, attach, humor, vices].filter(Boolean).join("|");
+  const exactName = (values && role && ARCH_NAMES[values+"|"+role])
+                 || (stress && role && ARCH_NAMES[stress+"|"+role])
+                 || (attach && role && ARCH_NAMES[attach+"|"+role])
+                 || null;
+
   const adjSrc = [values, attach, humor, vices, stress].filter(c=>c && ARCH_ADJ[c]);
-  const nounSrc = [role, stress].filter(c=>c && ARCH_NOUN[c]);
-  if (adjSrc.length && nounSrc.length){
-    return {name:"The " + pickFrom(ARCH_ADJ[pickFrom(adjSrc, seed+"a")], seed+"a2") + " " + pickFrom(ARCH_NOUN[pickFrom(nounSrc, seed+"n")], seed+"n2"), exact:false};
+  const nounSrc = [role, stress, values, attach, humor, vices].filter(c=>c && ARCH_NOUN[c]);
+  const composed = (()=>{
+    if (adjSrc.length && nounSrc.length){
+      const adj  = pickFrom(ARCH_ADJ[pickFrom(adjSrc, seed+"a")], seed+"a2");
+      const noun = pickFrom(ARCH_NOUN[pickFrom(nounSrc, seed+"n")], seed+"n2");
+      // "The Barbed Blade" — an adjective and noun from the same category is a tautology
+      if (adj.toLowerCase() === noun.toLowerCase()) return null;
+      return "The " + adj + " " + noun;
+    }
+    if (nounSrc.length) return "The " + pickFrom(ARCH_NOUN[pickFrom(nounSrc, seed+"n")], seed+"n2");
+    return null;
+  })();
+
+  if (exactName && composed) {
+    // 45/55 toward the exact table: it is the better-written half, but not so dominant
+    // that composition goes back to being dead code.
+    return seededRandom(seed + "pick")() < 0.45
+      ? {name: exactName, exact: true}
+      : {name: composed, exact: false};
   }
-  if (nounSrc.length) return {name:"The " + pickFrom(ARCH_NOUN[pickFrom(nounSrc, seed+"n")], seed+"n2"), exact:false};
+  if (exactName) return {name: exactName, exact: true};
+  if (composed) return {name: composed, exact: false};
   return null;
 }
 
@@ -1903,7 +2150,7 @@ const TENSION_RULES = [
 ];
 function softTensionsFor(st){
   const out = [];
-  const catOf = id => (st["prof_"+id+"_0"] ? st["prof_"+id+"_0"].trait.category : null);
+  const catOf = id => slotCat(st["prof_"+id+"_0"]);
   const motivText = Object.keys(st).filter(k=>k.startsWith("prof_motivation_"))
                     .map(k=>st[k].trait.trait+" "+st[k].trait.desc).join(" | ");
   const match = (spec) => {
@@ -2052,16 +2299,89 @@ function coherenceScore(st){
    character who is loud in four different directions at once, which is the single most
    common way a generated sheet stops reading as a person. Advisory, like the budget —
    but stated at the level where the problem actually exists. */
+/* A flat "three or more loud traits" threshold made this a readout of where the sliders
+   were sitting, not a fact about the character: measured over 400 sheets it fired 0/400
+   at neutral sliders and 400/400 at extreme ones, mean 16.7 loud traits. At the top of
+   the range a loud sheet is what was ASKED for, and warning about it every time trains
+   the user to ignore the panel; at the bottom, three loud traits is genuinely unusual
+   and got no warning at all.
+
+   Score against what this sheet's own settings should have produced instead. Every slot
+   carries the target it was drawn against, and the eligible window around that target is
+   recoverable, so the share of that window sitting at intensity 4+ is the per-slot
+   probability of a loud draw. Summing those gives the expected loud count for these
+   exact settings — the same "compare against a chance baseline" technique coherenceScore
+   already uses. Then the warning means "louder than you asked for", which is a fact
+   about the character, at any slider position. */
+function expectedLoudCount(st){
+  let expected = 0, variance = 0, measurable = 0;
+  Object.values(st || {}).forEach(s=>{
+    if (!s || !s.trait || s.target === undefined || s.target === null) return;
+    const pool = byFilter(s.trait.section, s.trait.category);
+    if (pool.length < 2) return;
+    const sel = rangeSelect(pool, s.target, 4);
+    const {list} = sel;
+    if (!list.length) return;
+    /* Weight by the same proximity kernel the picker uses, not uniformly over the
+       window: a uniform estimate counted every trait in a widened band equally and so
+       overstated the expected loudness by more than half at the top of the sliders
+       (29 against a measured 18.6), which is exactly where the warning most needed to
+       be calibrated. */
+    const w = proximityWeights(list, sel.target, sel.half, false);
+    const total = w.reduce((a,b)=>a+b, 0);
+    if (!total) return;
+    // position 3.5 is the boundary above which a trait rounds to intensity 4
+    let loudW = 0;
+    list.forEach((t,i)=>{ if (traitPos(t) >= 3.5) loudW += w[i]; });
+    const p = loudW / total;
+    expected += p;
+    /* Each slot is one Bernoulli draw, so the count's variance is the sum of p(1-p) —
+       NOT sqrt(mean). The difference matters at the ends of the sliders: there most
+       slots have p near 0 or near 1, so the count is far tighter than a Poisson
+       assumption implies, and using sqrt(mean) there sets the bar so high the warning
+       could never fire at all. */
+    variance += p * (1 - p);
+    measurable++;
+  });
+  return {expected, variance, measurable};
+}
+
 function loudnessCheck(st){
   const loud = [];
   Object.values(st || {}).forEach(s=>{
     if (s && s.trait && (s.trait.intensity||0) >= 4) loud.push(s.trait);
   });
   if (loud.length < 3) return null;
+
+  const {expected, variance, measurable} = expectedLoudCount(st);
+  /* KNOWN LIMIT. This models the eligibility WINDOW and the proximity kernel, but not
+     the rarity, tier, affinity and uniqueness pressure the picker also applies —
+     CURRENT_AFFINITY_VEC in particular is live only during a build and cannot be
+     recovered afterwards. Measured, the estimate tracks closely at neutral and mid
+     sliders (0.70 predicted against 0.74 observed, 0.73 against 0.91), which is where
+     the warning has to discriminate, and over-predicts at the top of the range (28.6
+     against 18.4), which makes it conservative exactly where a loud sheet is what was
+     asked for. Erring quiet at the extremes is the behaviour we want; it is worth
+     knowing it is partly an artefact rather than entirely a decision.
+
+     Below a handful of measurable slots the baseline is too noisy to reason from, so
+     fall back to the flat threshold rather than inventing a comparison. */
+  const haveBaseline = measurable >= 8;
+  /* Poisson-ish: the count is a sum of independent per-slot draws, so its spread scales
+     with the true standard deviation of the per-slot Bernoulli sum. 1.5 sigma puts the
+     warning at roughly the top few percent of sheets for whatever the settings happen to
+     be, rather than at a fixed count that only ever reflected slider position. */
+  const slack = 1.5 * Math.max(1, Math.sqrt(variance));
+  if (haveBaseline && loud.length <= expected + slack) return null;
+
   const names = loud.slice(0, 5).map(t=>t.trait);
+  const baselineNote = haveBaseline
+    ? `Your current settings would typically produce about <b>${expected.toFixed(1)}</b>, so this one came out louder than you asked for. `
+    : ``;
   return {
-    count: loud.length, names,
+    count: loud.length, expected: haveBaseline ? expected : null, names,
     note: `This sheet carries <b>${loud.length}</b> traits at intensity 4 or 5 — ${names.join(", ")}${loud.length>names.length?", and more":""}. `
+        + baselineNote
         + `Each of those is meant to be load-bearing on its own, so together they read as loud in ${loud.length} different directions. `
         + `The best characters are usually one loud thing and a lot of texture: consider pinning the one that matters lower on the others, or asking what's quiet about them.`
   };
@@ -2352,11 +2672,42 @@ function restoreSliders(s){
   if (!s) return;
   Object.entries(s).forEach(([id,v])=>{ const el = document.getElementById(id); if (el) el.value = v; });
 }
+/* Undo kept fifteen full deep copies, each holding ~37 slots with a complete trait
+   object embedded in every one — the whole trait record duplicated per slot per
+   snapshot, for traits that are already live in TRAITS and never change. Store the id
+   and re-link on the way out instead; the import path already needs exactly this
+   relink, for the same reason. Traits that no longer exist in the pool (an older
+   session, a trait since removed) keep their embedded copy, so undo cannot lose a slot
+   the way a naive id-only store would. */
+function compressSlots(st){
+  if (!st) return st;
+  const out = {};
+  Object.entries(st).forEach(([k, slot])=>{
+    if (!slot){ out[k] = slot; return; }
+    const copy = {...slot};
+    if (copy.trait && TRAITS_BY_ID.has(copy.trait.id)) copy.trait = {__id: copy.trait.id};
+    else if (copy.trait) copy.trait = JSON.parse(JSON.stringify(copy.trait));
+    out[k] = copy;
+  });
+  return out;
+}
+function expandSlots(st){
+  if (!st) return st;
+  const out = {};
+  Object.entries(st).forEach(([k, slot])=>{
+    if (!slot){ out[k] = slot; return; }
+    const copy = {...slot};
+    if (copy.trait && copy.trait.__id !== undefined) copy.trait = TRAITS_BY_ID.get(copy.trait.__id) || null;
+    out[k] = copy;
+  });
+  return out;
+}
+
 function snapshotHistory(){
   history.push({
-    state: JSON.parse(JSON.stringify(state)),
+    state: compressSlots(state),
     charMeta: {...charMeta},
-    pressureState: pressureState ? JSON.parse(JSON.stringify(pressureState)) : null,
+    pressureState: compressSlots(pressureState),
     // Fall back to live DOM only for the very first snapshot ever taken, when there's
     // no prior generation to have recorded sliders for.
     sliders: lastGeneratedSliders || captureSliders()
@@ -2367,8 +2718,8 @@ function snapshotHistory(){
 function undoLast(){
   if (!history.length) return;
   const prev = history.pop();
-  state = prev.state; charMeta = prev.charMeta;
-  pressureState = prev.pressureState || null;
+  state = expandSlots(prev.state); charMeta = prev.charMeta;
+  pressureState = expandSlots(prev.pressureState) || null;
   restoreSliders(prev.sliders);
   lastGeneratedSliders = prev.sliders; // the restored state now corresponds to these again
   document.getElementById('charName').value = charMeta.name || "";
@@ -2390,8 +2741,21 @@ function pickVerbositySlot(verbLevel, rarityPref){
     const pool = byFilter(AXES.verbosityLow.section, AXES.verbosityLow.category);
     return {slotId:"verbosity", locked:false, label:"Verbosity (minimal-leaning)", target, trait: pickInRange(pool, rarityPref, target)};
   } else if (verbLevel >= 0.12){
-    const pool = byFilter(AXES.verbosityHigh.section, AXES.verbosityHigh.category);
-    return {slotId:"verbosity", locked:false, label:"Verbosity (high-volume-leaning)", target, trait: pickInRange(pool, rarityPref, target)};
+    /* "Repetitive & Circular" (48 authored traits) was the one category in the whole
+       bank that no normal pick path could reach: AXES named four of this section's
+       five categories and nothing else in the app draws from Verbosity Traits, so the
+       entries were live data reachable only via the off-by-default wildcard slot.
+       Circling back over the same ground IS a way of using too many words, so it
+       belongs on the high-volume branch — as a minority of it, because it is a
+       narrower and more noticeable habit than plain wordiness. Rises with the slider:
+       barely present at +0.12, about a third of high-volume draws at the top. */
+    const circularOdds = clamp((Math.abs(verbLevel) - 0.12) / 1.88, 0, 1) * 0.34;
+    const useCircular = Math.random() < circularOdds;
+    const ax = useCircular ? AXES.circular : AXES.verbosityHigh;
+    const pool = byFilter(ax.section, ax.category);
+    return {slotId:"verbosity", locked:false,
+            label: useCircular ? "Verbosity (circling, high-volume)" : "Verbosity (high-volume-leaning)",
+            target, trait: pickInRange(pool, rarityPref, target)};
   } else {
     // Dead centre now means "situational pacing at low intensity" rather than an
     // unfiltered free-for-all — the neutral band respects the range engine too.
@@ -2540,7 +2904,11 @@ function pickAppearanceSlots(rarityPref, overrides, resolvedCats, sourceState){
       label:"Appearance \u2014 "+axis.label + (derived ? " (from their habits)" : ""), target, trait};
   });
   const actLevel = axisLevel('activeness', overrides);
-  const mvTarget = targetFromMag(Math.max(25, Math.abs(actLevel)*50));
+  // Floor raised from 25 to 40. Movement & Bearing has no material down at the
+  // intensity a magnitude of 25 asks for (target 1.35), so a neutral Activeness
+  // slider aimed the picker below the pool entirely — 7 distinct traits in 400
+  // characters. 40 lands inside the pool's real content.
+  const mvTarget = targetFromMag(Math.max(40, Math.abs(actLevel)*50));
   const mv = pickInRange(byFilter("Appearance","Movement & Bearing"), rarityPref, mvTarget);
   if (mv) out['app_move'] = {slotId:'app_move', locked:false, label:"Appearance \u2014 Movement & Bearing", target:mvTarget, trait:mv};
   const pEl = document.getElementById('app_presence');
@@ -2590,12 +2958,14 @@ function _drawUnique(fn, tries){
    draw. It is labelled as what it is, so nobody mistakes it for a system failure. */
 const WILDCARD_SECTIONS = ["Personality Traits","Mannerisms","Vocabulary Traits","Habits & Vices","Humor Style","Verbosity Traits","Dialogue Grammar Traits"];
 function pickWildcardSlot(rarityPref){
-  const sections = WILDCARD_SECTIONS.filter(s => catsOf(s).length);
-  if (!sections.length) return null;
-  const section = sections[Math.floor(Math.random()*sections.length)];
-  const cats = catsOf(section).filter(c => byFilter(section, c).length);
-  if (!cats.length) return null;
-  const cat = cats[Math.floor(Math.random()*cats.length)];
+  /* Picking a uniform SECTION and then a uniform CATEGORY within it weighted the draw
+     by how finely a section happens to be subdivided, not by how much content it holds:
+     a Mannerism category came up at 1/84 while a Verbosity one came up at 1/35, for no
+     reason anyone chose. Flatten to a single uniform draw over all eligible categories. */
+  const pairs = [];
+  WILDCARD_SECTIONS.forEach(s=> catsOf(s).forEach(c=>{ if (byFilter(s, c).length) pairs.push([s, c]); }));
+  if (!pairs.length) return null;
+  const [section, cat] = pairs[Math.floor(Math.random()*pairs.length)];
   // Far tail, either end — an outlier can be a startlingly quiet thing as easily as
   // a loud one. Affinity is suppressed for the draw so posture can't sand it down.
   const target = Math.random() < 0.75 ? 4.6 : 1.2;
@@ -2838,12 +3208,23 @@ function findTraitByName(val){
   const exact = TRAITS.find(x=> x.trait.toLowerCase() === q);
   if (exact) return exact;
   const partial = TRAITS.filter(x=> x.trait.toLowerCase().includes(q));
-  return partial.length ? partial[0] : null;
+  // The comment above promised to "give up loudly rather than silently taking the first
+  // of forty partial matches", and then took the first of forty. Typing "cold" banned
+  // one arbitrary trait and reported success. Return the ambiguity so the caller can
+  // say so.
+  if (partial.length === 1) return partial[0];
+  if (partial.length > 1) return {ambiguous: partial};
+  return null;
 }
 function addTraitConstraint(mode){
   const inp = document.getElementById('constraintTraitSearch');
   const t = findTraitByName(inp && inp.value);
   if (!t){ toast("No trait matches that name.", "warn"); return; }
+  if (t.ambiguous){
+    const names = t.ambiguous.slice(0, 3).map(x=>'"'+x.trait+'"').join(", ");
+    toast(`${t.ambiguous.length} traits match that — ${names}${t.ambiguous.length>3?', …':''}. Type more of the name.`, "warn");
+    return;
+  }
   if (mode === 'ban'){ bannedTraitIds.add(t.id); }
   else { if (!requiredTraitIds.includes(t.id)) requiredTraitIds.push(t.id); }
   inp.value = ""; refreshConstraintChips();
@@ -2854,6 +3235,8 @@ function addExclusivePair(){
   const a = findTraitByName((document.getElementById('exclusiveA')||{}).value);
   const b = findTraitByName((document.getElementById('exclusiveB')||{}).value);
   if (!a || !b){ toast("Name two traits to keep apart.", "warn"); return; }
+  const amb = a.ambiguous ? a : (b.ambiguous ? b : null);
+  if (amb){ toast(`${amb.ambiguous.length} traits match one of those names. Type more of it.`, "warn"); return; }
   if (a.id === b.id){ toast("Those are the same trait.", "warn"); return; }
   if (!exclusivePairs.some(p=> (p[0]===a.id&&p[1]===b.id) || (p[0]===b.id&&p[1]===a.id))){
     exclusivePairs.push([a.id, b.id]);

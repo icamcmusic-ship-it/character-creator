@@ -51,9 +51,48 @@ const storage = (function(){
   };
 })();
 
+/* prompt() is unstyleable, sits outside the page's own focus and keyboard handling, and
+   is blocked outright in some embedding contexts — where the three call sites below
+   silently did nothing. One small <dialog> replaces all of them: same shape as prompt
+   (a Promise resolving to the string or null), but it looks like the rest of the app,
+   the field is focused and pre-selected, Escape cancels, and Enter submits. */
+function askForName(message, initial){
+  return new Promise(resolve=>{
+    const dlg = document.createElement('dialog');
+    dlg.className = 'nameDialog';
+    dlg.innerHTML = `
+      <form method="dialog">
+        <label for="nameDialogInput">${escHTML(message)}</label>
+        <input type="text" id="nameDialogInput" autocomplete="off">
+        <div class="nameDialogBtns">
+          <button value="cancel" type="submit">Cancel</button>
+          <button value="ok" type="submit" class="primary">OK</button>
+        </div>
+      </form>`;
+    document.body.appendChild(dlg);
+    const input = dlg.querySelector('#nameDialogInput');
+    input.value = initial || "";
+    let settled = false;
+    const done = (v)=>{ if (settled) return; settled = true; dlg.remove(); resolve(v); };
+    dlg.addEventListener('close', ()=>{
+      // returnValue is "" for Escape as well as for a cancel press
+      done(dlg.returnValue === 'ok' ? (input.value.trim() || null) : null);
+    });
+    // showModal is the whole point (focus trap + Escape); if it is unavailable for any
+    // reason, fall back rather than leaving the caller waiting on a promise forever.
+    if (typeof dlg.showModal === 'function'){
+      dlg.showModal();
+      input.focus(); input.select();
+    } else {
+      const v = (typeof prompt === 'function') ? prompt(message, initial || "") : null;
+      done(v && v.trim() ? v.trim() : null);
+    }
+  });
+}
+
 async function saveCharacter(btnEl){
   if(!Object.keys(state).length){ toast("Generate a character first.", "warn"); return; }
-  const name = charMeta.name || prompt("Name this character voice:");
+  const name = charMeta.name || await askForName("Name this character voice:", "");
   if(!name) return;
   const btn = btnEl || null;
   const oldLabel = btn ? btn.textContent : null;
@@ -77,7 +116,7 @@ async function deleteSavedCharacter(name){
   catch(e){ console.error(e); toast("Could not delete — try again.", "warn"); }
 }
 async function renameSavedCharacter(name){
-  const next = prompt('Rename "'+name+'" to:', name);
+  const next = await askForName('Rename "'+name+'" to:', name);
   if (!next || next === name) return;
   try {
     const r = await storage.get('character:'+name);
@@ -181,7 +220,9 @@ function generateCast(){
   lastCastSeed = seedStr || seedNum.toString(36);
   const _origRandom = Math.random;
   castStates = [];
-  try {
+  // withoutContextBias: the cast is not "six more of the character you just made" —
+  // see the note on the helper in engine.js.
+  try { withoutContextBias(()=>{
     Math.random = mulberry32(seedNum);
     for (let i=0;i<count;i++){
       const verbLevel = randomAxisLevel();
@@ -194,7 +235,7 @@ function generateCast(){
         rarityPref, vocabPref:null, personalityOverrides});
       castStates.push({state: st, meta: {name:"Character " + (i+1), age:"", context:"", archetypeLabel:"Cast member"}});
     }
-  } finally { Math.random = _origRandom; }
+  }); } finally { Math.random = _origRandom; }
   const out = document.getElementById('castSeedReadout');
   if (out) out.textContent = "Cast seed: " + lastCastSeed;
   renderCast();
@@ -231,15 +272,19 @@ function renderCast(){
     addAll(["verbosity","register","grammar"].filter(id=>c.state[id]));
     addAll(Object.keys(c.state).filter(k=>k.startsWith("vocab")));
     addAll(Object.keys(c.state).filter(k=>k.startsWith("manner")));
+    // Appearance was generated (on by default) and exported by sheetToText, but never
+    // shown here — so the cast card and the copied markdown disagreed about what the
+    // character looked like.
+    addAll(Object.keys(c.state).filter(k=>k.startsWith("app_")));
     addAll(Object.keys(c.state).filter(k=>k.startsWith("wild_")));
     card.innerHTML = inner;
     grid.appendChild(card);
   });
 }
-function renameCastMember(i){
+async function renameCastMember(i){
   const c = castStates[i];
   if (!c) return;
-  const next = prompt("Name this cast member:", c.meta.name);
+  const next = await askForName("Name this cast member:", c.meta.name);
   if (!next) return;
   c.meta.name = next;
   renderCast();
@@ -284,6 +329,27 @@ function onSliderChange(){
   if (_previewTimer) clearTimeout(_previewTimer);
   _previewTimer = setTimeout(updateHeavyPreview, 80);
 }
+/* Every range input has a visible <label for>, but a screen reader announces the VALUE
+   as the bare number — "minus thirty-five" — which is exactly the part of these controls
+   that means nothing on its own. The resolved word is already computed for the sighted
+   readout; aria-valuetext puts the same word in the accessibility tree. */
+const VOICE_SLIDER_WORDS = {
+  verbositySlider: ["almost silent","terse","fairly terse","balanced","fairly voluble","voluble","torrential"],
+  registerSlider:  ["very blunt","blunt","fairly plain","neutral","fairly formal","elaborate","highly ornate"],
+  composureSlider: ["very steady","steady","fairly steady","mixed","somewhat volatile","volatile","highly erratic"],
+};
+function voiceSliderWord(id, raw){
+  const words = VOICE_SLIDER_WORDS[id];
+  if (!words) return String(raw);
+  // -100..100 across seven bands, with the middle band covering the real neutral zone
+  const idx = clamp(Math.round((raw + 100) / 200 * (words.length - 1)), 0, words.length - 1);
+  return words[idx];
+}
+function setValueText(id, text){
+  const el = document.getElementById(id);
+  if (el && el.setAttribute) el.setAttribute('aria-valuetext', text);
+}
+
 function updateSliderReadouts(){
   const vRaw = intVal('verbositySlider', 0);
   const rRaw = intVal('registerSlider', 0);
@@ -291,12 +357,26 @@ function updateSliderReadouts(){
   document.getElementById('verbosityVal').textContent = vRaw;
   document.getElementById('registerVal').textContent = rRaw;
   document.getElementById('composureVal').textContent = cRaw;
+  [['verbositySlider',vRaw],['registerSlider',rRaw],['composureSlider',cRaw]].forEach(([id,raw])=>{
+    setValueText(id, `${raw} — ${voiceSliderWord(id, raw)}`);
+  });
+  const dv = document.getElementById('divergence');
+  if (dv){
+    const v = parseFloat(dv.value) || 0;
+    setValueText('divergence', v < 0.08 ? "never" : v < 0.3 ? "sometimes" : v < 0.6 ? "often" : "very often");
+  }
+  const rf = document.getElementById('rangeFocus');
+  if (rf){
+    const v = parseFloat(rf.value);
+    setValueText('rangeFocus', v >= 0.75 ? "sliders decide strictly" : v >= 0.45 ? "sliders decide fairly strictly" : "sliders decide loosely");
+  }
   PERSONALITY_AXES.forEach(axis=>{
     const el = document.getElementById('pers_'+axis.id);
     const out = document.getElementById('persVal_'+axis.id);
     if (el && out){
       const raw = parseInt(el.value, 10) || 0;
       out.textContent = raw + " · " + axisReadout(axis, raw);
+      setValueText('pers_'+axis.id, `${raw} — ${axisReadout(axis, raw)}`);
       out.classList.toggle('inNeutral', Math.abs(raw) < 14);
     }
     // Show whether this axis actually made it into the last generated sheet. With
@@ -359,6 +439,24 @@ function updateHeavyPreview(){
 // Live explanation of what the three voice sliders are currently targeting, in the
 // same units the trait cards use. Without this the new continuous range engine is
 // invisible: you'd feel the difference between 35 and 45 but never see why.
+/* The readout stated the numeric band and nothing else: "targets intensity 2.41,
+   accepts 2.06–2.76" is precise and tells a novelist nothing about what will come out.
+   All three of the missing pieces were already computed elsewhere — which pool the
+   slider selects, and FREQ_BUDGET's plain-English frequency for an intensity. Join
+   them, so the readout answers "what will this slider actually do". */
+function budgetPhraseFor(target){
+  const b = FREQ_BUDGET[clamp(Math.round(target), 1, 5)] || FREQ_BUDGET[3];
+  return b.label;
+}
+// Which pool each voice slider resolves to at its current position. Mirrors the
+// branch conditions in pickVerbositySlot / pickRegisterSlot rather than guessing.
+function voicePoolNameFor(id, level){
+  if (id === 'verbositySlider') return level <= -0.12 ? "Minimal & Ultra-Brief"
+    : level >= 0.12 ? "High-Volume & Wordy (sometimes Repetitive & Circular)" : "Pacing & Situation-Driven";
+  if (id === 'registerSlider') return level >= 0.12 ? "Stylized & Elaborate"
+    : level <= -0.12 ? "Register & Formality Spectrum (informal end)" : "Register & Formality Spectrum";
+  return null;   // composure drives grammar/mannerism weighting rather than one pool
+}
 function updateRangeReadout(){
   const box = document.getElementById('rangeReadout');
   if (!box) return;
@@ -366,15 +464,20 @@ function updateRangeReadout(){
   const rows = [
     ['Verbosity','verbositySlider'], ['Register','registerSlider'], ['Composure','composureSlider']
   ].map(([label,id])=>{
-    const raw = Math.abs(intVal(id, 0));
+    const rawSigned = intVal(id, 0);
+    const raw = Math.abs(rawSigned);
     const t = targetFromMag(raw);
     const lo = Math.max(1, t - half).toFixed(2), hi = Math.min(5, t + half).toFixed(2);
-    return `<div><b>${label}:</b> targets intensity <b>${t.toFixed(2)}</b> · accepts ${lo}–${hi}</div>`;
+    const pool = voicePoolNameFor(id, rawToLevel(rawSigned));
+    const poolBit = pool ? ` draws from <b>${escHTML(pool)}</b>,` : ``;
+    return `<div><b>${label}</b> at ${rawSigned}:${poolBit} targeting intensity <b>${t.toFixed(2)}</b> `
+         + `— roughly "${escHTML(budgetPhraseFor(t))}" <span class="sub">(accepts ${lo}–${hi})</span></div>`;
   });
   const pw = document.getElementById('profileWeight');
   if (pw){
     const t = targetFromMag(parseInt(pw.value)||0);
-    rows.push(`<div><b>Profile weight:</b> targets intensity <b>${t.toFixed(2)}</b></div>`);
+    rows.push(`<div><b>Profile weight</b> at ${pw.value}: targeting intensity <b>${t.toFixed(2)}</b> `
+            + `— roughly "${escHTML(budgetPhraseFor(t))}" across Motivation, Values, Role and the rest.</div>`);
   }
   rows.push(`<div class="sub" style="margin:6px 0 0;">Window half-width ${half.toFixed(2)} — narrower means the sliders dictate more tightly and results vary less.</div>`);
   box.innerHTML = rows.join("");
@@ -460,6 +563,50 @@ function togglePersonalityPanel(){
 function toggleExamples(){
   const show = document.getElementById('examplesToggle').checked;
   document.body.classList.toggle('hide-examples', !show);
+}
+
+/* ================= STARTING POINTS =================
+   First load showed every control and no character: a lot of dials and no reason to
+   touch any of them. These are not a fourth kind of preset — each one just writes
+   personality and voice sliders and then generates, exactly as if the user had moved
+   them by hand, so what happens next is fully explorable rather than opaque. Kept to
+   three, and deliberately not "hero / villain / mentor": the useful first move is a
+   character with a tension in it. */
+const STARTING_POINTS = {
+  liar: {
+    label: "A liar",
+    voice: {verbositySlider: 30, registerSlider: 20, composureSlider: -10},
+    pers: {honesty: -75, confidence: 40, friendliness: 45, emotionalcapacity: -35, intelligence: 35},
+  },
+  kindtired: {
+    label: "Someone kind who is tired",
+    voice: {verbositySlider: -35, registerSlider: -10, composureSlider: -25},
+    pers: {friendliness: 65, agreeableness: 60, activeness: -60, positivity: -35, emotionalcapacity: 30, discipline: -20},
+  },
+  menace: {
+    label: "A cheerful menace",
+    voice: {verbositySlider: 55, registerSlider: -25, composureSlider: 45},
+    pers: {positivity: 70, rebelliousness: 75, manners: -55, agreeableness: -40, activeness: 60, discipline: -50},
+  },
+};
+function applyStartingPoint(key){
+  const sp = STARTING_POINTS[key];
+  if (!sp) return;
+  // Every axis is written, not just the ones the preset names — otherwise a starting
+  // point silently inherits whatever the previous one left behind on the axes it is
+  // silent about, and the same button produces different characters.
+  PERSONALITY_AXES.forEach(a=>{
+    const el = document.getElementById('pers_'+a.id);
+    if (el) el.value = sp.pers[a.id] !== undefined ? sp.pers[a.id] : 0;
+  });
+  Object.entries(sp.voice).forEach(([id,v])=>{ const el = document.getElementById(id); if (el) el.value = v; });
+  const nameEl = document.getElementById('charName');
+  if (nameEl && !nameEl.value) nameEl.placeholder = sp.label;
+  invalidateSliderCache();
+  onSliderChange();
+  savePrefs();
+  runGeneration();
+  toast(`Started from "${sp.label}" — the sliders are set, so change anything and generate again.`);
 }
 
 function resetAllToDefaults(){
@@ -705,7 +852,7 @@ const RELATIONSHIP_CATEGORY_RULES = [
    note:"One's whole structure is control; the other's is release. They either regulate each other or each quietly resents what the other represents."},
 ];
 function categoryPairNotesFor(stA, stB){
-  const catOf = (st,id) => (st["prof_"+id+"_0"] ? st["prof_"+id+"_0"].trait.category : null);
+  const catOf = (st,id) => slotCat(st["prof_"+id+"_0"]);
   const notes = [];
   RELATIONSHIP_CATEGORY_RULES.forEach(r=>{
     const forward = catOf(stA, r.a.sec) === r.a.cat && catOf(stB, r.b.sec) === r.b.cat;
@@ -856,6 +1003,16 @@ const OPPOSED_CATEGORIES = {
 OPPOSED_CATEGORIES.role["Connector"] = "Outsider";
 OPPOSED_CATEGORIES.values["Idealistic & Visionary"] = "Self-Interested";
 OPPOSED_CATEGORIES.humor["Intellectual & Wordplay"] = "Humorless & Absent";
+/* Lookup is keyed off the SOURCE character's category, so a missing key doesn't fall
+   back to anything — it silently drops that whole section from the opposition and the
+   foil's rationale simply never mentions it. Humor was missing Self-Deprecating and
+   Humorless & Absent (2 of 7); Vices was missing Substance & Consumption and
+   Compulsion & Ritual, which between them are where a neutral roll lands 43% of the
+   time — so nearly half of all foils had no Vices opposition at all. */
+OPPOSED_CATEGORIES.humor["Self-Deprecating"] = "Cruel & Barbed";
+OPPOSED_CATEGORIES.humor["Humorless & Absent"] = "Absurd & Chaotic";
+OPPOSED_CATEGORIES.vices["Substance & Consumption"] = "Restraint & Discipline";
+OPPOSED_CATEGORIES.vices["Compulsion & Ritual"] = "Risk & Escape";
 /* A foil built purely out of oppositions is an unrelated stranger who happens to
    disagree. What makes a foil a foil is a shared history — the reason these two are
    in the same room at all — so every foil now arrives with a premise, drawn against
@@ -870,6 +1027,38 @@ const FOIL_PREMISES = [
   "One of them owes the other, and the debt has outlived everyone who could enforce it.",
   "They worked the same job for years. One got out.",
 ];
+/* The comment above says premises are "drawn against the actual opposition that was
+   rolled". They were not — it was a uniform pick from the flat list, so a foil opposed
+   on Attachment could arrive with a premise about opposite sides of a war. Key them to
+   the section that was actually opposed, falling back to the generic list when the
+   roll opposed only personality axes. */
+const FOIL_PREMISES_BY_SECTION = {
+  values: [
+    "They agreed on the goal and then discovered they had never agreed on the price.",
+    "One of them drew a line years ago. The other keeps being asked to stand on it.",
+  ],
+  attachment: [
+    "They keep reaching for each other at different times and calling it bad luck.",
+    "One needs to be told. The other believes saying it out loud cheapens it.",
+  ],
+  role: [
+    "They have been handed the same room to run, more than once, and it has never gone well twice.",
+    "One of them speaks for the group. Nobody agreed to that, least of all the other.",
+  ],
+  stress: [
+    "The same emergency. One moved toward it, one moved away, and both were right once.",
+    "They have seen each other at their worst and drawn opposite conclusions about it.",
+  ],
+  humor: [
+    "One of them made a joke at a funeral. The other has never let it go.",
+    "They find completely different things unbearable, and neither can fake it.",
+  ],
+  vices: [
+    "One of them got clean. The other took it as a verdict.",
+    "They kept each other's worst habits secret for years, for different reasons.",
+  ],
+};
+
 function generateFoil(){
   if (!Object.keys(state).length){ toast("Generate a character first — the foil is built against them.", "warn"); return; }
   const seedInput = document.getElementById('foilSeed');
@@ -915,13 +1104,13 @@ function _generateFoilInner(seedLabel){
   // than opposed personality sliders alone — two characters with opposite Values or
   // Attachment styles clash in ways that don't show up as a personality-axis mismatch.
   const profSectionsWithSrc = ["values","attachment","role","stress","humor","vices"]
-    .filter(id => state["prof_"+id+"_0"] && OPPOSED_CATEGORIES[id]);
+    .filter(id => slotCat(state["prof_"+id+"_0"]) && OPPOSED_CATEGORIES[id]);
   const profOpposeCount = Math.min(profSectionsWithSrc.length, 1 + (Math.random()<0.5?1:0)); // 1 or 2
   const profOpposed = shuffle(profSectionsWithSrc).slice(0, profOpposeCount);
   const forcedProfileCats = {};
   const profOpposedNames = [];
   profOpposed.forEach(id=>{
-    const srcCat = state["prof_"+id+"_0"].trait.category;
+    const srcCat = slotCat(state["prof_"+id+"_0"]);
     const oppCat = OPPOSED_CATEGORIES[id][srcCat];
     if (oppCat){
       forcedProfileCats[id] = oppCat;
@@ -943,13 +1132,24 @@ function _generateFoilInner(seedLabel){
   const opposeComposure = composureToggleEl ? composureToggleEl.checked : false;
   const composureRaw = rawToLevel(intVal('composureSlider', 0));
   rollCharacterVariants();
-  const foilState = buildCharacterState({
+  // A foil is defined by contrast, so it must not inherit the source character's
+  // context bias — that bias pulls toward the same categories the oppositions above
+  // just spent effort pushing away from.
+  const foilState = withoutContextBias(()=> buildCharacterState({
     verbLevel: -rawToLevel(intVal('verbositySlider', 0)),
     regLevel:  -rawToLevel(intVal('registerSlider', 0)),
     compLevel: opposeComposure ? -composureRaw : composureRaw,
     mannerCount, rarityPref, vocabPref:null, personalityOverrides: overrides, vocabCount, forcedProfileCats
-  });
-  const premise = FOIL_PREMISES[Math.floor(Math.random()*FOIL_PREMISES.length)];
+  }));
+  const premisePool = (()=>{
+    const keyed = profOpposed.filter(id=>FOIL_PREMISES_BY_SECTION[id] && forcedProfileCats[id]);
+    if (!keyed.length) return FOIL_PREMISES;
+    const id = keyed[Math.floor(Math.random()*keyed.length)];
+    // Keep a slice of the generic list in play so a section opposed twice in a session
+    // doesn't return the same two lines.
+    return FOIL_PREMISES_BY_SECTION[id].concat(FOIL_PREMISES.slice(0, 2));
+  })();
+  const premise = premisePool[Math.floor(Math.random()*premisePool.length)];
 
   // The whole point of a foil is contrast — without the source character also on the
   // Cast tab, the "Opposed on... Shared ground on..." rationale below refers to a
@@ -992,9 +1192,9 @@ function checkEnsembleBalance(){
       // generator supports, not a quiet "low" — counting them as -1 falsely inflated
       // apparent clustering toward the negative pole, or diluted real one-sided
       // clustering with mis-tagged neutrals. Exclude them from the posture count.
-      if (slot.neutral || slot.trait.category === a.mid) return;
+      if (slot.neutral || slotCat(slot) === a.mid) return;
       // derive a -1/+1 posture from which pole the chosen trait came from
-      const isPos = slot.trait.category === a.pos;
+      const isPos = slotCat(slot) === a.pos;
       axisVals[a.id].push(isPos ? 1 : -1);
     });
   });
@@ -1016,8 +1216,7 @@ function checkEnsembleBalance(){
   const profClustered = [];
   PROFILE_SECTIONS.filter(ps=>!ps.drawAll).forEach(ps=>{
     const picks = castStates.map(c=>{
-      const slot = c.state["prof_"+ps.id+"_0"];
-      return slot ? slot.trait.category : null;
+      return slotCat(c.state["prof_"+ps.id+"_0"]);
     }).filter(Boolean);
     if (picks.length < 3) return;
     const counts = {};
@@ -1107,11 +1306,13 @@ function generateGapFiller(){
   });
   const rarityPref = document.getElementById('rarityPref') ? document.getElementById('rarityPref').value : 0;
   rollCharacterVariants();
-  const st = buildCharacterState({
+  // The gap-filler exists to break clustering; inheriting the last character's context
+  // bias reinforced exactly what it was called in to counteract.
+  const st = withoutContextBias(()=> buildCharacterState({
     verbLevel: (Math.random()*4)-2, regLevel: (Math.random()*4)-2, compLevel: (Math.random()*4)-2,
     mannerCount: intVal('mannerCount', 3), vocabCount: intVal('vocabCount', 2),
     rarityPref, vocabPref:null, personalityOverrides: overrides, forcedProfileCats,
-  });
+  }));
   castStates.push({state: st, meta:{name:"Character " + (castStates.length+1), age:"", context:"Built to fill the ensemble's gaps", archetypeLabel:"Gap-filler"}});
   renderCast();
   refreshRelSelectors();
@@ -1167,26 +1368,72 @@ function randomizeProfileTypes(){
   });
 }
 
+/* ERROR BOUNDARY. Single-character generation has had one since a throw mid-build was
+   found to leave a half-rendered sheet and a silent console — which reads as the app
+   simply not responding. The cast, foil, relationship and balance paths run the same
+   engine over the same data (and the balance panel has already been taken down once by
+   a null trait) but had no boundary at all. Same treatment: report it where the user is
+   looking, name the usual cause, and leave the rest of the app usable.
+
+   Wrapping by reassignment keeps each function's own body free of try/catch noise and
+   guarantees no path is missed. */
+(function wrapGeneratorsWithBoundary(){
+  const guard = (name, fn, hint) => function(){
+    try { return fn.apply(this, arguments); }
+    catch (err){
+      console.error(name, err);
+      const msg = err && err.message ? err.message : String(err);
+      toast(`${name} failed: ${msg}${hint ? ' — ' + hint : ''}`, "warn", 7000);
+      return undefined;
+    }
+  };
+  const constraintHint = "a constraint combination that leaves a section with no eligible traits is the usual cause";
+  generateCast          = guard("Cast generation", generateCast, constraintHint);
+  generateFoil          = guard("Foil generation", generateFoil, constraintHint);
+  generateGapFiller     = guard("Gap-filler", generateGapFiller, constraintHint);
+  analyseRelationship   = guard("Relationship analysis", analyseRelationship, "");
+  checkEnsembleBalance  = guard("Balance check", checkEnsembleBalance, "");
+})();
+
 // ---------- Session preference persistence -------------------------------
 // Remembers the knobs (not the character) so returning users don't have to
 // re-set counts, rarity and mode on every visit. Deliberately excludes slider
 // positions and the generated sheet: those are per-character choices, and
 // silently restoring them would make "fresh start" behave unpredictably.
-const PREF_KEY = 'prefs:v1';
-const PREF_FIELDS = ['mannerCount','vocabCount','personalityCount','profileDepth',
-                     'rarityPref','affinityBoost','rangeFocus','profileWeight','divergence',
-                     'app_stature','app_upkeep','app_presence'];
-const PREF_TOGGLES = ['personalityToggle','depthFirstToggle','examplesToggle',
-                      'genPersonality','genSpeech','genVocab','genManner','genAppearance',
-                      'avoidRecentToggle','wildcardToggle','compactToggle','advancedToggle'];
+const PREF_KEY = 'prefs:v2';
+
+/* WORKSPACE PERSISTENCE.
+   v1 persisted a hand-maintained list of twelve static control ids. Everything else
+   was lost on refresh: all three voice sliders, all thirteen personality sliders, every
+   sec_/type_/pw_ profile control (those are built by buildProfileSectionUI at runtime,
+   so a static id list could never have covered them), the seed, the archetype — and,
+   worst of all, the entire constraint set. Bans, requires, exclusive pairs and category
+   tiers are the highest-effort state in the app: a user could spend ten minutes banning
+   categories and lose all of it by reloading the tab, with exporting a character JSON
+   the only way to keep any of it.
+
+   captureSettings/restoreSettings already serialise exactly this — they were written
+   for the character-export format, which had the same "the file must actually contain
+   the settings" problem. Reuse them rather than maintaining a second, and inevitably
+   divergent, list. `charName`/`charAge`/`charContext` and the reroll exclusions are
+   stripped: those describe one particular character, not the workspace, and silently
+   restoring them would make a fresh session behave unpredictably. */
+// seedInput joins these: a persisted seed would make every reload regenerate the same
+// character forever, which reads as the generator being broken rather than as a
+// remembered preference.
+const PREF_VOLATILE_FIELDS = ['charName','charAge','charContext','seedInput'];
 let prefsReady = false;
 
 async function savePrefs(){
   if (!prefsReady) return; // don't persist the defaults we just wrote during load
   try {
-    const data = {fields:{}, toggles:{}};
-    PREF_FIELDS.forEach(id=>{ const el=document.getElementById(id); if(el) data.fields[id]=el.value; });
-    PREF_TOGGLES.forEach(id=>{ const el=document.getElementById(id); if(el) data.toggles[id]=el.checked; });
+    const data = captureSettings();
+    PREF_VOLATILE_FIELDS.forEach(id=>{ delete data.fields[id]; });
+    delete data.rerollExclusions;
+    // advancedToggle is a pure presentation switch and so isn't in SETTING_TOGGLES,
+    // but it is very much a workspace preference.
+    const adv = document.getElementById('advancedToggle');
+    if (adv) data.toggles.advancedToggle = !!adv.checked;
     await storage.set(PREF_KEY, JSON.stringify(data));
   } catch(e){ /* storage unavailable — preferences just won't persist */ }
 }
@@ -1196,24 +1443,11 @@ async function loadPrefs(){
     const res = await storage.get(PREF_KEY);
     if (res && res.value){
       const data = JSON.parse(res.value);
-      Object.entries(data.fields||{}).forEach(([id,v])=>{
-        const el = document.getElementById(id);
-        // only accept values the control actually offers, in case options changed
-        if (!el) return;
-        if (el.tagName === 'SELECT'){
-          if ([...el.options].some(o=>o.value===v)) el.value = v;
-        } else if (el.type === 'range' || el.type === 'number'){
-          // A stored value from an older build can be a word ("balanced") where the
-          // control is now numeric; ignore anything that isn't a number rather than
-          // letting the browser silently reset the control to its midpoint.
-          if (v !== "" && !Number.isNaN(parseFloat(v))) el.value = v;
-        } else { el.value = v; }
-      });
-      Object.entries(data.toggles||{}).forEach(([id,v])=>{
-        const el = document.getElementById(id); if (el) el.checked = !!v;
-      });
+      PREF_VOLATILE_FIELDS.forEach(id=>{ if (data.fields) delete data.fields[id]; });
+      delete data.rerollExclusions;
+      restoreSettings(data);
     }
-  } catch(e){ /* no saved prefs, or storage unavailable */ }
+  } catch(e){ /* no saved prefs, corrupt prefs, or storage unavailable */ }
   prefsReady = true;
   try { onSliderChange(); } catch(e){}
   const ex = document.getElementById('examplesToggle');
@@ -1222,12 +1456,32 @@ async function loadPrefs(){
   try { toggleCompact(); } catch(e){}
 }
 
+/* Wire every control the workspace persists, including the ones buildProfileSectionUI
+   and buildPersonalitySliders create at runtime — a static id list is what left those
+   without a change listener in the first place. Called after both builders have run.
+   Sliders fire `input` as well as `change` so dragging is captured on release either
+   way; savePrefs is cheap and idempotent. */
 function wirePrefPersistence(){
-  PREF_FIELDS.concat(PREF_TOGGLES).forEach(id=>{
+  const ids = SETTING_FIELDS.concat(SETTING_TOGGLES, ['advancedToggle']);
+  (typeof PROFILE_SECTIONS !== 'undefined' ? PROFILE_SECTIONS : []).forEach(ps=>{
+    ids.push('sec_'+ps.id, 'type_'+ps.id, 'pw_'+ps.id);
+  });
+  ['verbositySlider','registerSlider','composureSlider'].forEach(id=>ids.push(id));
+  PERSONALITY_AXES.forEach(a=> ids.push('pers_'+a.id));
+  ids.forEach(id=>{
     const el = document.getElementById(id);
     if (el) el.addEventListener('change', savePrefs);
   });
 }
+
+// Constraints live outside the DOM (Sets and arrays in engine.js), so no element
+// listener can catch a change to them. refreshConstraintChips is the one function every
+// constraint mutation already calls to redraw itself — hook the save on there.
+(function persistConstraintsOnChange(){
+  if (typeof refreshConstraintChips !== 'function') return;
+  const inner = refreshConstraintChips;
+  refreshConstraintChips = function(){ const r = inner.apply(this, arguments); savePrefs(); return r; };
+})();
 
 /* ================= QUICK / ADVANCED =================
    The single-character tab presented every control it has, all at once, in one
@@ -1245,10 +1499,10 @@ function applyAdvancedMode(){
 
 /* ================= TRAIT SEARCH =================
    BUG FIX: the constraint autocomplete was a <datalist> built from TRAITS.slice(0,
-   4000) — of a pool that is now 6,452 — so everything from id 90000 up was invisible.
+   4000) — of a pool that is now 7,073 — so everything from id 90000 up was invisible.
    That is the entire supplement series: precisely the intensity-1/4/5 material added
    to fix "the sliders feel grouped", and users could not ban or require any of it.
-   A 6,452-option datalist is also a lot of DOM for a control nobody can scroll.
+   A 7,073-option datalist is also a lot of DOM for a control nobody can scroll.
    This is a debounced search over trait + description, showing the category, capped
    at a readable number of results and drawing from the WHOLE pool. */
 let _searchTimer = null;
@@ -1293,6 +1547,12 @@ function explainWhyNotFromInput(){
   if (!inp || !out) return;
   const t = findTraitByName(inp.value);
   if (!t){ out.innerHTML = `<div class="whyExcl">No trait matches that name.</div>`; out.style.display='block'; return; }
+  if (t.ambiguous){
+    // Ambiguity is useful here rather than an error: show the matches as a shortlist.
+    const list = t.ambiguous.slice(0, 8).map(x=>`<li>${escHTML(x.trait)} <span class="sub">— ${escHTML(x.category)}</span></li>`).join("");
+    out.innerHTML = `<div class="whyNote"><b>${t.ambiguous.length} traits match that.</b> Type more of a name to pick one:<ul style="margin:6px 0 0 18px;">${list}</ul></div>`;
+    out.style.display = 'block'; return;
+  }
   out.innerHTML = `<div class="whyNote"><b>${escHTML(t.trait)}</b> — ${escHTML(t.category)}<div style="margin-top:6px;">${explainWhyNot(t)}</div></div>`;
   out.style.display = 'block';
 }

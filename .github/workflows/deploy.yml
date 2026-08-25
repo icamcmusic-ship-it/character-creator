@@ -22,6 +22,26 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      # The invariant suite is the whole quality argument for this repo and it gated
+      # nothing: a deploy went out regardless of whether the bank still held together.
+      - name: Run invariant tests
+        run: node tests/run.js
+      # The service worker's comment promised "a version stamp so a deploy invalidates
+      # it", but the stamp was the literal string v1 and nothing ever bumped it, so the
+      # activate-purge loop was a permanent no-op and returning users could hold stale
+      # JS indefinitely. Stamp the commit SHA in at deploy time.
+      - name: Stamp service worker cache version
+        run: sed -i "s/character-voice-v1/character-voice-${GITHUB_SHA::12}/" sw.js && grep -q "character-voice-${GITHUB_SHA::12}" sw.js
+      # Pages serves the repo root, so tests/, .github/ and LICENSE were all being
+      # published alongside the app. .nojekyll stops Pages ignoring underscore-prefixed
+      # paths.
+      - name: Prepare artifact
+        run: |
+          rm -rf tests .github LICENSE
+          touch .nojekyll
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

@@ -65,9 +65,10 @@ function removeTier(cat){ categoryTiers.delete(cat); refreshConstraintChips(); }
    function draws a single character or a full cast overlay. */
 function radarSVG(profiles, size){
   size = size || 300;
-  // Only the 12 personality codes belong on this chart — AXIS_LABELS also contains
+  // Only the personality codes belong on this chart — AXIS_LABELS also contains
   // voice-polarity codes (volume, formality, pace, mood) used elsewhere, and mixing
-  // them in made the radar read as 16 unrelated spokes.
+  // them in made the radar read as 16 unrelated spokes. Now thirteen spokes, not
+  // twelve: curiosity gained its polarity code and so appears here automatically.
   const axes = Object.values(AXIS_TO_POLCODE);
   const cx = size/2, cy = size/2, R = size/2 - 46;
   let maxV = 1;
@@ -203,7 +204,7 @@ function archetypeFidelity(st, arch){
   return Math.round(100 * score / total);
 }
 
-/* Generation is synchronous over a 6,452-trait bank with per-trait position maths, and
+/* Generation is synchronous over a 7,073-trait bank with per-trait position maths, and
    on a slow phone that is a visible freeze with nothing on screen to explain it. Paint
    a skeleton first, then do the work on the next frame. The real build stays available
    as a plain synchronous call (runGeneration) for the paths that need to act on the
@@ -230,6 +231,7 @@ function runGeneration(){
 function _runGeneration(){
   snapshotHistory();
   diffLog = {};
+  changedSlots = new Set();   // recomputed once the new state is in place
   // Per-slot UI state belongs to the previous character, not this one.
   rerollExclusions = {};
   rerollHistory = {};
@@ -335,6 +337,10 @@ function _runGeneration(){
   // tells you how much moved, never what.
   lastSheetTraits = Object.keys(state).length ? snapshotSheetTraits(state) : null;
   state = newState;
+  // Which slots this generation actually moved — drives the per-card flash. Set here
+  // rather than inside renderSheet so only a full regeneration highlights, and a later
+  // reroll or a re-render of the same sheet doesn't re-flash everything.
+  markChangedSlots();
   // Record which slider positions produced this state, so a future undo (which
   // restores the state that came BEFORE the next generation) can also restore
   // the sliders that actually match it.
