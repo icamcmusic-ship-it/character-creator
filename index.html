@@ -9,53 +9,62 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="css/style.css">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='%2326547c'/%3E%3Ccircle cx='16' cy='16' r='6' fill='%23ef476f'/%3E%3C/svg%3E">
 </head>
-<body>
+<body class="on-single-tab quick-mode">
 <div class="wrap">
   <h1><span class="h1-dot"></span>Character Voice Generator</h1>
   <div class="sub" id="taglineSub">Axis-based, per-trait conflict-aware, intensity &amp; rarity-weighted selection.</div>
 
-  <details class="legendBox" style="margin:0 0 10px;">
-    <summary>How to use</summary>
+  <!-- The two intro explainers ran to roughly 900 words BEFORE the interface began.
+       Same text, one panel, closed by default, reachable from the header and by "?". -->
+  <div class="headerRow">
+    <button class="helpBtn" onclick="document.getElementById('helpPanel').open = !document.getElementById('helpPanel').open" aria-controls="helpPanel">? How this works</button>
+    <label class="modeSwitch" title="Quick shows the essentials; Advanced reveals every control. Hidden controls keep their values.">
+      <input type="checkbox" id="advancedToggle" onchange="applyAdvancedMode()">
+      <span id="advancedToggleLabel">Quick</span>
+    </label>
+  </div>
+
+  <details class="legendBox" id="helpPanel" style="margin:0 0 18px;">
+    <summary>How to use, and how generation works</summary>
     <div style="margin-top:11px; font-size:.85rem; line-height:1.75; color:var(--muted);">
       <p style="margin:0 0 8px;"><b style="color:var(--text);">The 30-second version.</b> Set a few sliders (or none), press <b>Generate Character</b>, and read the sheet. Every card is one trait; <b>reroll</b> any card you don't like, <b>lock</b> the ones you love, then Generate again — locked cards survive. That loop (generate → lock the keepers → regenerate the rest) is the intended way to work, not getting a perfect sheet on roll one.</p>
       <p style="margin:0 0 8px;"><b style="color:var(--text);">Sliders.</b> The centre of each personality slider is a real <b>neutral band</b>, not a hair-trigger between two poles. Below about 14 you get genuinely balanced or <i>situational</i> traits — "warm one-to-one, flat in groups," "honest about facts, evasive about feelings" — and ±5 draws from the same middle pool, so small settings either side of zero aren't different people. From roughly 14 to 42 the middle fades gradually into the leaning side; past that you're committed. Direction picks which side; <b>distance from centre picks intensity</b>, on an eased curve that keeps the bottom of the dial quiet. Honesty at −20 gives small, deniable evasions; −90 gives someone who lies about the weather. The three voice sliders (Verbosity / Register / Composure) don't just shape speech — they also pull the deep sections: high volatility drags Attachment toward Disorganized, high verbosity favours the Connector role, and so on.</p>
       <p style="margin:0 0 8px;"><b style="color:var(--text);">Per-card controls.</b> <b>lock</b> = keep this exact trait. <b>pin</b> = keep this <i>intensity level</i> while letting the trait vary (use +/− to nudge it). <b>reroll</b> = redraw, never repeating something you already rejected. <b>why?</b> = exactly which sliders and resolved traits caused this pick — the generator never hides its reasoning.</p>
-      <p style="margin:0 0 8px;"><b style="color:var(--text);">Deeper tools.</b> <b>Archetypes</b> blend a preset posture with your sliders (they nudge, never overwrite). <b>Depth-first</b> flips the whole flow: roll the wound/values/attachment first and derive personality from them. <b>Seed from a trait</b> builds a character around one trait you've picked by hand. <b>Under pressure</b> adds a second sheet showing how the voice degrades under stress. The <b>Cast</b> and <b>Relationships</b> tabs generate ensembles and analyse how any two characters clash or align. <b>Export .json</b> round-trips everything — pins, sliders, pressure sheet — exactly.</p>
+      <p style="margin:0 0 8px;"><b style="color:var(--text);">Deeper tools.</b> <b>Archetypes</b> blend a preset posture with your sliders (they nudge, never overwrite). <b>Depth-first</b> flips the whole flow: roll the wound/values/attachment first and derive personality from them. <b>Seed from a trait</b> builds a character around one trait you've picked by hand. <b>Under pressure</b> adds a second sheet showing how the voice degrades under stress. The <b>Cast</b> and <b>Relationships</b> tabs generate ensembles and analyse how any two characters clash or align. <b>Export .json</b> round-trips everything — traits, pins, sliders, pressure sheet, constraints, counts and toggles — so re-importing and pressing Generate reproduces the same character, not just the same sheet.</p>
       <p style="margin:0;"><b style="color:var(--text);">Reading the sheet.</b> <b>Coherence</b> is how much the picks reinforce each other <i>versus chance</i> — the lift over baseline is the real number. <b>Uncommon combinations</b> are flagged tensions, not errors; they're often the most interesting thing on the sheet. The <b>Use:</b> line under each trait is a frequency budget — how often the trait should actually appear on the page before it tips into caricature.</p>
-    </div>
-  </details>
-
-  <details class="legendBox" style="margin:0 0 18px;">
-    <summary>How generation works (deep dive)</summary>
-    <div style="margin-top:11px; font-size:.85rem; line-height:1.75; color:var(--muted);">
+      <hr style="border:none;border-top:1px dashed var(--border-strong);margin:14px 0;">
       <p style="margin:0 0 8px;"><b style="color:var(--text);">1 · Who first, then how.</b> Generation resolves the deep profile sections first — Motivation &amp; Wound, Stress Response, Social Role, Values, Attachment, Humor, Vices — and only then draws the voice (vocabulary, grammar, mannerisms). Resolved deep facts feed forward: land on "Freeze" for stress and Disfluencies &amp; Flow grammar gets likelier; land on "Skeptic" and precision vocabulary rises. Cause runs from character to voice, the way it does in actual people.</p>
       <p style="margin:0 0 8px;"><b style="color:var(--text);">2 · The signal system.</b> Sixteen signals — thirteen personality axes plus the three voice sliders — each carry a hand-built table of category affinities in three strengths (strong / moderate / weak). Every category draw sums all active signals into a weight map; <b>Boost strength</b> scales how hard that map bends the dice, with 0 = pure uniform random. Nothing is ever forced: a strongly-driven category is <i>likelier</i>, never guaranteed, which is why coherence is reported against a chance baseline instead of pretending determinism.</p>
       <p style="margin:0 0 8px;"><b style="color:var(--text);">3 · Continuous intensity.</b> Every trait occupies a fixed, continuous position on a 1–5 intensity scale (its declared level plus a stable per-trait offset, so twelve "intensity 3" traits are twelve distinct points, not one bucket). A slider's magnitude maps to a continuous target on the same scale; only traits inside a window around that target are eligible, and proximity to the target weights the draw. This is why −35 and −45 give measurably different results, and why each card shows an <b>active range</b> — the exact slider span where that trait can ever appear. <b>Slider precision</b> sets the window width: tight = sliders dictate, loose = sliders nudge.</p>
       <p style="margin:0 0 8px;"><b style="color:var(--text);">4 · Trait-level polarity.</b> Beyond categories, most traits carry their own small psychology vector ("this trait leans +honesty, −warmth"). At pick time that vector is scored against your current combined slider posture: agreeing traits get boosted, conflicting ones suppressed, scaled by Boost strength. So two characters can resolve the same category — say, "Core Want" — and still draw systematically different <i>traits</i> from it depending on posture. The why? panel reports this whenever it applied.</p>
       <p style="margin:0;"><b style="color:var(--text);">5 · Order of authority.</b> When systems disagree: <b>lock</b> beats everything; <b>pin</b> beats sliders for that slot's intensity; archetype blends with (never replaces) your sliders; depth-first derives sliders but leaves any axis its resolved categories don't speak to untouched. Reroll always honours the slot's own current target, and remembers what you've rejected. Every one of these decisions is inspectable per-card via why?.</p>
+      <p style="margin:8px 0 0;"><b style="color:var(--text);">6 · Keeping it from going stale.</b> Three controls exist specifically to fight sameness. <b>Avoid recent traits</b> softly penalises anything drawn in your last few characters. <b>Divergence</b> inverts the correlation matrix on a share of category draws, so the system stops optimising toward the most typical member of each cluster — coherence becomes a dial you set rather than a score you're graded on. <b>The one thing that doesn't fit</b> forces a single slot from the far tail of a random category with your slider posture switched off, because real people have exactly one trait that doesn't follow from the others. The sheet also reports <b>distinctiveness</b> against everything you've generated this session, which is a different question from the novelty note (that one only compares you to your last character).</p>
+      <p style="margin:8px 0 0;"><b style="color:var(--text);">Keyboard.</b> <b>Ctrl/&#8984;+Enter</b> generates, <b>Ctrl/&#8984;+Z</b> undoes, <b>R</b> rerolls the card under the pointer, <b>?</b> opens this panel.</p>
     </div>
   </details>
 
-  <div class="tabs">
-    <button id="tabSingleBtn" class="active" onclick="switchTab('single')">Single Character</button>
-    <button id="tabCastBtn" onclick="switchTab('cast')">Cast Comparison</button>
-    <button id="tabRelBtn" onclick="switchTab('rel')">Relationships</button>
+  <div class="tabs" role="tablist" aria-label="Views">
+    <button id="tabSingleBtn" class="active" role="tab" aria-selected="true" aria-controls="view-single" onclick="switchTab('single')">Single Character</button>
+    <button id="tabCastBtn" role="tab" aria-selected="false" aria-controls="view-cast" tabindex="-1" onclick="switchTab('cast')">Cast Comparison</button>
+    <button id="tabRelBtn" role="tab" aria-selected="false" aria-controls="view-rel" tabindex="-1" onclick="switchTab('rel')">Relationships</button>
   </div>
+  <div id="toastHost" class="toastHost" aria-live="polite"></div>
 
-  <div id="view-single" class="viewSection active">
+  <div id="view-single" class="viewSection active" role="tabpanel" aria-labelledby="tabSingleBtn">
     <div class="controls">
       <div class="row">
         <div class="field">
-          <label>Name</label>
+          <label for="charName">Name</label>
           <input type="text" id="charName" placeholder="e.g. Corven Ashe">
         </div>
         <div class="field" style="max-width:100px;">
-          <label>Age</label>
+          <label for="charAge">Age</label>
           <input type="text" id="charAge" placeholder="e.g. 34">
         </div>
         <div class="field" style="flex:2;">
-          <label>One-line context (optional)</label>
+          <label for="charContext">One-line context (optional)</label>
           <input type="text" id="charContext" placeholder="e.g. dockside smuggler, ex-military">
         </div>
       </div>
@@ -81,7 +90,7 @@
       </div>
       <div class="sub" id="suggestNote" style="display:none; color:var(--accent2); margin:-4px 0 12px;"></div>
 
-      <details class="advanced" style="margin:0 0 14px;">
+      <details class="advanced advOnly" style="margin:0 0 14px;">
         <summary>Appearance crafter</summary>
         <div class="row" style="margin-top:10px;">
           <div class="field">
@@ -103,41 +112,67 @@
         <div class="sub" style="margin:6px 0 0;">Sliders left at centre make no statement and add no card. Movement &amp; Bearing derives from your Activeness personality slider — a sedentary character moves like one — and Distinguishing Marks scale with Presence. Same engine as everything else: distance from centre sets intensity, and each card shows its active range.</div>
       </details>
 
-      <div class="row">
+      <div class="row advOnly">
         <div class="field" style="max-width:280px;">
-          <label>Seed (optional — reproducible generation)</label>
+          <label for="seedInput">Seed (optional — reproducible generation)</label>
           <input type="text" id="seedInput" placeholder="leave blank for random">
           <div class="sub" style="margin:4px 0 0;" id="lastSeedReadout">Seed: —</div>
         </div>
         <div class="field">
           <label>&nbsp;</label>
-          <div class="sub" style="margin:0;">Same seed + same settings = the exact same character, shareable as text. Every generation shows the seed it used — paste one back in to replay it. Rerolls are deliberately un-seeded: a reroll is you overriding the dice.</div>
+          <div class="sub" style="margin:0;">Same seed + same settings = the exact same character, pressure sheet included, shareable as text. Every generation shows the seed it used — paste one back in to replay it. Two deliberate exceptions: rerolls are un-seeded (a reroll is you overriding the dice), and <b>Avoid recent traits</b> takes your last few characters as an input, so a seed only replays exactly with it switched off.</div>
         </div>
       </div>
 
-      <details class="advanced" style="margin:0 0 14px;">
+      <details class="advanced advOnly" style="margin:0 0 14px;">
         <summary>Constraints — always / never</summary>
         <div class="row" style="margin-top:10px;">
           <div class="field" style="max-width:320px;">
-            <label>Never generate from category</label>
+            <label for="banCategorySelect">Category</label>
             <select id="banCategorySelect"></select>
-            <button class="btn-secondary" style="margin-top:6px;" onclick="addCategoryBan()">Ban category</button>
-          </div>
-          <div class="field" style="max-width:320px;">
-            <label>Weighted tier (softer than a ban)</label>
-            <select id="tierCategorySelect"></select>
             <div class="actionRow" style="margin-top:6px;">
-              <button class="btn-secondary" onclick="addCategoryTier('prefer')">Prefer ×3</button>
-              <button class="btn-secondary" onclick="addCategoryTier('rarely')">Rarely ×¼</button>
+              <button class="btn-secondary" onclick="addCategoryBan()">Never</button>
+              <button class="btn-secondary" onclick="addRequiredCategory()">At least one</button>
             </div>
           </div>
           <div class="field" style="max-width:320px;">
-            <label>Trait by name</label>
-            <input type="text" id="constraintTraitSearch" list="seedTraitList" placeholder="type a trait name…">
+            <label for="banSectionSelect">Whole section</label>
+            <select id="banSectionSelect"></select>
+            <button class="btn-secondary" style="margin-top:6px;" onclick="addSectionBan()">Ban section</button>
+          </div>
+          <div class="field" style="max-width:320px;">
+            <label for="tierCategorySelect">Weighted tier (softer than a ban)</label>
+            <select id="tierCategorySelect"></select>
+            <div class="actionRow" style="margin-top:6px;">
+              <button class="btn-secondary" onclick="addCategoryTier('prefer')">Prefer &times;3</button>
+              <button class="btn-secondary" onclick="addCategoryTier('rarely')">Rarely &times;&frac14;</button>
+            </div>
+            <div class="actionRow" style="margin-top:6px;">
+              <input type="number" id="tierCustomValue" step="0.05" min="0.05" max="20" placeholder="e.g. 1.5" style="max-width:110px;" aria-label="Custom category multiplier">
+              <button class="btn-secondary" onclick="addCategoryTier('custom')">Use this multiplier</button>
+            </div>
+          </div>
+        </div>
+        <div class="row">
+          <div class="field" style="max-width:420px;">
+            <label for="constraintTraitSearch">Trait by name</label>
+            <input type="text" id="constraintTraitSearch" placeholder="type at least two letters — searches names and descriptions…"
+                   autocomplete="off" oninput="searchTraits('constraintTraitSearch','constraintSearchResults')">
+            <div class="searchResults" id="constraintSearchResults" style="display:none;"></div>
             <div class="actionRow" style="margin-top:6px;">
               <button class="btn-secondary" onclick="addTraitConstraint('req')">Always include</button>
               <button class="btn-secondary" onclick="addTraitConstraint('ban')">Never include</button>
             </div>
+          </div>
+          <div class="field" style="max-width:420px;">
+            <label>Mutually exclusive pair</label>
+            <input type="text" id="exclusiveA" placeholder="first trait…" autocomplete="off"
+                   oninput="searchTraits('exclusiveA','exclusiveAResults')" aria-label="First trait of the exclusive pair">
+            <div class="searchResults" id="exclusiveAResults" style="display:none;"></div>
+            <input type="text" id="exclusiveB" placeholder="second trait…" autocomplete="off" style="margin-top:6px;"
+                   oninput="searchTraits('exclusiveB','exclusiveBResults')" aria-label="Second trait of the exclusive pair">
+            <div class="searchResults" id="exclusiveBResults" style="display:none;"></div>
+            <button class="btn-secondary" style="margin-top:6px;" onclick="addExclusivePair()">Never both</button>
           </div>
           <div class="field">
             <label>&nbsp;</label>
@@ -145,10 +180,28 @@
           </div>
         </div>
         <div id="constraintChips" style="margin-top:10px; display:flex; flex-wrap:wrap; gap:6px;"></div>
-        <div class="sub" style="margin:8px 0 0;">Bans are hard filters — banned content can never appear, even where sliders point straight at it. "Always include" traits arrive locked on every generation. If a trait is both banned and required, required wins: an explicit always is the stronger statement.</div>
+        <div class="sub" style="margin:8px 0 0;">Bans are hard filters — banned content can never appear, even where sliders point straight at it. "Always include" traits arrive locked on every generation; "at least one" only spends a slot when the build didn't already land in that category. If a trait is both banned and required, required wins: an explicit always is the stronger statement.</div>
       </details>
 
-      <div class="stressToggleRow checkboxRow" style="flex-wrap:wrap; gap:14px;">
+      <details class="advanced advOnly" style="margin:0 0 14px;">
+        <summary>Why didn't I get a particular trait?</summary>
+        <div class="sub" style="margin:10px 0;">The per-card <b>why?</b> panel explains a pick. This explains an absence — which constraint, presentation lock, or active-range window is standing in the way, and what to move.</div>
+        <div class="row">
+          <div class="field" style="max-width:420px;">
+            <label for="whyNotSearch">Trait name</label>
+            <input type="text" id="whyNotSearch" placeholder="type at least two letters…" autocomplete="off"
+                   oninput="searchTraits('whyNotSearch','whyNotResults')">
+            <div class="searchResults" id="whyNotResults" style="display:none;"></div>
+          </div>
+          <div class="field">
+            <label>&nbsp;</label>
+            <button class="btn-secondary" onclick="explainWhyNotFromInput()">Explain</button>
+          </div>
+        </div>
+        <div id="whyNotResult" style="display:none; margin-top:8px;"></div>
+      </details>
+
+      <div class="stressToggleRow checkboxRow advOnly" style="flex-wrap:wrap; gap:14px;">
         <span style="font-size:.78rem; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); font-weight:700;">Generate:</span>
         <label style="margin:0; text-transform:none; font-size:.85rem; color:var(--text); display:flex; align-items:center; gap:5px;"><input type="checkbox" id="genPersonality" checked>Personality</label>
         <label style="margin:0; text-transform:none; font-size:.85rem; color:var(--text); display:flex; align-items:center; gap:5px;"><input type="checkbox" id="genSpeech" checked>Speech pattern</label>
@@ -156,11 +209,11 @@
         <label style="margin:0; text-transform:none; font-size:.85rem; color:var(--text); display:flex; align-items:center; gap:5px;"><input type="checkbox" id="genManner" checked>Mannerisms</label>
         <label style="margin:0; text-transform:none; font-size:.85rem; color:var(--text); display:flex; align-items:center; gap:5px;"><input type="checkbox" id="genAppearance" checked>Appearance</label>
       </div>
-      <div class="sub" style="margin:4px 0 12px;">Unchecked groups are skipped entirely, not hidden — use this to generate just a voice, just a psychology, or just an appearance. Deep profile sections (Motivation, Values, etc.) have their own per-section toggles below.</div>
+      <div class="sub advOnly" style="margin:4px 0 12px;">Unchecked groups are skipped entirely, not hidden — use this to generate just a voice, just a psychology, or just an appearance. Deep profile sections (Motivation, Values, etc.) have their own per-section toggles below.</div>
 
       <div class="row">
         <div class="field">
-          <label>Archetype seed (optional)</label>
+          <label for="archetypeSelect">Archetype seed (optional)</label>
           <select id="archetypeSelect">
             <option value="">None &mdash; fully random</option>
             <option value="soldier">Wounded Soldier</option>
@@ -183,9 +236,17 @@
             <option value="workaholicAvoiding">Workaholic Avoiding a Diagnosis</option>
             <option value="formerTrueBeliever">Former True Believer</option>
             <option value="goldenChild">Golden Child</option>
+            <option value="competentProfessional">Quietly Excellent Professional</option>
+            <option value="contentedElder">Contented Elder</option>
+            <option value="genuinelyFunny">Genuinely Funny One</option>
+            <option value="careerBureaucrat">Career Bureaucrat</option>
+            <option value="trueZealot">Ecstatic True Believer</option>
+            <option value="alienLogic">Alien-Logic Outsider</option>
+            <option value="unbotheredYoung">Unbothered Young Person</option>
+            <option value="steadyOrganiser">Steady Organiser</option>
           </select>
         </div>
-        <div class="field">
+        <div class="field advOnly">
           <label># of Mannerisms</label>
           <select id="mannerCount">
             <option value="1">1</option>
@@ -200,17 +261,15 @@
             <option value="10">10</option>
           </select>
         </div>
-        <div class="field">
-          <label>Trait rarity preference</label>
-          <select id="rarityPref">
-            <option value="balanced" selected>Balanced</option>
-            <option value="common">Favor common</option>
-            <option value="signature">Favor signature (rare)</option>
-          </select>
+        <div class="field advOnly">
+          <label for="rarityPref">Trait rarity preference</label>
+          <input type="range" id="rarityPref" min="-1" max="1" value="0" step="0.05" oninput="onSliderChange()">
+          <div class="scaleLabels"><span>Ordinary</span><span>Balanced</span><span>Sharply defining</span></div>
+          <div class="sub" style="margin:4px 0 0;">Three tiers now, not two: <b>common</b>, <b>distinctive</b>, and a genuinely rare <b>signature</b> (distinctive <i>and</i> loud enough to define a voice). Continuous, like everything else.</div>
         </div>
       </div>
       <div class="row">
-        <div class="field">
+        <div class="field advOnly">
           <label># of Vocabulary traits</label>
           <select id="vocabCount">
             <option value="1">1</option>
@@ -223,7 +282,7 @@
             <option value="8">8</option>
           </select>
         </div>
-        <div class="field">
+        <div class="field advOnly">
           <label># of Personality traits shown</label>
           <select id="personalityCount">
             <option value="13" selected>All 13</option>
@@ -233,7 +292,7 @@
             <option value="3">3 (random)</option>
           </select>
         </div>
-        <div class="field">
+        <div class="field advOnly">
           <label>&nbsp;</label>
           <div class="actionRow">
             <button class="btn-secondary" onclick="randomizeSliders('voice')">🎲 Randomize Voice</button>
@@ -242,26 +301,35 @@
           </div>
         </div>
       </div>
-      <div class="stressToggleRow checkboxRow">
+      <div class="stressToggleRow checkboxRow advOnly">
         <input type="checkbox" id="stressToggle">
         <label style="margin:0; text-transform:none; font-size:.85rem; color:var(--text);" for="stressToggle">Also generate an "Under Pressure" variant (situational mode)</label>
       </div>
-      <div class="stressToggleRow checkboxRow" style="margin-top:8px;">
+      <div class="stressToggleRow checkboxRow advOnly" style="margin-top:8px;">
         <input type="checkbox" id="personalityToggle" checked onchange="togglePersonalityPanel()">
         <label style="margin:0; text-transform:none; font-size:.85rem; color:var(--text);" for="personalityToggle">Include personality profile</label>
       </div>
-      <div class="stressToggleRow checkboxRow" style="margin-top:8px;">
+      <div class="stressToggleRow checkboxRow advOnly" style="margin-top:8px;">
         <input type="checkbox" id="examplesToggle" checked onchange="toggleExamples()">
         <label style="margin:0; text-transform:none; font-size:.85rem; color:var(--text);" for="examplesToggle">Show example dialogue lines</label>
       </div>
 
-      <div class="stressToggleRow checkboxRow" style="margin-top:8px;">
+      <div class="stressToggleRow checkboxRow advOnly" style="margin-top:8px;">
+        <input type="checkbox" id="avoidRecentToggle">
+        <label style="margin:0; text-transform:none; font-size:.85rem; color:var(--text);" for="avoidRecentToggle">Avoid recent traits — softly penalise anything drawn in your last few characters</label>
+      </div>
+      <div class="stressToggleRow checkboxRow advOnly" style="margin-top:8px;">
+        <input type="checkbox" id="wildcardToggle">
+        <label style="margin:0; text-transform:none; font-size:.85rem; color:var(--text);" for="wildcardToggle">Add "the one thing that doesn't fit" — one slot drawn against the grain, ignoring your slider posture</label>
+      </div>
+
+      <div class="stressToggleRow checkboxRow advOnly" style="margin-top:8px;">
         <input type="checkbox" id="depthFirstToggle">
         <label style="margin:0; text-transform:none; font-size:.85rem; color:var(--text);" for="depthFirstToggle">Depth-first generation — resolve wound, values &amp; attachment first, then derive personality from them</label>
       </div>
-      <div class="sub" style="margin:4px 0 0 26px; font-size:.76rem;">Heads up: this mode sets personality sliders <i>from</i> the deep facts, so the Coherence score on the sheet will read structurally higher here — that's the mode working as designed, not extra consistency you earned.</div>
+      <div class="sub advOnly" style="margin:4px 0 0 26px; font-size:.76rem;">Heads up: this mode sets personality sliders <i>from</i> the deep facts, so the Coherence score on the sheet will read structurally higher here — that's the mode working as designed, not extra consistency you earned.</div>
 
-      <details class="advanced">
+      <details class="advanced advOnly">
         <summary>Seed from a single trait</summary>
         <div class="sub" style="margin:10px 0;">Fix one trait you already know about this character; everything else is built outward from it through the correlation matrix.</div>
         <div class="row">
@@ -279,7 +347,7 @@
         </div>
       </details>
 
-      <details class="advanced" id="profilePanel" open>
+      <details class="advanced advOnly" id="profilePanel">
         <summary>Character Profile — Motivation, Values, Role &amp; more</summary>
         <div class="row" style="margin-top:10px;">
           <div class="field" style="max-width:220px;">
@@ -303,12 +371,12 @@
         <div id="profileSectionsGrid"></div>
       </details>
 
-      <details class="advanced" id="personalityPanel" open>
+      <details class="advanced advOnly" id="personalityPanel">
         <summary>Personality Profile (13 axes)</summary>
         <div class="row" style="margin-top:10px;" id="personalitySlidersGrid"></div>
       </details>
 
-      <details class="advanced">
+      <details class="advanced advOnly">
         <summary>Advanced: affinity weights</summary>
         <div class="row" style="margin-top:10px;">
           <div class="field" style="max-width:160px;">
@@ -321,21 +389,26 @@
             <div class="scaleLabels"><span>Loose (more variety)</span><span>Tight (sliders dictate)</span></div>
           </div>
           <div class="field" style="max-width:200px;">
-            <label>Profile weight (Motivation, Values, etc.)</label>
+            <label for="divergence">Divergence</label>
+            <input type="range" id="divergence" min="0" max="1" value="0" step="0.05" oninput="onSliderChange()">
+            <div class="scaleLabels"><span>Coherent</span><span>Contrary</span></div>
+          </div>
+          <div class="field" style="max-width:200px;">
+            <label for="profileWeight">Profile weight (Motivation, Values, etc.)</label>
             <input type="range" id="profileWeight" min="0" max="100" value="55" step="1" oninput="onSliderChange()">
             <div class="scaleLabels"><span>Quiet, background</span><span>Life-defining</span></div>
           </div>
           <div class="field">
-            <div class="sub" style="margin:0;">Higher boost strength = current sliders bias category selection more strongly toward "paired" categories, AND bias which individual trait gets drawn within a category toward ones whose own psychology agrees with your current slider posture (a trait's "why?" panel shows this when it applies). 0 = pure uniform random. Verbosity, Register, and Composure now feed the same system personality sliders do — they influence Motivation, Stress Response, Social Role, Values, Attachment, Humor, and Vices too, not just tone. Slider precision controls how narrow the intensity window is around each slider's target — narrower means -35 and -45 draw from more clearly different traits. Profile weight sets how intensely Motivation/Values/Role/etc. traits read, independent of the voice sliders.</div>
+            <div class="sub" style="margin:0;"><b>Divergence</b> is the counterweight to all of this: on a share of category draws proportional to the setting, the correlation matrix's pull is deliberately inverted, so the system stops walking toward the most typical member of each cluster. Coherence is then something you choose rather than something you are graded on. Higher boost strength = current sliders bias category selection more strongly toward "paired" categories, AND bias which individual trait gets drawn within a category toward ones whose own psychology agrees with your current slider posture (a trait's "why?" panel shows this when it applies). 0 = pure uniform random. Verbosity, Register, and Composure now feed the same system personality sliders do — they influence Motivation, Stress Response, Social Role, Values, Attachment, Humor, and Vices too, not just tone. Slider precision controls how narrow the intensity window is around each slider's target — narrower means -35 and -45 draw from more clearly different traits. Profile weight sets how intensely Motivation/Values/Role/etc. traits read, independent of the voice sliders.</div>
           </div>
         </div>
         <div id="rangeReadout"></div>
         <div class="affinityList" id="affinityPreview"></div>
       </details>
 
-      <details class="advanced">
+      <details class="advanced advOnly">
         <summary>Custom archetype builder</summary>
-        <div class="sub" style="margin:10px 0;">Set the sliders above however you like, then save them as a reusable archetype.</div>
+        <div class="sub" style="margin:10px 0;">Set the sliders above however you like, then save them as a reusable archetype. The constraints, counts and section toggles in force are saved alongside — selecting the archetype still just blends its posture with yours, and "Restore full setup" is the explicit way to get the rest back. The library exports as a file, so a set of house archetypes can be shared or moved between machines.</div>
         <div class="row">
           <div class="field">
             <label>Archetype name</label>
@@ -344,34 +417,69 @@
           <div class="field">
             <label>&nbsp;</label>
             <div class="actionRow">
-              <button class="btn-secondary" onclick="saveCustomArchetype(this)">Save current sliders as archetype</button>
+              <button class="btn-secondary" onclick="saveCustomArchetype(this)">Save current setup as archetype</button>
+              <button class="btn-secondary" onclick="applyArchetypeSetup()">Restore selected archetype's full setup</button>
               <button class="btn-secondary" onclick="deleteCustomArchetype()">Delete selected</button>
+              <button class="btn-secondary" onclick="exportArchetypes()">Export library</button>
+              <label class="btn-secondary" style="cursor:pointer;">Import library<input type="file" accept=".json,application/json" style="display:none;" onchange="importArchetypes(this)"></label>
             </div>
           </div>
         </div>
         <div class="savedList" id="customArchList"></div>
       </details>
 
-      <div class="actionRow" style="margin-top:14px;">
-        <button class="btn-primary" onclick="generateCharacter()">Generate Character</button>
-        <button class="btn-primary" style="background:var(--accent2); color:#1a1a1a;" onclick="randomizeSliders('all'); generateCharacter();">🎲 Randomize All &amp; Generate</button>
-        <button class="btn-secondary" onclick="undoLast()" id="undoBtn" disabled>Undo</button>
-        <button class="btn-secondary" onclick="resetAllToDefaults()">↺ Reset to Defaults</button>
-        <button class="btn-secondary" onclick="copySheet(this)">Copy Sheet</button>
-        <button class="btn-secondary" onclick="downloadSheet()">Download .md</button>
-        <button class="btn-secondary" onclick="exportCharacterJSON()" title="Full-fidelity save: traits, pins, sliders, pressure sheet — re-importable exactly as-is">Export .json</button>
-        <label class="btn-secondary" style="cursor:pointer;" title="Restore a previously exported .character.json exactly, including pins and slider positions">Import .json<input type="file" accept=".json,application/json" style="display:none;" onchange="importCharacterJSON(this)"></label>
-        <button class="btn-secondary" onclick="window.print()">Print</button>
-        <button class="btn-secondary" onclick="saveCharacter(this)">Save Character</button>
-        <button class="btn-secondary" onclick="generateFoil()">⚔ Generate Foil</button>
-        <label style="display:inline-flex;align-items:center;gap:5px;font-size:.85rem;font-weight:500;">
-          <input type="checkbox" id="foilOpposeComposure">Foils should also clash under pressure
-        </label>
+      <!-- Thirteen buttons in one undifferentiated row (with a stray checkbox in the
+           middle of them) made the primary action hard to find. Four labelled groups. -->
+      <div class="actionGroups">
+        <div class="actionGroup">
+          <span class="actionGroupLabel">Generate</span>
+          <div class="actionRow">
+            <button class="btn-primary" onclick="generateCharacter()">Generate Character</button>
+            <button class="btn-primary" style="background:var(--accent2); color:#fff;" onclick="randomizeSliders('all'); generateCharacter();">🎲 Randomize All &amp; Generate</button>
+          </div>
+        </div>
+        <div class="actionGroup">
+          <span class="actionGroupLabel">Refine</span>
+          <div class="actionRow">
+            <button class="btn-secondary" onclick="undoLast()" id="undoBtn" disabled>Undo</button>
+            <button class="btn-secondary" onclick="resetAllToDefaults()">↺ Reset to Defaults</button>
+            <button class="btn-secondary" onclick="saveCharacter(this)">Save Character</button>
+          </div>
+        </div>
+        <div class="actionGroup">
+          <span class="actionGroupLabel">Export</span>
+          <div class="actionRow">
+            <button class="btn-secondary" onclick="copySheet(this)">Copy Sheet</button>
+            <button class="btn-secondary" onclick="downloadSheet()">Download .md</button>
+            <button class="btn-secondary" onclick="exportCharacterJSON()" title="Full-fidelity save: traits, pins, sliders, constraints, counts and toggles — re-importable exactly as-is">Export .json</button>
+            <label class="btn-secondary" style="cursor:pointer;" title="Restore a previously exported .character.json exactly, including the settings that produced it">Import .json<input type="file" accept=".json,application/json" style="display:none;" onchange="importCharacterJSON(this)"></label>
+            <button class="btn-secondary" onclick="window.print()">Print</button>
+          </div>
+        </div>
+        <div class="actionGroup advOnly">
+          <span class="actionGroupLabel">Derive</span>
+          <div class="actionRow">
+            <button class="btn-secondary" onclick="generateFoil()">⚔ Generate Foil</button>
+            <input type="text" id="foilSeed" placeholder="foil seed (optional)" style="max-width:170px;" aria-label="Foil seed">
+            <label class="inlineToggle">
+              <input type="checkbox" id="foilOpposeComposure">Foils should also clash under pressure
+            </label>
+          </div>
+        </div>
       </div>
       <div class="savedList" id="savedList"></div>
     </div>
 
-    <div class="warnBox" id="warnBox"></div>
+    <div class="warnBox" id="warnBox" role="status"></div>
+
+    <!-- The generate -> lock -> regenerate loop was documented only inside the folded
+         help text, which is the one place a first-time user has not looked yet. -->
+    <div id="emptyState" class="emptyState">
+      <b>Nothing generated yet.</b>
+      <p>Press <b>Generate Character</b> (or Ctrl/&#8984;+Enter). Then work the loop this tool is built around:
+      <b>lock</b> the cards you want to keep, <b>reroll</b> the ones you don't, and generate again — locked cards survive.
+      Nothing has to be right on the first roll.</p>
+    </div>
 
     <div class="sheet" id="sheet">
       <div class="sheetHeader">
@@ -380,17 +488,19 @@
       </div>
       <div class="charMeta" id="charMetaLine"></div>
       <div id="noveltyReadout" style="display:none;"></div>
+      <div id="changeList" class="changeList" style="display:none;"></div>
       <div id="insightPanel" style="display:none;"></div>
       <details class="legendBox" id="sheetLegend">
         <summary>What the markings on each trait mean</summary>
         <div class="legendGrid">
           <div><b>●●●○○ dots</b> — intensity, 1–5. How strongly the trait shows. Low-intensity traits are background texture; high-intensity ones dominate a scene.</div>
-          <div><b>common / signature</b> — how distinctive the trait is. "Signature" traits are sharply defining and read as specific to this character; "common" ones are ordinary human behaviour. Note that signature entries outnumber common ones in the bank, so the rarity preference weights each pool by its own size rather than treating the labels as frequencies.</div>
+          <div><b>common / distinctive / signature</b> — how sharply the trait defines a voice. <b>Common</b> is ordinary human behaviour: texture, not identity. <b>Distinctive</b> is specific enough to notice and not enough to carry a character on its own. <b>Signature</b> is both distinctive and loud, and is now genuinely rare — about a sixth of the bank rather than the two thirds the old two-class labelling produced, because when most entries are billed as defining, none of them are. The rarity preference weights each tier by its own size within the pool being drawn from, so "balanced" means balanced regardless of how a particular category happens to be composed.</div>
           <div><b>lock</b> — pin this exact trait so regenerating or rerolling the sheet won't replace it.</div>
           <div><b>pin</b> — different from lock: keeps this slot's <i>intensity target</i> fixed (shown as a number, e.g. "pinned 3.4") so future generations and rerolls keep drawing from around that level even as sliders move elsewhere — but the actual trait can still vary. Use +/− to nudge the pinned level. Lock overrides pin if both are set.</div>
           <div><b>active range</b> — the exact span of slider magnitude this specific trait can be drawn at. Outside that window it's never eligible, however the dice fall. The tick mark shows the slot's current target inside that window.</div>
           <div><b>reroll</b> — redraw just this slot. It won't hand you back a trait you already rejected here.</div>
           <div><b>presentation lock</b> — three categories (Confidence, Emotional Capacity, Intelligence) cover two genuinely different presentations of the same pole — insecure vs. grandiose, guarded vs. shallow, instinctive vs. unanalytical. Each character commits to one at generation, so a sheet never mixes self-loathing with preening. The why? panel names which one is locked, and it travels with the character in exports and seeds.</div>
+          <div><b>outlier</b> — the sheet's one deliberate misfit, present only when "the one thing that doesn't fit" is switched on. Drawn from the far tail of a randomly chosen category with your slider posture ignored for that single draw, because everything else in the engine pulls toward consistency and real people have exactly one trait that doesn't follow from the others.</div>
           <div><b>why?</b> — shows which slider or resolved trait actually caused this pick, or tells you it was an unweighted draw. When the trait itself carries a psychological lean, it also shows whether that lean currently agrees or conflicts with your sliders, and by how much.</div>
           <div><b>↺ was: "…"</b> — this slot changed on the last reroll; shows what it replaced.</div>
           <div><b>Coherence</b> — share of picks reinforced by another trait, shown against the chance baseline for your current settings. The <i>lift</i> over baseline is the meaningful figure.</div>
@@ -401,6 +511,11 @@
         <button class="btn-secondary" onclick="unpinAll()">Unpin all</button>
         <button class="btn-secondary" onclick="lockAll()">Lock all</button>
         <button class="btn-secondary" onclick="unlockAll()">Unlock all</button>
+        <button class="btn-secondary" onclick="setAllGroups(true)">Collapse all sections</button>
+        <button class="btn-secondary" onclick="setAllGroups(false)">Expand all</button>
+        <label class="inlineToggle">
+          <input type="checkbox" id="compactToggle" onchange="toggleCompact()">Compact view
+        </label>
       </div>
       <div id="sheetBody"></div>
 
@@ -411,11 +526,16 @@
     </div>
   </div>
 
-  <div id="view-cast" class="viewSection">
+  <div id="view-cast" class="viewSection" role="tabpanel" aria-labelledby="tabCastBtn" aria-hidden="true">
     <div class="controls">
       <div class="row">
+        <div class="field" style="max-width:220px;">
+          <label for="castSeed">Cast seed (optional)</label>
+          <input type="text" id="castSeed" placeholder="leave blank for random">
+          <div class="sub" style="margin:4px 0 0;" id="castSeedReadout">Cast seed: —</div>
+        </div>
         <div class="field">
-          <label># of characters in cast</label>
+          <label for="castCount"># of characters in cast</label>
           <select id="castCount">
             <option value="2">2</option>
             <option value="3" selected>3</option>
@@ -433,14 +553,14 @@
           </div>
         </div>
       </div>
-      <div class="sub" style="margin:4px 0 0;">Each cast member gets independent random axis settings so voices read as distinct from one another.</div>
+      <div class="sub" style="margin:4px 0 0;">Each cast member gets independent random axis settings so voices read as distinct from one another. The cast honours your mannerism/vocabulary counts, rarity preference and generate-group toggles from the Single Character tab, and is seedable: the same cast seed and settings rebuild the same ensemble.</div>
     </div>
     <div class="warnBox" id="balanceResult" style="background:var(--panel); border-color:var(--border); color:var(--text);"></div>
     <div id="castRadar" class="legendBox" style="display:none; margin:14px 0; padding:14px;"></div>
     <div class="castGrid" id="castGrid"></div>
   </div>
 
-  <div id="view-rel" class="viewSection">
+  <div id="view-rel" class="viewSection" role="tabpanel" aria-labelledby="tabRelBtn" aria-hidden="true">
     <div class="controls">
       <div class="sub" style="margin:0 0 10px;">Generate a cast first, then analyse how any two members would rub together based on where their personality axes clash or align.</div>
       <div class="row">
@@ -468,9 +588,24 @@
     </div>
   </div>
 
+  <div class="stickyBar" id="stickyBar">
+    <button class="btn-primary" onclick="generateCharacter()">Generate</button>
+    <button class="btn-secondary" onclick="randomizeSliders('all'); generateCharacter();">🎲 Randomize</button>
+    <button class="btn-secondary" onclick="undoLast()">Undo</button>
+    <span class="stickySeed" id="stickySeed">no character yet</span>
+  </div>
+
   <div class="footerNote" id="footerTraitCount">Intensity, rarity, and conflict polarity are heuristically scored — a starting point, not gospel.</div>
 </div>
 
+<script src="js/data/traits-core.js" defer></script>
+<script src="js/data/traits-supplement.js" defer></script>
+<script src="js/data/traits-situational.js" defer></script>
+<script src="js/data/traits-tails.js" defer></script>
+<script src="js/data/traits-depth.js" defer></script>
+<script src="js/engine.js" defer></script>
+<script src="js/generate.js" defer></script>
+<script src="js/render.js" defer></script>
 <script src="js/app.js" defer></script>
 </body>
 </html>
