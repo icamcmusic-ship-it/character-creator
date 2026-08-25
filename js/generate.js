@@ -254,7 +254,7 @@ function _runGeneration(){
     archOverrides = {};
     PERSONALITY_AXES.forEach(a=>{
       const el = document.getElementById('pers_'+a.id);
-      const current = el ? parseInt(el.value) : 0;
+      const current = intVal(el, 0);
       archOverrides[a.id] = (arch.pers[a.id] !== undefined)
         ? Math.round(clamp(current*0.35 + arch.pers[a.id]*0.65, -100, 100))
         : current;
@@ -377,6 +377,9 @@ function _runGeneration(){
   try { rememberProfile(axisProfile(state)); } catch(e){}
   charMeta.contextNotes = ctxInfo && ctxInfo.notes.length ? ctxInfo.notes.slice() : null;
 
+  // A fresh generation is where the density preference applies; from then on the
+  // sections are however the user has arranged them.
+  if (typeof markDensityPending === 'function') markDensityPending();
   const sheetEl = document.getElementById('sheet');
   const wasHidden = !sheetEl.classList.contains('show');
   renderSheet(); checkConflicts();
@@ -465,7 +468,7 @@ function rerollSlot(slotId){
     }
     return firstUnseated || (cand && !seated.has(cand.trait.id) ? cand : null);
   };
-  const rawOf = id => { const el = document.getElementById(id); return el ? parseInt(el.value) : 0; };
+  const rawOf = id => intVal(id, 0);
 
   let replacement;
   if (pinnedTargets[slotId] !== undefined){
@@ -600,6 +603,47 @@ function rerollBack(slotId){
 }
 
 function toggleWhy(slotId){ whyOpen[slotId] = !whyOpen[slotId]; renderSheet(); }
+
+async function editTraitNote(slotId){
+  const s = state[slotId];
+  if (!s || !s.trait) return;
+  const note = await askForName(`Note on "${s.trait.trait}":`, traitNotes[slotId] || "");
+  if (note === null) return;
+  traitNotes[slotId] = note;
+  renderSheet();
+}
+function clearTraitNote(slotId){ delete traitNotes[slotId]; renderSheet(); }
+
+// Favourite / never, straight off the card, writing into the same constraint sets the
+// Constraints panel edits — so a star here shows up as an "always" chip there.
+function favouriteTrait(id){
+  const t = TRAITS_BY_ID.get(id);
+  if (!t) return;
+  if (requiredTraitIds.includes(id)){
+    requiredTraitIds = requiredTraitIds.filter(x=>x!==id);
+    toast(`"${t.trait}" is no longer required on every character.`);
+  } else {
+    requiredTraitIds.push(id);
+    bannedTraitIds.delete(id);     // required beats banned, as everywhere else
+    toast(`"${t.trait}" will now be included on every character.`);
+  }
+  refreshConstraintChips(); renderSheet();
+  if (typeof savePrefs === 'function') savePrefs();
+}
+function banTrait(id){
+  const t = TRAITS_BY_ID.get(id);
+  if (!t) return;
+  if (bannedTraitIds.has(id)){
+    bannedTraitIds.delete(id);
+    toast(`"${t.trait}" can be drawn again.`);
+  } else {
+    bannedTraitIds.add(id);
+    requiredTraitIds = requiredTraitIds.filter(x=>x!==id);
+    toast(`"${t.trait}" will never be drawn again.`);
+  }
+  refreshConstraintChips(); renderSheet();
+  if (typeof savePrefs === 'function') savePrefs();
+}
 function clearExclusions(slotId){
   delete rerollExclusions[slotId];
   renderSheet();

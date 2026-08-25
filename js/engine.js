@@ -213,6 +213,47 @@ function byFilter(section, category){
 }
 function catsOf(section){ return CATS_BY_SECTION.get(section) || []; }
 
+/* ================= TRAIT SHAPE ASSERTIONS =================
+   TRAITS entries are assumed everywhere to carry {id, section, category, trait, desc,
+   example, intensity, rarity, pol}. A malformed entry — a missing example, an intensity
+   of 0, a rarity string that is not one of the four tiers — does not fail at the data
+   file. It fails much later, at an arbitrary draw, in a stack that says nothing about
+   which line of which file is wrong.
+
+   The test suite covers this for CI. It does not cover somebody hand-editing a data
+   file locally and reloading, which is exactly when the feedback is worth having. Runs
+   only with ?dev=1 in the URL, so it costs a normal load nothing. */
+function assertTraitShape(){
+  const problems = [];
+  const seenIds = new Set();
+  const push = (t, msg) => { if (problems.length < 40) problems.push(`#${t && t.id} ${(t && t.trait) || '(no name)'}: ${msg}`); };
+  TRAITS.forEach(t=>{
+    if (!t || typeof t !== 'object') return problems.push('a non-object entry in TRAITS');
+    if (t.id === undefined) return push(t, 'no id');
+    if (seenIds.has(t.id)) push(t, 'duplicate id');
+    seenIds.add(t.id);
+    ['section','category','trait','desc','example'].forEach(k=>{
+      if (typeof t[k] !== 'string' || !t[k].trim()) push(t, `${k} is missing or empty`);
+    });
+    if (!Number.isInteger(t.intensity) || t.intensity < 1 || t.intensity > 5) push(t, `intensity ${t.intensity} is not 1-5`);
+    if (!RTIER_SET.has(t.rarity)) push(t, `rarity "${t.rarity}" is not one of ${RTIER_ORDER.join('/')}`);
+    if (t.pol && typeof t.pol !== 'object') push(t, 'pol is not an object');
+    Object.entries(t.pol || {}).forEach(([ax, v])=>{
+      if (!AXIS_LABELS[ax]) push(t, `pol names an unknown axis "${ax}"`);
+      if (typeof v !== 'number') push(t, `pol.${ax} is not a number`);
+    });
+  });
+  return problems;
+}
+if (typeof location !== 'undefined' && /[?&]dev=1\b/.test(location.search || '')){
+  setTimeout(()=>{
+    const problems = assertTraitShape();
+    if (!problems.length){ console.info(`[dev] trait shape OK — ${TRAITS.length} entries`); return; }
+    console.error(`[dev] ${problems.length} malformed trait entr${problems.length===1?'y':'ies'}:\n` + problems.join('\n'));
+    if (typeof toast === 'function') toast(`${problems.length} malformed trait entries — see the console.`, 'warn', 9000);
+  }, 0);
+}
+
 
 // Coarse polarity for the 7 Profile sections, mirroring DEPTH_TO_PERSONALITY's logic
 // but expressed as signed axis contributions so these traits plug into the SAME
@@ -578,7 +619,11 @@ function targetFromLevel(level){ return targetFromMag(Math.abs(level) * 50); }
 // from onSliderChange and after any programmatic slider write) drops it.
 let _rangeFocusEl = null;
 let _bandHalfMemo = null;
-function invalidateSliderCache(){ _rangeFocusEl = null; _bandHalfMemo = null; }
+function invalidateSliderCache(){
+  _rangeFocusEl = null; _bandHalfMemo = null;
+  // The loudness estimate is measured against the band width, so it goes stale with it.
+  if (typeof _loudPCache !== 'undefined') _loudPCache.clear();
+}
 function bandHalf(){
   if (_bandHalfMemo !== null) return _bandHalfMemo;
   if (!_rangeFocusEl) _rangeFocusEl = document.getElementById('rangeFocus');
@@ -1109,7 +1154,7 @@ function AFFINITY(){ return floatVal('affinityBoost', 2.5); }
 
 function persLevel(id, overrides){
   const raw = (overrides && overrides[id] !== undefined) ? overrides[id] : (()=>{
-    const el = document.getElementById('pers_'+id); return el ? parseInt(el.value) : 0;
+    return intVal('pers_'+id, 0);
   })();
   return rawToLevel(raw);
 }
@@ -1236,7 +1281,7 @@ function _explainPickInner(slotId, s){
     const axisId = slotId.replace("pers_","").replace(/__2$/,"");
     const axis = PERSONALITY_AXES.find(a=>a.id===axisId);
     const el = document.getElementById('pers_'+axisId);
-    const raw = el ? parseInt(el.value) : 0;
+    const raw = intVal(el, 0);
     const side = raw >= 0 ? "positive" : "negative";
     const target = targetFromMag(Math.abs(raw));
     return pinNote + variantNote + `Driven directly by your <b>${axis?axis.label:axisId}</b> slider at <b>${raw}</b>, which selects the ${side} pool ("${cat}") and sets a continuous intensity target of <b>${target.toFixed(2)}</b>.${bandNote(s.trait, target)}${polNote}`;
@@ -1252,7 +1297,7 @@ function _explainPickInner(slotId, s){
   if (slotId === "verbosity" || slotId === "register"){
     const sliderId = slotId === "verbosity" ? 'verbositySlider' : 'registerSlider';
     const el = document.getElementById(sliderId);
-    const raw = el ? parseInt(el.value) : 0;
+    const raw = intVal(el, 0);
     return pinNote + `Set by your <b>${slotId === "verbosity" ? "Verbosity" : "Register"}</b> slider at <b>${raw}</b>, which chooses the "${cat}" pool.${bandNote(s.trait, s.target)}${polNote}`;
   }
 
@@ -1782,7 +1827,7 @@ function axisLevel(axisId, overrides){
   if (overrides && overrides[axisId] !== undefined) return rawToLevel(overrides[axisId]);
   const voice = VOICE_AXES.find(v=>v.id===axisId);
   const el = document.getElementById(voice ? voice.sliderId : 'pers_'+axisId);
-  return el ? rawToLevel(parseInt(el.value)) : 0;
+  return rawToLevel(intVal(el, 0));
 }
 
 // Maps each personality axis onto the short polarity code its traits already use in
@@ -2614,10 +2659,25 @@ function coherenceScore(st){
    exact settings — the same "compare against a chance baseline" technique coherenceScore
    already uses. Then the warning means "louder than you asked for", which is a fact
    about the character, at any slider position. */
+/* PERF: this re-runs rangeSelect for every slot on the sheet, on every render that
+   evaluates the caricature guard — a second full pass over the same pools immediately
+   after the build has just walked them. The answer for a given (section, category,
+   target) is a pure function of the pool and the current band width, so it is cached
+   for the lifetime of one evaluation pass and invalidated whenever the slider cache is.
+   A default sheet drops from ~38 rangeSelect calls per render to roughly the number of
+   distinct pools it actually draws from. */
+const _loudPCache = new Map();
+function _invalidateLoudCache(){ _loudPCache.clear(); }
 function expectedLoudCount(st){
   let expected = 0, variance = 0, measurable = 0;
   Object.values(st || {}).forEach(s=>{
     if (!s || !s.trait || s.target === undefined || s.target === null) return;
+    const key = s.trait.section + "||" + s.trait.category + "@" + s.target.toFixed(3);
+    const hit = _loudPCache.get(key);
+    if (hit !== undefined){
+      expected += hit; variance += hit * (1 - hit); measurable++;
+      return;
+    }
     const pool = byFilter(s.trait.section, s.trait.category);
     if (pool.length < 2) return;
     const sel = rangeSelect(pool, s.target, 4);
@@ -2635,6 +2695,7 @@ function expectedLoudCount(st){
     let loudW = 0;
     list.forEach((t,i)=>{ if (traitPos(t) >= 3.5) loudW += w[i]; });
     const p = loudW / total;
+    _loudPCache.set(key, p);
     expected += p;
     /* Each slot is one Bernoulli draw, so the count's variance is the sum of p(1-p) —
        NOT sqrt(mean). The difference matters at the ends of the sliders: there most
@@ -2824,7 +2885,7 @@ function personalityFromDepth(chosen){
       // map doesn't cover (Manners, Activeness, Curiosity). Preserve their value
       // instead — depth-first should derive what it can and leave the rest alone.
       const el = document.getElementById('pers_'+a.id);
-      out[a.id] = el ? parseInt(el.value) : 0;
+      out[a.id] = intVal(el, 0);
       out['__untouched_'+a.id] = true;
     }
   });
@@ -2950,6 +3011,11 @@ let history = [];
 let lastGeneratedSliders = null;
 let charMetaSeed = null;
 let diffLog = {}; // slotId -> {from, to}
+/* Free-text notes attached to a card. Round-trips in the JSON export and in a saved
+   character, and is deliberately keyed on the SLOT rather than the trait: the note is
+   about this character's version of the trait ("this is the one the whole first act
+   turns on"), not about the trait in the abstract. */
+let traitNotes = {};   // slotId -> string
 let whyOpen = {};          // slotId -> bool, is the "why?" panel expanded
 let rerollExclusions = {}; // slotId -> Set of trait ids already rejected here
 let rerollHistory = {};    // slotId -> array of previous slot objects, oldest first
@@ -3007,7 +3073,25 @@ function expandSlots(st){
   return out;
 }
 
+/* Redo. The snapshot mechanism already stores everything needed to move in either
+   direction; all that was missing was a second stack and the discipline of clearing it
+   when a NEW action forks the timeline. Undo depth is 15, so redo matches it. */
+let redoStack = [];
+function _snapshotNow(){
+  return {
+    state: compressSlots(state),
+    charMeta: {...charMeta},
+    pressureState: compressSlots(pressureState),
+    sliders: lastGeneratedSliders || captureSliders()
+  };
+}
+function updateUndoButtons(){
+  const u = document.getElementById('undoBtn'); if (u) u.disabled = history.length === 0;
+  const r = document.getElementById('redoBtn'); if (r) r.disabled = redoStack.length === 0;
+}
 function snapshotHistory(){
+  // A fresh action invalidates anything that was ahead of us on the timeline.
+  redoStack = [];
   history.push({
     state: compressSlots(state),
     charMeta: {...charMeta},
@@ -3017,11 +3101,11 @@ function snapshotHistory(){
     sliders: lastGeneratedSliders || captureSliders()
   });
   if (history.length > 15) history.shift();
-  const btn = document.getElementById('undoBtn'); if (btn) btn.disabled = false;
+  updateUndoButtons();
 }
-function undoLast(){
-  if (!history.length) return;
-  const prev = history.pop();
+// Shared by undo and redo: the restore half is identical, only which stack the current
+// position is pushed onto differs.
+function _restoreSnapshot(prev){
   state = expandSlots(prev.state); charMeta = prev.charMeta;
   pressureState = expandSlots(prev.pressureState) || null;
   restoreSliders(prev.sliders);
@@ -3034,7 +3118,19 @@ function undoLast(){
   diffLog = {}; rerollExclusions = {}; rerollHistory = {}; whyOpen = {};
   onSliderChange();
   renderSheet(); checkConflicts();
-  document.getElementById('undoBtn').disabled = history.length === 0;
+  updateUndoButtons();
+}
+function undoLast(){
+  if (!history.length) return;
+  redoStack.push(_snapshotNow());
+  if (redoStack.length > 15) redoStack.shift();
+  _restoreSnapshot(history.pop());
+}
+function redoLast(){
+  if (!redoStack.length) return;
+  history.push(_snapshotNow());
+  if (history.length > 15) history.shift();
+  _restoreSnapshot(redoStack.pop());
 }
 
 function pickVerbositySlot(verbLevel, rarityPref){
@@ -3196,7 +3292,7 @@ function pickAppearanceSlots(rarityPref, overrides, resolvedCats, sourceState){
   const derivedUpkeep = resolvedCats ? UPKEEP_FROM_VICE[resolvedCats.vices] : 0;
   APPEARANCE_AXES.forEach((axis,i)=>{
     const el = document.getElementById('app_'+axis.id);
-    const raw = el ? parseInt(el.value) : 0;
+    const raw = intVal(el, 0);
     let cat, target, derived = false;
     if (Math.abs(raw) < 8){
       // centred slider = no deliberate statement
@@ -3222,7 +3318,7 @@ function pickAppearanceSlots(rarityPref, overrides, resolvedCats, sourceState){
   const mv = withSlotMemory("app_move", ()=>pickInRange(mvPool, rarityPref, mvTarget, 8, true));
   if (mv) out['app_move'] = {slotId:'app_move', locked:false, label:"Appearance \u2014 Movement & Bearing", target:mvTarget, trait:mv};
   const pEl = document.getElementById('app_presence');
-  const pMag = pEl ? Math.abs(parseInt(pEl.value)) : 0;
+  const pMag = Math.abs(intVal(pEl, 0));
   // Wound intensity, read off whichever Motivation slots this build has already seated.
   let woundMag = 0;
   const st = sourceState || null;
@@ -3269,8 +3365,21 @@ function _drawUnique(fn, tries){
    So: one slot, drawn from the far tail of a category chosen at random, with the
    slider posture and the affinity vector deliberately switched off for that single
    draw. It is labelled as what it is, so nobody mistakes it for a system failure. */
-const WILDCARD_SECTIONS = ["Personality Traits","Mannerisms","Vocabulary Traits","Habits & Vices","Humor Style","Verbosity Traits","Dialogue Grammar Traits"];
-function pickWildcardSlot(rarityPref){
+/* The Profile sections were excluded, which meant the one slot in the app whose job is
+   to be out of character could never be an out-of-character FACT — only an
+   out-of-character verbal habit. "The devoted caretaker whose actual vice is gambling"
+   is a far better outlier than "the terse person who sometimes rambles", and it was
+   unreachable. Motivation & Wound stays out: those seven categories are the character's
+   own explanation of themselves, and an outlier there reads as an error rather than a
+   contradiction. */
+const WILDCARD_SECTIONS = ["Personality Traits","Mannerisms","Vocabulary Traits","Habits & Vices","Humor Style","Verbosity Traits","Dialogue Grammar Traits",
+  "Conflict & Stress Response","Social Role in a Group","Values & Moral Line","Attachment & Intimacy Style"];
+function wildcardCount(){
+  if (!wildcardEnabled()) return 0;
+  const el = document.getElementById('wildcardCount');
+  return el ? clamp(parseInt(el.value, 10) || 0, 0, 3) : 1;
+}
+function pickWildcardSlot(rarityPref, index){
   /* Picking a uniform SECTION and then a uniform CATEGORY within it weighted the draw
      by how finely a section happens to be subdivided, not by how much content it holds:
      a Mannerism category came up at 1/84 while a Verbosity one came up at 1/35, for no
@@ -3289,7 +3398,8 @@ function pickWildcardSlot(rarityPref){
   finally { CURRENT_AFFINITY_VEC = prior; }
   if (!trait) return null;
   _markUsed(trait);
-  return {slotId:"wild_0", locked:false, wildcard:true, target,
+  const slotId = "wild_" + (index || 0);
+  return {slotId, locked:false, wildcard:true, target,
           label:"Doesn't fit the rest — " + cat, trait};
 }
 function wildcardEnabled(){
@@ -3364,8 +3474,8 @@ function buildCharacterState(opts){
   // Appearance draws last on purpose: it now reads the Motivation slots this build
   // just seated (see the wound → distinguishing-marks link) and the resolved vice.
   if (on('genAppearance')) Object.assign(obj, pickAppearanceSlots(rarityPref, fullOverrides, resolvedCats, obj));
-  if (wildcardEnabled()){
-    const wild = pickWildcardSlot(rarityPref);
+  for (let w = 0; w < wildcardCount(); w++){
+    const wild = pickWildcardSlot(rarityPref, w);
     if (wild) obj[wild.slotId] = wild;
   }
   return obj;
@@ -3480,8 +3590,14 @@ function refreshConstraintChips(){
   if (!box) return;
   const byId = TRAITS_BY_ID;   // PERF: was rebuilding the whole 7,073-entry map per call
   let h = "";
-  bannedSections.forEach(sec=> h += `<span class="chip chip-ban">never (section): ${escHTML(sec)} <b onclick="removeBan('section','${escAttr(sec)}')" title="Remove">&times;</b></span>`);
-  bannedCategories.forEach(c=> h += `<span class="chip chip-ban">never: ${escHTML(c)} <b onclick="removeBan('cat','${escAttr(c)}')" title="Remove">&times;</b></span>`);
+  /* A ban chip said what was excluded but never how much — "never: Cruel & Barbed" is a
+     very different decision at 8 traits than at 54, and the number was one lookup away
+     the whole time. */
+  const catSize = c => (TRAITS_BY_KEY.get((SECTION_OF_CATEGORY.get(c) || "") + "||" + c) || []).length;
+  const secSize = sec => (catsOf(sec) || []).reduce((n,c)=> n + catSize(c), 0);
+  const cost = n => n ? ` <span class="chipCost">(${n} trait${n===1?'':'s'})</span>` : ``;
+  bannedSections.forEach(sec=> h += `<span class="chip chip-ban">never (section): ${escHTML(sec)}${cost(secSize(sec))} <b onclick="removeBan('section','${escAttr(sec)}')" title="Remove">&times;</b></span>`);
+  bannedCategories.forEach(c=> h += `<span class="chip chip-ban">never: ${escHTML(c)}${cost(catSize(c))} <b onclick="removeBan('cat','${escAttr(c)}')" title="Remove">&times;</b></span>`);
   categoryTiers.forEach((tier,c)=> h += `<span class="chip ${tierMultiplier(c)>1?'chip-req':'chip-tier'}">${escHTML(tierLabel(tier))}: ${escHTML(c)} <b onclick="removeTier('${escAttr(c)}')" title="Remove">&times;</b></span>`);
   requiredCategories.forEach(c=> h += `<span class="chip chip-req">at least one: ${escHTML(c)} <b onclick="removeRequiredCategory('${escAttr(c)}')" title="Remove">&times;</b></span>`);
   bannedTraitIds.forEach(id=>{ const t=byId.get(id); if(t) h += `<span class="chip chip-ban">never: ${escHTML(t.trait)} <b onclick="removeBan('trait','${id}')" title="Remove">&times;</b></span>`; });

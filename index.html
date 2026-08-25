@@ -25,7 +25,10 @@
   </header>
 
   <!-- The two intro explainers ran to roughly 900 words BEFORE the interface began.
-       Same text, one panel, closed by default, reachable from the header and by "?". -->
+       Same text, one panel, closed by default, reachable from the header and by "?".
+       It is still 900 words once opened, and a keyboard or screen-reader user who opens
+       it has to traverse all of it to reach a control — hence the skip link. -->
+  <a class="skipLink" href="#controlsStart">Skip to the controls</a>
 
   <div class="tabs" role="tablist" aria-label="Views">
     <button id="tabSingleBtn" class="active" role="tab" aria-selected="true" aria-controls="view-single" onclick="switchTab('single')"><span class="tabIcon" aria-hidden="true">👤</span>Single Character</button>
@@ -47,7 +50,7 @@
       <p style="margin:0 0 8px;"><b style="color:var(--text);">4 · Trait-level polarity.</b> Beyond categories, most traits carry their own small psychology vector ("this trait leans +honesty, −warmth"). At pick time that vector is scored against your current combined slider posture: agreeing traits get boosted, conflicting ones suppressed, scaled by Boost strength. So two characters can resolve the same category — say, "Core Want" — and still draw systematically different <i>traits</i> from it depending on posture. The why? panel reports this whenever it applied.</p>
       <p style="margin:0;"><b style="color:var(--text);">5 · Order of authority.</b> When systems disagree: <b>lock</b> beats everything; <b>pin</b> beats sliders for that slot's intensity; archetype blends with (never replaces) your sliders; depth-first derives sliders but leaves any axis its resolved categories don't speak to untouched. Reroll always honours the slot's own current target, and remembers what you've rejected. Every one of these decisions is inspectable per-card via why?.</p>
       <p style="margin:8px 0 0;"><b style="color:var(--text);">6 · Keeping it from going stale.</b> Three controls exist specifically to fight sameness. <b>Avoid recent traits</b> softly penalises anything drawn in your last few characters. <b>Divergence</b> inverts the correlation matrix on a share of category draws, so the system stops optimising toward the most typical member of each cluster — coherence becomes a dial you set rather than a score you're graded on. <b>The one thing that doesn't fit</b> forces a single slot from the far tail of a random category with your slider posture switched off, because real people have exactly one trait that doesn't follow from the others. The sheet also reports <b>distinctiveness</b> against everything you've generated this session, which is a different question from the novelty note (that one only compares you to your last character).</p>
-      <p style="margin:8px 0 0;"><b style="color:var(--text);">Keyboard.</b> <b>Ctrl/&#8984;+Enter</b> generates, <b>Ctrl/&#8984;+Z</b> undoes, <b>R</b> rerolls the card under the pointer, <b>?</b> opens this panel.</p>
+      <p style="margin:8px 0 0;"><b style="color:var(--text);">Keyboard.</b> <b>Ctrl/&#8984;+Enter</b> generates, <b>Ctrl/&#8984;+Z</b> undoes, <b>Shift+Ctrl/&#8984;+Z</b> (or <b>Ctrl/&#8984;+Y</b>) redoes, <b>R</b> rerolls the card under the pointer, <b>?</b> opens this panel. The tab strip takes <b>Left/Right</b>, and the trait search boxes take <b>Up/Down</b>, <b>Enter</b> and <b>Escape</b>.</p>
     </div>
   </details>
   <div id="toastHost" class="toastHost" aria-live="polite"></div>
@@ -58,7 +61,7 @@
   <div id="srAnnounce" class="srOnly" role="status" aria-live="polite" aria-atomic="true"></div>
 
   <div id="view-single" class="viewSection active" role="tabpanel" aria-labelledby="tabSingleBtn">
-    <div class="controls">
+    <div class="controls" id="controlsStart" tabindex="-1">
       <div class="panelHead">
         <h2>Build a character.</h2>
         <p>Fill in what you know. We'll build the rest, one card at a time.</p>
@@ -139,13 +142,13 @@
         <div class="sub" style="margin:6px 0 0;">Sliders left at centre make no statement and add no card. Movement &amp; Bearing derives from your Activeness personality slider — a sedentary character moves like one — and Distinguishing Marks scale with Presence. Same engine as everything else: distance from centre sets intensity, and each card shows its active range.</div>
       </details>
 
-      <div class="row advOnly">
+      <div class="row">
         <div class="field" style="max-width:280px;">
           <label for="seedInput">Seed (optional — reproducible generation)</label>
           <input type="text" id="seedInput" placeholder="leave blank for random">
           <div class="sub" style="margin:4px 0 0;" id="lastSeedReadout">Seed: —</div>
         </div>
-        <div class="field">
+        <div class="field advOnly">
           <label>&nbsp;</label>
           <div class="sub" style="margin:0;">Same seed + same settings = the exact same character, pressure sheet included, shareable as text. Every generation shows the seed it used — paste one back in to replay it. Two deliberate exceptions: rerolls are un-seeded (a reroll is you overriding the dice), and <b>Avoid recent traits</b> takes your last few characters as an input, so a seed only replays exactly with it switched off.</div>
         </div>
@@ -184,7 +187,8 @@
           <div class="field" style="max-width:420px;">
             <label for="constraintTraitSearch">Trait by name</label>
             <input type="text" id="constraintTraitSearch" placeholder="type at least two letters — searches names and descriptions…"
-                   autocomplete="off" oninput="searchTraits('constraintTraitSearch','constraintSearchResults')">
+                   autocomplete="off" oninput="searchTraits('constraintTraitSearch','constraintSearchResults')"
+                   onkeydown="searchKeydown(event,'constraintTraitSearch','constraintSearchResults')" role="combobox" aria-expanded="false" aria-autocomplete="list">
             <div class="searchResults" id="constraintSearchResults" style="display:none;"></div>
             <div class="actionRow" style="margin-top:6px;">
               <button class="btn-secondary" onclick="addTraitConstraint('req')">Always include</button>
@@ -194,10 +198,12 @@
           <div class="field" style="max-width:420px;">
             <label>Mutually exclusive pair</label>
             <input type="text" id="exclusiveA" placeholder="first trait…" autocomplete="off"
-                   oninput="searchTraits('exclusiveA','exclusiveAResults')" aria-label="First trait of the exclusive pair">
+                   oninput="searchTraits('exclusiveA','exclusiveAResults')"
+                   onkeydown="searchKeydown(event,'exclusiveA','exclusiveAResults')" role="combobox" aria-expanded="false" aria-autocomplete="list" aria-label="First trait of the exclusive pair">
             <div class="searchResults" id="exclusiveAResults" style="display:none;"></div>
             <input type="text" id="exclusiveB" placeholder="second trait…" autocomplete="off" style="margin-top:6px;"
-                   oninput="searchTraits('exclusiveB','exclusiveBResults')" aria-label="Second trait of the exclusive pair">
+                   oninput="searchTraits('exclusiveB','exclusiveBResults')"
+                   onkeydown="searchKeydown(event,'exclusiveB','exclusiveBResults')" role="combobox" aria-expanded="false" aria-autocomplete="list" aria-label="Second trait of the exclusive pair">
             <div class="searchResults" id="exclusiveBResults" style="display:none;"></div>
             <button class="btn-secondary" style="margin-top:6px;" onclick="addExclusivePair()">Never both</button>
           </div>
@@ -245,7 +251,8 @@
           <div class="field" style="max-width:420px;">
             <label for="whyNotSearch">Trait name</label>
             <input type="text" id="whyNotSearch" placeholder="type at least two letters…" autocomplete="off"
-                   oninput="searchTraits('whyNotSearch','whyNotResults')">
+                   oninput="searchTraits('whyNotSearch','whyNotResults')"
+                   onkeydown="searchKeydown(event,'whyNotSearch','whyNotResults')" role="combobox" aria-expanded="false" aria-autocomplete="list">
             <div class="searchResults" id="whyNotResults" style="display:none;"></div>
           </div>
           <div class="field">
@@ -302,19 +309,9 @@
           </select>
         </div>
         <div class="field advOnly">
-          <label># of Mannerisms</label>
-          <select id="mannerCount">
-            <option value="1">1</option>
-            <option value="2">2</option>
-            <option value="3" selected>3</option>
-            <option value="4">4</option>
-            <option value="5">5</option>
-            <option value="6">6</option>
-            <option value="7">7</option>
-            <option value="8">8</option>
-            <option value="9">9</option>
-            <option value="10">10</option>
-          </select>
+          <label for="mannerCount"># of Mannerisms</label>
+          <input type="range" id="mannerCount" min="1" max="10" value="3" step="1" oninput="onSliderChange()">
+          <div class="sliderVal" id="mannerCountVal">3</div>
         </div>
         <div class="field advOnly">
           <label for="rarityPref">Trait rarity preference</label>
@@ -325,27 +322,14 @@
       </div>
       <div class="row">
         <div class="field advOnly">
-          <label># of Vocabulary traits</label>
-          <select id="vocabCount">
-            <option value="1">1</option>
-            <option value="2" selected>2</option>
-            <option value="3">3</option>
-            <option value="4">4</option>
-            <option value="5">5</option>
-            <option value="6">6</option>
-            <option value="7">7</option>
-            <option value="8">8</option>
-          </select>
+<label for="vocabCount"># of Vocabulary traits</label>
+          <input type="range" id="vocabCount" min="1" max="8" value="2" step="1" oninput="onSliderChange()">
+          <div class="sliderVal" id="vocabCountVal">2</div>
         </div>
         <div class="field advOnly">
-          <label># of Personality traits shown</label>
-          <select id="personalityCount">
-            <option value="13" selected>All 13</option>
-            <option value="10">10 (random)</option>
-            <option value="7">7 (random)</option>
-            <option value="5">5 (random)</option>
-            <option value="3">3 (random)</option>
-          </select>
+          <label for="personalityCount"># of Personality traits shown</label>
+          <input type="range" id="personalityCount" min="3" max="13" value="13" step="1" oninput="onSliderChange()">
+          <div class="sliderVal" id="personalityCountVal">13 of 13 axes</div>
         </div>
         <div class="field advOnly">
           <label>&nbsp;</label>
@@ -447,7 +431,11 @@
         <div class="row" style="margin-top:10px;">
           <div class="field" style="max-width:160px;">
             <label>Boost strength</label>
-            <input type="number" id="affinityBoost" value="2.5" min="0" max="10" step="0.5" oninput="onSliderChange()">
+            <!-- Was a bare number input with a 400-word explanation attached, in a UI
+                 where every other dial is a slider with a resolved word beside it. -->
+            <input type="range" id="affinityBoost" value="2.5" min="0" max="10" step="0.5" oninput="onSliderChange()">
+            <div class="scaleLabels"><span>Pure random</span><span>Balanced</span><span>Sliders dictate</span></div>
+            <div class="sliderVal" id="affinityBoostVal">2.5</div>
           </div>
           <div class="field" style="max-width:200px;">
             <label for="profileWeight">Profile weight (Motivation, Values, etc.)</label>
@@ -502,6 +490,8 @@
           <span class="actionGroupLabel">Refine</span>
           <div class="actionRow">
             <button class="btn-secondary" onclick="undoLast()" id="undoBtn" disabled>Undo</button>
+            <button class="btn-secondary" onclick="redoLast()" id="redoBtn" disabled title="Step forward again through anything you have undone">Redo</button>
+            <button class="btn-secondary" onclick="duplicateCharacter()" title="Copy this character into the Cast tab so you can keep it while you carry on tweaking this one">Duplicate</button>
             <button class="btn-secondary" onclick="resetAllToDefaults()">↺ Reset to Defaults</button>
             <button class="btn-secondary" onclick="saveCharacter(this)">Save Character</button>
           </div>
@@ -513,7 +503,8 @@
             <button class="btn-secondary" onclick="downloadSheet()">Download .md</button>
             <button class="btn-secondary" onclick="exportCharacterJSON()" title="Full-fidelity save: traits, pins, sliders, constraints, counts and toggles — re-importable exactly as-is">Export .json</button>
             <label class="btn-secondary" style="cursor:pointer;" title="Restore a previously exported .character.json exactly, including the settings that produced it">Import .json<input type="file" accept=".json,application/json" style="display:none;" onchange="importCharacterJSON(this)"></label>
-            <button class="btn-secondary" onclick="window.print()">Print</button>
+            <button class="btn-secondary" onclick="printSheet(false)">Print</button>
+            <button class="btn-secondary" onclick="printSheet(true)" title="One page: the name, the brief, the headline traits and the voice fingerprint — the card you keep at the desk">Print summary</button>
           </div>
         </div>
         <div class="actionGroup advOnly">
@@ -553,7 +544,18 @@
 
     <div class="sheet" id="sheet">
       <div class="handHead"><span>Your hand</span>
-        <span class="handMeter" id="handMeter" hidden><span class="handTrack"><i></i></span><b>—</b></span>
+        <span class="handMeter" id="handMeter" hidden><span class="handTrack"><i></i></span><b>&mdash;</b></span>
+        <!-- After locking eight cards nothing anywhere summarised what that meant for
+             the next Generate. This is that sentence. -->
+        <span class="handKept" id="handKept" hidden></span>
+        <span class="handDensity">
+          <label for="sheetDensity" class="srOnly">Sheet density</label>
+          <select id="sheetDensity" onchange="onDensityChange()" title="How much of the sheet is expanded on arrival. Standard is the behaviour this app has always had.">
+            <option value="summary">Summary</option>
+            <option value="standard" selected>Standard</option>
+            <option value="everything">Everything</option>
+          </select>
+        </span>
       </div>
       <div class="sheetHeader">
         <h2 id="sheetTitle">Character Voice</h2>
@@ -621,6 +623,10 @@
             <button class="btn-primary" onclick="generateCast()">Generate Cast</button>
             <button class="btn-secondary" onclick="copyCast(this)">Copy Cast</button>
             <button class="btn-secondary" onclick="downloadCast()">Download .md</button>
+            <button class="btn-secondary" onclick="exportCastJSON()" title="Round-trips the whole ensemble, re-importable exactly as-is">Export cast .json</button>
+            <label class="btn-secondary" style="cursor:pointer;">Import cast .json
+              <input type="file" accept="application/json,.json" style="display:none;" onchange="importCastJSON(this)">
+            </label>
             <button class="btn-secondary" onclick="checkEnsembleBalance()">⚖ Check Ensemble Balance</button>
             <button class="btn-secondary" onclick="window.print()">Print</button>
           </div>
