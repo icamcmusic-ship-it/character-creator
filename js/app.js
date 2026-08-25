@@ -345,6 +345,21 @@ function voiceSliderWord(id, raw){
   const idx = clamp(Math.round((raw + 100) / 200 * (words.length - 1)), 0, words.length - 1);
   return words[idx];
 }
+/* Range inputs in the mockups are drawn as a filled bar up to the thumb. CSS alone
+   can't read a range's value, so each input carries its own --fill percentage and the
+   track gradient is built from it. Called on every readout update and on input. */
+function paintRangeFill(el){
+  if (!el || el.type !== 'range') return;
+  const min = parseFloat(el.min); const max = parseFloat(el.max);
+  const span = (max - min) || 1;
+  const pct = ((parseFloat(el.value) - min) / span) * 100;
+  el.style.setProperty('--fill', Math.max(0, Math.min(100, pct)) + '%');
+}
+function paintRangeFills(root){
+  (root || document).querySelectorAll('input[type=range]').forEach(paintRangeFill);
+}
+document.addEventListener('input', e => { if (e.target && e.target.type === 'range') paintRangeFill(e.target); }, true);
+
 function setValueText(id, text){
   const el = document.getElementById(id);
   if (el && el.setAttribute) el.setAttribute('aria-valuetext', text);
@@ -354,9 +369,17 @@ function updateSliderReadouts(){
   const vRaw = intVal('verbositySlider', 0);
   const rRaw = intVal('registerSlider', 0);
   const cRaw = intVal('composureSlider', 0);
-  document.getElementById('verbosityVal').textContent = vRaw;
-  document.getElementById('registerVal').textContent = rRaw;
-  document.getElementById('composureVal').textContent = cRaw;
+  // The dial reads as a word, the way the mockups show it — the raw number stays in
+  // the tooltip and in aria-valuetext, where it is still exact but no longer the
+  // loudest thing on the control.
+  [['verbosityVal','verbositySlider',vRaw],['registerVal','registerSlider',rRaw],['composureVal','composureSlider',cRaw]]
+    .forEach(([outId, sliderId, raw])=>{
+      const out = document.getElementById(outId);
+      if (!out) return;
+      out.textContent = voiceSliderWord(sliderId, raw);
+      out.title = String(raw);
+    });
+  paintRangeFills();
   [['verbositySlider',vRaw],['registerSlider',rRaw],['composureSlider',cRaw]].forEach(([id,raw])=>{
     setValueText(id, `${raw} — ${voiceSliderWord(id, raw)}`);
   });
@@ -1599,7 +1622,7 @@ refreshConstraintChips();
 // Live trait count in the tagline — the old hardcoded number went stale every time
 // the pool grew.
 (function(){ const el = document.getElementById('taglineSub');
-  if (el) el.textContent = `Axis-based, per-trait conflict-aware, intensity & rarity-weighted selection from a ${TRAITS.length.toLocaleString()}-trait bank.`; })();
+  if (el) el.textContent = `Build a character, compare a cast, and see how any two would get along. One card at a time, from a ${TRAITS.length.toLocaleString()}-trait bank.`; })();
 // Footer trait count, driven off the live pool the same way — a hardcoded number here
 // previously went stale (and disagreed with the tagline above) every time the pool grew.
 (function(){ const el = document.getElementById('footerTraitCount');
