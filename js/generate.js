@@ -65,9 +65,10 @@ function removeTier(cat){ categoryTiers.delete(cat); refreshConstraintChips(); }
    function draws a single character or a full cast overlay. */
 function radarSVG(profiles, size){
   size = size || 300;
-  // Only the 12 personality codes belong on this chart — AXIS_LABELS also contains
+  // Only the personality codes belong on this chart — AXIS_LABELS also contains
   // voice-polarity codes (volume, formality, pace, mood) used elsewhere, and mixing
-  // them in made the radar read as 16 unrelated spokes.
+  // them in made the radar read as 16 unrelated spokes. Now thirteen spokes, not
+  // twelve: curiosity gained its polarity code and so appears here automatically.
   const axes = Object.values(AXIS_TO_POLCODE);
   const cx = size/2, cy = size/2, R = size/2 - 46;
   let maxV = 1;

@@ -34,7 +34,7 @@ const ctx = loadEngine([
   'rarityTier','rarityWeight','rarityPrefValue','polarityFit','buildContextBias','parseAgeHint',
   'traitBand','CURVE_EXP','clamp','SECTION_COLORS','loudnessCheck','recentPenalty',
   'rememberGeneration','forgetRecentTraits','_drawUnique','_buildUsedIds','explainWhyNot',
-  'MOOD_TAG_STATS','TIER_TAG_STATS','divergenceLevel',
+  'MOOD_TAG_STATS','TIER_TAG_STATS','divergenceLevel','AXES','CROSSLINK_STRENGTH','slotCat','rangeSelect',
 ]);
 const A = ctx.api;
 const T = A.TRAITS;
@@ -335,15 +335,167 @@ check('every context rule names categories that exist', ()=>{
   assert(!bad.length, 'unknown categories in context rules: ' + [...new Set(bad)].join(', '));
 });
 
+group('Coverage invariants');
+// Each of these encodes a bug that shipped: a silently-unmapped axis, a target the
+// picker aimed outside its own pool, a category no code path could reach, and an
+// opposition table with holes. They are cheap and they are the only thing that makes
+// "we fixed it consistently" checkable rather than a claim.
+
+check('every personality axis has a polarity code', ()=>{
+  // curiosity was the missing one, and nothing failed loudly: the pole-tagging pass,
+  // the affinity vector, conflict detection, archetype fidelity and the radar chart
+  // all just quietly skipped it.
+  const missing = A.PERSONALITY_AXES.filter(a=> !A.AXIS_TO_POLCODE[a.id]).map(a=>a.id);
+  assert(!missing.length, 'axes with no polarity code: ' + missing.join(', '));
+  const unlabelled = Object.values(A.AXIS_TO_POLCODE).filter(c=> !A.AXIS_LABELS[c]);
+  assert(!unlabelled.length, 'polarity codes with no label: ' + unlabelled.join(', '));
+  return A.PERSONALITY_AXES.length + ' axes';
+});
+
+check('both poles of every personality axis are polarity-tagged', ()=>{
+  // The real symptom of the missing code: Curiosity's two poles sat at 19% and 2%
+  // tagged while every other pole pair was at 100%.
+  const weak = [];
+  A.PERSONALITY_AXES.forEach(a=>{
+    const code = A.AXIS_TO_POLCODE[a.id];
+    if (!code) return;
+    [a.pos, a.neg].forEach(cat=>{
+      const pool = T.filter(t=>t.category === cat);
+      if (!pool.length) return;
+      const tagged = pool.filter(t=> t.pol && t.pol[code]).length;
+      if (tagged / pool.length < 0.75) weak.push(`${cat} ${tagged}/${pool.length}`);
+    });
+  });
+  assert(!weak.length, 'poles under 75% tagged: ' + weak.join(' | '));
+});
+
+check('a draw never targets outside its own pool', ()=>{
+  /* S1-A: rangeSelect widened its band on COUNT but never checked WHERE the candidates
+     sat, so a target below a pool's minimum left every candidate on one side of it and
+     the proximity falloff went monotonic. Assert on the window rangeSelect actually
+     returns — its centre must lie inside the pool's span, and the eligible slice must
+     have material on both sides of that centre wherever the pool allows. Checking the
+     returned trait instead would prove nothing: the pick always comes from the pool. */
+  const bad = [];
+  A.CATS_BY_SECTION.forEach((cats, section)=>{
+    cats.forEach(cat=>{
+      const pool = A.byFilter(section, cat);
+      if (pool.length < 4) return;
+      let lo = Infinity, hi = -Infinity;
+      pool.forEach(t=>{ const p = A.traitPos(t); if(p<lo)lo=p; if(p>hi)hi=p; });
+      [0, 25, 55, 80, 100].forEach(mag=>{
+        const sel = A.rangeSelect(pool, A.targetFromMag(mag), 4);
+        if (sel.target < lo - 1e-6 || sel.target > hi + 1e-6){
+          bad.push(`${cat}@${mag}: centre ${sel.target.toFixed(2)} outside span [${lo.toFixed(2)}, ${hi.toFixed(2)}]`);
+          return;
+        }
+        /* The collapse signature is a centre sitting clear of ALL its candidates: that
+           is what turns the two-sided falloff monotonic and makes the nearest trait win
+           every draw. A centre that merely lands in a gap between candidates is fine —
+           sparse pools have gaps — so allow a half-position of slack rather than
+           demanding a trait strictly on each side. */
+        const positions = sel.list.map(t=> A.traitPos(t));
+        const lmin = Math.min(...positions), lmax = Math.max(...positions);
+        if (sel.target < lmin - 0.5 || sel.target > lmax + 0.5)
+          bad.push(`${cat}@${mag}: centre ${sel.target.toFixed(2)} clear of all ${sel.list.length} candidates [${lmin.toFixed(2)}, ${lmax.toFixed(2)}]`);
+      });
+    });
+  });
+  assert(!bad.length, bad.length + ' one-sided or out-of-span windows: ' + bad.slice(0,4).join('; '));
+});
+
+check('a thin pool with an unreachable target still spreads its draws', ()=>{
+  /* The regression that matters isn't "does it crash", it's "does it return the same
+     trait every time". Motivation & Wound is drawAll, so its three 20-trait pools
+     appear on EVERY sheet; before the fix The Need returned one trait 81% of the time
+     and five distinct traits in three thousand draws. Assert the distribution, not the
+     mechanism, so any future change to the weighting has to keep the property. */
+  const thin = [['Motivation & Wound','The Need (what would actually help)'],
+                ['Motivation & Wound','The Ghost (who or what it\'s attached to)'],
+                ['Motivation & Wound','The Defence (what they built on top)']];
+  const bad = [];
+  thin.forEach(([sec,cat])=>{
+    const pool = A.byFilter(sec, cat);
+    if (pool.length < 5) return;
+    const counts = new Map();
+    for (let i=0;i<1200;i++){
+      const t = A.pickInRange(pool, 'balanced', A.targetFromMag(62));
+      if (t) counts.set(t.id, (counts.get(t.id)||0)+1);
+    }
+    const top = Math.max(...counts.values()) / 1200;
+    if (counts.size < 8) bad.push(`${cat}: only ${counts.size} distinct in 1200 draws`);
+    if (top > 0.55) bad.push(`${cat}: top trait takes ${(top*100).toFixed(0)}%`);
+  });
+  assert(!bad.length, bad.join('; '));
+});
+
+check('every category is reachable by some pick path', ()=>{
+  /* "Repetitive & Circular" held 48 authored traits that no normal path could draw:
+     AXES named four of its section's five categories. Approximate reachability as
+     "named by AXES, or belongs to a section the generator draws by category" — enough
+     to catch a whole category being orphaned by an incomplete lookup table. */
+  const named = new Set();
+  Object.values(A.AXES).forEach(ax=> named.add(ax.section + '||' + ax.category));
+  const drawnByCategory = new Set(['Vocabulary Traits','Mannerisms','Dialogue Grammar Traits','Appearance']);
+  A.PROFILE_SECTIONS.forEach(ps=> drawnByCategory.add(ps.section));
+  A.PERSONALITY_AXES.forEach(a=> [a.pos,a.neg,a.mid].forEach(c=>{ if(c) named.add('Personality Traits||'+c); }));
+  const orphans = [];
+  A.CATS_BY_SECTION.forEach((cats, section)=>{
+    cats.forEach(cat=>{
+      if (drawnByCategory.has(section)) return;
+      if (named.has(section + '||' + cat)) return;
+      orphans.push(section + ' :: ' + cat);
+    });
+  });
+  assert(!orphans.length, 'unreachable categories: ' + orphans.join(' | '));
+});
+
+check('every profile category is a cross-link target, not only a source', ()=>{
+  // Skeptic and Secure could once only arrive by slider: nothing in WEIGHT_MATRIX
+  // linked into them, so at neutral sliders they were structurally starved.
+  const targets = new Set();
+  const walk = m => Object.entries(m||{}).forEach(([k,v])=>{
+    if (k === 'pos' || k === 'neg') walk(v);
+    else if (v && typeof v === 'object') Object.keys(v).forEach(f=>targets.add(f.toLowerCase()));
+  });
+  Object.values(A.WEIGHT_MATRIX).forEach(walk);
+  const missing = [];
+  A.PROFILE_SECTIONS.forEach(ps=>{
+    if (ps.drawAll) return;   // drawAll sections take every category, so nothing to steer
+    A.catsOf(ps.section).forEach(c=>{
+      if (![...targets].some(f=> c.toLowerCase().includes(f))) missing.push(ps.id + ':' + c);
+    });
+  });
+  assert(!missing.length, 'categories nothing links into: ' + missing.join(' | '));
+});
+
 group('Anti-repetition memory');
 check('a remembered trait is penalised, an unseen one is not', ()=>{
+  // recentPenalty only applies while a build has enabled it, and the flag is resolved
+  // once per build rather than per draw — so drive it through the real path: set the
+  // toggle, run a build, then check. Asserts BOTH directions, because the toggle now
+  // ships on and a test that only checks the off case would have quietly stopped
+  // testing anything the moment that default flipped.
+  const t = T[10], unseen = T[11];
+  const build = () => A.buildCharacterState({verbLevel:0, regLevel:0, compLevel:0,
+    mannerCount:1, vocabCount:1, rarityPref:'balanced', vocabPref:null});
+
+  ctx.document._set('avoidRecentToggle', {checked:false});
   A.forgetRecentTraits();
-  const t = T[10];
   A.rememberGeneration({a:{trait:t}});
-  // recentPenalty only applies while a build has enabled it; the flag lives in the
-  // engine and defaults off, so this asserts the memory itself is wired.
+  build();
   assert(A.recentPenalty(t) === 1, 'penalty applied while the toggle is off');
+
+  ctx.document._set('avoidRecentToggle', {checked:true});
   A.forgetRecentTraits();
+  A.rememberGeneration({a:{trait:t}});
+  build();
+  assert(A.recentPenalty(t) < 1, 'remembered trait was not penalised while the toggle is on');
+  assert(A.recentPenalty(unseen) === 1, 'an unseen trait was penalised');
+
+  A.forgetRecentTraits();
+  ctx.document._set('avoidRecentToggle', {checked:false});
+  return 'both directions';
 });
 
 group('Explanations');

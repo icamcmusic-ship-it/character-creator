@@ -1,0 +1,23 @@
+# The invariant suite only guards what it actually runs against. deploy.yml runs it
+# before publishing main; this runs it on pull requests, so a change is checked before
+# it is merged rather than after.
+name: Tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: node tests/run.js

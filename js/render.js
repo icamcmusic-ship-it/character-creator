@@ -704,6 +704,7 @@ function sheetToHTML(st, meta, pState){
   groupOf(st).forEach((slots, title)=>{
     h += `<h2 style="font-family:Georgia,serif;font-size:1.05em;border-bottom:1px solid #ccc;padding-bottom:2px;margin:16px 0 6px;">${esc(title)}</h2>`;
     slots.forEach(s=>{
+      if (!s || !s.trait) return;   // exhausted pool / older save — skip, don't crash the export
       h += `<p style="margin:6px 0;"><b>${esc(s.trait.trait)}</b> <span style="color:#888;font-size:.85em;">(${esc(s.trait.category)} · intensity ${s.trait.intensity}/5 · ${esc(s.trait.rarity)})</span><br>${esc(s.trait.desc)}<br><i style="color:#555;">"${esc(s.trait.example)}"</i></p>`;
     });
   });
