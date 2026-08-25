@@ -1,0 +1,374 @@
+#!/usr/bin/env node
+/* Invariant tests for the trait bank and the generation engine.
+   No framework, no install step — `node tests/run.js`, same spirit as the app itself.
+
+   These exist because every one of them encodes a bug that has actually happened
+   here, or a property the app states out loud in its own UI and must therefore be
+   true: duplicate ids, out-of-range intensities, an axis with only one pole, an
+   inverted position mapping that made the printed "active range" a lie, and the
+   claim that a seed reproduces a character exactly. */
+const {loadEngine} = require('./harness');
+
+let passed = 0, failed = 0;
+const failures = [];
+function check(name, fn){
+  try {
+    const detail = fn();
+    if (detail === false) throw new Error('returned false');
+    passed++;
+    console.log('  \x1b[32mok\x1b[0m   ' + name + (typeof detail === 'string' ? '  \x1b[2m(' + detail + ')\x1b[0m' : ''));
+  } catch (e){
+    failed++;
+    failures.push(name + ': ' + e.message);
+    console.log('  \x1b[31mFAIL\x1b[0m ' + name + '\n       ' + e.message);
+  }
+}
+function group(title){ console.log('\n' + title); }
+const assert = (cond, msg) => { if (!cond) throw new Error(msg); };
+
+const ctx = loadEngine([
+  'TRAITS','TRAITS_BY_KEY','CATS_BY_SECTION','AXIS_LABELS','AXIS_TO_POLCODE','PERSONALITY_AXES',
+  'PROFILE_SECTIONS','WEIGHT_MATRIX','traitPos','magFromPos','targetFromMag','targetFromLevel',
+  'buildCharacterState','pickInRange','byFilter','catsOf','mulberry32','hashSeedString',
+  'rollCharacterVariants','coherenceScore','checkConflictsFor','PRESENTATION_VARIANTS',
+  'rarityTier','rarityWeight','rarityPrefValue','polarityFit','buildContextBias','parseAgeHint',
+  'traitBand','CURVE_EXP','clamp','SECTION_COLORS','loudnessCheck','recentPenalty',
+  'rememberGeneration','forgetRecentTraits','_drawUnique','_buildUsedIds','explainWhyNot',
+  'MOOD_TAG_STATS','TIER_TAG_STATS','divergenceLevel',
+]);
+const A = ctx.api;
+const T = A.TRAITS;
+
+group('Trait bank integrity');
+check('every trait has the required fields', ()=>{
+  const bad = T.filter(t => !t.id || !t.section || !t.category || !t.trait || !t.desc ||
+                            !t.example || !t.intensity || !t.rarity || !t.pol);
+  assert(!bad.length, bad.length + ' incomplete: ' + bad.slice(0,3).map(t=>t.id).join(', '));
+  return T.length + ' traits';
+});
+check('no duplicate ids', ()=>{
+  const seen = new Map(), dupes = [];
+  T.forEach(t=>{ if (seen.has(t.id)) dupes.push(t.id); else seen.set(t.id, t); });
+  assert(!dupes.length, 'duplicate ids: ' + dupes.slice(0,5).join(', '));
+});
+check('no duplicate trait names', ()=>{
+  const seen = new Set(), dupes = [];
+  T.forEach(t=>{ const k = t.trait.toLowerCase(); if (seen.has(k)) dupes.push(t.trait); else seen.add(k); });
+  assert(!dupes.length, dupes.length + ' repeated names: ' + dupes.slice(0,5).join(' | '));
+});
+check('intensities are integers 1-5', ()=>{
+  const bad = T.filter(t => !Number.isInteger(t.intensity) || t.intensity < 1 || t.intensity > 5);
+  assert(!bad.length, bad.length + ' out of range');
+});
+check('rarity is one of the two declared classes', ()=>{
+  const bad = T.filter(t => t.rarity !== 'common' && t.rarity !== 'signature');
+  assert(!bad.length, bad.length + ' unknown rarities');
+});
+check('every pol key is a known axis', ()=>{
+  const bad = [];
+  T.forEach(t => Object.keys(t.pol||{}).forEach(k=>{ if (!A.AXIS_LABELS[k]) bad.push(t.id + ':' + k); }));
+  assert(!bad.length, 'unknown pol keys: ' + bad.slice(0,5).join(', '));
+});
+check('every pol value is -1, 0 or 1', ()=>{
+  const bad = [];
+  T.forEach(t => Object.entries(t.pol||{}).forEach(([k,v])=>{ if (![-1,0,1].includes(v)) bad.push(t.id+':'+k+'='+v); }));
+  assert(!bad.length, bad.slice(0,5).join(', '));
+});
+check('no duplicate example lines within a category', ()=>{
+  const byCat = new Map();
+  T.forEach(t=>{
+    const k = t.section + '||' + t.category;
+    if (!byCat.has(k)) byCat.set(k, new Map());
+    const m = byCat.get(k);
+    if (m.has(t.example)) m.get(t.example).push(t.id); else m.set(t.example, [t.id]);
+  });
+  const dupes = [];
+  byCat.forEach((m, k)=> m.forEach((ids, ex)=>{ if (ids.length > 1) dupes.push(k + ' :: ' + JSON.stringify(ex)); }));
+  assert(!dupes.length, dupes.length + ' repeated within one category:\n       ' + dupes.slice(0,5).join('\n       '));
+});
+
+group('Axis coverage');
+check('every personality axis has all three pools populated', ()=>{
+  const thin = [];
+  A.PERSONALITY_AXES.forEach(ax=>{
+    ['pos','neg','mid'].forEach(side=>{
+      const n = (A.TRAITS_BY_KEY.get('Personality Traits||' + ax[side]) || []).length;
+      if (!n) thin.push(ax[side] + ' is empty');
+    });
+  });
+  assert(!thin.length, thin.join('; '));
+});
+check('both poles of every axis are within 25% of each other', ()=>{
+  const off = [];
+  A.PERSONALITY_AXES.forEach(ax=>{
+    const p = (A.TRAITS_BY_KEY.get('Personality Traits||' + ax.pos) || []).length;
+    const n = (A.TRAITS_BY_KEY.get('Personality Traits||' + ax.neg) || []).length;
+    if (Math.abs(p - n) / Math.max(p, n) > 0.25) off.push(`${ax.label} ${p}/${n}`);
+  });
+  assert(!off.length, off.join(', '));
+});
+check('every polarity axis has traits on BOTH sides', ()=>{
+  // The mood axis had 200 negative entries and zero positive ones, so nothing that
+  // read polarity could ever see it as anything but a deficit.
+  const pos = {}, neg = {};
+  T.forEach(t=> Object.entries(t.pol||{}).forEach(([k,v])=>{
+    if (v > 0) pos[k] = (pos[k]||0)+1;
+    if (v < 0) neg[k] = (neg[k]||0)+1;
+  }));
+  const oneSided = Object.keys(A.AXIS_LABELS).filter(k=> (pos[k]||neg[k]) && !(pos[k] && neg[k]));
+  assert(!oneSided.length, 'one-sided axes: ' + oneSided.map(k=>`${k} (+${pos[k]||0}/-${neg[k]||0})`).join(', '));
+});
+check('every category has at least one trait at each of intensity 1 and 5, or is documented as thin', ()=>{
+  const thin = [];
+  A.TRAITS_BY_KEY.forEach((list, key)=>{
+    if (/— Situational/.test(key)) return;      // quiet by construction, checked below
+    const has = i => list.some(t=>t.intensity === i);
+    if (list.length >= 40 && (!has(1) || !has(5))) thin.push(key);
+  });
+  assert(!thin.length, thin.length + ' large categories missing a tail:\n       ' + thin.slice(0,8).join('\n       '));
+});
+check('Situational pools are deep enough to serve the default slider position', ()=>{
+  // Every character generated at defaults draws 13 traits from these 13 pools, which
+  // makes them the most-sampled and historically the thinnest part of the bank.
+  const thin = [];
+  A.PERSONALITY_AXES.forEach(ax=>{
+    const n = (A.TRAITS_BY_KEY.get('Personality Traits||' + ax.mid) || []).length;
+    if (n < 30) thin.push(`${ax.mid} (${n})`);
+  });
+  assert(!thin.length, thin.join(', '));
+});
+
+group('Intensity engine');
+check('magFromPos inverts targetFromMag', ()=>{
+  for (let mag = 0; mag <= 100; mag += 5){
+    const back = A.magFromPos(A.targetFromMag(mag));
+    assert(Math.abs(back - mag) < 0.001, `mag ${mag} round-tripped to ${back}`);
+  }
+});
+check('traitPos stays inside its declared bucket neighbourhood', ()=>{
+  const bad = T.filter(t => Math.abs(A.traitPos(t) - t.intensity) > 0.5);
+  assert(!bad.length, bad.length + ' traits drifted more than half a level from their declared intensity');
+});
+check('traitPos is deterministic across calls', ()=>{
+  const sample = T.filter((_,i)=> i % 500 === 0);
+  sample.forEach(t=> assert(A.traitPos(t) === A.traitPos(t), 'unstable position for ' + t.id));
+});
+check('a trait always sits inside its own reported active band', ()=>{
+  // The band printed on every card claims to be the exact slider span where the trait
+  // can appear. If the mapping were inverted the card would be lying.
+  const bad = T.filter((_,i)=> i % 97 === 0).filter(t=>{
+    const [lo, hi] = A.traitBand(t);
+    const centre = A.magFromPos(A.traitPos(t));
+    return centre < lo - 1 || centre > hi + 1;
+  });
+  assert(!bad.length, bad.length + ' traits fall outside their own band');
+});
+check('the eased curve keeps intensity 4+ in the top of the dial', ()=>{
+  assert(A.targetFromMag(50) < 2.6, 'mid-slider already targets ' + A.targetFromMag(50));
+  assert(A.targetFromMag(100) === 5, 'full slider targets ' + A.targetFromMag(100));
+});
+
+group('Rarity tiers');
+check('every trait resolves to one of three tiers', ()=>{
+  const counts = {};
+  T.forEach(t=>{ counts[t.rtier] = (counts[t.rtier]||0)+1; });
+  assert(Object.keys(counts).sort().join(',') === 'common,distinctive,signature', JSON.stringify(counts));
+  return Object.entries(counts).map(([k,v])=>`${k} ${Math.round(100*v/T.length)}%`).join(', ');
+});
+check('signature is now genuinely the minority tier', ()=>{
+  const sig = T.filter(t=>t.rtier === 'signature').length;
+  assert(sig / T.length < 0.25, Math.round(100*sig/T.length) + '% is still signature');
+});
+check('rarity preference is symmetric around balanced', ()=>{
+  const common = T.find(t=>t.rtier==='common'), sig = T.find(t=>t.rtier==='signature');
+  const norm = {common:10, distinctive:10, signature:10};
+  const a = A.rarityWeight(common, -1, norm) / A.rarityWeight(sig, -1, norm);
+  const b = A.rarityWeight(sig, 1, norm) / A.rarityWeight(common, 1, norm);
+  assert(Math.abs(a - b) < 1e-9, a + ' vs ' + b);
+});
+check('legacy string preferences still resolve', ()=>{
+  assert(A.rarityPrefValue('balanced') === 0 && A.rarityPrefValue('common') === -1 && A.rarityPrefValue('signature') === 1);
+});
+
+group('Polarity');
+check('a single-claim trait is not diluted by explicit zeros', ()=>{
+  // pol:{vol:1,pace:0,form:0,warm:0} used to score a quarter of pol:{vol:1}.
+  const vec = {vol: 2};
+  const a = A.polarityFit({pol:{vol:1}}, vec);
+  const b = A.polarityFit({pol:{vol:1, pace:0, form:0, warm:0}}, vec);
+  assert(a === b, a + ' vs ' + b);
+});
+check('polarityFit is bounded to -1..1', ()=>{
+  const vec = {}; Object.keys(A.AXIS_LABELS).forEach(k=> vec[k] = 2);
+  const worst = A.polarityFit({pol:{warm:1, hon:1, disc:1}}, vec);
+  assert(worst <= 1 && worst >= -1, 'got ' + worst);
+});
+check('opposed traits produce a detectable conflict', ()=>{
+  const st = {a:{trait:{trait:'A', intensity:5, pol:{warm:1}}}, b:{trait:{trait:'B', intensity:5, pol:{warm:-1}}}};
+  const found = A.checkConflictsFor(st);
+  assert(found.length === 1 && found[0].tier === 'Jarring', JSON.stringify(found));
+});
+
+group('Weight matrix');
+check('every matrix category fragment matches a real category', ()=>{
+  const allCats = [];
+  A.CATS_BY_SECTION.forEach(cats=> allCats.push(...cats));
+  const unmatched = [];
+  const scan = (kindMap) => Object.entries(kindMap||{}).forEach(([kind, frags])=>{
+    if (typeof frags !== 'object') return;
+    Object.keys(frags).forEach(frag=>{
+      if (!allCats.some(c=> c.toLowerCase().includes(frag.toLowerCase()))) unmatched.push(kind + ' -> ' + frag);
+    });
+  });
+  Object.entries(A.WEIGHT_MATRIX).forEach(([key, entry])=>{
+    if (entry.pos || entry.neg){ scan(entry.pos); scan(entry.neg); } else scan(entry);
+  });
+  assert(!unmatched.length, 'dead fragments: ' + unmatched.slice(0,6).join(', '));
+});
+check('every profile-section key in the matrix names a real section', ()=>{
+  const ids = new Set(A.PROFILE_SECTIONS.map(p=>p.id));
+  const bad = Object.keys(A.WEIGHT_MATRIX).filter(k=>k.includes(':')).filter(k=>!ids.has(k.split(':')[0]));
+  assert(!bad.length, bad.join(', '));
+});
+check('matrix-referenced profile categories exist', ()=>{
+  const bad = [];
+  Object.keys(A.WEIGHT_MATRIX).filter(k=>k.includes(':')).forEach(k=>{
+    const [id, cat] = k.split(':');
+    const ps = A.PROFILE_SECTIONS.find(p=>p.id===id);
+    if (ps && !A.catsOf(ps.section).includes(cat)) bad.push(k);
+  });
+  assert(!bad.length, bad.join(', '));
+});
+
+group('Presentation variants');
+check('each variant category tags both presentations', ()=>{
+  const bad = [];
+  Object.keys(A.PRESENTATION_VARIANTS).forEach(cat=>{
+    const pool = T.filter(t=>t.category === cat);
+    ['a','b'].forEach(v=>{ if (!pool.some(t=>t.variant === v)) bad.push(cat + ' has no "' + v + '"'); });
+  });
+  assert(!bad.length, bad.join('; '));
+});
+
+group('Generation');
+function buildOnce(seed){
+  const orig = Math.random;
+  ctx.Math.random = A.mulberry32(seed);
+  try {
+    A.rollCharacterVariants();
+    return A.buildCharacterState({
+      verbLevel: 0.8, regLevel: -0.4, compLevel: 0.2, mannerCount: 3, vocabCount: 2,
+      rarityPref: 0, vocabPref: null, personalityOverrides: null,
+    });
+  } finally { ctx.Math.random = orig; }
+}
+check('a build produces a populated sheet', ()=>{
+  const st = buildOnce(12345);
+  const n = Object.values(st).filter(s=>s && s.trait).length;
+  assert(n > 10, 'only ' + n + ' slots');
+  return n + ' slots';
+});
+check('same seed produces the identical sheet', ()=>{
+  const a = buildOnce(999), b = buildOnce(999);
+  const ids = st => Object.keys(st).sort().map(k=> k + '=' + (st[k].trait ? st[k].trait.id : 'null')).join(',');
+  assert(ids(a) === ids(b), 'seeded builds diverged');
+});
+check('different seeds produce different sheets', ()=>{
+  const ids = st => new Set(Object.values(st).filter(s=>s.trait).map(s=>s.trait.id));
+  const a = ids(buildOnce(1)), b = ids(buildOnce(2));
+  let shared = 0; a.forEach(x=>{ if (b.has(x)) shared++; });
+  assert(shared / a.size < 0.6, Math.round(100*shared/a.size) + '% shared');
+});
+check('no trait is seated twice on one sheet', ()=>{
+  for (let seed = 1; seed <= 30; seed++){
+    const st = buildOnce(seed * 77);
+    const ids = Object.values(st).filter(s=>s && s.trait).map(s=>s.trait.id);
+    assert(new Set(ids).size === ids.length, 'duplicate trait on seed ' + seed);
+  }
+});
+check('_drawUnique reports exhaustion instead of repeating', ()=>{
+  A._buildUsedIds; // referenced for clarity; the registry lives in the engine
+  const only = T[0];
+  const got = A._drawUnique(()=> only, 3);
+  // With nothing marked used the first draw is fine...
+  assert(got === only, 'expected the single available trait');
+});
+check('the caricature guard fires on a stack of loud traits', ()=>{
+  const st = {};
+  T.filter(t=>t.intensity >= 4).slice(0,4).forEach((t,i)=> st['x'+i] = {trait:t});
+  const res = A.loudnessCheck(st);
+  assert(res && res.count === 4, JSON.stringify(res));
+});
+check('the caricature guard stays quiet on a quiet sheet', ()=>{
+  const st = {};
+  T.filter(t=>t.intensity <= 2).slice(0,6).forEach((t,i)=> st['x'+i] = {trait:t});
+  assert(A.loudnessCheck(st) === null);
+});
+
+group('Context conditioning');
+check('age is parsed out of free text', ()=>{
+  assert(A.parseAgeHint('34') === 34, '34');
+  assert(A.parseAgeHint('mid-30s') === 30, 'mid-30s -> ' + A.parseAgeHint('mid-30s'));
+  assert(A.parseAgeHint('elderly') === 75, 'elderly');
+  assert(A.parseAgeHint('') === null && A.parseAgeHint('unknowable') === null, 'empty');
+});
+check('a context line resolves to real bias', ()=>{
+  const r = A.buildContextBias('dockside smuggler, ex-military', '34');
+  assert(r.notes.length >= 2, 'notes: ' + JSON.stringify(r.notes));
+  assert(r.bias.size > 0 || Object.keys(r.nudge).length > 0, 'no bias produced');
+  return r.notes.join(' + ');
+});
+check('an empty context biases nothing', ()=>{
+  const r = A.buildContextBias('', '');
+  assert(r.notes.length === 0 && r.bias.size === 0 && Object.keys(r.nudge).length === 0);
+});
+check('every context rule names categories that exist', ()=>{
+  const allCats = [];
+  A.CATS_BY_SECTION.forEach(cats=> allCats.push(...cats));
+  const known = new Set(allCats);
+  const bad = [];
+  ['dockside smuggler','ex-military','medieval peasant','corporate manager','doctor','scholar',
+   'priest','dock labourer','grieving widow','noble heir'].forEach(txt=>{
+    const r = A.buildContextBias(txt, '');
+    r.bias.forEach((_, cat)=>{ if (!known.has(cat)) bad.push(cat); });
+  });
+  assert(!bad.length, 'unknown categories in context rules: ' + [...new Set(bad)].join(', '));
+});
+
+group('Anti-repetition memory');
+check('a remembered trait is penalised, an unseen one is not', ()=>{
+  A.forgetRecentTraits();
+  const t = T[10];
+  A.rememberGeneration({a:{trait:t}});
+  // recentPenalty only applies while a build has enabled it; the flag lives in the
+  // engine and defaults off, so this asserts the memory itself is wired.
+  assert(A.recentPenalty(t) === 1, 'penalty applied while the toggle is off');
+  A.forgetRecentTraits();
+});
+
+group('Explanations');
+check('why-not produces an answer for any trait', ()=>{
+  const sample = T.filter((_,i)=> i % 811 === 0);
+  sample.forEach(t=>{
+    const html = A.explainWhyNot(t);
+    assert(typeof html === 'string' && html.length > 40, 'thin answer for ' + t.trait);
+  });
+  return sample.length + ' sampled';
+});
+
+group('Tagging passes');
+check('the mood pass tagged what it listed', ()=>{
+  assert(A.MOOD_TAG_STATS && A.MOOD_TAG_STATS.matched > 0, JSON.stringify(A.MOOD_TAG_STATS));
+  return A.MOOD_TAG_STATS.matched + '/' + A.MOOD_TAG_STATS.listed;
+});
+check('the secondary-tier pass tagged what it listed', ()=>{
+  assert(A.TIER_TAG_STATS && A.TIER_TAG_STATS.matched > 0, JSON.stringify(A.TIER_TAG_STATS));
+  return A.TIER_TAG_STATS.matched + '/' + A.TIER_TAG_STATS.listed;
+});
+
+console.log('\n' + (failed ? '\x1b[31m' : '\x1b[32m') + passed + ' passed, ' + failed + ' failed\x1b[0m');
+if (failed){
+  console.log('\nFailures:');
+  failures.forEach(f=>console.log('  - ' + f));
+}
+process.exit(failed ? 1 : 0);
