@@ -12,6 +12,7 @@ const ASSETS = [
   './js/data/traits-situational.js',
   './js/data/traits-tails.js',
   './js/data/traits-depth.js',
+  './js/data/traits-tailfill2.js',
   './js/engine.js',
   './js/generate.js',
   './js/render.js',
