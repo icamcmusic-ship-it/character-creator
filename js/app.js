@@ -51,9 +51,48 @@ const storage = (function(){
   };
 })();
 
+/* prompt() is unstyleable, sits outside the page's own focus and keyboard handling, and
+   is blocked outright in some embedding contexts — where the three call sites below
+   silently did nothing. One small <dialog> replaces all of them: same shape as prompt
+   (a Promise resolving to the string or null), but it looks like the rest of the app,
+   the field is focused and pre-selected, Escape cancels, and Enter submits. */
+function askForName(message, initial){
+  return new Promise(resolve=>{
+    const dlg = document.createElement('dialog');
+    dlg.className = 'nameDialog';
+    dlg.innerHTML = `
+      <form method="dialog">
+        <label for="nameDialogInput">${escHTML(message)}</label>
+        <input type="text" id="nameDialogInput" autocomplete="off">
+        <div class="nameDialogBtns">
+          <button value="cancel" type="submit">Cancel</button>
+          <button value="ok" type="submit" class="primary">OK</button>
+        </div>
+      </form>`;
+    document.body.appendChild(dlg);
+    const input = dlg.querySelector('#nameDialogInput');
+    input.value = initial || "";
+    let settled = false;
+    const done = (v)=>{ if (settled) return; settled = true; dlg.remove(); resolve(v); };
+    dlg.addEventListener('close', ()=>{
+      // returnValue is "" for Escape as well as for a cancel press
+      done(dlg.returnValue === 'ok' ? (input.value.trim() || null) : null);
+    });
+    // showModal is the whole point (focus trap + Escape); if it is unavailable for any
+    // reason, fall back rather than leaving the caller waiting on a promise forever.
+    if (typeof dlg.showModal === 'function'){
+      dlg.showModal();
+      input.focus(); input.select();
+    } else {
+      const v = (typeof prompt === 'function') ? prompt(message, initial || "") : null;
+      done(v && v.trim() ? v.trim() : null);
+    }
+  });
+}
+
 async function saveCharacter(btnEl){
   if(!Object.keys(state).length){ toast("Generate a character first.", "warn"); return; }
-  const name = charMeta.name || prompt("Name this character voice:");
+  const name = charMeta.name || await askForName("Name this character voice:", "");
   if(!name) return;
   const btn = btnEl || null;
   const oldLabel = btn ? btn.textContent : null;
@@ -77,7 +116,7 @@ async function deleteSavedCharacter(name){
   catch(e){ console.error(e); toast("Could not delete — try again.", "warn"); }
 }
 async function renameSavedCharacter(name){
-  const next = prompt('Rename "'+name+'" to:', name);
+  const next = await askForName('Rename "'+name+'" to:', name);
   if (!next || next === name) return;
   try {
     const r = await storage.get('character:'+name);
@@ -242,10 +281,10 @@ function renderCast(){
     grid.appendChild(card);
   });
 }
-function renameCastMember(i){
+async function renameCastMember(i){
   const c = castStates[i];
   if (!c) return;
-  const next = prompt("Name this cast member:", c.meta.name);
+  const next = await askForName("Name this cast member:", c.meta.name);
   if (!next) return;
   c.meta.name = next;
   renderCast();

@@ -458,6 +458,25 @@
   }
   .emptyPresets button:hover { border-color:var(--golden-deep); color:var(--golden-deep); background:var(--golden-light); }
 
+  /* ---------- Name dialog (replaces prompt) ---------- */
+  .nameDialog {
+    border:1px solid var(--border-strong); border-radius:10px; padding:0;
+    background:var(--panel); color:var(--text); max-width:min(420px, 92vw); width:100%;
+  }
+  .nameDialog::backdrop { background:rgba(34,54,74,.42); }
+  .nameDialog form { padding:18px 20px; display:flex; flex-direction:column; gap:10px; }
+  .nameDialog label { font-size:.88rem; font-weight:600; }
+  .nameDialog input {
+    padding:9px 11px; border:1px solid var(--border-strong); border-radius:6px;
+    font-family:inherit; font-size:.95rem; background:var(--panel2); color:var(--text);
+  }
+  .nameDialogBtns { display:flex; gap:8px; justify-content:flex-end; margin-top:2px; }
+  .nameDialogBtns button {
+    padding:8px 16px; border-radius:6px; cursor:pointer; font-family:inherit; font-size:.85rem;
+    border:1px solid var(--border-strong); background:var(--panel2); color:var(--text);
+  }
+  .nameDialogBtns button.primary { background:var(--dusk-blue); border-color:var(--dusk-blue); color:#fff; }
+
   /* ---------- Summary card ---------- */
   .summaryCard {
     border:1px solid var(--border-strong); border-left:4px solid var(--golden-deep);
