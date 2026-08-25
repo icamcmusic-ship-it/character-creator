@@ -211,6 +211,108 @@ function toggleCompact(){
   document.body.classList.toggle('compact-sheet', !!(on && on.checked));
 }
 
+/* ================= SUMMARY CARD =================
+   A default build produces 37 populated slots, and at profileDepth 4 it passes forty.
+   Collapse and compact both exist but default to expanded, so the first thing a new
+   character presented was five screens of cards with no entry point — the user had to
+   read all of it to learn anything about who this person is.
+
+   Everything here is already computed and already on the page somewhere: the emergent
+   name is in the archetype tag, the fingerprint and coherence are down in the insight
+   panel, the loud traits are the caricature guard's input. What was missing was a place
+   that answers "who is this" in five lines before the detail starts. This is a reading
+   order change, not new analysis.
+
+   Deliberately NOT collapsing every group by default alongside this: that would change
+   how the sheet behaves for people who already use it, and the summary on its own
+   supplies the entry point that was actually missing. */
+function summaryCardHTML(){
+  const slots = Object.values(state).filter(s=> s && s.trait);
+  if (!slots.length) return "";
+
+  const emergent = (typeof emergentArchetypeName === 'function') ? emergentArchetypeName(state) : null;
+  // "Unnamed Character" is the generator's placeholder, not a name the user chose — an
+  // emergent title says far more, so it takes the headline when there is no real name.
+  const named = charMeta.name && charMeta.name !== "Unnamed Character" ? charMeta.name : null;
+  const title = named || (emergent && emergent.name) || "This character";
+  const sub = (emergent && named) ? emergent.name : "";
+
+  // The loudest traits are the sheet's own headline: highest intensity first, and among
+  // equals prefer the deeper sections over a mannerism, since "what they want" carries
+  // further than "taps the table".
+  const weightOfSection = sec =>
+    sec === "Motivation & Wound" ? 3 :
+    (sec === "Personality Traits" || sec === "Values & Moral Line" || sec === "Conflict & Stress Response") ? 2 : 1;
+  const loudest = slots.slice()
+    .sort((a,b)=> (b.trait.intensity - a.trait.intensity)
+               || (weightOfSection(b.trait.section) - weightOfSection(a.trait.section)))
+    .slice(0, 3);
+
+  let h = `<div class="summaryCard">
+    <div class="summaryHead">
+      <div class="summaryName">${escHTML(title)}</div>
+      ${sub ? `<div class="summarySub">${escHTML(sub)}</div>` : ``}
+    </div>`;
+
+  if (loudest.length){
+    h += `<ul class="summaryTraits">` + loudest.map(s=>
+      `<li><b>${escHTML(s.trait.trait)}</b> <span class="summaryCat">${escHTML(s.trait.category)}</span></li>`
+    ).join("") + `</ul>`;
+  }
+
+  const fp = (typeof voiceFingerprint === 'function') ? voiceFingerprint(state, charMeta) : "";
+  if (fp) h += `<div class="summaryVoice">${escHTML(fp)}</div>`;
+
+  const co = (typeof coherenceScore === 'function') ? coherenceScore(state) : null;
+  const bits = [];
+  if (co) bits.push(`Coherence <b>${co.pct}%</b>${co.significant ? ` (${co.lift>=0?'+':''}${co.lift} vs chance)` : ` (within noise)`}`);
+  bits.push(`<b>${slots.length}</b> traits below`);
+  h += `<div class="summaryMeta">${bits.join(" · ")}</div>`;
+
+  const why = whyThisCharacterHTML();
+  if (why) h += why;
+
+  return h + `</div>`;
+}
+
+/* The per-slot "why?" panel is the best thing in the UI and it is per-slot and
+   collapsed: it can tell you why ONE trait arrived but never why this character did.
+   The signals are already resolved during a build — the pushed sliders, the archetype,
+   the resolved profile categories, the context bias — so this is a matter of naming
+   the loudest three rather than computing anything new. */
+function whyThisCharacterHTML(){
+  const drivers = [];
+
+  const pushed = PERSONALITY_AXES
+    .map(a=>{ const el = document.getElementById('pers_'+a.id); return {a, raw: el ? (parseInt(el.value,10)||0) : 0}; })
+    .filter(x=> Math.abs(x.raw) >= 25)
+    .sort((x,y)=> Math.abs(y.raw) - Math.abs(x.raw))
+    .slice(0, 3);
+  pushed.forEach(x=> drivers.push(`<b>${escHTML(x.a.label)}</b> at ${x.raw}`));
+
+  if (charMeta.archetypeLabel && charMeta.archetypeLabel !== "Imported" && !drivers.length)
+    drivers.push(`the <b>${escHTML(charMeta.archetypeLabel)}</b> archetype`);
+
+  if (charMeta.contextNotes && charMeta.contextNotes.length)
+    drivers.push(`context read as <b>${escHTML(charMeta.contextNotes.join(", "))}</b>`);
+
+  // drawAll sections (Motivation & Wound) take one trait from EVERY category, so naming
+  // the first of them as what the section "resolved to" states a choice that was never
+  // made. Only the sections that actually pick a category belong here.
+  const chosen = PROFILE_SECTIONS.filter(ps=> !ps.drawAll).map(ps=>{
+    const c = slotCat(state["prof_"+ps.id+"_0"]);
+    return c ? `${ps.label}: ${c}` : null;
+  }).filter(Boolean);
+  const profBits = chosen.slice(0, 3);
+
+  if (!drivers.length && !profBits.length) return "";
+  let h = `<details class="summaryWhy"><summary>Why this character?</summary><div>`;
+  if (drivers.length) h += `<div>Strongest signals: ${drivers.join("; ")}.</div>`;
+  if (profBits.length) h += `<div style="margin-top:5px;">Resolved to ${escHTML(profBits.join(" · "))}${chosen.length>profBits.length?", and more below":""}. Each of those then biased the ones after it.</div>`;
+  h += `<div class="sub" style="margin-top:6px;">Every individual card has its own <b>why?</b> button with the full reasoning for that one trait.</div>`;
+  return h + `</div></details>`;
+}
+
 function renderSheet(){
   const sheet = document.getElementById('sheet');
   sheet.classList.add('show');
@@ -225,6 +327,7 @@ function renderSheet(){
 
   const body = document.getElementById('sheetBody');
   body.innerHTML = "";
+  body.innerHTML = summaryCardHTML();
   const profGroups = PROFILE_SECTIONS.map(ps=>({
     title: ps.label,
     ids: Object.keys(state).filter(k=>k.startsWith("prof_"+ps.id+"_"))

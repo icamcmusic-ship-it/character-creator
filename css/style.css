@@ -458,6 +458,30 @@
   }
   .emptyPresets button:hover { border-color:var(--golden-deep); color:var(--golden-deep); background:var(--golden-light); }
 
+  /* ---------- Summary card ---------- */
+  .summaryCard {
+    border:1px solid var(--border-strong); border-left:4px solid var(--golden-deep);
+    background:var(--panel2); border-radius:10px; padding:16px 18px; margin:0 0 18px;
+  }
+  .summaryHead { display:flex; flex-wrap:wrap; align-items:baseline; gap:10px; }
+  .summaryName { font-family:var(--font-display); font-size:1.25rem; color:var(--text); }
+  .summarySub { font-size:.85rem; color:var(--golden-deep); font-style:italic; }
+  .summaryTraits { list-style:none; margin:10px 0 0; padding:0; display:grid; gap:4px; }
+  .summaryTraits li { font-size:.92rem; line-height:1.5; }
+  .summaryCat { color:var(--muted); font-size:.78rem; }
+  .summaryVoice {
+    margin-top:11px; padding:9px 12px; border-left:2px solid var(--emerald);
+    background:var(--emerald-light); border-radius:0 6px 6px 0;
+    font-style:italic; line-height:1.65; font-size:.88rem;
+  }
+  .summaryMeta { margin-top:10px; font-size:.78rem; color:var(--muted); font-family:var(--font-mono); }
+  .summaryWhy { margin-top:10px; font-size:.84rem; }
+  .summaryWhy > summary { cursor:pointer; color:var(--dusk-blue); font-weight:600; }
+  .summaryWhy > div { margin-top:7px; line-height:1.65; }
+  body.compact-sheet .summaryVoice { display:none; }
+  @media print { .summaryWhy { display:block !important; } .summaryWhy > div { display:block !important; } }
+  @media (max-width: 600px) { .summaryCard { padding:13px 14px; } .summaryName { font-size:1.1rem; } }
+
   /* ---------- Grouped personality sliders + neutral band ---------- */
   .persGroup { margin-bottom:18px; }
   .persGroupHead {
