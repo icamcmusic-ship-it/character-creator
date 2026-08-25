@@ -470,6 +470,51 @@ check('every profile category is a cross-link target, not only a source', ()=>{
   assert(!missing.length, 'categories nothing links into: ' + missing.join(' | '));
 });
 
+check('at neutral sliders no profile category dominates its section', ()=>{
+  /* With every slider centred, nothing the user did should be steering the result — but
+     resolved-category cross-links were applied at full weight while axis contributions
+     were scaled by slider strength, so the cascade was the only signal in play and it
+     decided the character outright. Measured: Outsider took 29% of a seven-way Social
+     Role split, Disorganized 32% of a four-way Attachment split, and Secure 12% — the
+     last because no cross-link pointed at it at all.
+
+     Assert the property rather than the mechanism, at BOTH ends. The ceiling catches an
+     unscaled cascade; the floor catches the sharper half of the bug, a category nothing
+     links into, which is how Secure and Skeptic ended up structurally starved rather
+     than merely unlucky. Bounds are loose enough to absorb sampling noise at this N and
+     tight enough that the measured pre-fix numbers fail them. */
+  const N = 300;
+  const counts = {};
+  for (let i=0;i<N;i++){
+    const o = {}; A.PERSONALITY_AXES.forEach(a=> o[a.id] = 0);
+    A.rollCharacterVariants();
+    const st = A.buildCharacterState({verbLevel:0, regLevel:0, compLevel:0, mannerCount:2,
+      vocabCount:2, rarityPref:'balanced', vocabPref:null, personalityOverrides:o});
+    A.PROFILE_SECTIONS.forEach(ps=>{
+      if (ps.drawAll) return;
+      const c = A.slotCat(st["prof_"+ps.id+"_0"]);
+      if (c) ((counts[ps.id] = counts[ps.id] || {}))[c] = (counts[ps.id][c]||0) + 1;
+    });
+  }
+  const bad = [];
+  Object.entries(counts).forEach(([id, c])=>{
+    const ps = A.PROFILE_SECTIONS.find(p=>p.id===id);
+    const nCats = A.catsOf(ps.section).length;
+    const total = Object.values(c).reduce((a,b)=>a+b,0);
+    if (!total || nCats < 2) return;
+    const uniform = 1 / nCats;
+    A.catsOf(ps.section).forEach(cat=>{
+      const share = (c[cat] || 0) / total;
+      if (share > uniform * 1.9)
+        bad.push(`${id}:${cat} took ${(share*100).toFixed(0)}% of a ${nCats}-way split (uniform ${(uniform*100).toFixed(0)}%)`);
+      if (share < uniform * 0.55)
+        bad.push(`${id}:${cat} starved at ${(share*100).toFixed(0)}% of a ${nCats}-way split (uniform ${(uniform*100).toFixed(0)}%)`);
+    });
+  });
+  assert(!bad.length, bad.join('; '));
+  return Object.keys(counts).length + ' sections checked';
+});
+
 group('Workspace persistence');
 check('every workspace control survives a capture/restore round-trip', ()=>{
   /* The old preference layer persisted a hand-maintained list of twelve static control

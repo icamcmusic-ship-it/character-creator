@@ -874,17 +874,31 @@ const WEIGHT_MATRIX = {
   // do they hold onto, once the stress response is actually running" — which is a far
   // more interesting output than "they talk faster", and the reason the pressure sheet
   // is no longer voice-only.
+  /* Attachment was decided almost entirely by stress at neutral sliders, and the four
+     stress responses pointed at only three of the four attachment styles: Fight and
+     Freeze BOTH fed Disorganized while Secure was the target of no stress link at all.
+     That is why Disorganized took 32% of a four-way split and Secure 12%. Fight moved
+     onto Secure — meeting a threat head-on is at least as consistent with secure
+     attachment as with disorganized, and it leaves one stress response feeding each
+     style. */
   "stress:Fight (attack the threat)": { vocab:{"Affective & Emotional Intensity":TIER_WEAK},
     role:{"Instigator":TIER_STRONG,"Leader":TIER_MODERATE}, values:{"Self-Interested":TIER_WEAK},
-    attachment:{"Disorganized":TIER_WEAK} },
+    attachment:{"Secure":TIER_WEAK} },
   "stress:Flight (remove yourself)": { grammar:{"Spoken Compression":TIER_WEAK},
     role:{"Outsider":TIER_STRONG}, values:{"Pragmatic & Flexible":TIER_WEAK},
     attachment:{"Avoidant":TIER_STRONG} },
+  /* Same asymmetry as attachment above, in Social Role. Flight and Freeze BOTH fed
+     Outsider while Skeptic and Connector were the target of no stress link at all, so at
+     neutral sliders — where stress is the only signal actually firing — Outsider took
+     24% of a seven-way split and those two sat near 9%. Freeze moved onto Skeptic (a
+     freeze response is watching and doubting rather than acting, which is what the
+     Skeptic role describes) and Fawn gained Connector, social glue being the same
+     impulse as appeasement pointed outward. Every role now has some stress inbound. */
   "stress:Freeze (shut down)": { grammar:{"Disfluencies & Flow":TIER_MODERATE},
-    role:{"Outsider":TIER_MODERATE}, values:{"Pragmatic & Flexible":TIER_WEAK},
+    role:{"Skeptic":TIER_MODERATE}, values:{"Pragmatic & Flexible":TIER_WEAK},
     attachment:{"Disorganized":TIER_MODERATE} },
   "stress:Fawn (appease the threat)": { vocab:{"Pragmatic Focus & Speech Functions":TIER_WEAK},
-    role:{"Peacemaker":TIER_STRONG,"Caretaker":TIER_MODERATE}, values:{"Loyalty-Bound":TIER_MODERATE},
+    role:{"Peacemaker":TIER_STRONG,"Caretaker":TIER_MODERATE,"Connector":TIER_WEAK}, values:{"Loyalty-Bound":TIER_MODERATE},
     attachment:{"Anxious":TIER_STRONG} },
 };
 
