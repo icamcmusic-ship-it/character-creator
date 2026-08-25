@@ -34,7 +34,8 @@ const ctx = loadEngine([
   'rarityTier','rarityWeight','rarityPrefValue','polarityFit','buildContextBias','parseAgeHint',
   'traitBand','CURVE_EXP','clamp','SECTION_COLORS','loudnessCheck','recentPenalty',
   'rememberGeneration','forgetRecentTraits','_drawUnique','_buildUsedIds','explainWhyNot',
-  'MOOD_TAG_STATS','TIER_TAG_STATS','divergenceLevel','AXES','CROSSLINK_STRENGTH','slotCat','rangeSelect',
+  'MOOD_TAG_STATS','TIER_TAG_STATS','divergenceLevel','AXES','CROSSLINK_STRENGTH','slotCat','rangeSelect','captureSettings','restoreSettings',
+  'bannedCategories','requiredTraitIds','exclusivePairs','SETTING_FIELDS','SETTING_TOGGLES',
 ]);
 const A = ctx.api;
 const T = A.TRAITS;
@@ -469,6 +470,61 @@ check('every profile category is a cross-link target, not only a source', ()=>{
   assert(!missing.length, 'categories nothing links into: ' + missing.join(' | '));
 });
 
+group('Workspace persistence');
+check('every workspace control survives a capture/restore round-trip', ()=>{
+  /* The old preference layer persisted a hand-maintained list of twelve static control
+     ids. Everything else was lost on reload: all thirteen personality sliders, the
+     three voice sliders, every sec_/type_/pw_ control (built at runtime, so a static
+     list could never have covered them), and the entire constraint set — the highest
+     effort state in the app. Preferences now serialise through captureSettings /
+     restoreSettings, the same pair the character-export format uses, so this asserts
+     the property both features depend on. */
+  const doc = ctx.document;
+  ['verbositySlider','registerSlider','composureSlider'].forEach(id=> doc._set(id, {value:'0', type:'range'}));
+  A.PERSONALITY_AXES.forEach(a=> doc._set('pers_'+a.id, {value:'0', type:'range'}));
+  A.PROFILE_SECTIONS.forEach(ps=>{
+    doc._set('sec_'+ps.id, {checked:true});
+    doc._set('pw_'+ps.id, {value:'', tagName:'SELECT', options:[{value:''},{value:'70'}]});
+  });
+
+  const axis = A.PERSONALITY_AXES[0], secA = A.PROFILE_SECTIONS[0], secB = A.PROFILE_SECTIONS[1];
+  doc.getElementById('pers_'+axis.id).value = '-80';
+  doc.getElementById('verbositySlider').value = '45';
+  doc.getElementById('pw_'+secA.id).value = '70';
+  doc.getElementById('sec_'+secB.id).checked = false;
+  A.bannedCategories.add('Cruel & Barbed');
+  A.requiredTraitIds.push(T[5].id);
+  A.exclusivePairs.push([T[1].id, T[2].id]);
+
+  const snap = JSON.parse(JSON.stringify(A.captureSettings()));
+
+  // wipe the workspace the way a reload does
+  doc.getElementById('pers_'+axis.id).value = '0';
+  doc.getElementById('verbositySlider').value = '0';
+  doc.getElementById('pw_'+secA.id).value = '';
+  doc.getElementById('sec_'+secB.id).checked = true;
+  A.bannedCategories.clear();
+  A.requiredTraitIds.length = 0;
+  A.exclusivePairs.length = 0;
+
+  A.restoreSettings(snap);
+
+  assert(doc.getElementById('pers_'+axis.id).value === '-80', 'personality slider lost');
+  assert(doc.getElementById('verbositySlider').value === '45', 'voice slider lost');
+  assert(doc.getElementById('pw_'+secA.id).value === '70', 'profile weight lost');
+  assert(doc.getElementById('sec_'+secB.id).checked === false, 'section toggle lost');
+  // restoreSettings REASSIGNS the constraint collections rather than mutating them, so
+  // read them back through a fresh capture — a reference held from before the restore
+  // points at the discarded Set.
+  const after = A.captureSettings().constraints;
+  assert(after.bannedCategories.includes('Cruel & Barbed'), 'banned category lost');
+  assert(after.requiredTraitIds.length === 1, 'required trait lost');
+  assert(after.exclusivePairs.length === 1, 'exclusive pair lost');
+
+  A.restoreSettings({constraints:{}});   // leave the workspace clean for later tests
+  return 'sliders, sections, constraints';
+});
+
 group('Anti-repetition memory');
 check('a remembered trait is penalised, an unseen one is not', ()=>{
   // recentPenalty only applies while a build has enabled it, and the flag is resolved
@@ -517,6 +573,22 @@ check('the secondary-tier pass tagged what it listed', ()=>{
   assert(A.TIER_TAG_STATS && A.TIER_TAG_STATS.matched > 0, JSON.stringify(A.TIER_TAG_STATS));
   return A.TIER_TAG_STATS.matched + '/' + A.TIER_TAG_STATS.listed;
 });
+
+/* Bank figures, printed every run. Comments across the codebase cited the bank size as
+   6,452 / 4,358 / 2,094 / 1,900 / 1,649 / 1,400 at various points, all of them stale and
+   none of them agreeing. Printing the live numbers where they are read on every test run
+   is cheaper than a doc-generation step and harder to ignore than a comment. */
+(function bankStats(){
+  const bySection = new Map(), byRarity = {};
+  T.forEach(t=>{
+    bySection.set(t.section, (bySection.get(t.section)||0)+1);
+    byRarity[t.rarity] = (byRarity[t.rarity]||0)+1;
+  });
+  let cats = 0; A.CATS_BY_SECTION.forEach(c=> cats += c.length);
+  console.log('\n\x1b[2mBank: ' + T.length.toLocaleString() + ' traits · ' + bySection.size +
+    ' sections · ' + cats + ' categories · ' +
+    Object.entries(byRarity).map(([k,v])=>v.toLocaleString()+' '+k).join(' / ') + '\x1b[0m');
+})();
 
 console.log('\n' + (failed ? '\x1b[31m' : '\x1b[32m') + passed + ' passed, ' + failed + ' failed\x1b[0m');
 if (failed){

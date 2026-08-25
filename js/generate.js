@@ -204,7 +204,7 @@ function archetypeFidelity(st, arch){
   return Math.round(100 * score / total);
 }
 
-/* Generation is synchronous over a 6,452-trait bank with per-trait position maths, and
+/* Generation is synchronous over a 7,073-trait bank with per-trait position maths, and
    on a slow phone that is a visible freeze with nothing on screen to explain it. Paint
    a skeleton first, then do the work on the next frame. The real build stays available
    as a plain synchronous call (runGeneration) for the paths that need to act on the

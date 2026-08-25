@@ -1331,10 +1331,10 @@ function applyAdvancedMode(){
 
 /* ================= TRAIT SEARCH =================
    BUG FIX: the constraint autocomplete was a <datalist> built from TRAITS.slice(0,
-   4000) — of a pool that is now 6,452 — so everything from id 90000 up was invisible.
+   4000) — of a pool that is now 7,073 — so everything from id 90000 up was invisible.
    That is the entire supplement series: precisely the intensity-1/4/5 material added
    to fix "the sliders feel grouped", and users could not ban or require any of it.
-   A 6,452-option datalist is also a lot of DOM for a control nobody can scroll.
+   A 7,073-option datalist is also a lot of DOM for a control nobody can scroll.
    This is a debounced search over trait + description, showing the category, capped
    at a readable number of results and drawing from the WHOLE pool. */
 let _searchTimer = null;

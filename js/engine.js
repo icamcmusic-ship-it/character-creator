@@ -9,7 +9,7 @@ const AXES = {
   circular:      {section:"Verbosity Traits", category:"Repetitive & Circular"},
 };
 // ---------- Indexed lookups (built once) ----------
-// TRAITS has ~1900 entries and every pick used to re-scan the whole array with
+// TRAITS has ~7,000 entries and every pick used to re-scan the whole array with
 // .filter(). Build the two maps a lookup actually needs, once, at load.
 const TRAITS_BY_KEY = new Map();      // "section||category" -> trait[]
 const CATS_BY_SECTION = new Map();    // section -> category[] (first-seen order)
@@ -88,7 +88,7 @@ const PRESENTATION_VARIANTS = {
    Tagged conservatively by pattern — only unambiguous symptom-shaped names, which
    deliberately excludes adjectival forms like "Adventure-seeking" or "Principled
    truth-teller" that read as dispositions despite similar morphology. This catches
-   the clearest cases rather than guessing at 1,400 traits; broadening it is a
+   the clearest cases rather than guessing across the whole bank; broadening it is a
    dedicated data pass, not something a regex should be trusted to finish.
 
    Effect: secondary traits are progressively down-weighted as the intensity target
@@ -523,7 +523,7 @@ function bandHalf(){
   if (_bandHalfMemo !== null) return _bandHalfMemo;
   if (!_rangeFocusEl) _rangeFocusEl = document.getElementById('rangeFocus');
   const el = _rangeFocusEl;
-  const focus = el ? clamp(parseFloat(el.value), 0, 1) : 0.62;
+  const focus = clamp(floatVal(el, 0.62), 0, 1);
   return (_bandHalfMemo = 1.35 - 1.0 * focus); // 1.35 (loose) .. 0.35 (tight)
 }
 
@@ -879,10 +879,16 @@ const WEIGHT_MATRIX = {
 // Guarded: this is called from pickCategoryWeighted, which runs on every category
 // draw, including from code paths that have no DOM at all (tests, and any future
 // headless use). An unguarded dereference here took the whole build down.
-function AFFINITY(){
-  const el = document.getElementById('affinityBoost');
-  return el ? (parseFloat(el.value) || 0) : 2.5;
+// `parseFloat(el.value) || 0` read an emptied number field as 0, which for this dial
+// means "switch off all category steering" — a silent, invisible mode change from a
+// cleared input. Fall back to the default the same way intVal does.
+function floatVal(idOrEl, fallback){
+  const el = typeof idOrEl === 'string' ? document.getElementById(idOrEl) : idOrEl;
+  if (!el) return fallback;
+  const n = parseFloat(el.value);
+  return Number.isFinite(n) ? n : fallback;
 }
+function AFFINITY(){ return floatVal('affinityBoost', 2.5); }
 
 function persLevel(id, overrides){
   const raw = (overrides && overrides[id] !== undefined) ? overrides[id] : (()=>{
@@ -955,11 +961,44 @@ function polFitNote(t){
 }
 
 // Returns a short human sentence explaining why this slot landed where it did.
+/* The comment on rangeSelect has always claimed `widened` is "surfaced in the UI so a
+   sparse category is visible as a data gap rather than silently behaving like a loose
+   one". It never was — nothing read the flag. Now that rangeSelect also reports when it
+   had to CLAMP a target into the pool's span, both facts matter enough to say out loud:
+   a clamped target means the pool has no content at the intensity you asked for, and
+   the honest response is to show that rather than to quietly serve the nearest thing.
+
+   Recomputed here rather than threaded through every pick site: the slot already knows
+   its pool and its target, so this is the same question asked again, not a second
+   source of truth. */
+function dataGapNote(s){
+  if (!s || !s.trait || s.target === undefined || s.target === null) return "";
+  const pool = byFilter(s.trait.section, s.trait.category);
+  if (pool.length < 2) return "";
+  const sel = rangeSelect(pool, s.target, 4);
+  if (!sel.clamped && !sel.widened) return "";
+  const bits = [];
+  if (sel.clamped){
+    let lo = Infinity, hi = -Infinity;
+    pool.forEach(t=>{ const p = traitPos(t); if(p<lo)lo=p; if(p>hi)hi=p; });
+    const edge = s.target < lo ? `floor of ${lo.toFixed(2)}` : `ceiling of ${hi.toFixed(2)}`;
+    bits.push(`your target of <b>${s.target.toFixed(2)}</b> is outside this category's ${edge}, so the draw was clamped to the nearest end`);
+  }
+  if (sel.widened) bits.push(`the eligible band had to be widened to find enough candidates`);
+  return `<div class="whyExcl"><b>Data gap.</b> ${bits.join(", and ")}. This category is thin at the intensity you asked for — the pick is the closest available, not an exact match.</div>`;
+}
+
 function explainPick(slotId, s){
+  const gap = dataGapNote(s);
+  return gap + _explainPickInner(slotId, s);
+}
+
+function _explainPickInner(slotId, s){
   if (!s || !s.trait) return "";
   const cat = s.trait.category;
   const currentProfileCats = {};
-  PROFILE_SECTIONS.forEach(ps=>{ const p = state["prof_"+ps.id+"_0"]; if (p) currentProfileCats[ps.id] = p.trait.category; });
+  // slotCat: prof_ slots can hold trait:null, same guard as everywhere else.
+  PROFILE_SECTIONS.forEach(ps=>{ const c = slotCat(state["prof_"+ps.id+"_0"]); if (c) currentProfileCats[ps.id] = c; });
 
   const pinNote = pinnedTargets[slotId] !== undefined
     ? `<div class="whyExcl" style="border-left-color:var(--golden-deep); background:rgba(184,134,11,.08);"><b>Pinned</b> at intensity <b>${pinnedTargets[slotId].toFixed(1)}</b> — this overrides whatever the sliders below would otherwise target. Unpin to let it follow them again.</div>`
@@ -1111,7 +1150,7 @@ function boostedMannerCats(compLevel, regLevel, profileCats, overrides){
 
 // ---------- Weighted random helpers ----------
 
-// The trait bank skews ~2:1 toward "signature" over "common" (4,358 vs 2,094). With a
+// The trait bank skews ~2:1 toward "signature" over "common" (4,742 vs 2,331). With a
 // flat per-trait weight of 1, "Balanced" silently inherited that skew — even a balanced
 // pick drew mostly signature material, and "Favor common" was pulling a 3x multiplier
 // against a pool where common was already the minority, so it under-delivered.
@@ -1123,11 +1162,11 @@ function boostedMannerCats(compLevel, regLevel, profileCats, overrides){
 // a lot from the global mix, so a single global divisor over- or under-corrects
 // depending on which category is being sampled.
 /* ================= THREE RARITY TIERS =================
-   The bank declares only two classes and 68% of it is "signature" (4,358 vs 2,094).
+   The bank declares only two classes and 67% of it is "signature" (4,742 vs 2,331).
    When two thirds of everything is billed as sharply defining, nothing is: the badge
    stopped carrying information long before the pool got this big.
 
-   Derive a third tier instead of re-tagging 6,452 entries by hand. The rule is a
+   Derive a third tier instead of re-tagging 7,073 entries by hand. The rule is a
    single readable claim — a signature trait is one that is both distinctive AND loud
    enough to actually define the voice — so:
 
@@ -1446,7 +1485,7 @@ const AXIS_TO_POLCODE = {
 };
 /* ================= PERSONALITY POLE POLARITY =================
    The trait-level affinity system reads `pol`, and 54% of Personality Traits — the
-   largest section in the bank, 1,649 entries — carried an empty vector. That is the
+   largest section in the bank, 2,013 entries — carried an empty vector. That is the
    section where posture SHOULD bite hardest, and it was the section the mechanism
    could least see: within "Honesty — Deceptive & Evasive", an untagged majority was
    drawn essentially at random with respect to how far the user had pushed Honesty.
@@ -1535,9 +1574,7 @@ function liveAxisVector(overrides){
 // from the same "Boost strength" dial that already scales category-level boosting —
 // one dial, two effects, both meaning "how hard do sliders steer content."
 function affinityStrength(){
-  const el = document.getElementById('affinityBoost');
-  const v = el ? parseFloat(el.value) || 0 : 2.5;
-  return v * 0.16;
+  return floatVal('affinityBoost', 2.5) * 0.16;   // see AFFINITY() on the fallback
 }
 
 // -1..1: how well a trait's own declared polarity agrees with the current combined
@@ -2748,12 +2785,14 @@ function _drawUnique(fn, tries){
    draw. It is labelled as what it is, so nobody mistakes it for a system failure. */
 const WILDCARD_SECTIONS = ["Personality Traits","Mannerisms","Vocabulary Traits","Habits & Vices","Humor Style","Verbosity Traits","Dialogue Grammar Traits"];
 function pickWildcardSlot(rarityPref){
-  const sections = WILDCARD_SECTIONS.filter(s => catsOf(s).length);
-  if (!sections.length) return null;
-  const section = sections[Math.floor(Math.random()*sections.length)];
-  const cats = catsOf(section).filter(c => byFilter(section, c).length);
-  if (!cats.length) return null;
-  const cat = cats[Math.floor(Math.random()*cats.length)];
+  /* Picking a uniform SECTION and then a uniform CATEGORY within it weighted the draw
+     by how finely a section happens to be subdivided, not by how much content it holds:
+     a Mannerism category came up at 1/84 while a Verbosity one came up at 1/35, for no
+     reason anyone chose. Flatten to a single uniform draw over all eligible categories. */
+  const pairs = [];
+  WILDCARD_SECTIONS.forEach(s=> catsOf(s).forEach(c=>{ if (byFilter(s, c).length) pairs.push([s, c]); }));
+  if (!pairs.length) return null;
+  const [section, cat] = pairs[Math.floor(Math.random()*pairs.length)];
   // Far tail, either end — an outlier can be a startlingly quiet thing as easily as
   // a loud one. Affinity is suppressed for the draw so posture can't sand it down.
   const target = Math.random() < 0.75 ? 4.6 : 1.2;
