@@ -35,7 +35,7 @@ const ctx = loadEngine([
   'traitBand','CURVE_EXP','clamp','SECTION_COLORS','loudnessCheck','recentPenalty',
   'rememberGeneration','forgetRecentTraits','_drawUnique','_buildUsedIds','explainWhyNot',
   'MOOD_TAG_STATS','TIER_TAG_STATS','divergenceLevel','AXES','CROSSLINK_STRENGTH','slotCat','rangeSelect','captureSettings','restoreSettings',
-  'bannedCategories','requiredTraitIds','exclusivePairs','SETTING_FIELDS','SETTING_TOGGLES','validateSheetPayload','compressSlots','expandSlots','TRAITS_BY_ID',
+  'bannedCategories','requiredTraitIds','exclusivePairs','SETTING_FIELDS','SETTING_TOGGLES','validateSheetPayload','compressSlots','expandSlots','TRAITS_BY_ID','emergentArchetypeName',
 ]);
 const A = ctx.api;
 const T = A.TRAITS;
@@ -584,6 +584,63 @@ check('undo round-trips a sheet without losing or duplicating traits', ()=>{
   const empties = A.expandSlots(A.compressSlots({a:null, b:{trait:null}}));
   assert(empties.a === null && empties.b.trait === null, 'empty slots did not survive');
   return before.length + ' slots';
+});
+
+check('emergent names are deterministic per profile and varied across profiles', ()=>{
+  /* The name keyed off two of the seven profile facts, and the exact-name table hit on
+     400 rolls out of 400 — so the compositional branch was unreachable and Humor and
+     Vices, the two most texture-carrying facts, could never affect the name. 400
+     characters produced 35 distinct names. Assert both halves of the fix: the same
+     sheet must still always show the same name, and the spread must stay wide. */
+  const mk = (over) => {
+    const o = {}; A.PERSONALITY_AXES.forEach(a=> o[a.id] = 0);
+    A.rollCharacterVariants();
+    return A.buildCharacterState({verbLevel:0, regLevel:0, compLevel:0, mannerCount:2,
+      vocabCount:2, rarityPref:'balanced', vocabPref:null, personalityOverrides:Object.assign(o, over||{})});
+  };
+  const st = mk();
+  const first = A.emergentArchetypeName(st);
+  for (let i=0;i<5;i++){
+    const again = A.emergentArchetypeName(st);
+    assert(again && first && again.name === first.name,
+      `same sheet named differently: "${first && first.name}" then "${again && again.name}"`);
+  }
+
+  const names = new Map();
+  for (let i=0;i<250;i++){
+    const n = A.emergentArchetypeName(mk());
+    if (n) names.set(n.name, (names.get(n.name)||0)+1);
+  }
+  const top = Math.max(...names.values());
+  assert(names.size >= 100, `only ${names.size} distinct names in 250 characters`);
+  assert(top / 250 < 0.12, `one name took ${(top/250*100).toFixed(0)}% of 250 characters`);
+  return names.size + ' distinct in 250';
+});
+
+check('the caricature guard responds to the character, not the slider position', ()=>{
+  /* A flat "three or more loud traits" threshold made this a readout of where the
+     sliders were: 0/400 at neutral and 400/400 at extreme, mean 16.7 loud traits. It now
+     scores against what these settings should have produced. The property: it must fire
+     sometimes at neutral (where three loud traits really is the tail) and must NOT fire
+     routinely at the extremes (where loud is what was asked for). */
+  const run = (v) => {
+    let fired = 0;
+    const N = 300;
+    for (let i=0;i<N;i++){
+      const o = {}; A.PERSONALITY_AXES.forEach(a=> o[a.id] = v ? (i%2 ? v : -v) : 0);
+      A.rollCharacterVariants();
+      const st = A.buildCharacterState({verbLevel: v/50*(i%2?1:-1), regLevel:0, compLevel:0,
+        mannerCount:3, vocabCount:2, rarityPref:'balanced', vocabPref:null, personalityOverrides:o});
+      if (A.loudnessCheck(st)) fired++;
+    }
+    return fired / N;
+  };
+  const neutral = run(0), extreme = run(100);
+  assert(neutral > 0 && neutral < 0.20,
+    `at neutral sliders the guard fired on ${(neutral*100).toFixed(1)}% of sheets — it should flag the tail, not nothing and not everything`);
+  assert(extreme < 0.20,
+    `at extreme sliders the guard fired on ${(extreme*100).toFixed(1)}% of sheets — loud is what was asked for there`);
+  return `neutral ${(neutral*100).toFixed(1)}%, extreme ${(extreme*100).toFixed(1)}%`;
 });
 
 group('Anti-repetition memory');

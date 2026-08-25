@@ -667,6 +667,19 @@ function rangeSelect(pool, target, minCount){
 // by construction, so precision buys nothing and the concentration just made slider 0
 // return the same few traits — measured: 6 distinct in 50 rolls even after the pool
 // grew. A gentler exponent there trades precision (irrelevant) for variety (the point).
+/* The proximity component of the draw weight, factored out so the picker and anything
+   that needs to REASON about the picker (expectedLoudCount) share one definition rather
+   than keeping two that drift. Rarity, tier, affinity and recency stay in pickInRange:
+   they are per-draw context, not a property of the window. */
+function proximityWeights(list, centre, half, flatten){
+  const exp = flatten ? 0.8 : clamp(0.9 + list.length/40, 0.9, 2.4);
+  const floor = flatten ? 0.03 : (0.03 + 0.9/Math.max(4, list.length));
+  return list.map(t => {
+    const d = Math.abs(traitPos(t) - centre) / half;      // 0 at centre, 1 at edge
+    return floor + Math.pow(1 - Math.min(d, 0.9999), exp); // smooth falloff
+  });
+}
+
 function pickInRange(pool, rarityPref, target, minCount, flatten){
   if (!pool || !pool.length) return null;
   if (target === undefined || target === null) return pickWeighted(pool, rarityPref);
@@ -684,13 +697,10 @@ function pickInRange(pool, rarityPref, target, minCount, flatten){
      of candidates in the band there is nothing left to vary. Scale both with pool
      size: small pools flatten and lift their tail automatically, large ones keep the
      precision they were tuned for. */
-  const exp = flatten ? 0.8 : clamp(0.9 + list.length/40, 0.9, 2.4);
-  const floor = flatten ? 0.03 : (0.03 + 0.9/Math.max(4, list.length));
   const norm = rarityNorm(list);
-  const weights = list.map(t => {
-    const d = Math.abs(traitPos(t) - centre) / half;      // 0 at centre, 1 at edge
-    const prox = Math.pow(1 - Math.min(d, 0.9999), exp);  // smooth falloff
-    let w = (floor + prox) * rarityWeight(t, rarityPref, norm) * tierWeight(t, centre);
+  const prox = proximityWeights(list, centre, half, flatten);
+  const weights = list.map((t, i) => {
+    let w = prox[i] * rarityWeight(t, rarityPref, norm) * tierWeight(t, centre);
     if (aff > 0 && CURRENT_AFFINITY_VEC){
       const fit = polarityFit(t, CURRENT_AFFINITY_VEC); // -1..1, 0 if untagged
       if (fit) w *= clamp(1 + aff*fit, 0.15, 3);
@@ -2024,6 +2034,21 @@ const ARCH_NOUN = {
   "Fight (attack the threat)":["Fighter"], "Flight (remove yourself)":["Runner"],
   "Freeze (shut down)":["Stillness"], "Fawn (appease the threat)":["Appeaser"],
   "Connector":["Connector","Bridge","Networker"],
+  /* Only Role and Stress supplied nouns, so every composed name had the same shape and
+     the four other profile facts could contribute an adjective at most. Values,
+     Attachment, Humor and Vices now supply nouns too. */
+  "Rigid & Principled":["Zealot","Absolutist","Oath-Keeper"], "Pragmatic & Flexible":["Operator","Fixer","Broker"],
+  "Loyalty-Bound":["Retainer","Hand","Sworn Friend"], "Self-Interested":["Opportunist","Climber","Free Agent"],
+  "Idealistic & Visionary":["Believer","Visionary","Dreamer"],
+  "Secure":["Anchor","Constant"], "Anxious":["Worrier","Hoverer"],
+  "Avoidant":["Recluse","Absentee"], "Disorganized":["Weathervane","Contradiction"],
+  "Dry & Deadpan":["Straight Face","Dry Wit"], "Self-Deprecating":["Punchline","Apologist"],
+  "Cruel & Barbed":["Blade","Needler"], "Warm & Playful":["Warmth","Delight"],
+  "Absurd & Chaotic":["Riot","Loose Cannon"], "Humorless & Absent":["Stone Face","Sober Judge"],
+  "Intellectual & Wordplay":["Wordsmith","Punster"],
+  "Substance & Consumption":["Drinker","Indulgent"], "Compulsion & Ritual":["Ritualist","Counter"],
+  "Risk & Escape":["Gambler","Bolter"], "Restraint & Discipline":["Ascetic","Abstainer"],
+  "Avoidance & Procrastination":["Postponer","Deferrer"],
 };
 // Deterministic when a seed is given (mulberry32 PRNG off a string hash), otherwise
 // falls back to Math.random(). Lets any caller opt into repeatable output — e.g. the
@@ -2046,18 +2071,46 @@ function emergentArchetypeName(st){
   const catOf = id => slotCat(st["prof_"+id+"_0"]);
   const values = catOf("values"), role = catOf("role"), stress = catOf("stress");
   const attach = catOf("attachment"), humor = catOf("humor"), vices = catOf("vices");
-  if (values && role && ARCH_NAMES[values+"|"+role]) return {name:ARCH_NAMES[values+"|"+role], exact:true};
-  if (stress && role && ARCH_NAMES[stress+"|"+role]) return {name:ARCH_NAMES[stress+"|"+role], exact:true};
-  if (attach && role && ARCH_NAMES[attach+"|"+role]) return {name:ARCH_NAMES[attach+"|"+role], exact:true};
-  // compose — seeded off the actual chosen categories, so the same profile always
-  // composes the same name instead of re-rolling a different one on every render.
+  /* The name keyed off Values+Role, then Stress+Role, then Attachment+Role. Measured
+     over 400 characters: the exact table hit 400 times out of 400, so the compositional
+     branch below was unreachable in practice and the name depended on exactly two of
+     the seven profile facts. Humor and Vices — the two that carry the most texture —
+     could never affect it. 400 characters produced 35 distinct names.
+
+     The hand-written exact names are better writing than anything composition produces,
+     so they keep priority; they just no longer take every single roll. The coin is
+     seeded on the WHOLE profile, so it stays deterministic per character (the same
+     sheet always shows the same name) while two characters who share Values and Role
+     but differ in Humor or Vices can now diverge. */
   const seed = [values, role, stress, attach, humor, vices].filter(Boolean).join("|");
+  const exactName = (values && role && ARCH_NAMES[values+"|"+role])
+                 || (stress && role && ARCH_NAMES[stress+"|"+role])
+                 || (attach && role && ARCH_NAMES[attach+"|"+role])
+                 || null;
+
   const adjSrc = [values, attach, humor, vices, stress].filter(c=>c && ARCH_ADJ[c]);
-  const nounSrc = [role, stress].filter(c=>c && ARCH_NOUN[c]);
-  if (adjSrc.length && nounSrc.length){
-    return {name:"The " + pickFrom(ARCH_ADJ[pickFrom(adjSrc, seed+"a")], seed+"a2") + " " + pickFrom(ARCH_NOUN[pickFrom(nounSrc, seed+"n")], seed+"n2"), exact:false};
+  const nounSrc = [role, stress, values, attach, humor, vices].filter(c=>c && ARCH_NOUN[c]);
+  const composed = (()=>{
+    if (adjSrc.length && nounSrc.length){
+      const adj  = pickFrom(ARCH_ADJ[pickFrom(adjSrc, seed+"a")], seed+"a2");
+      const noun = pickFrom(ARCH_NOUN[pickFrom(nounSrc, seed+"n")], seed+"n2");
+      // "The Barbed Blade" — an adjective and noun from the same category is a tautology
+      if (adj.toLowerCase() === noun.toLowerCase()) return null;
+      return "The " + adj + " " + noun;
+    }
+    if (nounSrc.length) return "The " + pickFrom(ARCH_NOUN[pickFrom(nounSrc, seed+"n")], seed+"n2");
+    return null;
+  })();
+
+  if (exactName && composed) {
+    // 45/55 toward the exact table: it is the better-written half, but not so dominant
+    // that composition goes back to being dead code.
+    return seededRandom(seed + "pick")() < 0.45
+      ? {name: exactName, exact: true}
+      : {name: composed, exact: false};
   }
-  if (nounSrc.length) return {name:"The " + pickFrom(ARCH_NOUN[pickFrom(nounSrc, seed+"n")], seed+"n2"), exact:false};
+  if (exactName) return {name: exactName, exact: true};
+  if (composed) return {name: composed, exact: false};
   return null;
 }
 
@@ -2232,16 +2285,89 @@ function coherenceScore(st){
    character who is loud in four different directions at once, which is the single most
    common way a generated sheet stops reading as a person. Advisory, like the budget —
    but stated at the level where the problem actually exists. */
+/* A flat "three or more loud traits" threshold made this a readout of where the sliders
+   were sitting, not a fact about the character: measured over 400 sheets it fired 0/400
+   at neutral sliders and 400/400 at extreme ones, mean 16.7 loud traits. At the top of
+   the range a loud sheet is what was ASKED for, and warning about it every time trains
+   the user to ignore the panel; at the bottom, three loud traits is genuinely unusual
+   and got no warning at all.
+
+   Score against what this sheet's own settings should have produced instead. Every slot
+   carries the target it was drawn against, and the eligible window around that target is
+   recoverable, so the share of that window sitting at intensity 4+ is the per-slot
+   probability of a loud draw. Summing those gives the expected loud count for these
+   exact settings — the same "compare against a chance baseline" technique coherenceScore
+   already uses. Then the warning means "louder than you asked for", which is a fact
+   about the character, at any slider position. */
+function expectedLoudCount(st){
+  let expected = 0, variance = 0, measurable = 0;
+  Object.values(st || {}).forEach(s=>{
+    if (!s || !s.trait || s.target === undefined || s.target === null) return;
+    const pool = byFilter(s.trait.section, s.trait.category);
+    if (pool.length < 2) return;
+    const sel = rangeSelect(pool, s.target, 4);
+    const {list} = sel;
+    if (!list.length) return;
+    /* Weight by the same proximity kernel the picker uses, not uniformly over the
+       window: a uniform estimate counted every trait in a widened band equally and so
+       overstated the expected loudness by more than half at the top of the sliders
+       (29 against a measured 18.6), which is exactly where the warning most needed to
+       be calibrated. */
+    const w = proximityWeights(list, sel.target, sel.half, false);
+    const total = w.reduce((a,b)=>a+b, 0);
+    if (!total) return;
+    // position 3.5 is the boundary above which a trait rounds to intensity 4
+    let loudW = 0;
+    list.forEach((t,i)=>{ if (traitPos(t) >= 3.5) loudW += w[i]; });
+    const p = loudW / total;
+    expected += p;
+    /* Each slot is one Bernoulli draw, so the count's variance is the sum of p(1-p) —
+       NOT sqrt(mean). The difference matters at the ends of the sliders: there most
+       slots have p near 0 or near 1, so the count is far tighter than a Poisson
+       assumption implies, and using sqrt(mean) there sets the bar so high the warning
+       could never fire at all. */
+    variance += p * (1 - p);
+    measurable++;
+  });
+  return {expected, variance, measurable};
+}
+
 function loudnessCheck(st){
   const loud = [];
   Object.values(st || {}).forEach(s=>{
     if (s && s.trait && (s.trait.intensity||0) >= 4) loud.push(s.trait);
   });
   if (loud.length < 3) return null;
+
+  const {expected, variance, measurable} = expectedLoudCount(st);
+  /* KNOWN LIMIT. This models the eligibility WINDOW and the proximity kernel, but not
+     the rarity, tier, affinity and uniqueness pressure the picker also applies —
+     CURRENT_AFFINITY_VEC in particular is live only during a build and cannot be
+     recovered afterwards. Measured, the estimate tracks closely at neutral and mid
+     sliders (0.70 predicted against 0.74 observed, 0.73 against 0.91), which is where
+     the warning has to discriminate, and over-predicts at the top of the range (28.6
+     against 18.4), which makes it conservative exactly where a loud sheet is what was
+     asked for. Erring quiet at the extremes is the behaviour we want; it is worth
+     knowing it is partly an artefact rather than entirely a decision.
+
+     Below a handful of measurable slots the baseline is too noisy to reason from, so
+     fall back to the flat threshold rather than inventing a comparison. */
+  const haveBaseline = measurable >= 8;
+  /* Poisson-ish: the count is a sum of independent per-slot draws, so its spread scales
+     with the true standard deviation of the per-slot Bernoulli sum. 1.5 sigma puts the
+     warning at roughly the top few percent of sheets for whatever the settings happen to
+     be, rather than at a fixed count that only ever reflected slider position. */
+  const slack = 1.5 * Math.max(1, Math.sqrt(variance));
+  if (haveBaseline && loud.length <= expected + slack) return null;
+
   const names = loud.slice(0, 5).map(t=>t.trait);
+  const baselineNote = haveBaseline
+    ? `Your current settings would typically produce about <b>${expected.toFixed(1)}</b>, so this one came out louder than you asked for. `
+    : ``;
   return {
-    count: loud.length, names,
+    count: loud.length, expected: haveBaseline ? expected : null, names,
     note: `This sheet carries <b>${loud.length}</b> traits at intensity 4 or 5 — ${names.join(", ")}${loud.length>names.length?", and more":""}. `
+        + baselineNote
         + `Each of those is meant to be load-bearing on its own, so together they read as loud in ${loud.length} different directions. `
         + `The best characters are usually one loud thing and a lot of texture: consider pinning the one that matters lower on the others, or asking what's quiet about them.`
   };
