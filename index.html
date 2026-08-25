@@ -9,27 +9,33 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="css/style.css">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='%2326547c'/%3E%3Ccircle cx='16' cy='16' r='6' fill='%23ef476f'/%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='%232a2140'/%3E%3Ccircle cx='16' cy='16' r='6' fill='%23e8327d'/%3E%3C/svg%3E">
 </head>
 <body class="on-single-tab quick-mode">
 <div class="wrap">
-  <h1><span class="h1-dot"></span>Character Voice Generator</h1>
-  <div class="sub" id="taglineSub">Axis-based, per-trait conflict-aware, intensity &amp; rarity-weighted selection.</div>
+  <header class="pageHead">
+    <div class="pageHeadText">
+      <div class="eyebrow">Workshop Bench</div>
+      <h1>Character Voice Generator</h1>
+      <div class="sub" id="taglineSub">Build a character, compare a cast, and see how any two would get along. One card at a time.</div>
+    </div>
+    <button type="button" class="benchBadge" title="How this works"
+            onclick="document.getElementById('helpPanel').open = true; document.getElementById('helpPanel').scrollIntoView({block:'nearest'});"
+            aria-label="How this works">🛠</button>
+  </header>
 
   <!-- The two intro explainers ran to roughly 900 words BEFORE the interface began.
        Same text, one panel, closed by default, reachable from the header and by "?". -->
-  <div class="headerRow">
-    <button class="helpBtn" onclick="document.getElementById('helpPanel').open = !document.getElementById('helpPanel').open" aria-controls="helpPanel">? How this works</button>
-    <label class="modeSwitch" title="Quick shows the essentials; Advanced reveals every control. Hidden controls keep their values.">
-      <input type="checkbox" id="advancedToggle" onchange="applyAdvancedMode()">
-      <span id="advancedToggleLabel">Quick</span>
-    </label>
-  </div>
 
+  <div class="tabs" role="tablist" aria-label="Views">
+    <button id="tabSingleBtn" class="active" role="tab" aria-selected="true" aria-controls="view-single" onclick="switchTab('single')"><span class="tabIcon" aria-hidden="true">👤</span>Single Character</button>
+    <button id="tabCastBtn" role="tab" aria-selected="false" aria-controls="view-cast" tabindex="-1" onclick="switchTab('cast')"><span class="tabIcon" aria-hidden="true">🎭</span>Cast Comparison</button>
+    <button id="tabRelBtn" role="tab" aria-selected="false" aria-controls="view-rel" tabindex="-1" onclick="switchTab('rel')"><span class="tabIcon" aria-hidden="true">🔗</span>Relationships</button>
+  </div>
   <details class="legendBox" id="helpPanel" style="margin:0 0 18px;">
     <summary>How to use, and how generation works</summary>
     <div style="margin-top:11px; font-size:.85rem; line-height:1.75; color:var(--muted);">
-      <p style="margin:0 0 8px;"><b style="color:var(--text);">The 30-second version.</b> Set a few sliders (or none), press <b>Generate Character</b>, and read the sheet. Every card is one trait; <b>reroll</b> any card you don't like, <b>lock</b> the ones you love, then Generate again — locked cards survive. That loop (generate → lock the keepers → regenerate the rest) is the intended way to work, not getting a perfect sheet on roll one.</p>
+      <p style="margin:0 0 8px;"><b style="color:var(--text);">The 30-second version.</b> Set a few sliders (or none), press <b>Build &amp; Roll</b>, and read the sheet. Every card is one trait; <b>toss</b> any card you don't like, <b>keep</b> the ones you love, then build again — kept cards survive. That loop (generate → lock the keepers → regenerate the rest) is the intended way to work, not getting a perfect sheet on roll one.</p>
       <p style="margin:0 0 8px;"><b style="color:var(--text);">Sliders.</b> The centre of each personality slider is a real <b>neutral band</b>, not a hair-trigger between two poles. Below about 14 you get genuinely balanced or <i>situational</i> traits — "warm one-to-one, flat in groups," "honest about facts, evasive about feelings" — and ±5 draws from the same middle pool, so small settings either side of zero aren't different people. From roughly 14 to 42 the middle fades gradually into the leaning side; past that you're committed. Direction picks which side; <b>distance from centre picks intensity</b>, on an eased curve that keeps the bottom of the dial quiet. Honesty at −20 gives small, deniable evasions; −90 gives someone who lies about the weather. The three voice sliders (Verbosity / Register / Composure) don't just shape speech — they also pull the deep sections: high volatility drags Attachment toward Disorganized, high verbosity favours the Connector role, and so on.</p>
       <p style="margin:0 0 8px;"><b style="color:var(--text);">Per-card controls.</b> <b>lock</b> = keep this exact trait. <b>pin</b> = keep this <i>intensity level</i> while letting the trait vary (use +/− to nudge it). <b>reroll</b> = redraw, never repeating something you already rejected. <b>why?</b> = exactly which sliders and resolved traits caused this pick — the generator never hides its reasoning.</p>
       <p style="margin:0 0 8px;"><b style="color:var(--text);">Deeper tools.</b> <b>Archetypes</b> blend a preset posture with your sliders (they nudge, never overwrite). <b>Depth-first</b> flips the whole flow: roll the wound/values/attachment first and derive personality from them. <b>Seed from a trait</b> builds a character around one trait you've picked by hand. <b>Under pressure</b> adds a second sheet showing how the voice degrades under stress. The <b>Cast</b> and <b>Relationships</b> tabs generate ensembles and analyse how any two characters clash or align. <b>Export .json</b> round-trips everything — traits, pins, sliders, pressure sheet, constraints, counts and toggles — so re-importing and pressing Generate reproduces the same character, not just the same sheet.</p>
@@ -44,12 +50,6 @@
       <p style="margin:8px 0 0;"><b style="color:var(--text);">Keyboard.</b> <b>Ctrl/&#8984;+Enter</b> generates, <b>Ctrl/&#8984;+Z</b> undoes, <b>R</b> rerolls the card under the pointer, <b>?</b> opens this panel.</p>
     </div>
   </details>
-
-  <div class="tabs" role="tablist" aria-label="Views">
-    <button id="tabSingleBtn" class="active" role="tab" aria-selected="true" aria-controls="view-single" onclick="switchTab('single')">Single Character</button>
-    <button id="tabCastBtn" role="tab" aria-selected="false" aria-controls="view-cast" tabindex="-1" onclick="switchTab('cast')">Cast Comparison</button>
-    <button id="tabRelBtn" role="tab" aria-selected="false" aria-controls="view-rel" tabindex="-1" onclick="switchTab('rel')">Relationships</button>
-  </div>
   <div id="toastHost" class="toastHost" aria-live="polite"></div>
   <!-- renderSheet replaces #sheetBody wholesale, which a screen reader has no reason to
        notice: nothing moves focus and no live region announces it, so a generate reads
@@ -59,6 +59,10 @@
 
   <div id="view-single" class="viewSection active" role="tabpanel" aria-labelledby="tabSingleBtn">
     <div class="controls">
+      <div class="panelHead">
+        <h2>Build a character.</h2>
+        <p>Fill in what you know. We'll build the rest, one card at a time.</p>
+      </div>
       <div class="row">
         <div class="field">
           <label for="charName">Name</label>
@@ -73,7 +77,7 @@
           <input type="text" id="charContext" placeholder="e.g. dockside smuggler, ex-military">
         </div>
       </div>
-      <div class="row">
+      <div class="row dialBox">
         <div class="field">
           <label>Verbosity (Terse &rarr; Voluble)</label>
           <input type="range" id="verbositySlider" min="-100" max="100" value="0" step="1" oninput="onSliderChange()">
@@ -443,14 +447,18 @@
 
       <!-- Thirteen buttons in one undifferentiated row (with a stray checkbox in the
            middle of them) made the primary action hard to find. Four labelled groups. -->
+      <div class="buildRow">
+        <button class="btn-primary btn-build" onclick="generateCharacter()"><span aria-hidden="true">✦</span> Build &amp; Roll</button>
+        <button class="btn-primary btn-roll" onclick="randomizeSliders('all'); generateCharacter();" title="Randomize every slider, then build">🎲 Randomize All</button>
+      </div>
+      <label class="modeSwitch tinkerBar" title="Quick shows the essentials; Tinker Mode reveals every control. Hidden controls keep their values.">
+        <input type="checkbox" id="advancedToggle" onchange="applyAdvancedMode()">
+        <span class="tinkerLabel"><span aria-hidden="true">🔧</span> Tinker Mode</span>
+        <span class="tinkerState" id="advancedToggleLabel">Quick</span>
+        <span class="tinkerChev" aria-hidden="true">⌄</span>
+      </label>
+
       <div class="actionGroups">
-        <div class="actionGroup">
-          <span class="actionGroupLabel">Generate</span>
-          <div class="actionRow">
-            <button class="btn-primary" onclick="generateCharacter()">Generate Character</button>
-            <button class="btn-primary" style="background:var(--accent2); color:#fff;" onclick="randomizeSliders('all'); generateCharacter();">🎲 Randomize All &amp; Generate</button>
-          </div>
-        </div>
         <div class="actionGroup">
           <span class="actionGroupLabel">Refine</span>
           <div class="actionRow">
@@ -489,8 +497,8 @@
          help text, which is the one place a first-time user has not looked yet. -->
     <div id="emptyState" class="emptyState">
       <b>Nothing generated yet.</b>
-      <p>Press <b>Generate Character</b> (or Ctrl/&#8984;+Enter). Then work the loop this tool is built around:
-      <b>lock</b> the cards you want to keep, <b>reroll</b> the ones you don't, and generate again — locked cards survive.
+      <p>Press <b>Build &amp; Roll</b> (or Ctrl/&#8984;+Enter). Then work the loop this tool is built around:
+      <b>keep</b> the cards you want, <b>toss</b> the ones you don't, and build again — kept cards survive.
       Nothing has to be right on the first roll.</p>
       <!-- First load previously showed every control and no character, which is a lot of
            dials and no reason to touch any of them. Three one-click starts give a new
@@ -505,6 +513,9 @@
     </div>
 
     <div class="sheet" id="sheet">
+      <div class="handHead"><span>Your hand</span>
+        <span class="handMeter" id="handMeter" hidden><span class="handTrack"><i></i></span><b>—</b></span>
+      </div>
       <div class="sheetHeader">
         <h2 id="sheetTitle">Character Voice</h2>
         <div class="archetypeTag" id="archetypeTag"></div>
@@ -518,10 +529,10 @@
         <div class="legendGrid">
           <div><b>●●●○○ dots</b> — intensity, 1–5. How strongly the trait shows. Low-intensity traits are background texture; high-intensity ones dominate a scene.</div>
           <div><b>common / distinctive / signature</b> — how sharply the trait defines a voice. <b>Common</b> is ordinary human behaviour: texture, not identity. <b>Distinctive</b> is specific enough to notice and not enough to carry a character on its own. <b>Signature</b> is both distinctive and loud, and is now genuinely rare — about a sixth of the bank rather than the two thirds the old two-class labelling produced, because when most entries are billed as defining, none of them are. The rarity preference weights each tier by its own size within the pool being drawn from, so "balanced" means balanced regardless of how a particular category happens to be composed.</div>
-          <div><b>lock</b> — pin this exact trait so regenerating or rerolling the sheet won't replace it.</div>
+          <div><b>keep</b> — hold this exact trait so rebuilding or tossing elsewhere on the sheet won't replace it.</div>
           <div><b>pin</b> — different from lock: keeps this slot's <i>intensity target</i> fixed (shown as a number, e.g. "pinned 3.4") so future generations and rerolls keep drawing from around that level even as sliders move elsewhere — but the actual trait can still vary. Use +/− to nudge the pinned level. Lock overrides pin if both are set.</div>
           <div><b>active range</b> — the exact span of slider magnitude this specific trait can be drawn at. Outside that window it's never eligible, however the dice fall. The tick mark shows the slot's current target inside that window.</div>
-          <div><b>reroll</b> — redraw just this slot. It won't hand you back a trait you already rejected here.</div>
+          <div><b>toss</b> — redraw just this slot. It won't hand you back a trait you already rejected here.</div>
           <div><b>presentation lock</b> — three categories (Confidence, Emotional Capacity, Intelligence) cover two genuinely different presentations of the same pole — insecure vs. grandiose, guarded vs. shallow, instinctive vs. unanalytical. Each character commits to one at generation, so a sheet never mixes self-loathing with preening. The why? panel names which one is locked, and it travels with the character in exports and seeds.</div>
           <div><b>outlier</b> — the sheet's one deliberate misfit, present only when "the one thing that doesn't fit" is switched on. Drawn from the far tail of a randomly chosen category with your slider posture ignored for that single draw, because everything else in the engine pulls toward consistency and real people have exactly one trait that doesn't follow from the others.</div>
           <div><b>why?</b> — shows which slider or resolved trait actually caused this pick, or tells you it was an unweighted draw. When the trait itself carries a psychological lean, it also shows whether that lean currently agrees or conflicts with your sliders, and by how much.</div>
@@ -612,7 +623,7 @@
   </div>
 
   <div class="stickyBar" id="stickyBar">
-    <button class="btn-primary" onclick="generateCharacter()">Generate</button>
+    <button class="btn-primary" onclick="generateCharacter()">✦ Build &amp; Roll</button>
     <button class="btn-secondary" onclick="randomizeSliders('all'); generateCharacter();">🎲 Randomize</button>
     <button class="btn-secondary" onclick="undoLast()">Undo</button>
     <span class="stickySeed" id="stickySeed">no character yet</span>

@@ -125,7 +125,7 @@ function bandHTML(t, slot){
 
 const RTIER_LABEL = {common:"common", distinctive:"distinctive", signature:"signature"};
 
-function traitCardHTML(id, s, includeControls, showDiff, accent){
+function traitCardHTML(id, s, includeControls, showDiff, accent, tagLabel){
   // BUG FIX: several code paths could produce a slot with a null trait (an empty
   // pool after filtering, a failed reroll), and this function dereferenced it
   // immediately — throwing and blanking the whole sheet. Fail soft on one card.
@@ -144,8 +144,12 @@ function traitCardHTML(id, s, includeControls, showDiff, accent){
   // Generate the user had forty cards and no idea which were new. Purely a CSS
   // animation keyed off the class, so it plays once per render and needs no timer.
   const changedClass = (showDiff && changedSlots.has(id)) ? ' justChanged' : '';
+  // The section name rides on the card as a tag, so a card still says what it is once
+  // it is out of its group (compact view, cast cards, a screenshot of one card).
+  const tag = tagLabel ? `<span class="traitTag">${escHTML(tagLabel)}</span>` : ``;
   return `
-    <div class="traitCard${s.wildcard ? ' wildcardCard' : ''}${changedClass}"${style}>
+    <div class="traitCard${s.wildcard ? ' wildcardCard' : ''}${changedClass}${tag ? ' tagged' : ''}"${style}>
+      ${tag}
       <div class="traitMain">
         <div class="traitName">${escHTML(t.trait)}
           <span class="rarityBadge rarity-${tier}" title="${escHTML(RARITY_TIER_HINT[tier]||'')}">${escHTML(RTIER_LABEL[tier]||tier)}</span>
@@ -163,13 +167,13 @@ function traitCardHTML(id, s, includeControls, showDiff, accent){
       </div>
       ${includeControls ? `
       <div class="slotBtns">
-        <button class="lockBtn ${lockedClass}" onclick="toggleLock('${escAttr(id)}')" title="Keep this trait through rerolls and regeneration" aria-pressed="${s.locked?'true':'false'}">${s.locked ? "locked" : "lock"}</button>
+        <button class="rerollBtn" onclick="rerollSlot('${escAttr(id)}')" title="Draw a different trait for this slot (never repeats one you've already rejected here)"><span aria-hidden="true">✕</span> Toss</button>
+        <button class="lockBtn ${lockedClass}" onclick="toggleLock('${escAttr(id)}')" title="Keep this trait through rerolls and regeneration" aria-pressed="${s.locked?'true':'false'}"><span aria-hidden="true">📌</span> ${s.locked ? "Kept" : "Keep"}</button>
         <div class="pinRow">
           <button class="pinBtn ${pinnedTargets[id]!==undefined ? "pinned" : ""}" onclick="togglePin('${escAttr(id)}')" title="Pin this slot's intensity target (not the exact trait) so future generations/rerolls stay near this level even as sliders move elsewhere" aria-pressed="${pinnedTargets[id]!==undefined?'true':'false'}">${pinnedTargets[id]!==undefined ? "pinned "+pinnedTargets[id].toFixed(1) : "pin"}</button>
           ${pinnedTargets[id]!==undefined ? `<button class="pinAdj" onclick="adjustPin('${escAttr(id)}',-0.2)" title="Nudge pinned intensity down" aria-label="Nudge pinned intensity down">−</button><button class="pinAdj" onclick="adjustPin('${escAttr(id)}',0.2)" title="Nudge pinned intensity up" aria-label="Nudge pinned intensity up">+</button>` : ``}
         </div>
-        <button class="rerollBtn" onclick="rerollSlot('${escAttr(id)}')" title="Draw a different trait for this slot (never repeats one you've already rejected here)">reroll</button>
-        ${history ? `<button class="rerollBtn" onclick="rerollBack('${escAttr(id)}')" title="Step back to the trait this slot held before the last reroll">↺ back</button>` : ``}
+        ${history ? `<button class="rerollBtn" onclick="rerollBack('${escAttr(id)}')" title="Step back to the trait this slot held before the last toss">↺ back</button>` : ``}
         <button class="whyBtn" onclick="toggleWhy('${escAttr(id)}')" title="Why did I get this trait?" aria-expanded="${whyOpen[id]?'true':'false'}">why?</button>
       </div>` : ``}
     </div>`;
@@ -358,7 +362,7 @@ function renderSheet(){
     let inner = `<button class="axisTitle" onclick="toggleGroup('${escAttr(g.title)}')" aria-expanded="${collapsed?'false':'true'}" title="Collapse or expand this section">`
       + `<span class="axisGlyph" aria-hidden="true">${sectionGlyph(g.title)}</span>${escHTML(g.title)}`
       + `<span class="axisCount">${validIds.length}</span><span class="axisChev">${collapsed?'▸':'▾'}</span></button>`;
-    if (!collapsed) validIds.forEach(id=>{ inner += traitCardHTML(id, state[id], true, true); });
+    if (!collapsed) validIds.forEach(id=>{ inner += traitCardHTML(id, state[id], true, true, null, g.title); });
     div.innerHTML = inner;
     body.appendChild(div);
   });
@@ -377,6 +381,17 @@ function renderSheet(){
   // Coherence score + soft tension notes
   const co = coherenceScore(state);
   const tensions = softTensionsFor(state);
+  // The "Your hand" strip carries the coherence figure as a small meter, so the
+  // headline number is visible without opening the insight panel.
+  (function(){
+    const m = document.getElementById('handMeter');
+    if (!m) return;
+    if (!co){ m.hidden = true; return; }
+    m.hidden = false;
+    m.querySelector('i').style.width = co.pct + '%';
+    m.querySelector('b').textContent = co.pct + '%';
+    m.title = `Coherence ${co.pct}% — ${co.label}`;
+  })();
   const insight = document.getElementById('insightPanel');
   if (insight){
     let h = "";
