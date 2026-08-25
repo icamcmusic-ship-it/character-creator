@@ -450,6 +450,36 @@ function whyThisCharacterHTML(){
   return h + `</div></details>`;
 }
 
+/* Why a section came out empty, in the user's own terms. Returns null for the ordinary
+   case of a section that was never going to produce anything (no constraints set on an
+   optional group), so the sheet does not fill up with notes about nothing. */
+const GROUP_TOGGLE_IDS = {
+  "Personality": "genPersonality", "Speech Pattern": "genSpeech",
+  "Vocabulary": "genVocab", "Mannerisms": "genManner", "Appearance": "genAppearance",
+};
+function emptyGroupReason(title){
+  const toggleId = GROUP_TOGGLE_IDS[title];
+  if (toggleId){
+    const el = document.getElementById(toggleId);
+    if (el && !el.checked) return "Switched off in the generation options — nothing was drawn for this section.";
+  }
+  const ps = PROFILE_SECTIONS.find(p=>p.label === title);
+  if (ps){
+    const tog = document.getElementById('sec_'+ps.id);
+    if (tog && !tog.checked) return "Switched off in the Character Profile panel.";
+    if (bannedSections.has(ps.section)) return `The whole "${ps.section}" section is banned in your constraints, so nothing here can ever be drawn.`;
+    const cats = catsOf(ps.section);
+    if (cats.length && cats.every(c => bannedCategories.has(c)))
+      return "Every category in this section is banned in your constraints.";
+    if (cats.length && cats.every(c => !byFilter(ps.section, c).length))
+      return "Nothing in this section is drawable at your current constraints — the banned traits cover it entirely.";
+    return "Nothing was drawable here at these settings. Ease a constraint or widen the slider precision.";
+  }
+  if (title === "The one thing that doesn't fit" && !wildcardEnabled()) return null;
+  if (title === "Required (constraints)") return null;
+  return null;
+}
+
 function renderSheet(){
   const sheet = document.getElementById('sheet');
   sheet.classList.add('show');
@@ -465,10 +495,13 @@ function renderSheet(){
   const body = document.getElementById('sheetBody');
   body.innerHTML = "";
   body.innerHTML = summaryCardHTML();
+  /* Not filtered on ids.length any more: a profile section that produced nothing is
+     exactly the case emptyGroupReason exists to explain, and filtering it out here
+     removed it from the sheet before that could happen. */
   const profGroups = PROFILE_SECTIONS.map(ps=>({
     title: ps.label,
     ids: Object.keys(state).filter(k=>k.startsWith("prof_"+ps.id+"_"))
-  })).filter(g=>g.ids.length);
+  }));
   const groups = [
     {title:"Required (constraints)", ids:Object.keys(state).filter(k=>k.startsWith("req_")||k.startsWith("reqcat_"))},
     {title:"Personality", ids:Object.keys(state).filter(k=>k.startsWith("pers_"))},
@@ -484,7 +517,21 @@ function renderSheet(){
   applySheetDensity(SHEET_GROUP_TITLES);
   groups.forEach(g=>{
     const validIds = g.ids.filter(id=>state[id]);
-    if(!validIds.length) return;
+    /* A section that produced nothing simply vanished, so "off because I turned it off",
+       "off because I banned it" and "empty because nothing was drawable at these
+       settings" were indistinguishable — and the last of those is a real result the
+       user needs to see, not an absence. */
+    if(!validIds.length){
+      const why = emptyGroupReason(g.title);
+      if (why){
+        const note = document.createElement('div');
+        note.className = "axisGroup emptyGroup";
+        note.innerHTML = `<div class="axisTitle static"><span class="axisGlyph" aria-hidden="true">${sectionGlyph(g.title)}</span>${escHTML(g.title)}<span class="axisCount">empty</span></div>`
+          + `<div class="emptyGroupNote">${escHTML(why)}</div>`;
+        body.appendChild(note);
+      }
+      return;
+    }
     const div = document.createElement('div');
     const collapsed = !!collapsedGroups[g.title];
     div.className = "axisGroup" + (collapsed ? " collapsed" : "");
@@ -577,6 +624,18 @@ function renderSheet(){
       h += `<div class="tensionBlock"><div class="tensionTitle">Uncommon combinations — not errors</div><ul>` +
            tensions.map(t=>`<li>${t}</li>`).join("") + `</ul></div>`;
     }
+    /* Framed as a prompt, not a defect — see the CONTRADICTION AS CONTENT note in
+       engine.js. Sits above the tension list, because it is the one a writer can
+       actually use tonight. */
+    const contra = contradictionFor(state);
+    if (contra){
+      h += `<div class="tensionBlock" style="border-left-color:var(--golden-deep); margin-top:10px;">
+        <div class="tensionTitle" style="color:var(--golden-deep);">The contradiction &mdash; ${escHTML(contra.axisLabel)}</div>
+        <div style="margin:6px 0;">They are <b>${escHTML(contra.hi.trait)}</b> and also <b>${escHTML(contra.lo.trait)}</b>.</div>
+        <div style="margin:6px 0; font-style:italic;">${escHTML(contra.question)}</div>
+        <div class="sub" style="margin:6px 0 0;">Not an error to fix. A ${escHTML(contra.tier.toLowerCase())} opposition on one axis is where a character stops being a list of traits — answer the question and the rest of the sheet reorganises around it.</div>
+      </div>`;
+    }
     const patterns = secondOrderTensions(state);
     if (patterns.length){
       h += `<div class="tensionBlock" style="border-left-color:var(--dusk-blue);"><div class="tensionTitle" style="color:var(--dusk-blue);">Emergent patterns</div>` +
@@ -615,6 +674,22 @@ function renderSheet(){
         </div><div class="coherenceNote">${escHTML(dist.label)} Measured against the centroid of all ${dist.count} characters generated this session — a different question from the novelty note above, which only compares you to the last one.</div>`;
       }
     } catch(e){}
+    /* The anti-repetition system works and has always been invisible: it is a silent
+       weight applied to traits you can't see being penalised. Naming the traits that
+       keep coming back makes the mechanism legible — and is the fastest route to the
+       ban button for anyone who is tired of one of them. */
+    (function(){
+      const rep = recurringTraits(3);
+      if (!rep.length) return;
+      h += `<div class="tensionBlock" style="border-left-color:var(--muted); margin-top:10px;">
+        <div class="tensionTitle" style="color:var(--muted);">Recurring this session</div>
+        <ul>` + rep.map(r=>
+          `<li><b>${escHTML(r.trait.trait)}</b> — ${r.count} of your last ${r.window} characters `
+          + `<button class="markBtn" onclick="banTrait(${r.trait.id})" title="Never draw this trait again">🚫 never again</button></li>`
+        ).join("") + `</ul>
+        <div class="sub" style="margin:6px 0 0;">These are already being penalised on every draw${avoidRecentEnabled() ? `` : ` — except that <b>Avoid recent traits</b> is currently off, so they are not`}. Banning one is the harder version of the same instruction.</div>
+      </div>`;
+    })();
     if (lastDepthUntouched.length){
       h += `<div class="depthNote"><b>Depth-first note:</b> no resolved profile category implies ${lastDepthUntouched.join(", ")}, so ${lastDepthUntouched.length>1?"those sliders were":"that slider was"} left exactly as you set ${lastDepthUntouched.length>1?"them":"it"} rather than being reset to centre.</div>`;
     }
@@ -628,6 +703,19 @@ function renderSheet(){
   if (pressureState){
     const pbody = document.getElementById('pressureBody');
     pbody.innerHTML = "";
+    /* The sheet described a degradation with no cause, no fingerprint and no aftermath —
+       three things it already had the data for. They go first, because "what does this
+       to them" is the question a writer is actually holding. */
+    const pm = pressureState.__pressure || {};
+    let head = "";
+    if (pm.level !== undefined && pm.level < 0.99){
+      head += `<div class="shiftNote holds">Shown at <b>${Math.round(pm.level*100)}%</b> pressure — a bad afternoon rather than the worst day.</div>`;
+    }
+    if (pm.trigger) head += `<div class="pressureBlock"><b>What sets it off.</b> ${pm.trigger}</div>`;
+    const pfp = voiceFingerprint(pressureState, charMeta);
+    if (pfp) head += `<div class="pressureBlock"><b>How they sound once it starts.</b> <i>${escHTML(pfp)}</i></div>`;
+    if (pm.recovery) head += `<div class="pressureBlock"><b>Afterwards.</b> ${escHTML(pm.recovery)}</div>`;
+    pbody.innerHTML = head;
     const pgroups = [
       {title:"Speech Under Pressure", ids:["verbosity","register","grammar"]},
       {title:"Mannerisms Under Pressure", ids:Object.keys(pressureState).filter(k=>k.startsWith("p_manner"))},
@@ -778,6 +866,15 @@ function sheetToText(st, meta, pState){
   // ---- Under pressure ----
   if (pState){
     L.push("", "## Under Pressure", "");
+    /* The trigger is authored as HTML for the panel; the text export needs it plain,
+       entities included — stripping tags alone leaves "&#39;" on the page. */
+    const pm = pState.__pressure || {};
+    const plainify = v => String(v || "").replace(/<[^>]+>/g, "")
+      .replace(/&#39;/g, "'").replace(/&quot;/g, '"').replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">").replace(/&amp;/g, "&");
+    if (pm.level !== undefined && pm.level < 0.99) L.push(`_Shown at ${Math.round(pm.level*100)}% pressure._`, "");
+    if (pm.trigger) L.push(`**What sets it off.** ${plainify(pm.trigger)}`, "");
+    if (pm.recovery) L.push(`**Afterwards.** ${pm.recovery}`, "");
     ["verbosity","register","grammar"].forEach(id=>{ if(pState[id]) L.push(fmt(pState[id])); });
     Object.keys(pState).filter(k=>k.startsWith("p_manner")).forEach(id=> L.push(fmt(pState[id])));
     const shifts = Object.keys(pState).filter(k=>k.startsWith("p_prof_"));
@@ -845,7 +942,7 @@ const CHAR_FORMAT_VERSION = 2;
 // Every control that changes what a generation produces.
 const SETTING_FIELDS = ['mannerCount','vocabCount','personalityCount','profileDepth',
   'rarityPref','affinityBoost','rangeFocus','profileWeight','divergence',
-  'app_stature','app_upkeep','app_presence','archetypeSelect','seedInput','sheetDensity','wildcardCount',
+  'app_stature','app_upkeep','app_presence','archetypeSelect','seedInput','sheetDensity','wildcardCount','pressureLevel',
   'charName','charAge','charContext','castCount'];
 const SETTING_TOGGLES = ['personalityToggle','depthFirstToggle','examplesToggle','stressToggle',
   'genPersonality','genSpeech','genVocab','genManner','genAppearance',
@@ -1253,6 +1350,12 @@ function sheetToHTML(st, meta, pState){
   });
   if (pState){
     h += `<h2 style="font-family:Georgia,serif;font-size:1.05em;border-bottom:1px solid #ccc;padding-bottom:2px;margin:16px 0 6px;">Under Pressure</h2>`;
+    // The trigger and the aftermath are the two most useful lines on this sheet, and
+    // the styled-clipboard export was dropping both.
+    const pm = pState.__pressure || {};
+    if (pm.level !== undefined && pm.level < 0.99) h += `<p style="margin:6px 0;color:#555;"><i>Shown at ${Math.round(pm.level*100)}% pressure.</i></p>`;
+    if (pm.trigger) h += `<p style="margin:6px 0;"><b>What sets it off.</b> ${pm.trigger}</p>`;
+    if (pm.recovery) h += `<p style="margin:6px 0;"><b>Afterwards.</b> ${esc(pm.recovery)}</p>`;
     Object.values(pState).forEach(s=>{
       if (!s || !s.trait) return;
       h += `<p style="margin:6px 0;"><b>${esc(s.trait.trait)}</b><br>${esc(s.trait.desc)}<br><i style="color:#555;">"${esc(s.trait.example)}"</i></p>`;

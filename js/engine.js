@@ -706,6 +706,20 @@ function rememberGeneration(st){
   rememberSlotDraws(st);
 }
 function forgetRecentTraits(){ recentTraitIds = []; }
+/* Which traits keep coming back across the session's recent window. recentTraitIds has
+   held this the whole time and nothing ever showed it to anyone. */
+function recurringTraits(minCount){
+  const window = recentTraitIds.length;
+  if (window < 3) return [];
+  const counts = new Map();
+  recentTraitIds.forEach(set => set.forEach(id => counts.set(id, (counts.get(id)||0) + 1)));
+  return [...counts.entries()]
+    .filter(([, n]) => n >= (minCount || 3))
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5)
+    .map(([id, n]) => ({trait: TRAITS_BY_ID.get(id), count: n, window}))
+    .filter(r => r.trait);
+}
 function avoidRecentEnabled(){
   const el = document.getElementById('avoidRecentToggle');
   return el ? !!el.checked : true;   // default-on; see RECENT_WINDOW above
@@ -1786,6 +1800,63 @@ let POL_NORM = {};
 function polNormalise(ax, raw){
   const d = POL_NORM[ax];
   return d ? raw / d : raw;
+}
+
+/* ================= CONTRADICTION AS CONTENT =================
+   checkConflictsFor already finds every pair of seated traits that pull opposite ways
+   on an axis, and reports them as something to be aware of — a warning, softened by
+   the tier grading, but still framed as a problem the sheet has.
+
+   The far more useful move is to let a character OWN one. A person who is truthful and
+   evasive is not a broken character sheet; they are a character with a question
+   attached, and the question is the interesting part. The detection and the grading
+   already exist — this only asks the generative question about the strongest pair, per
+   axis, in the character's own terms.
+
+   Deliberately one contradiction, not a list: a sheet that names six of them is back to
+   being a warnings panel. The strongest pair is the one worth a scene. */
+const CONTRADICTION_QUESTIONS = {
+  hon:  "What are they lying about, and to whom?",
+  warm: "Who gets the warm one, and what did that person do to earn it?",
+  ego:  "Which of the two is the performance, and who is it for?",
+  asrt: "What has to be at stake before they take the room?",
+  emo:  "Who has seen the open version, and when did they last see it?",
+  disc: "What is the one area they refuse to be organised about, and why that one?",
+  agr:  "What is the thing they will not go along with, however much easier it would be?",
+  man:  "Whose rules do they observe, and whose do they treat as optional?",
+  intel:"Which kind of problem makes them go quiet, and which makes them show off?",
+  reb:  "What authority do they actually accept, and what did it do to deserve that?",
+  pos:  "Which future do they say out loud, and which one do they plan around?",
+  act:  "What are they saving the energy for?",
+  cur:  "What is the one subject they refuse to be curious about?",
+  vol:  "In whose company do they run out of words?",
+  form: "Which room makes them formal, and what are they defending in it?",
+  pace: "What makes them slow down?",
+  mood: "How long has this been the mood, and what were they like before it?",
+};
+function contradictionFor(stateObj){
+  const items = Object.values(stateObj || {}).filter(s=> s && s.trait && s.trait.pol);
+  let best = null;
+  for (let i = 0; i < items.length; i++){
+    for (let j = i + 1; j < items.length; j++){
+      const a = items[i].trait, b = items[j].trait;
+      for (const axis of Object.keys(AXIS_LABELS)){
+        const pa = a.pol[axis], pb = b.pol[axis];
+        if (!(pa === 1 && pb === -1 || pa === -1 && pb === 1)) continue;
+        const severity = (a.intensity||3) + (b.intensity||3);
+        if (!best || severity > best.severity){
+          // Whichever side is positive on the axis reads first, so the sentence keeps
+          // the same orientation as the axis label.
+          const hi = pa === 1 ? a : b, lo = pa === 1 ? b : a;
+          best = {severity, axis, axisLabel: AXIS_LABELS[axis], hi, lo,
+                  tier: conflictTier(severity).label,
+                  question: CONTRADICTION_QUESTIONS[axis] || "When does each of these come out, and what decides it?"};
+        }
+      }
+    }
+  }
+  // Two quiet traits nudging opposite ways is not a contradiction anyone would notice.
+  return best && best.severity >= 6 ? best : null;
 }
 
 const PERSONALITY_AXES = [
@@ -3488,10 +3559,62 @@ function buildCharacterState(opts){
 // grammar shifts (a vice under stress is a scene, not a different vice).
 const PRESSURE_SHIFT_SECTIONS = ["role", "values", "attachment"];
 
+/* How much pressure. The sheet used to be binary — calm, or maximum stress — which
+   is the least interesting question you can ask about someone under load, and the
+   existing machinery already takes a continuous level everywhere. 0-100, where the
+   old behaviour is 100 and stays the default. */
+function pressureLevel(){
+  const el = document.getElementById('pressureLevel');
+  return el ? clamp(intVal(el, 100), 0, 100) / 100 : 1;
+}
+
+/* The sheet said how they degrade and never what degrades them, with Core Fear sitting
+   right there in the build. A trigger turns the pressure sheet from a description into
+   a scene: this is the thing that does this to them. */
+function pressureTrigger(st){
+  const find = re => {
+    const id = Object.keys(st || {}).find(k => k.startsWith("prof_motivation_")
+      && st[k] && st[k].trait && re.test(st[k].trait.category));
+    return id ? st[id].trait : null;
+  };
+  const fear = find(/Core Fear/i), wound = find(/Core Wound/i), lie = find(/The Lie/i);
+  if (!fear && !wound) return null;
+  let out = fear
+    ? `Anything that looks like <b>${escHTML(fear.trait)}</b>${wound ? ` — especially when it rhymes with <b>${escHTML(wound.trait)}</b>` : ``}.`
+    : `Anything that reopens <b>${escHTML(wound.trait)}</b>.`;
+  if (lie) out += ` Underneath it, they are still working from <b>${escHTML(lie.trait)}</b>.`;
+  return out;
+}
+
+/* What they are like once it passes, which is at least as characterful as the break
+   itself — and is the part a writer actually has to stage next. Derived from the
+   stress response and the attachment style, both already resolved. */
+const RECOVERY_BY_STRESS = {
+  "Fight (attack the threat)": "Comes down slowly and does not apologise first. Expect the next hour to be businesslike and a little too polite.",
+  "Flight (remove yourself)": "Reappears as if nothing happened, and is genuinely puzzled that anyone is still on it.",
+  "Freeze (shut down)": "Comes back online in stages, and is exhausted for far longer than the incident lasted.",
+  "Fawn (appease the threat)": "Over-corrects afterwards — does something generous and slightly disproportionate, and resents having done it.",
+};
+const RECOVERY_BY_ATTACHMENT = {
+  "Secure": "Will raise it themselves, once, when it's over.",
+  "Anxious": "Needs to be told explicitly that it's fine, and will not fully believe the first telling.",
+  "Avoidant": "Treats any attempt to discuss it as a second incident.",
+  "Disorganized": "May be warm or cold about it afterwards, and which one is not predictable from what happened.",
+};
+function pressureRecovery(st){
+  const catOf = id => { const s2 = (st||{})["prof_"+id+"_0"]; return s2 && s2.trait ? s2.trait.category : null; };
+  const bits = [RECOVERY_BY_STRESS[catOf('stress')], RECOVERY_BY_ATTACHMENT[catOf('attachment')]].filter(Boolean);
+  return bits.length ? bits.join(" ") : null;
+}
+
 function buildStressVariant(baseVerbLevel, baseRegLevel, mannerCount, rarityPref, sourceState){
-  // stress pushes composure to extreme volatile, verbosity toward its more urgent extreme
-  const stressCompLevel = 2;
-  const stressVerbLevel = baseVerbLevel >= 0 ? Math.max(baseVerbLevel, 1.5) : Math.min(baseVerbLevel, -1.5);
+  /* Scaled by the pressure dial rather than pinned to the extreme. At 1.0 these are
+     exactly the values this function has always used, so the default is unchanged; at
+     0.4 you get someone having a difficult afternoon rather than a crisis. */
+  const p = pressureLevel();
+  const stressCompLevel = 2 * p;
+  const push = 1.5 * p;
+  const stressVerbLevel = baseVerbLevel >= 0 ? Math.max(baseVerbLevel, push) : Math.min(baseVerbLevel, -push);
   const st = sourceState || state;
 
   // Under-pressure picks should reflect the EXAGGERATED stress levels, not the calm
@@ -3560,7 +3683,7 @@ function buildStressVariant(baseVerbLevel, baseRegLevel, mannerCount, rarityPref
     const cats = catsOf(ps.section);
     const boostMap = resolveBoostMapForCats(cats, accumulateBoost(id, seed, stressOverrides));
     const cat = pickCategoryWeighted(cats, boostMap);
-    const tgt = clamp(profileTarget(id) + 0.6, 1, 5);   // pressure reads louder than baseline
+    const tgt = clamp(profileTarget(id) + 0.6 * p, 1, 5);   // pressure reads louder than baseline
     const trait = pickInRange(byFilter(ps.section, cat), rarityPref, tgt, 4);
     if (!trait) return;
     obj['p_prof_'+id] = {
@@ -3569,6 +3692,10 @@ function buildStressVariant(baseVerbLevel, baseRegLevel, mannerCount, rarityPref
       shifted: cat !== baseCat, fromCat: baseCat, toCat: cat
     };
   });
+  /* Carried on the returned object under a key no slot path can produce, so the sheet
+     renderers (which all filter for `.trait`) skip it and the pressure panel can read
+     it back. */
+  obj.__pressure = {level: p, trigger: pressureTrigger(st), recovery: pressureRecovery(st)};
   return obj;
   } finally {
     CURRENT_AFFINITY_VEC = _priorAffinityVec;

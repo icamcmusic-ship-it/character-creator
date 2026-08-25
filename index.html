@@ -596,6 +596,12 @@
 
       <div class="pressureSheet" id="pressureSheet" style="display:none;">
         <div class="pressureTitle">Under Pressure</div>
+        <div class="field" style="max-width:240px; margin:0 0 12px;">
+          <label for="pressureLevel">How much pressure</label>
+          <input type="range" id="pressureLevel" min="0" max="100" value="100" step="5" oninput="onSliderChange()">
+          <div class="scaleLabels"><span>A bad hour</span><span>A bad day</span><span>The worst day</span></div>
+          <div class="sliderVal" id="pressureLevelVal">the worst day</div>
+        </div>
         <div id="pressureBody"></div>
       </div>
     </div>

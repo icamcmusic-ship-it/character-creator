@@ -230,14 +230,46 @@ async function loadSavedList(){
       const ren = document.createElement('button');
       ren.className = 'savedAct'; ren.textContent = 'rename';
       ren.onclick = ()=> renameSavedCharacter(name);
+      /* The Relationships tab compares whatever is on the Cast tab, so comparing two of
+         your OWN saved characters was impossible: loading the second one replaced the
+         first. Adding a save to the cast (rather than loading it over the sheet) is the
+         missing half — load two and the Relationships tab works on them. */
+      const cmp = document.createElement('button');
+      cmp.className = 'savedAct'; cmp.textContent = 'to cast';
+      cmp.title = 'Add this saved character to the Cast tab, so it can be compared with others without replacing the sheet you are working on';
+      cmp.setAttribute('aria-label', 'Add ' + name + ' to the cast');
+      cmp.onclick = ()=> addSavedToCast(name);
       const del = document.createElement('button');
       del.className = 'savedAct savedDel'; del.textContent = 'delete';
       del.setAttribute('aria-label', 'Delete ' + name);
       del.onclick = ()=> deleteSavedCharacter(name);
-      row.appendChild(open); row.appendChild(ren); row.appendChild(del);
+      row.appendChild(open); row.appendChild(cmp); row.appendChild(ren); row.appendChild(del);
       listEl.appendChild(row);
     }
   } catch(e){ /* none saved yet */ }
+}
+
+async function addSavedToCast(name){
+  try {
+    const r = await storage.get('character:'+name);
+    const parsed = JSON.parse(r.value);
+    validateSheetPayload(parsed);
+    const st = parsed.state || {};
+    Object.values(st).forEach(s2=>{
+      if (s2 && s2.trait){ const live = TRAITS_BY_ID.get(s2.trait.id); if (live) s2.trait = live; }
+    });
+    if (castStates.some(c=>c.meta.name === name)){
+      toast(`"${name}" is already on the Cast tab.`, "warn");
+      switchTab('cast');
+      return;
+    }
+    castStates.push({state: st, variants: parsed.charVariants || null,
+      meta: (parsed.charMeta && Object.assign({}, parsed.charMeta, {name})) || {name, age:"", context:"", archetypeLabel:"Saved"}});
+    renderCast();
+    refreshRelSelectors();
+    switchTab('cast');
+    toast(`Added "${name}" to the cast — the Relationships tab can compare it now.`);
+  } catch(e){ console.error(e); toast("Could not add that character: " + e.message, "warn", 6000); }
 }
 
 // ================= CAST COMPARISON =================
@@ -519,6 +551,14 @@ function updateSliderReadouts(){
   /* The three counts and Boost strength were the only controls in the app that weren't
      sliders-with-a-resolved-word — two <select>s and a bare number box in a page made
      entirely of dials. Same readout treatment as everything else now. */
+  (function(){
+    const el = document.getElementById('pressureLevel'), out = document.getElementById('pressureLevelVal');
+    if (!el) return;
+    const v = intVal(el, 100);
+    const word = v <= 5 ? "barely rattled" : v < 35 ? "a bad hour" : v < 70 ? "a bad day" : v < 95 ? "a very bad day" : "the worst day";
+    if (out) out.textContent = word;
+    setValueText('pressureLevel', `${v} — ${word}`);
+  })();
   (function(){
     const boost = document.getElementById('affinityBoost');
     const out = document.getElementById('affinityBoostVal');
@@ -810,7 +850,7 @@ const DEFAULTS = {
     app_stature: "0", app_upkeep: "0", app_presence: "0",
     mannerCount: "3", vocabCount: "2", personalityCount: "13", profileDepth: "1",
     rarityPref: "0", affinityBoost: "2.5", rangeFocus: "0.62",
-    sheetDensity: "standard", wildcardCount: "1",
+    sheetDensity: "standard", wildcardCount: "1", pressureLevel: "100",
     profileWeight: "62", divergence: "0.15", castCount: "3",
     charName: "", charAge: "", charContext: "", archetypeSelect: "", seedInput: "",
   },
