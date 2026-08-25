@@ -76,7 +76,8 @@ const DEFAULT_EXPORTS = [
   'charVariants','VARIANT_ODDS','POL_COUNTS','polNormalise','poolFloorTarget','rangeSelect',
   'rarityNorm','proximityWeights','profileTarget','applyBudgets','budgetCapacity',
   'BUDGET_GROUPS','BUDGET_PRESETS','applyBudgetPreset','clearBudgets','rarityCaps',
-  'intensityCaps','budgetMode','lastBudgetReport','SECTION_OF_CATEGORY','forgetSlotDraws',
+  'intensityCaps','getBudgetMode','setBudgetMode','getBudgetReport','getCharVariants',
+  'SECTION_OF_CATEGORY','forgetSlotDraws',
 ];
 
 module.exports = {loadEngine, makeDocument, ROOT, ENGINE_FILES};

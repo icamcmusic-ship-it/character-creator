@@ -3628,8 +3628,8 @@ function applyRequiredTraits(obj){
    The case neither the sliders nor the rarity dial could express, and the one most
    writers actually want: an ordinary person with ONE startling thing about them.
    That is signature-cap 1 plus a tight intensity budget everywhere else. */
-let rarityCaps    = {common:null, uncommon:null, distinctive:null, signature:null};
-let intensityCaps = {};        // budget group id -> max total intensity, or null
+const rarityCaps  = {common:null, uncommon:null, distinctive:null, signature:null};
+const intensityCaps = {};      // budget group id -> max total intensity, or null
 let budgetMode    = 'redraw';  // 'redraw' | 'drop' | 'warn'
 let lastBudgetReport = null;
 
@@ -3645,12 +3645,22 @@ const BUDGET_GROUPS = [
   {id:'sheet',       label:'Whole sheet',          match: () => true},
 ];
 
+/* Mutated in place rather than reassigned, so anything holding a reference to these
+   objects — the tests, and any future module that captures them — keeps seeing the
+   live values instead of a snapshot from load time. */
 function clearBudgets(){
-  rarityCaps = {common:null, uncommon:null, distinctive:null, signature:null};
-  intensityCaps = {};
+  RTIER_ORDER.forEach(t=>{ rarityCaps[t] = null; });
+  Object.keys(intensityCaps).forEach(k=>{ delete intensityCaps[k]; });
   budgetMode = 'redraw';
   lastBudgetReport = null;
 }
+// Accessors for the two values that genuinely have to be reassigned (a primitive and
+// a whole-object result), so callers outside this file never read a stale binding.
+function getBudgetMode(){ return budgetMode; }
+function setBudgetMode(m){ budgetMode = m; }
+function getBudgetReport(){ return lastBudgetReport; }
+// Same reason: rollCharacterVariants and the import path both reassign charVariants.
+function getCharVariants(){ return charVariants; }
 function budgetsActive(){
   return RTIER_ORDER.some(t => rarityCaps[t] != null)
       || BUDGET_GROUPS.some(g => intensityCaps[g.id] != null);

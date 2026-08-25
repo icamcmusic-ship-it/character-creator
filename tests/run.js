@@ -35,7 +35,8 @@ const ctx = loadEngine([
   'charVariants','VARIANT_ODDS','POL_COUNTS','polNormalise','poolFloorTarget','rangeSelect',
   'rarityNorm','proximityWeights','profileTarget','applyBudgets','budgetCapacity',
   'BUDGET_GROUPS','BUDGET_PRESETS','applyBudgetPreset','clearBudgets','rarityCaps',
-  'intensityCaps','budgetMode','lastBudgetReport','SECTION_OF_CATEGORY','forgetSlotDraws',
+  'intensityCaps','getBudgetMode','setBudgetMode','getBudgetReport','getCharVariants',
+  'SECTION_OF_CATEGORY','forgetSlotDraws',
   'rarityTier','rarityWeight','rarityPrefValue','polarityFit','buildContextBias','parseAgeHint',
   'traitBand','CURVE_EXP','clamp','SECTION_COLORS','loudnessCheck','recentPenalty',
   'rememberGeneration','forgetRecentTraits','_drawUnique','_buildUsedIds','explainWhyNot',
@@ -360,6 +361,123 @@ check('the caricature guard stays quiet on a quiet sheet', ()=>{
   const st = {};
   T.filter(t=>t.intensity <= 2).slice(0,6).forEach((t,i)=> st['x'+i] = {trait:t});
   assert(A.loudnessCheck(st) === null);
+});
+
+group('Presentation variant isolation');
+check('a borrowed generator restores the caller\'s presentation locks', ()=>{
+  /* charVariants was a module global and generateCast/foil/gap-filler all rolled it
+     and walked away, so after generating a cast the single-character sheet was
+     filtering its rerolls against a stranger's lock. */
+  A.rollCharacterVariants();
+  const mine = JSON.stringify(A.getCharVariants());
+  let innerDiffered = false;
+  for (let i = 0; i < 40 && !innerDiffered; i++){
+    A.withCharacterVariants(()=>{ if (JSON.stringify(A.getCharVariants()) !== mine) innerDiffered = true; });
+  }
+  assert(JSON.stringify(A.getCharVariants()) === mine, 'caller locks were clobbered');
+  assert(innerDiffered, 'the wrapper never rolled a different set — the test proves nothing');
+  // withSavedVariants restores without rolling, for the per-item cast loop.
+  A.withSavedVariants(()=>{ A.rollCharacterVariants(); });
+  assert(JSON.stringify(A.getCharVariants()) === mine, 'withSavedVariants did not restore');
+});
+check('the a/b coin is weighted by how much material each side has', ()=>{
+  /* A flat 50/50 over a 3.5:1 tagging split meant half of every affected character
+     drew from a third of the pool, invisibly. */
+  Object.entries(A.VARIANT_ODDS).forEach(([cat, p])=>{
+    assert(p > 0.2 && p < 0.8, `${cat} coin at ${p.toFixed(2)} — a floor should stop either side vanishing`);
+  });
+  const cat = Object.keys(A.PRESENTATION_VARIANTS)[0];
+  const pool = v => T.filter(t=>t.category===cat && (!t.variant || t.variant===v)).length;
+  const bigger = pool('a') >= pool('b') ? 'a' : 'b';
+  const odds = A.VARIANT_ODDS[cat];
+  assert((bigger === 'a') === (odds >= 0.5), `${cat}: pools a=${pool('a')} b=${pool('b')} but coin favours the smaller side`);
+  return Object.entries(A.VARIANT_ODDS).map(([c,p])=>`${p.toFixed(2)}`).join(' / ');
+});
+
+group('Budgets');
+function budgetSheet(){
+  // A hand-built sheet with a known rarity/intensity shape, so the assertions are
+  // about the enforcement and not about whatever a random draw happened to produce.
+  const pick = (tier, inten) => T.find(t => t.rtier === tier && t.intensity === inten
+    && A.byFilter(t.section, t.category).length > 6);
+  const st = {};
+  [5,5,4,4].forEach((i,n)=>{ const t = pick('signature', i); if (t) st['manner'+n] = {slotId:'manner'+n, target:i, trait:t}; });
+  [3,3].forEach((i,n)=>{ const t = pick('distinctive', i); if (t) st['pers_x'+n] = {slotId:'pers_x'+n, target:i, trait:t}; });
+  return st;
+}
+check('a rarity cap evicts down to the cap and reports what it did', ()=>{
+  A.clearBudgets();
+  A.rarityCaps.signature = 1;
+  const st = A.applyBudgets(budgetSheet(), 0);
+  const sig = Object.values(st).filter(s=>s.trait && s.trait.rtier === 'signature').length;
+  assert(sig <= 1, sig + ' signature traits survived a cap of 1');
+  assert(A.getBudgetReport().actions.length > 0, 'nothing was reported');
+  A.getBudgetReport().actions.forEach(a=> assert(a.from && a.why, 'an action was reported without saying what or why'));
+  A.clearBudgets();
+  return A.getBudgetReport() ? 'reported' : '';
+});
+check('locked, pinned and required slots are never modified but still spend the budget', ()=>{
+  A.clearBudgets();
+  A.rarityCaps.signature = 0;
+  const st = budgetSheet();
+  Object.keys(st).forEach(k=>{ st[k].locked = true; });
+  const before = JSON.stringify(Object.keys(st).map(k=>st[k].trait.id));
+  const after = A.applyBudgets(st, 0);
+  assert(JSON.stringify(Object.keys(after).map(k=>after[k].trait.id)) === before, 'a locked slot was rewritten');
+  // ...and the shortfall is stated rather than swallowed.
+  assert(A.getBudgetReport().rarity.signature.unmet > 0, 'an unsatisfiable cap was reported as satisfied');
+  A.clearBudgets();
+});
+check('an intensity budget lowers the loudest slots first', ()=>{
+  A.clearBudgets();
+  const st = budgetSheet();
+  const total = o => Object.values(o).reduce((s,x)=> s + (x.trait ? x.trait.intensity : 0), 0);
+  const cap = Math.max(6, total(st) - 6);
+  A.intensityCaps.sheet = cap;
+  const after = A.applyBudgets(st, 0);
+  assert(total(after) <= cap || A.getBudgetReport().intensity.sheet.unmet,
+    `total ${total(after)} exceeds cap ${cap} with no unmet flag`);
+  A.clearBudgets();
+});
+check('warn-only changes nothing', ()=>{
+  A.clearBudgets();
+  A.rarityCaps.signature = 0;
+  A.setBudgetMode('warn');
+  const st = budgetSheet();
+  const before = JSON.stringify(Object.keys(st).map(k=>st[k].trait.id));
+  const after = A.applyBudgets(st, 0);
+  assert(JSON.stringify(Object.keys(after).map(k=>after[k].trait.id)) === before, 'warn-only mutated the sheet');
+  assert(!A.getBudgetReport().actions.length, 'warn-only reported adjustments');
+  A.clearBudgets();
+});
+check('with no budgets set applyBudgets is a no-op', ()=>{
+  A.clearBudgets();
+  const st = budgetSheet();
+  const before = JSON.stringify(st);
+  A.applyBudgets(st, 0);
+  assert(JSON.stringify(st) === before, 'an unconfigured budget still touched the sheet');
+  assert(A.getBudgetReport() && !A.getBudgetReport().active, 'reported itself active with nothing set');
+});
+check('every budget group matches at least one slot on a real sheet', ()=>{
+  const st = buildOnce(4242);
+  const ids = Object.keys(st).filter(id => st[id] && st[id].trait);
+  const empty = A.BUDGET_GROUPS.filter(g => !ids.some(g.match)).map(g=>g.id);
+  // Appearance depends on DOM sliders the harness leaves centred, so it is allowed to
+  // be empty here; everything else must be reachable or the control is a dead end.
+  assert(!empty.filter(id => id !== 'appearance').length, 'groups matching nothing: ' + empty.join(', '));
+  return A.BUDGET_GROUPS.length - empty.length + ' of ' + A.BUDGET_GROUPS.length + ' groups populated';
+});
+check('every preset resolves to caps the engine recognises', ()=>{
+  Object.keys(A.BUDGET_PRESETS).forEach(k=>{
+    A.clearBudgets();
+    assert(A.applyBudgetPreset(k), k + ' did not apply');
+    Object.keys(A.BUDGET_PRESETS[k].rarity || {}).forEach(t=>
+      assert(A.RTIER_ORDER.includes(t), `${k} names an unknown tier "${t}"`));
+    Object.keys(A.BUDGET_PRESETS[k].intensity || {}).forEach(g=>
+      assert(A.BUDGET_GROUPS.some(x=>x.id===g), `${k} names an unknown budget group "${g}"`));
+  });
+  A.clearBudgets();
+  return Object.keys(A.BUDGET_PRESETS).length + ' presets';
 });
 
 group('Context conditioning');

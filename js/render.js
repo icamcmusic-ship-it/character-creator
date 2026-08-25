@@ -728,7 +728,7 @@ function captureSettings(){
       // setups for free.
       rarityCaps: Object.assign({}, rarityCaps),
       intensityCaps: Object.assign({}, intensityCaps),
-      budgetMode,
+      budgetMode: getBudgetMode(),
     },
     rerollExclusions: excl,
   };
@@ -759,8 +759,8 @@ function restoreSettings(s){
   categoryTiers    = new Map(c.categoryTiers || []);
   clearBudgets();
   Object.assign(rarityCaps, c.rarityCaps || {});
-  intensityCaps    = Object.assign({}, c.intensityCaps || {});
-  budgetMode       = c.budgetMode || 'redraw';
+  Object.assign(intensityCaps, c.intensityCaps || {});
+  setBudgetMode(c.budgetMode || 'redraw');
   if (typeof refreshBudgetUI === 'function') refreshBudgetUI();
   rerollExclusions = {};
   Object.entries(s.rerollExclusions || {}).forEach(([k,v])=>{ rerollExclusions[k] = new Set(v); });
@@ -815,7 +815,7 @@ function refreshBudgetUI(){
     if (el) el.value = intensityCaps[g.id] == null ? "" : intensityCaps[g.id];
   });
   const m = document.getElementById('budgetMode');
-  if (m) m.value = budgetMode;
+  if (m) m.value = getBudgetMode();
   refreshBudgetChips();
   refreshBudgetMeters();
 }
@@ -856,7 +856,7 @@ function onIntensityCapChange(id){
 }
 function onBudgetModeChange(){
   const m = document.getElementById('budgetMode');
-  if (m) budgetMode = m.value;
+  if (m) setBudgetMode(m.value);
   refreshBudgetChips(); savePrefs();
 }
 function useBudgetPreset(key){
@@ -881,7 +881,7 @@ function refreshBudgetChips(){
     if (intensityCaps[g.id] == null) return;
     h += `<span class="chip chip-tier">${escHTML(g.label)} intensity &le; ${intensityCaps[g.id]} <b onclick="clearOneBudget('intensity','${g.id}')" title="Remove">&times;</b></span>`;
   });
-  if (h && budgetMode !== 'redraw') h += `<span class="chip chip-ban">over budget: ${budgetMode === 'drop' ? 'drop the loudest' : 'warn only'}</span>`;
+  if (h && getBudgetMode() !== 'redraw') h += `<span class="chip chip-ban">over budget: ${getBudgetMode() === 'drop' ? 'drop the loudest' : 'warn only'}</span>`;
   box.innerHTML = h || '<span class="sub" style="margin:0;">No budgets set — every draw stands as dealt.</span>';
 }
 function clearOneBudget(kind, key){
@@ -896,7 +896,7 @@ function intensityBudgetSet(){
   return typeof BUDGET_GROUPS !== 'undefined' && BUDGET_GROUPS.some(g => intensityCaps[g.id] != null);
 }
 function budgetReportHTML(){
-  const r = lastBudgetReport;
+  const r = getBudgetReport();
   if (!r || !r.active) return "";
   const bits = [];
   Object.entries(r.rarity).forEach(([tier, info])=>{
