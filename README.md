@@ -47,6 +47,7 @@ a real category, and seeded generation reproducing a character exactly.
 - `js/data/traits-situational.js` — the thirteen Situational pools (ids 110000+)
 - `js/data/traits-tails.js` — Appearance depth and i1/i5 tail fill (ids 120000+)
 - `js/data/traits-depth.js` — Need / Ghost / Defence and listening traits (ids 130000+)
+- `js/data/traits-tailfill2.js` — i1/i5 tail fill closing out the categories still over 50% intensity-3 after the v3 pass, plus a Situational i5 top-up (ids 140000+)
 - `js/engine.js` — indexes, tagging passes, the weight matrix, and every pick path
 - `js/generate.js` — seeded generation, reroll, pins, undo, scoring
 - `js/render.js` — the sheet, exports, imports, toasts
