@@ -526,6 +526,50 @@ function toggleExamples(){
   document.body.classList.toggle('hide-examples', !show);
 }
 
+/* ================= STARTING POINTS =================
+   First load showed every control and no character: a lot of dials and no reason to
+   touch any of them. These are not a fourth kind of preset — each one just writes
+   personality and voice sliders and then generates, exactly as if the user had moved
+   them by hand, so what happens next is fully explorable rather than opaque. Kept to
+   three, and deliberately not "hero / villain / mentor": the useful first move is a
+   character with a tension in it. */
+const STARTING_POINTS = {
+  liar: {
+    label: "A liar",
+    voice: {verbositySlider: 30, registerSlider: 20, composureSlider: -10},
+    pers: {honesty: -75, confidence: 40, friendliness: 45, emotionalcapacity: -35, intelligence: 35},
+  },
+  kindtired: {
+    label: "Someone kind who is tired",
+    voice: {verbositySlider: -35, registerSlider: -10, composureSlider: -25},
+    pers: {friendliness: 65, agreeableness: 60, activeness: -60, positivity: -35, emotionalcapacity: 30, discipline: -20},
+  },
+  menace: {
+    label: "A cheerful menace",
+    voice: {verbositySlider: 55, registerSlider: -25, composureSlider: 45},
+    pers: {positivity: 70, rebelliousness: 75, manners: -55, agreeableness: -40, activeness: 60, discipline: -50},
+  },
+};
+function applyStartingPoint(key){
+  const sp = STARTING_POINTS[key];
+  if (!sp) return;
+  // Every axis is written, not just the ones the preset names — otherwise a starting
+  // point silently inherits whatever the previous one left behind on the axes it is
+  // silent about, and the same button produces different characters.
+  PERSONALITY_AXES.forEach(a=>{
+    const el = document.getElementById('pers_'+a.id);
+    if (el) el.value = sp.pers[a.id] !== undefined ? sp.pers[a.id] : 0;
+  });
+  Object.entries(sp.voice).forEach(([id,v])=>{ const el = document.getElementById(id); if (el) el.value = v; });
+  const nameEl = document.getElementById('charName');
+  if (nameEl && !nameEl.value) nameEl.placeholder = sp.label;
+  invalidateSliderCache();
+  onSliderChange();
+  savePrefs();
+  runGeneration();
+  toast(`Started from "${sp.label}" — the sliders are set, so change anything and generate again.`);
+}
+
 function resetAllToDefaults(){
   // BUG FIX: this cleared persisted preferences and per-slot UI state BEFORE asking
   // for confirmation, so cancelling the dialog still silently wiped your saved

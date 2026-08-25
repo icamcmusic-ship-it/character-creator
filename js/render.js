@@ -16,8 +16,21 @@ function toast(message, kind, ms){
   close.onclick = ()=> el.remove();
   el.appendChild(close);
   host.appendChild(el);
-  setTimeout(()=>{ el.classList.add('toastOut'); setTimeout(()=>el.remove(), 300); }, ms || 3200);
-  while (host.children.length > 4) host.removeChild(host.firstChild);
+  /* A failed import, an exhausted pool and a successful save all presented identically
+     and all auto-dismissed after about three seconds — so the one class of message the
+     user actually needed to read was the one most likely to vanish before they looked
+     up. Warnings now stay until dismissed. The call sites that already passed a longer
+     ms for the important ones were only ever approximating this. */
+  const persist = (kind === 'warn');
+  if (persist) el.dataset.persist = "1";
+  else setTimeout(()=>{ el.classList.add('toastOut'); setTimeout(()=>el.remove(), 300); }, ms || 3200);
+  // Only evict auto-dismissing toasts on overflow: dropping an undismissed failure to
+  // make room for a success notice would reintroduce exactly the problem above.
+  while (host.children.length > 4){
+    const evictable = [...host.children].find(c=> !c.dataset.persist);
+    if (!evictable) break;
+    evictable.remove();
+  }
 }
 
 // A skeleton, shown for the frame between pressing Generate and the build finishing.

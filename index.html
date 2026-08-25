@@ -492,6 +492,16 @@
       <p>Press <b>Generate Character</b> (or Ctrl/&#8984;+Enter). Then work the loop this tool is built around:
       <b>lock</b> the cards you want to keep, <b>reroll</b> the ones you don't, and generate again — locked cards survive.
       Nothing has to be right on the first roll.</p>
+      <!-- First load previously showed every control and no character, which is a lot of
+           dials and no reason to touch any of them. Three one-click starts give a new
+           user something on screen to react to, which is a much easier first move than
+           deciding what thirteen sliders should be. -->
+      <p class="sub" style="margin:14px auto 6px;">Or start from one of these:</p>
+      <div class="emptyPresets">
+        <button type="button" onclick="applyStartingPoint('liar')">A liar</button>
+        <button type="button" onclick="applyStartingPoint('kindtired')">Someone kind who is tired</button>
+        <button type="button" onclick="applyStartingPoint('menace')">A cheerful menace</button>
+      </div>
     </div>
 
     <div class="sheet" id="sheet">
