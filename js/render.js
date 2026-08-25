@@ -605,6 +605,36 @@ function exportCharacterJSON(){
   downloadText(JSON.stringify(payload, null, 2), name + ".character.json");
   toast("Exported " + name + ".character.json");
 }
+/* Structural validation for an imported sheet. Deliberately permissive about what it
+   does not know — unknown keys and missing optional blocks are fine, since files written
+   by older and newer builds both have to import — and strict only about the shapes the
+   render path will actually dereference. */
+function validateSheetPayload(p){
+  const isPlainObject = v => v && typeof v === 'object' && !Array.isArray(v);
+  if (!isPlainObject(p)) throw new Error("File does not contain a character object.");
+  if (p.state !== undefined && !isPlainObject(p.state)) throw new Error("The `state` block is not an object.");
+  if (p.pressureState != null && !isPlainObject(p.pressureState)) throw new Error("The `pressureState` block is not an object.");
+  if (p.charMeta != null && !isPlainObject(p.charMeta)) throw new Error("The `charMeta` block is not an object.");
+  if (p.settings != null && !isPlainObject(p.settings)) throw new Error("The `settings` block is not an object.");
+  const checkSlots = (st, label) => {
+    if (!isPlainObject(st)) return;
+    Object.entries(st).forEach(([slotId, slot])=>{
+      if (slot === null) return;                       // a legitimately empty slot
+      if (!isPlainObject(slot)) throw new Error(`${label} slot "${slotId}" is not an object.`);
+      if (slot.trait == null) return;                  // trait:null is legitimate too
+      if (!isPlainObject(slot.trait)) throw new Error(`${label} slot "${slotId}" has a malformed trait.`);
+      if (slot.trait.id === undefined) throw new Error(`${label} slot "${slotId}" has a trait with no id.`);
+      // relink() replaces matched traits wholesale, but an orphan keeps its embedded
+      // copy and is rendered from it — so an orphan must carry the fields the card reads.
+      ['trait','category','section'].forEach(k=>{
+        if (typeof slot.trait[k] !== 'string') throw new Error(`${label} slot "${slotId}" has a trait with no ${k}.`);
+      });
+    });
+  };
+  checkSlots(p.state, "state");
+  checkSlots(p.pressureState, "pressureState");
+}
+
 function importCharacterJSON(fileInput){
   const file = fileInput.files && fileInput.files[0];
   if (!file) return;
@@ -613,6 +643,13 @@ function importCharacterJSON(fileInput){
     try {
       const p = JSON.parse(reader.result);
       if (p.format !== "character-voice-sheet") throw new Error("Not a character sheet file.");
+      /* The format string was the only check, so a file that said the right thing and
+         then carried a malformed `state` — a string, an array, slots with no trait
+         object — got all the way to renderSheet and threw there, AFTER snapshotHistory
+         had run and the globals had been overwritten. The user lost their character to
+         a bad file and got a crash instead of a message. Validate the shape first, while
+         nothing has been touched yet. */
+      validateSheetPayload(p);
       // Re-link every imported trait to the live TRAITS pool by id, so imported
       // characters keep working with reroll/pin/why (which need live trait objects)
       // and quietly survive trait-text updates between app versions. Unmatched ids

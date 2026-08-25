@@ -1227,6 +1227,33 @@ function randomizeProfileTypes(){
   });
 }
 
+/* ERROR BOUNDARY. Single-character generation has had one since a throw mid-build was
+   found to leave a half-rendered sheet and a silent console — which reads as the app
+   simply not responding. The cast, foil, relationship and balance paths run the same
+   engine over the same data (and the balance panel has already been taken down once by
+   a null trait) but had no boundary at all. Same treatment: report it where the user is
+   looking, name the usual cause, and leave the rest of the app usable.
+
+   Wrapping by reassignment keeps each function's own body free of try/catch noise and
+   guarantees no path is missed. */
+(function wrapGeneratorsWithBoundary(){
+  const guard = (name, fn, hint) => function(){
+    try { return fn.apply(this, arguments); }
+    catch (err){
+      console.error(name, err);
+      const msg = err && err.message ? err.message : String(err);
+      toast(`${name} failed: ${msg}${hint ? ' — ' + hint : ''}`, "warn", 7000);
+      return undefined;
+    }
+  };
+  const constraintHint = "a constraint combination that leaves a section with no eligible traits is the usual cause";
+  generateCast          = guard("Cast generation", generateCast, constraintHint);
+  generateFoil          = guard("Foil generation", generateFoil, constraintHint);
+  generateGapFiller     = guard("Gap-filler", generateGapFiller, constraintHint);
+  analyseRelationship   = guard("Relationship analysis", analyseRelationship, "");
+  checkEnsembleBalance  = guard("Balance check", checkEnsembleBalance, "");
+})();
+
 // ---------- Session preference persistence -------------------------------
 // Remembers the knobs (not the character) so returning users don't have to
 // re-set counts, rarity and mode on every visit. Deliberately excludes slider

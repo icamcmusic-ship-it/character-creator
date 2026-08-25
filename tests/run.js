@@ -35,7 +35,7 @@ const ctx = loadEngine([
   'traitBand','CURVE_EXP','clamp','SECTION_COLORS','loudnessCheck','recentPenalty',
   'rememberGeneration','forgetRecentTraits','_drawUnique','_buildUsedIds','explainWhyNot',
   'MOOD_TAG_STATS','TIER_TAG_STATS','divergenceLevel','AXES','CROSSLINK_STRENGTH','slotCat','rangeSelect','captureSettings','restoreSettings',
-  'bannedCategories','requiredTraitIds','exclusivePairs','SETTING_FIELDS','SETTING_TOGGLES',
+  'bannedCategories','requiredTraitIds','exclusivePairs','SETTING_FIELDS','SETTING_TOGGLES','validateSheetPayload','compressSlots','expandSlots','TRAITS_BY_ID',
 ]);
 const A = ctx.api;
 const T = A.TRAITS;
@@ -523,6 +523,67 @@ check('every workspace control survives a capture/restore round-trip', ()=>{
 
   A.restoreSettings({constraints:{}});   // leave the workspace clean for later tests
   return 'sliders, sections, constraints';
+});
+
+check('import validation accepts real sheets and rejects malformed ones', ()=>{
+  /* The format string was the only check an imported file faced, so a file that claimed
+     the right format and then carried a malformed state crashed in renderSheet — after
+     snapshotHistory had run and the globals had been replaced. Validation now runs
+     before anything is touched, so it has to accept everything the app itself writes. */
+  const st = A.buildCharacterState({verbLevel:0.5, regLevel:-0.5, compLevel:0.5,
+    mannerCount:2, vocabCount:2, rarityPref:'balanced', vocabPref:null});
+  const good = {format:'character-voice-sheet', state:st, charMeta:{name:'x'}};
+  A.validateSheetPayload(good);                       // a real export must pass
+  A.validateSheetPayload({format:'character-voice-sheet'});          // minimal file
+  A.validateSheetPayload({format:'character-voice-sheet', state:{}}); // empty sheet
+  // trait:null and an empty slot are both legitimate states the engine produces
+  A.validateSheetPayload({format:'character-voice-sheet', state:{a:{trait:null}, b:null}});
+
+  const rejects = [
+    ['state is a string',   {state:'nope'}],
+    ['state is an array',   {state:[1,2]}],
+    ['slot is a string',    {state:{a:'nope'}}],
+    ['trait is a string',   {state:{a:{trait:'nope'}}}],
+    ['trait has no id',     {state:{a:{trait:{trait:'x',category:'y',section:'z'}}}}],
+    ['trait has no text',   {state:{a:{trait:{id:1,category:'y',section:'z'}}}}],
+    ['settings not object', {settings:'nope'}],
+    ['pressure not object', {pressureState:'nope'}],
+  ];
+  const missed = [];
+  rejects.forEach(([label, extra])=>{
+    try { A.validateSheetPayload(Object.assign({format:'character-voice-sheet'}, extra)); missed.push(label); }
+    catch(e){ /* expected */ }
+  });
+  assert(!missed.length, 'accepted malformed payloads: ' + missed.join(', '));
+  return rejects.length + ' malformed shapes rejected';
+});
+
+check('undo round-trips a sheet without losing or duplicating traits', ()=>{
+  /* Undo stored fifteen full deep copies, embedding a complete trait record in every one
+     of ~37 slots per snapshot for traits that are live in TRAITS and never change. Now
+     it stores ids and re-links. The property that must hold either way: what comes back
+     out of undo is what went in. */
+  const st = A.buildCharacterState({verbLevel:0.5, regLevel:-0.5, compLevel:0.5,
+    mannerCount:3, vocabCount:2, rarityPref:'balanced', vocabPref:null});
+  const before = Object.entries(st).filter(([,v])=>v && v.trait).map(([k,v])=>k+'='+v.trait.id).sort();
+  assert(before.length > 5, 'built a sheet with almost nothing on it');
+
+  const round = A.expandSlots(A.compressSlots(st));
+  const after = Object.entries(round).filter(([,v])=>v && v.trait).map(([k,v])=>k+'='+v.trait.id).sort();
+  assert(before.join('|') === after.join('|'), 'slot/trait mapping changed across a round-trip');
+  // re-linked, not copied: the sheet must point back at the live pool so reroll, pin and
+  // the why-panel keep working on an undone character
+  Object.values(round).forEach(v=>{
+    if (v && v.trait) assert(A.TRAITS_BY_ID.get(v.trait.id) === v.trait, 'slot holds a detached trait copy');
+  });
+  // a trait no longer in the pool keeps its embedded text rather than vanishing
+  const orphan = {a:{trait:{id:-999, trait:'gone', category:'c', section:'s', intensity:3, rarity:'common'}}};
+  const kept = A.expandSlots(A.compressSlots(orphan));
+  assert(kept.a.trait && kept.a.trait.trait === 'gone', 'an orphaned trait was dropped by undo');
+  // null slots and trait:null survive untouched
+  const empties = A.expandSlots(A.compressSlots({a:null, b:{trait:null}}));
+  assert(empties.a === null && empties.b.trait === null, 'empty slots did not survive');
+  return before.length + ' slots';
 });
 
 group('Anti-repetition memory');

@@ -11,10 +11,12 @@ const AXES = {
 // ---------- Indexed lookups (built once) ----------
 // TRAITS has ~7,000 entries and every pick used to re-scan the whole array with
 // .filter(). Build the two maps a lookup actually needs, once, at load.
+const TRAITS_BY_ID = new Map();       // id -> trait (undo/import re-linking)
 const TRAITS_BY_KEY = new Map();      // "section||category" -> trait[]
 const CATS_BY_SECTION = new Map();    // section -> category[] (first-seen order)
 (function indexTraits(){
   TRAITS.forEach(t=>{
+    TRAITS_BY_ID.set(t.id, t);
     const key = t.section + "||" + t.category;
     if (!TRAITS_BY_KEY.has(key)) TRAITS_BY_KEY.set(key, []);
     TRAITS_BY_KEY.get(key).push(t);
@@ -2530,11 +2532,42 @@ function restoreSliders(s){
   if (!s) return;
   Object.entries(s).forEach(([id,v])=>{ const el = document.getElementById(id); if (el) el.value = v; });
 }
+/* Undo kept fifteen full deep copies, each holding ~37 slots with a complete trait
+   object embedded in every one — the whole trait record duplicated per slot per
+   snapshot, for traits that are already live in TRAITS and never change. Store the id
+   and re-link on the way out instead; the import path already needs exactly this
+   relink, for the same reason. Traits that no longer exist in the pool (an older
+   session, a trait since removed) keep their embedded copy, so undo cannot lose a slot
+   the way a naive id-only store would. */
+function compressSlots(st){
+  if (!st) return st;
+  const out = {};
+  Object.entries(st).forEach(([k, slot])=>{
+    if (!slot){ out[k] = slot; return; }
+    const copy = {...slot};
+    if (copy.trait && TRAITS_BY_ID.has(copy.trait.id)) copy.trait = {__id: copy.trait.id};
+    else if (copy.trait) copy.trait = JSON.parse(JSON.stringify(copy.trait));
+    out[k] = copy;
+  });
+  return out;
+}
+function expandSlots(st){
+  if (!st) return st;
+  const out = {};
+  Object.entries(st).forEach(([k, slot])=>{
+    if (!slot){ out[k] = slot; return; }
+    const copy = {...slot};
+    if (copy.trait && copy.trait.__id !== undefined) copy.trait = TRAITS_BY_ID.get(copy.trait.__id) || null;
+    out[k] = copy;
+  });
+  return out;
+}
+
 function snapshotHistory(){
   history.push({
-    state: JSON.parse(JSON.stringify(state)),
+    state: compressSlots(state),
     charMeta: {...charMeta},
-    pressureState: pressureState ? JSON.parse(JSON.stringify(pressureState)) : null,
+    pressureState: compressSlots(pressureState),
     // Fall back to live DOM only for the very first snapshot ever taken, when there's
     // no prior generation to have recorded sliders for.
     sliders: lastGeneratedSliders || captureSliders()
@@ -2545,8 +2578,8 @@ function snapshotHistory(){
 function undoLast(){
   if (!history.length) return;
   const prev = history.pop();
-  state = prev.state; charMeta = prev.charMeta;
-  pressureState = prev.pressureState || null;
+  state = expandSlots(prev.state); charMeta = prev.charMeta;
+  pressureState = expandSlots(prev.pressureState) || null;
   restoreSliders(prev.sliders);
   lastGeneratedSliders = prev.sliders; // the restored state now corresponds to these again
   document.getElementById('charName').value = charMeta.name || "";
