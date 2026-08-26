@@ -252,6 +252,12 @@ if (typeof location !== 'undefined' && /[?&]dev=1\b/.test(location.search || '')
     console.error(`[dev] ${problems.length} malformed trait entr${problems.length===1?'y':'ies'}:\n` + problems.join('\n'));
     if (typeof toast === 'function') toast(`${problems.length} malformed trait entries — see the console.`, 'warn', 9000);
   }, 0);
+  setTimeout(()=>{
+    const problems = assertAxisTables();
+    if (!problems.length){ console.info('[dev] axis tables OK'); return; }
+    console.error(`[dev] ${problems.length} axis-table problem(s):\n` + problems.join('\n'));
+    if (typeof toast === 'function') toast(`${problems.length} axis-table problems — see the console.`, 'warn', 9000);
+  }, 0);
 }
 
 
@@ -366,15 +372,25 @@ const MOOD_POSITIVE_IDS = [
 ];
 let MOOD_TAG_STATS = null;
 (function applyMoodPositive(){
+  /* The stat used to be a bare matched/listed, which reported 30/31 — and a shortfall
+     of one is indistinguishable from a typo'd id that silently tags nothing. Count the
+     three outcomes separately: `tagged` (this pass set it), `alreadyTagged` (the entry
+     carried an explicit mood tag and the pass correctly refused to clobber it), and
+     `missing` (an id in the list that matches no trait, which IS a bug). Only `missing`
+     should ever be non-zero unexpectedly, and the test asserts exactly that. */
   const want = new Set(MOOD_POSITIVE_IDS);
-  let matched = 0;
+  const found = new Set();
+  let tagged = 0, alreadyTagged = 0;
   TRAITS.forEach(t=>{
     if (!want.has(t.id)) return;
+    found.add(t.id);
     if (!t.pol) t.pol = {};
-    if (t.pol.mood) return;         // never clobber an explicit tag
-    t.pol.mood = 1; matched++;
+    if (t.pol.mood) { alreadyTagged++; return; }   // never clobber an explicit tag
+    t.pol.mood = 1; tagged++;
   });
-  MOOD_TAG_STATS = {listed: MOOD_POSITIVE_IDS.length, matched};
+  const missing = MOOD_POSITIVE_IDS.filter(id=>!found.has(id));
+  MOOD_TAG_STATS = {listed: MOOD_POSITIVE_IDS.length, matched: found.size,
+                    tagged, alreadyTagged, missing};
 })();
 
 const VOCAB_CATS = catsOf("Vocabulary Traits");
@@ -760,14 +776,44 @@ function recentPenalty(t){
    traits rather than on empty space. Only the neutral/unemphatic targets get this:
    a target the user actually asked for by moving a slider is left exactly where they
    put it, clamping and all. */
-function poolFloorTarget(pool, target, lift){
-  if (!pool || !pool.length) return target;
-  let lo = Infinity;
-  for (const t of pool){ const p = traitPos(t); if (p < lo) lo = p; }
-  if (!isFinite(lo)) return target;
-  return Math.max(target, lo + (lift === undefined ? 0.35 : lift));
+/* Quantile over an unsorted numeric array, linear interpolation between ranks.
+   Shared by poolFloorTarget and the density diagnostics. */
+function quantile(values, q){
+  if (!values || !values.length) return NaN;
+  const a = values.slice().sort((x,y)=>x-y);
+  if (a.length === 1) return a[0];
+  const pos = clamp(q, 0, 1) * (a.length - 1);
+  const lo = Math.floor(pos), hi = Math.ceil(pos);
+  return lo === hi ? a[lo] : a[lo] + (a[hi] - a[lo]) * (pos - lo);
 }
 
+/* BUG FIX (the lift was a no-op). This used to compute max(target, min(pool) + 0.35).
+   traitPos clamps to [0.55, 5.45] and the i1/i5 tail-fill content passes put at least
+   one intensity-1 trait in essentially every category, so min(pool) is 0.55 almost
+   everywhere, the lift produced 0.90, and max(1.20, 0.90) returned the ORIGINAL target
+   unchanged. Every pool this function was written for was still being aimed below its
+   own material — Register (neutral) was measured at 15 distinct traits out of 83, and
+   app_move's most frequent draw was still "Enters a room backwards", the exact trait
+   the original fix names as its symptom.
+
+   A single tail trait must not be allowed to define where the pool "starts". Use the
+   25th percentile of the pool's positions instead: robust to one or two outliers at
+   either end, and it lands the target inside the body of the material rather than on
+   its lower edge, which is what gives the proximity kernel traits on BOTH sides of
+   centre. `lift` is retained for callers that want to sit deliberately deeper in. */
+const POOL_FLOOR_QUANTILE = 0.25;
+function poolFloorTarget(pool, target, lift){
+  if (!pool || !pool.length) return target;
+  const positions = pool.map(traitPos);
+  const floor = quantile(positions, POOL_FLOOR_QUANTILE);
+  if (!isFinite(floor)) return target;
+  return Math.max(target, floor + (lift === undefined ? 0 : lift));
+}
+
+// A window should hold a real slice of its pool. 0.35 matches the clamped-case
+// requirement that was already shown to work; the cap keeps the big pools sharp.
+const POOL_ELIGIBLE_FRAC = 0.35;
+const POOL_ELIGIBLE_CAP = 26;
 function rangeSelect(pool, target, minCount){
   /* TARGET CLAMPING. The widening loop below reacts to how MANY candidates it found,
      never to WHERE they sit. When the target falls outside the pool's actual span —
@@ -791,7 +837,20 @@ function rangeSelect(pool, target, minCount){
      of the pool rather than the bare four candidates the tight band would return.
      Without this, clamping alone still bottoms out on the same handful of traits,
      because the band is narrow independently of where its centre sits. */
-  const wantCount = clamped ? Math.max(6, Math.ceil(pool.length * 0.35)) : (minCount || 4);
+  /* WINDOW WIDTH BY POOL DENSITY, not by the precision slider alone.
+     bandHalf() returns one width in position units for every pool in the bank. A
+     +/-0.73 window is a reasonable slice of a 120-trait Verbosity category and far too
+     narrow on a 40-trait Situational one, where the same width holds a dozen traits —
+     which is why the fixed-category slots collapsed to 11-19 distinct draws while the
+     category-choosing slots (vocab, manner, grammar, role) stayed healthy at 150-215.
+
+     So state the requirement as a COUNT and let the existing widening loop find the
+     width that satisfies it. The clamped case already did exactly this; the ordinary
+     case is the one that needed it. Capped so a very large pool keeps its precision —
+     the point is to stop thin pools starving, not to flatten fat ones. */
+  const density = Math.min(POOL_ELIGIBLE_CAP, Math.ceil(pool.length * POOL_ELIGIBLE_FRAC));
+  const wantCount = clamped ? Math.max(6, Math.ceil(pool.length * 0.35))
+                            : Math.max(minCount || 4, density);
   const need = Math.min(wantCount, pool.length);
   /* BOUNDARY REFLECTION. Clamping fixes a target that sits outside the pool; it does
      nothing for one that sits just inside the edge, which is the far more common case
@@ -1825,7 +1884,7 @@ const CONTRADICTION_QUESTIONS = {
   agr:  "What is the thing they will not go along with, however much easier it would be?",
   man:  "Whose rules do they observe, and whose do they treat as optional?",
   intel:"Which kind of problem makes them go quiet, and which makes them show off?",
-  reb:  "What authority do they actually accept, and what did it do to deserve that?",
+  rebel:"What authority do they actually accept, and what did it do to deserve that?",
   pos:  "Which future do they say out loud, and which one do they plan around?",
   act:  "What are they saving the energy for?",
   cur:  "What is the one subject they refuse to be curious about?",
@@ -1834,6 +1893,33 @@ const CONTRADICTION_QUESTIONS = {
   pace: "What makes them slow down?",
   mood: "How long has this been the mood, and what were they like before it?",
 };
+/* The `reb:` key above was dead for the entire life of this table: AXIS_LABELS spells
+   rebelliousness `rebel`, so every rebelliousness contradiction — one of the two most
+   heavily tagged axes in the bank — fell through to the generic fallback question. A
+   one-character typo with no symptom loud enough to notice.
+
+   Nothing checked that these axis-keyed tables agree with the axis vocabulary they are
+   keyed on, so nothing could. This does, for every such table at once: an unknown key
+   is a typo, and a missing key is a table that has fallen behind a newly added axis.
+   Wired into ?dev=1 alongside assertTraitShape and asserted by the test suite. */
+function assertAxisTables(){
+  const problems = [];
+  const tables = [
+    ['CONTRADICTION_QUESTIONS', CONTRADICTION_QUESTIONS, true],
+    ['AXIS_TO_POLCODE (values)', Object.fromEntries(Object.values(AXIS_TO_POLCODE).map(c=>[c,1])), false],
+  ];
+  tables.forEach(([name, table, requireTotal])=>{
+    Object.keys(table).forEach(k=>{
+      if (!AXIS_LABELS[k]) problems.push(`${name}: key "${k}" names no axis in AXIS_LABELS`);
+    });
+    if (!requireTotal) return;
+    Object.keys(AXIS_LABELS).forEach(k=>{
+      if (!(k in table)) problems.push(`${name}: no entry for axis "${k}" (${AXIS_LABELS[k]})`);
+    });
+  });
+  return problems;
+}
+
 function contradictionFor(stateObj){
   const items = Object.values(stateObj || {}).filter(s=> s && s.trait && s.trait.pol);
   let best = null;
@@ -2305,7 +2391,7 @@ function pickProfileSlots(rarityPref, resolvedCats){
         const t = _drawUnique(()=>pickInRange(pool, rarityPref, tgt));
         if (!t) break;
         // If the pool is genuinely exhausted _drawUnique may hand back a repeat; skip it.
-        if (Object.values(out).some(s => s.sectionId === ps.id && s.trait.id === t.id)) continue;
+        if (Object.values(out).some(s => s.sectionId === ps.id && s.trait && s.trait.id === t.id)) continue;
         seat(`prof_${ps.id}_${placed}`, cat, ps.id, tgt, t);
         placed++;
       }
@@ -2568,7 +2654,7 @@ const TENSION_RULES = [
 function softTensionsFor(st){
   const out = [];
   const catOf = id => slotCat(st["prof_"+id+"_0"]);
-  const motivText = Object.keys(st).filter(k=>k.startsWith("prof_motivation_"))
+  const motivText = Object.keys(st).filter(k=>k.startsWith("prof_motivation_") && st[k] && st[k].trait)
                     .map(k=>st[k].trait.trait+" "+st[k].trait.desc).join(" | ");
   const match = (spec) => {
     if (spec.sec === "motivation") return spec.fragment ? new RegExp(spec.fragment,"i").test(motivText) : false;
@@ -2633,7 +2719,7 @@ function secondOrderTensions(st){
 
 function coherenceScore(st){
   const chosen = {};
-  PROFILE_SECTIONS.forEach(ps=>{ const s = st["prof_"+ps.id+"_0"]; if (s) chosen[ps.id] = s.trait.category; });
+  PROFILE_SECTIONS.forEach(ps=>{ const c = slotCat(st["prof_"+ps.id+"_0"]); if (c) chosen[ps.id] = c; });
   let reinforced = 0, total = 0;
   const kinds = {vocab:VOCAB_CATS, grammar:GRAMMAR_CATS, manner:MANNER_CATS};
   Object.entries(kinds).forEach(([kind, cats])=>{
@@ -2643,7 +2729,7 @@ function coherenceScore(st){
       if (kind==='vocab') return k.startsWith('vocab');
       if (kind==='grammar') return k==='grammar';
       return k.startsWith('manner');
-    }).map(k=>st[k].trait.category);
+    }).map(k=>slotCat(st[k])).filter(Boolean);
     picked.forEach(c=>{ total++; if ((boostMap.get(c)||0) > 0) reinforced++; });
   });
   PROFILE_SECTIONS.forEach(ps=>{
@@ -3204,13 +3290,19 @@ function redoLast(){
   _restoreSnapshot(redoStack.pop());
 }
 
+// Builds one of the sheet's fixed-spine slots, per the empty-slot convention above:
+// present either way, explicitly marked when the pool had nothing to give.
+function mkSlot(slotId, label, target, trait, extra){
+  if (!trait) return emptySlot(slotId, label, Object.assign({target}, extra || {}));
+  return Object.assign({slotId, locked:false, label, target, trait}, extra || {});
+}
 function pickVerbositySlot(verbLevel, rarityPref){
   // Crossover narrowed from ±0.3 (raw ±15) to ±0.12 (raw ±6): the old dead band
   // meant nearly a third of the slider produced identical pacing-pool draws.
   const target = targetFromLevel(verbLevel);
   if (verbLevel <= -0.12){
     const pool = byFilter(AXES.verbosityLow.section, AXES.verbosityLow.category);
-    return {slotId:"verbosity", locked:false, label:"Verbosity (minimal-leaning)", target, trait: pickInRange(pool, rarityPref, target)};
+    return mkSlot("verbosity", "Verbosity (minimal-leaning)", target, pickInRange(pool, rarityPref, target));
   } else if (verbLevel >= 0.12){
     /* "Repetitive & Circular" (48 authored traits) was the one category in the whole
        bank that no normal pick path could reach: AXES named four of this section's
@@ -3224,36 +3316,35 @@ function pickVerbositySlot(verbLevel, rarityPref){
     const useCircular = Math.random() < circularOdds;
     const ax = useCircular ? AXES.circular : AXES.verbosityHigh;
     const pool = byFilter(ax.section, ax.category);
-    return {slotId:"verbosity", locked:false,
-            label: useCircular ? "Verbosity (circling, high-volume)" : "Verbosity (high-volume-leaning)",
-            target, trait: pickInRange(pool, rarityPref, target)};
+    return mkSlot("verbosity", useCircular ? "Verbosity (circling, high-volume)" : "Verbosity (high-volume-leaning)",
+                  target, pickInRange(pool, rarityPref, target));
   } else {
     // Dead centre now means "situational pacing at low intensity" rather than an
     // unfiltered free-for-all — the neutral band respects the range engine too.
     const pool = byFilter(AXES.pacing.section, AXES.pacing.category);
     const t = poolFloorTarget(pool, targetFromMag(18));
-    return {slotId:"verbosity", locked:false, label:"Verbosity (pacing-driven)", target:t,
-            trait: withSlotMemory("verbosity", ()=>pickInRange(pool, rarityPref, t, 8, true))};
+    return mkSlot("verbosity", "Verbosity (pacing-driven)", t,
+                  withSlotMemory("verbosity", ()=>pickInRange(pool, rarityPref, t, 8, true)));
   }
 }
 function pickRegisterSlot(regLevel, rarityPref){
   const target = targetFromLevel(regLevel);
   if (regLevel >= 0.12){
     const pool = byFilter(AXES.stylized.section, AXES.stylized.category);
-    return {slotId:"register", locked:false, label:"Register (elaborate-leaning)", target, trait: pickInRange(pool, rarityPref, target)};
+    return mkSlot("register", "Register (elaborate-leaning)", target, pickInRange(pool, rarityPref, target));
   } else if (regLevel <= -0.12){
     const plainPool = byFilter("Vocabulary Traits","Directness & Literalness")
       .concat(byFilter("Vocabulary Traits","Register & Formality Spectrum").filter(t=>/coarse|colloquial|vernacular|elementary|sermo|plain|casual|slang|shop-floor|locker-room|backroom|unpolished|reflexively casual|under-speak/i.test(t.trait)));
     const pool = plainPool.length ? plainPool : byFilter("Vocabulary Traits","Register & Formality Spectrum");
-    return {slotId:"register", locked:false, label:"Register (plain-leaning)", target, trait: pickInRange(pool, rarityPref, target)};
+    return mkSlot("register", "Register (plain-leaning)", target, pickInRange(pool, rarityPref, target));
   } else {
     const pool = byFilter("Vocabulary Traits","Register & Formality Spectrum");
     // 83 traits returning 15, one of them ("Hushed-deliberate") in 28% of all
     // characters, because targetFromMag(18) sits below the pool's floor. See the
     // POOL-FLOOR TARGETS note above.
     const t = poolFloorTarget(pool, targetFromMag(18));
-    return {slotId:"register", locked:false, label:"Register (neutral)", target:t,
-            trait: withSlotMemory("register", ()=>pickInRange(pool, rarityPref, t, 10, true))};
+    return mkSlot("register", "Register (neutral)", t,
+                  withSlotMemory("register", ()=>pickInRange(pool, rarityPref, t, 10, true)));
   }
 }
 // Shared by pickVocabSlots/pickGrammarSlot/pickMannerSlots: when a category was actually
@@ -3298,7 +3389,7 @@ function pickGrammarSlot(verbLevel, compLevel, regLevel, rarityPref, profileCats
   const boosted = boostedGrammarCats(verbLevel, compLevel, regLevel, profileCats, overrides);
   const c = pickCategoryWeighted(GRAMMAR_CATS, boosted);
   const r = pickFromCategoryIntensityAware("Dialogue Grammar Traits", c, boosted, rarityPref);
-  return {slotId:"grammar", locked:false, label:"Dialogue Grammar — "+c, target:r.target, steered:r.steered, trait:r.trait};
+  return mkSlot("grammar", "Dialogue Grammar — "+c, r.target, r.trait, {steered:r.steered});
 }
 function pickMannerSlots(count, compLevel, regLevel, rarityPref, forcePool, profileCats, overrides){
   const boosted = boostedMannerCats(compLevel, regLevel, profileCats, overrides);
@@ -3387,7 +3478,7 @@ function pickAppearanceSlots(rarityPref, overrides, resolvedCats, sourceState){
   const mvPool = byFilter("Appearance","Movement & Bearing");
   const mvTarget = poolFloorTarget(mvPool, targetFromMag(Math.max(40, Math.abs(actLevel)*50)));
   const mv = withSlotMemory("app_move", ()=>pickInRange(mvPool, rarityPref, mvTarget, 8, true));
-  if (mv) out['app_move'] = {slotId:'app_move', locked:false, label:"Appearance \u2014 Movement & Bearing", target:mvTarget, trait:mv};
+  out['app_move'] = mkSlot('app_move', "Appearance \u2014 Movement & Bearing", mvTarget, mv);
   const pEl = document.getElementById('app_presence');
   const pMag = Math.abs(intVal(pEl, 0));
   // Wound intensity, read off whichever Motivation slots this build has already seated.
@@ -3403,7 +3494,7 @@ function pickAppearanceSlots(rarityPref, overrides, resolvedCats, sourceState){
   // were returning 9, and two of them were showing up in a quarter of all characters.
   const mkTarget = poolFloorTarget(mkPool, targetFromMag(Math.max(15, pMag, woundMag)));
   const mk = withSlotMemory("app_mark", ()=>pickInRange(mkPool, rarityPref, mkTarget, 8, true));
-  if (mk) out['app_mark'] = {slotId:'app_mark', locked:false, label:"Appearance \u2014 Distinguishing Marks", target:mkTarget, trait:mk};
+  out['app_mark'] = mkSlot('app_mark', "Appearance \u2014 Distinguishing Marks", mkTarget, mk);
   return out;
 }
 
@@ -3417,6 +3508,35 @@ function _markUsed(t){ if (t) _buildUsedIds.add(t.id); }
 // twice on one sheet with nothing said about it. Return null instead: every caller
 // already handles an empty draw, and traitCardHTML renders "no trait available at
 // these settings", which is the truth — a pool gap, visible as a pool gap.
+/* ================= THE EMPTY-SLOT CONVENTION =================
+   A draw can come back with nothing: the pool was banned out, a constraint emptied it,
+   the precision band is too tight, or _drawUnique exhausted a thin category. Three
+   different call sites had three different answers to that. pickProfileSlots and
+   pickAppearanceSlots guarded with `if (!trait) return;`, so the slot silently vanished
+   from the sheet. pickVerbositySlot, pickRegisterSlot and pickGrammarSlot returned the
+   slot object with trait:null, which then propagated into every consumer — and the
+   consumers that did not guard it (sheetToText, sheetToHTML, coherenceScore,
+   softTensionsFor) threw on export.
+
+   One rule, stated once, applied everywhere:
+
+     A slot the sheet ALWAYS has stays on the sheet as an explicit empty slot.
+     A slot that only exists because something asked for it is omitted when empty.
+
+   The first case is the fixed spine of the sheet — verbosity, register, grammar,
+   movement, marks. Those disappearing is worse than useless: the user has no way to
+   tell "this pool is empty at your settings" from "this section doesn't exist", and
+   traitCardHTML already renders exactly that message. The second case is the optional
+   depth — the fourth motivation facet, a counterpoint, an appearance axis the user left
+   centred. Nobody asked for those specifically, and an empty card for each would be
+   noise.
+
+   Every empty slot carries `empty:true` so a consumer can tell a deliberate gap from a
+   malformed one, and EVERY consumer guards on `.trait` regardless. */
+function emptySlot(slotId, label, extra){
+  return Object.assign({slotId, locked:false, label, trait:null, empty:true}, extra || {});
+}
+
 function _drawUnique(fn, tries){
   for (let i = 0; i < (tries || 24); i++){
     const cand = fn();
@@ -3539,7 +3659,7 @@ function buildCharacterState(opts){
       const t = pickInRange(byFilter("Mannerisms", s0.trait.category), rarityPref, s0.target);
       return t ? Object.assign({}, s0, {trait:t}) : s0;
     })));
-  const obj = {}; slots.forEach(s => obj[s.slotId] = s);
+  const obj = {}; slots.forEach(s => { if (s && s.slotId) obj[s.slotId] = s; });
   if (on('genPersonality')) Object.assign(obj, pickPersonalitySlots(rarityPref, fullOverrides));
   Object.assign(obj, pickProfileSlots(rarityPref, resolvedCats));
   // Appearance draws last on purpose: it now reads the Motivation slots this build

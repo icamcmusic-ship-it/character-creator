@@ -835,7 +835,9 @@ function sheetToText(st, meta, pState){
     return out.join("\n");
   };
   const block = (title, ids) => {
-    const valid = ids.filter(id=>st[id]);
+    // A slot can legitimately hold trait:null (pool exhausted by constraints, or an
+    // older save file). Guard the TRAIT, not just the slot — fmt() dereferences it.
+    const valid = ids.filter(id=>st[id] && st[id].trait);
     if (!valid.length) return;
     L.push("", `## ${title}`, "");
     valid.forEach(id=> L.push(fmt(st[id])));

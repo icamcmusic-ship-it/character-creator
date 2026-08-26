@@ -78,7 +78,18 @@ function radarSVG(profiles, size){
     const r = R * (0.5 + 0.5 * clamp(v/maxV, -1, 1)); // centre ring = 0, outer = +max, inner = -max
     return [cx + r*Math.cos(ang), cy + r*Math.sin(ang)];
   };
-  let s = `<svg viewBox="0 0 ${size} ${size}" style="max-width:${size}px;width:100%;">`;
+  /* `label` was accepted on every profile and never rendered anywhere — a dead
+     parameter that read as if the chart named its own polygons when it does not (the
+     cast view builds a separate legend for that). Rather than delete it and lose the
+     one thing it is genuinely good for, spend it on the accessible name: the SVG had
+     none at all, so a screen reader met this chart as an unlabelled graphic. */
+  const esc = t => String(t == null ? '' : t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const named = profiles.filter(p=>p.label);
+  const title = named.length > 1
+    ? `Axis profile overlay — ${named.map(p=>esc(p.label)).join(', ')}`
+    : `Axis profile${named.length ? ' — ' + esc(named[0].label) : ''}`;
+  let s = `<svg viewBox="0 0 ${size} ${size}" role="img" aria-label="${title}" style="max-width:${size}px;width:100%;">`;
+  s += `<title>${title}</title>`;
   // rings: -max, 0 (emphasised), +max
   [0.25, 0.5, 0.75, 1].forEach(f=>{
     const ring = axes.map((_,i)=>{ const ang=(Math.PI*2*i/axes.length)-Math.PI/2; return `${cx+R*f*Math.cos(ang)},${cy+R*f*Math.sin(ang)}`; }).join(" ");
@@ -92,7 +103,8 @@ function radarSVG(profiles, size){
   });
   profiles.forEach(p=>{
     const pts = axes.map((ax,i)=> pt(i, p.prof[ax]||0).join(",")).join(" ");
-    s += `<polygon points="${pts}" fill="${p.color}" fill-opacity="0.13" stroke="${p.color}" stroke-width="2"/>`;
+    s += `<polygon points="${pts}" fill="${p.color}" fill-opacity="0.13" stroke="${p.color}" stroke-width="2">` +
+         (p.label ? `<title>${esc(p.label)}</title>` : '') + `</polygon>`;
   });
   s += `</svg>`;
   return s;
