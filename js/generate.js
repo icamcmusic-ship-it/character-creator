@@ -78,7 +78,18 @@ function radarSVG(profiles, size){
     const r = R * (0.5 + 0.5 * clamp(v/maxV, -1, 1)); // centre ring = 0, outer = +max, inner = -max
     return [cx + r*Math.cos(ang), cy + r*Math.sin(ang)];
   };
-  let s = `<svg viewBox="0 0 ${size} ${size}" style="max-width:${size}px;width:100%;">`;
+  /* `label` was accepted on every profile and never rendered anywhere — a dead
+     parameter that read as if the chart named its own polygons when it does not (the
+     cast view builds a separate legend for that). Rather than delete it and lose the
+     one thing it is genuinely good for, spend it on the accessible name: the SVG had
+     none at all, so a screen reader met this chart as an unlabelled graphic. */
+  const esc = t => String(t == null ? '' : t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const named = profiles.filter(p=>p.label);
+  const title = named.length > 1
+    ? `Axis profile overlay — ${named.map(p=>esc(p.label)).join(', ')}`
+    : `Axis profile${named.length ? ' — ' + esc(named[0].label) : ''}`;
+  let s = `<svg viewBox="0 0 ${size} ${size}" role="img" aria-label="${title}" style="max-width:${size}px;width:100%;">`;
+  s += `<title>${title}</title>`;
   // rings: -max, 0 (emphasised), +max
   [0.25, 0.5, 0.75, 1].forEach(f=>{
     const ring = axes.map((_,i)=>{ const ang=(Math.PI*2*i/axes.length)-Math.PI/2; return `${cx+R*f*Math.cos(ang)},${cy+R*f*Math.sin(ang)}`; }).join(" ");
@@ -92,7 +103,8 @@ function radarSVG(profiles, size){
   });
   profiles.forEach(p=>{
     const pts = axes.map((ax,i)=> pt(i, p.prof[ax]||0).join(",")).join(" ");
-    s += `<polygon points="${pts}" fill="${p.color}" fill-opacity="0.13" stroke="${p.color}" stroke-width="2"/>`;
+    s += `<polygon points="${pts}" fill="${p.color}" fill-opacity="0.13" stroke="${p.color}" stroke-width="2">` +
+         (p.label ? `<title>${esc(p.label)}</title>` : '') + `</polygon>`;
   });
   s += `</svg>`;
   return s;
@@ -216,6 +228,80 @@ function generateCharacter(){
   requestAnimationFrame(()=> requestAnimationFrame(()=>{ runGeneration(); }));
 }
 
+/* ================= BATCH GENERATION =================
+   "Give me five and let me pick one" is how people actually use a generator, and there
+   was no way to ask for it: every roll overwrote the last, so choosing between two
+   candidates meant generating, deciding, and either keeping it or losing it forever.
+   The engine is more than fast enough — 400 full builds run in a couple of seconds —
+   so the only thing missing was somewhere to put them.
+
+   Each candidate is a complete, real generation, so picking one is exactly equivalent
+   to having rolled it directly: same seed handling, same locks, same pressure sheet.
+   The candidates that are not picked cost nothing and are discarded. */
+let batchCandidates = [];
+function generateBatch(n){
+  const count = clamp(parseInt(n, 10) || 5, 2, 8);
+  const host = document.getElementById('batchTray');
+  if (!host) return;
+  batchCandidates = [];
+  const before = {state, charMeta, pressureState, lastSheetTraits};
+  try {
+    for (let i = 0; i < count; i++){
+      // Each candidate needs its OWN seed, or a fixed seed in the box would produce
+      // the same character five times, which is a confusing way to present a choice.
+      const seedEl = document.getElementById('seedInput');
+      const userSeed = seedEl ? seedEl.value : "";
+      if (seedEl && userSeed) seedEl.value = userSeed + "#" + (i + 1);
+      try {
+        if (!_runGeneration()) continue;
+        batchCandidates.push({state, meta: Object.assign({}, charMeta), pressure: pressureState});
+      } finally { if (seedEl) seedEl.value = userSeed; }
+    }
+  } finally {
+    // Put the sheet back to whatever it was before the batch. Nothing is committed
+    // until the user picks one.
+    state = before.state; charMeta = before.charMeta;
+    pressureState = before.pressureState; lastSheetTraits = before.lastSheetTraits;
+  }
+  renderBatchTray();
+  renderSheet();
+  if (batchCandidates.length) srAnnounce(`${batchCandidates.length} candidates ready. Pick one to keep it.`);
+}
+function renderBatchTray(){
+  const host = document.getElementById('batchTray');
+  if (!host) return;
+  if (!batchCandidates.length){ host.style.display = 'none'; host.innerHTML = ''; return; }
+  const loudest = (st) => Object.values(st)
+    .filter(x=> x && x.trait)
+    .sort((a,b)=> b.trait.intensity - a.trait.intensity)
+    .slice(0, 3).map(x=> x.trait.trait);
+  host.innerHTML = `<div class="batchHead"><b>Pick one of ${batchCandidates.length}</b>` +
+    `<button class="btn-secondary" ${actAttr('click', 'dismissBatch')}>Discard all</button></div>` +
+    `<div class="batchGrid">` + batchCandidates.map((c, i)=>{
+      const em = (typeof emergentArchetypeName === 'function') ? emergentArchetypeName(c.state) : null;
+      const title = (c.meta && c.meta.name && c.meta.name !== "Unnamed Character") ? c.meta.name
+                  : (em && em.name) || ("Candidate " + (i + 1));
+      return `<button type="button" class="batchCard" ${actAttr('click', 'chooseBatch', i)} title="Keep this one">` +
+        `<b>${escHTML(title)}</b>` +
+        `<span class="sub">${loudest(c.state).map(escHTML).join(" · ")}</span></button>`;
+    }).join('') + `</div>`;
+  host.style.display = 'block';
+}
+function chooseBatch(i){
+  const pick = batchCandidates[i];
+  if (!pick) return;
+  snapshotHistory();
+  lastSheetTraits = Object.keys(state).length ? snapshotSheetTraits(state) : null;
+  state = pick.state; charMeta = pick.meta; pressureState = pick.pressure;
+  markChangedSlots();
+  dismissBatch();
+  const pEl = document.getElementById('pressureSheet');
+  if (pEl) pEl.style.display = pressureState ? "block" : "none";
+  renderSheet(); checkConflicts();
+  toast(`Kept "${charMeta.name && charMeta.name !== "Unnamed Character" ? charMeta.name : "that one"}". The rest are gone.`);
+}
+function dismissBatch(){ batchCandidates = []; renderBatchTray(); }
+
 function runGeneration(){
   try {
     return _runGeneration();
@@ -241,7 +327,7 @@ function _runGeneration(){
   const depthFirst = document.getElementById('depthFirstToggle');
   if (depthFirst && depthFirst.checked) applyDepthFirst();
 
-  const archKey = document.getElementById('archetypeSelect').value;
+  const archKey = strVal('archetypeSelect', '');
   const arch = ARCHETYPES[archKey] || CUSTOM_ARCHETYPES[archKey];
   // BUG FIX: this used to WRITE the blended value back into the slider elements.
   // Because the blend reads the slider it just wrote, pressing Generate repeatedly
@@ -279,7 +365,7 @@ function _runGeneration(){
   }
   const mannerCount = intVal('mannerCount', 3);
   const vocabCount = intVal('vocabCount', 2);
-  const rarityPref = document.getElementById('rarityPref').value;
+  const rarityPref = rarityPrefVal();
 
   // Age and the one-line context stop being decoration here: they resolve to category
   // weights and small slider nudges before anything is drawn (see buildContextBias).
@@ -353,16 +439,16 @@ function _runGeneration(){
   lastGeneratedSliders = captureSliders();
 
   charMeta = {
-    name: document.getElementById('charName').value || "Unnamed Character",
-    age: document.getElementById('charAge').value,
-    context: document.getElementById('charContext').value,
+    name: strVal('charName', '') || "Unnamed Character",
+    age: strVal('charAge', ''),
+    context: strVal('charContext', ''),
     archetypeLabel: archKey ? document.getElementById('archetypeSelect').selectedOptions[0].textContent : "Custom random",
     seed: charMetaSeed
   };
   charMeta.archFidelity = arch ? archetypeFidelity(state, arch) : null;
   const emergent = emergentArchetypeName(state);
   if (emergent && !archKey) charMeta.archetypeLabel = emergent.name + (emergent.exact ? "" : " *");
-  document.getElementById('archetypeTag').textContent = charMeta.archetypeLabel;
+  setText('archetypeTag', charMeta.archetypeLabel);
 
   pressureState = newPressure;
   document.getElementById('pressureSheet').style.display = pressureState ? "block" : "none";
@@ -413,8 +499,7 @@ function seatedTraitIds(exceptSlotId){
    card in a required category left the constraint quietly unsatisfied. Re-running both
    after a mutation costs one pass over the sheet and keeps the chips honest. */
 function reapplyConstraintsAfterMutation(){
-  const rarityPref = document.getElementById('rarityPref')
-    ? document.getElementById('rarityPref').value : 0;
+  const rarityPref = rarityPrefVal();
   try {
     state = applyExclusivePairs(applyRequiredTraits(state), rarityPref);
   } catch(e){ console.error(e); }
@@ -433,7 +518,7 @@ function rerollSlot(slotId){
     toast("This trait is here because you required it by name — remove the constraint to change it.", "warn");
     return;
   }
-  const rarityPref = document.getElementById('rarityPref').value;
+  const rarityPref = rarityPrefVal();
   // Reroll always operates on the single main-character UI, so the live DOM sliders
   // ARE the correct source for trait-level polarity affinity here (no per-call
   // overrides needed, unlike cast/foil generation).
@@ -698,7 +783,7 @@ function adjustPin(slotId, delta){
     // order of how much they matter: never seat a duplicate, but a rejected trait is
     // better than a pin control that does nothing.
     const pool = clean.length ? clean : full.filter(t => !seated.has(t.id));
-    const rarityPref = document.getElementById('rarityPref').value;
+    const rarityPref = rarityPrefVal();
     const picked = pool.length ? pickInRange(pool, rarityPref, pinnedTargets[slotId], 3) : null;
     if (picked && picked.id !== s.trait.id){ diffLog[slotId] = {from:s.trait.trait, to:picked.trait}; }
     if (picked){ state[slotId] = {...s, target: pinnedTargets[slotId], pinned:true, trait: picked}; }

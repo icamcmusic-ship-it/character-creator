@@ -7,7 +7,7 @@
    true: duplicate ids, out-of-range intensities, an axis with only one pole, an
    inverted position mapping that made the printed "active range" a lie, and the
    claim that a seed reproduces a character exactly. */
-const {loadEngine} = require('./harness');
+const {loadEngine, ROOT} = require('./harness');
 
 let passed = 0, failed = 0;
 const failures = [];
@@ -19,7 +19,7 @@ function check(name, fn){
     console.log('  \x1b[32mok\x1b[0m   ' + name + (typeof detail === 'string' ? '  \x1b[2m(' + detail + ')\x1b[0m' : ''));
   } catch (e){
     failed++;
-    failures.push(name + ': ' + e.message);
+    failures.push(name + ': ' + e.message + (process.env.STACK ? '\n' + e.stack : ''));
     console.log('  \x1b[31mFAIL\x1b[0m ' + name + '\n       ' + e.message);
   }
 }
@@ -42,9 +42,20 @@ const ctx = loadEngine([
   'rememberGeneration','forgetRecentTraits','_drawUnique','_buildUsedIds','explainWhyNot',
   'MOOD_TAG_STATS','TIER_TAG_STATS','divergenceLevel','AXES','CROSSLINK_STRENGTH','slotCat','rangeSelect','captureSettings','restoreSettings',
   'bannedCategories','requiredTraitIds','exclusivePairs','SETTING_FIELDS','SETTING_TOGGLES','validateSheetPayload','compressSlots','expandSlots','TRAITS_BY_ID','emergentArchetypeName',
+  // js/app.js — previously not loaded at all, so none of this had coverage.
+  'axisProfile','analyseRelationship','checkEnsembleBalance','randomAxisLevel','secondOrderTensions',
+  'suggestVoiceFromPersonality','intensityWord','axisPoleWord','voiceSliderWord','assertAxisTables',
+  'strVal','boolVal','rarityPrefVal','ARCHETYPES','sheetToText','sheetToHTML','quantile','emptySlot',
+  'MOTIVATION_CROSSLINKS','motivationCrosslinkMap','motivationText','setMotivationLinks','resolveProfileCategories',
+  'WILDCARD_SECTIONS','PRESSURE_SHIFT_SECTIONS','DEPTH_TO_PERSONALITY','clearContextBias',
 ]);
 const A = ctx.api;
 const T = A.TRAITS;
+
+/* Ratchet, not a target. Set to the value the bank actually achieves today; lowering it
+   is the content pass's job and raising it should require saying so out loud. It started
+   at 0.729, where rarity was very nearly a restatement of intensity. */
+const RARITY_V_CEILING = 0.66;
 
 group('Trait bank integrity');
 check('every trait has the required fields', ()=>{
@@ -199,11 +210,27 @@ check('the four-way rarity distribution stays within tolerance', ()=>{
   });
   return A.RTIER_ORDER.map(t=>`${t} ${Math.round(100*share(t))}%`).join(', ');
 });
-check('rarity is no longer a function of intensity', ()=>{
-  /* The whole point of the migration. Under the old derived scheme rtier was
-     determined by (rarity, intensity), so a quiet signature trait could not exist and
-     "an ordinary person with one startling verbal habit" was inexpressible. Every tier
-     must now be reachable at every intensity. */
+/* Cramer's V over the intensity x tier contingency table: 0 = the two axes are
+   independent, 1 = knowing one tells you the other exactly. This is the measurement the
+   README's "genuinely independent" claim is about. */
+function rarityIntensityV(){
+  const tiers = A.RTIER_ORDER, N = T.length, R = 5, C = tiers.length;
+  const obs = Array.from({length:R}, ()=> new Array(C).fill(0));
+  const rowT = new Array(R).fill(0), colT = new Array(C).fill(0);
+  T.forEach(t=>{
+    const r = t.intensity - 1, c = tiers.indexOf(t.rtier || A.rarityTier(t));
+    if (r < 0 || r >= R || c < 0) return;
+    obs[r][c]++; rowT[r]++; colT[c]++;
+  });
+  let chi = 0;
+  for (let i = 0; i < R; i++) for (let j = 0; j < C; j++){
+    const e = rowT[i] * colT[j] / N;
+    if (e > 0) chi += Math.pow(obs[i][j] - e, 2) / e;
+  }
+  return {v: Math.sqrt(chi / (N * Math.min(R - 1, C - 1))), obs, tiers};
+}
+
+check('every tier is reachable at every intensity', ()=>{
   const grid = {};
   T.forEach(t=>{ grid[t.rtier + '@' + t.intensity] = (grid[t.rtier + '@' + t.intensity]||0)+1; });
   const missing = [];
@@ -212,6 +239,25 @@ check('rarity is no longer a function of intensity', ()=>{
   });
   assert(!missing.length, 'unreachable combinations: ' + missing.join(', '));
   return Object.keys(grid).length + ' of 20 tier/intensity combinations populated';
+});
+
+check('rarity is not a restatement of intensity', ()=>{
+  /* This is what the test above was standing in for and could not do. "Every cell is
+     non-empty" is satisfied by ONE trait per cell, and it was: the bank had 10 quiet
+     signature traits and 12 loud commons out of 7,133, and Cramer's V measured 0.729 —
+     rarity was ~73% determined by intensity, so "an ordinary person with one startling
+     verbal habit" was still effectively inexpressible even though the cell was
+     technically occupied. Assert the actual statistical property, and assert the two
+     corner populations the oneLoud budget preset depends on directly, since those are
+     what the preset draws from and a low V could in principle be reached without
+     them. */
+  const {v} = rarityIntensityV();
+  const quietSig = T.filter(t=> t.intensity <= 2 && (t.rtier||A.rarityTier(t)) === 'signature').length;
+  const loudCommon = T.filter(t=> t.intensity >= 4 && (t.rtier||A.rarityTier(t)) === 'common').length;
+  assert(v <= RARITY_V_CEILING, `Cramer's V is ${v.toFixed(3)}, above the ${RARITY_V_CEILING} ceiling`);
+  assert(quietSig >= 90, `only ${quietSig} quiet signature traits (i<=2) — oneLoud has nothing to draw`);
+  assert(loudCommon >= 70, `only ${loudCommon} loud common traits (i>=4)`);
+  return `V=${v.toFixed(3)} · ${quietSig} quiet signature · ${loudCommon} loud common`;
 });
 check('signature is genuinely the minority tier', ()=>{
   const sig = T.filter(t=>t.rtier === 'signature').length;
@@ -508,7 +554,12 @@ check('every context rule names categories that exist', ()=>{
     r.bias.forEach((_, cat)=>{ if (!known.has(cat)) bad.push(cat); });
   });
   assert(!bad.length, 'unknown categories in context rules: ' + [...new Set(bad)].join(', '));
-});
+});/* buildContextBias sets module-level CONTEXT_BIAS / CONTEXT_AXIS_NUDGE as a side
+   effect, and nothing in this group put them back — so every check after it ran against
+   a character quietly conditioned as a 34-year-old dockside smuggler. Nothing measured
+   a distribution, so nothing noticed for as long as that was true. */
+ctx.evalIn('clearContextBias()');
+
 
 group('Coverage invariants');
 // Each of these encodes a bug that shipped: a silently-unmapped axis, a target the
@@ -664,6 +715,28 @@ check('at neutral sliders no profile category dominates its section', ()=>{
      intermittently on noise and telling nobody anything when it did. Measured over
      1,500 characters the real shares sit at 10-18% against a 14% uniform, comfortably
      inside the band; the seed makes that reproducible rather than probable. */
+  /* Reset the workspace first. Earlier checks deliberately leave sliders, per-section
+     profile weights and constraint sets dirty to prove they round-trip, and this check
+     is specifically about what happens when NOTHING is set — so inheriting their state
+     measures something other than what it claims to. */
+  /* clearContextBias in particular: the Context conditioning group above sets a live
+     age/occupation bias and never clears it, so every check after it was silently
+     generating conditioned characters. Harmless while nothing measured a distribution,
+     and it moved Social Role's Leader share from 14% to 28% the moment something did. */
+  ctx.evalIn("clearContextBias();" +
+             "bannedCategories.clear(); bannedSections.clear(); bannedTraitIds.clear();" +
+             "requiredTraitIds.length = 0; requiredCategories.length = 0; exclusivePairs.length = 0;" +
+             "categoryTiers.clear(); clearBudgets(); forgetRecentTraits(); forgetSlotDraws();");
+  ['verbositySlider','registerSlider','composureSlider','profileWeight','rangeFocus','affinityBoost']
+    .forEach(id=> ctx.document._set(id, {value:''}));
+  A.PERSONALITY_AXES.forEach(a=> ctx.document._set('pers_'+a.id, {value:'0'}));
+  A.PROFILE_SECTIONS.forEach(ps=>{
+    ctx.document._set('sec_'+ps.id, {checked:true});
+    ctx.document._set('pw_'+ps.id, {value:'', tagName:'SELECT', options:[{value:''}]});
+    ctx.document._set('type_'+ps.id, {value:'', tagName:'SELECT', options:[{value:''}]});
+  });
+  ctx.evalIn('invalidateSliderCache()');
+
   const N = 1200;
   const counts = {};
   const _rnd = Math.random;
@@ -900,6 +973,350 @@ check('a remembered trait is penalised, an unseen one is not', ()=>{
   A.forgetRecentTraits();
   ctx.document._set('avoidRecentToggle', {checked:false});
   return 'both directions';
+});
+
+group('Whole-sheet consumers survive an empty slot');
+/* Every one of these threw on a sheet holding a slot with trait:null — reachable by
+   banning a section and generating, and by loading a save written by an older build.
+   Two of them (coherenceScore via checkConflicts) threw outside any try/catch. The
+   pickers now emit an explicit empty slot rather than three inconsistent answers, so
+   this asserts the whole consumer surface tolerates one. */
+function sheetWithEmptySlots(){
+  const st = A.buildCharacterState({verbLevel:0, regLevel:0, compLevel:0,
+    mannerCount:2, vocabCount:2, rarityPref:'balanced', vocabPref:null});
+  const keys = Object.keys(st);
+  // Blank a profile slot, a fixed-spine slot, and a personality slot.
+  ['prof_role_0','register','verbosity','grammar','app_move','app_mark']
+    .forEach(k=>{ if (st[k]) st[k] = A.emptySlot(k, st[k].label); });
+  const pers = keys.find(k=>k.startsWith('pers_'));
+  if (pers) st[pers] = A.emptySlot(pers, st[pers].label);
+  return st;
+}
+check('a sheet with empty slots exports, scores and analyses without throwing', ()=>{
+  const st = sheetWithEmptySlots();
+  const meta = {name:'Test', age:'40', context:'', seed:'abc'};
+  const consumers = [
+    ['sheetToText',        ()=> A.sheetToText(st, meta, {})],
+    ['sheetToHTML',        ()=> A.sheetToHTML(st, meta, {})],
+    ['coherenceScore',     ()=> A.coherenceScore(st)],
+    ['checkConflictsFor',  ()=> A.checkConflictsFor(st)],
+    ['axisProfile',        ()=> A.axisProfile(st)],
+    ['secondOrderTensions',()=> A.secondOrderTensions(st)],
+    ['emergentArchetypeName', ()=> A.emergentArchetypeName(st)],
+    ['compressSlots/expandSlots', ()=> A.expandSlots(A.compressSlots(st))],
+    ['budgetCapacity',     ()=> A.budgetCapacity(st)],
+  ];
+  const broke = [];
+  consumers.forEach(([name, fn])=>{ try { fn(); } catch(e){ broke.push(name + ': ' + e.message); } });
+  assert(!broke.length, broke.join('\n       '));
+  return consumers.length + ' consumers';
+});
+check('an all-empty sheet is still exportable', ()=>{
+  const st = {};
+  ['verbosity','register','grammar','app_move','prof_role_0']
+    .forEach(k=> st[k] = A.emptySlot(k, k));
+  const out = A.sheetToText(st, {name:'Nobody'}, {});
+  assert(typeof out === 'string' && out.includes('Nobody'), 'no usable export');
+  return 'exported ' + out.split('\n').length + ' lines';
+});
+
+group('Axis-keyed table drift');
+check('every axis-keyed table agrees with AXIS_LABELS', ()=>{
+  /* CONTRADICTION_QUESTIONS keyed rebelliousness as `reb` while AXIS_LABELS spells it
+     `rebel`, so the entry had never been read once and every rebelliousness
+     contradiction — 302 tagged traits, one of the two most-tagged axes in the bank —
+     fell through to the generic fallback question. Nothing checked that these tables
+     agree with the vocabulary they are keyed on. */
+  const problems = A.assertAxisTables();
+  assert(!problems.length, problems.join('\n       '));
+  return Object.keys(A.AXIS_LABELS).length + ' axes';
+});
+
+group('js/app.js');
+check('axisProfile reads polarity off a real sheet and tolerates an empty slot', ()=>{
+  const st = A.buildCharacterState({verbLevel:1, regLevel:0, compLevel:0,
+    mannerCount:2, vocabCount:2, rarityPref:'balanced', vocabPref:null});
+  const full = A.axisProfile(st);
+  assert(full && typeof full === 'object', 'no profile');
+  const nonZero = Object.values(full).filter(v=>v !== 0).length;
+  assert(nonZero > 0, 'every axis read as zero on a full sheet');
+  const blanked = Object.assign({}, st);
+  Object.keys(blanked).slice(0, 5).forEach(k=> blanked[k] = A.emptySlot(k, 'x'));
+  A.axisProfile(blanked);   // must not throw
+  return nonZero + ' axes carry signal';
+});
+check('randomAxisLevel spans the whole axis range', ()=>{
+  let lo = Infinity, hi = -Infinity;
+  for (let i = 0; i < 5000; i++){ const v = A.randomAxisLevel(); lo = Math.min(lo,v); hi = Math.max(hi,v); }
+  assert(lo >= -2 && hi <= 2, `produced ${lo.toFixed(2)}..${hi.toFixed(2)} — outside the -2..2 axis range`);
+  assert(hi - lo > 3.5, 'barely varies: ' + (hi - lo).toFixed(2));
+  return `${lo.toFixed(2)}..${hi.toFixed(2)}`;
+});
+/* These two are UI entry points that read module globals rather than taking arguments,
+   so drive them the way the page does. Both crashed on a null trait before slotCat was
+   applied, and neither had ever been executed outside a browser. */
+const mkChar = (name, v) => ({meta:{name}, state: A.buildCharacterState({verbLevel:v, regLevel:-v,
+  compLevel:0, mannerCount:2, vocabCount:2, rarityPref:'balanced', vocabPref:null})});
+check('checkEnsembleBalance survives a cast holding empty slots', ()=>{
+  ctx.evalIn('castStates = []');
+  [mkChar('A',0), mkChar('B',1), mkChar('C',-1), mkChar('D',1.5)].forEach(c=>{
+    ctx.__push = c; ctx.evalIn('castStates.push(globalThis.__push)');
+  });
+  ctx.evalIn("castStates[1].state['prof_role_0'] = emptySlot('prof_role_0','Role');" +
+             "castStates[2].state['pers_honesty'] = emptySlot('pers_honesty','Honesty');" +
+             "if (castStates.length < 3) throw new Error('cast did not populate');" +
+             "checkEnsembleBalance();");
+  ctx.evalIn('castStates = []');
+  return 'ok on a 4-member cast';
+});
+check('analyseRelationship compares two sheets, one of them holding empty slots', ()=>{
+  ctx.evalIn('castStates = []');
+  [mkChar('Left', 1.5), mkChar('Right', -1.5)].forEach(c=>{
+    ctx.__push = c; ctx.evalIn('castStates.push(globalThis.__push)');
+  });
+  ctx.evalIn("castStates[0].state['prof_values_0'] = emptySlot('prof_values_0','Values')");
+  ctx.document._set('relA', {value:'cast_0'});
+  ctx.document._set('relB', {value:'cast_1'});
+  ctx.evalIn("if (!getCharByKey('cast_0') || !getCharByKey('cast_1')) throw new Error('cast lookup failed');" +
+             "analyseRelationship();");
+  ctx.evalIn('castStates = []');
+  return 'ok';
+});
+check('the readout word helpers cover their whole input range', ()=>{
+  const gaps = [];
+  for (let i = 1; i <= 5; i++) if (!A.intensityWord(i)) gaps.push('intensity ' + i);
+  for (let raw = -100; raw <= 100; raw += 5){
+    if (!A.voiceSliderWord('verbosity', raw)) gaps.push('verbosity ' + raw);
+  }
+  assert(!gaps.length, gaps.slice(0,5).join(', '));
+  return 'no gaps';
+});
+
+group('Content-Security-Policy');
+check('no source file contains an inline event handler', ()=>{
+  /* The app carried about 140 inline on* attributes. They work, and they make a strict
+     CSP impossible: any policy without 'unsafe-inline' in script-src turns every button
+     in the app into a dead button, which is a real constraint for anyone embedding
+     this. They are declared actions now, dispatched by one delegated listener per event
+     type. This is the cheap guard against one creeping back — tests/browser.mjs checks
+     the same property in a real browser AND that the whole app works under
+     script-src 'self'. */
+  const fs = require('fs'), path = require('path');
+  const files = ['index.html', 'js/app.js', 'js/engine.js', 'js/generate.js', 'js/render.js'];
+  const bad = [];
+  files.forEach(f=>{
+    const src = fs.readFileSync(path.join(ROOT, f), 'utf8');
+    src.split('\n').forEach((line, i)=>{
+      const m = line.match(/\son(click|change|input|keydown|submit|focus|blur|mouseover)\s*=\s*"/);
+      if (m) bad.push(`${f}:${i+1} ${m[1]}`);
+    });
+  });
+  assert(!bad.length, bad.length + ' inline handler(s):\n       ' + bad.slice(0, 8).join('\n       '));
+  return files.length + ' files clean';
+});
+check('every declared action names a function that exists', ()=>{
+  /* A typo in a data-act is silent at author time and dead at click time, which is
+     strictly worse than the inline handler it replaced — an inline typo at least
+     throws a ReferenceError naming the symbol. Check the static markup here; the
+     template-generated ones go through actAttr() and are covered in the browser run. */
+  const fs = require('fs'), path = require('path');
+  const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+  const names = [...html.matchAll(/data-act="([A-Za-z_$][\w$]*)"/g)].map(m=>m[1]);
+  const missing = [...new Set(names)].filter(n => typeof ctx[n] !== 'function' && typeof A[n] !== 'function');
+  assert(!missing.length, 'actions with no function: ' + missing.join(', '));
+  return new Set(names).size + ' distinct actions, all resolvable';
+});
+check('every declared argument list is valid JSON', ()=>{
+  const fs = require('fs'), path = require('path');
+  const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+  const bad = [];
+  [...html.matchAll(/data-args="([^"]*)"/g)].forEach(m=>{
+    const raw = m[1].replace(/&quot;/g, '"').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
+    try { const v = JSON.parse(raw); if (!Array.isArray(v)) bad.push(raw); }
+    catch (e){ bad.push(raw); }
+  });
+  assert(!bad.length, bad.length + ' unparseable: ' + bad.slice(0,3).join(' | '));
+  return 'all parse';
+});
+
+group('Archetype coverage');
+check('the archetype presets cover both directions of every axis', ()=>{
+  /* The prior widening pass fixed the THEMES; the imbalance that remained was in the
+     numbers. discipline was set in 20 of 28 presets and POSITIVE in 17 of them, so
+     there was no 'chaotic but likeable' archetype at all. intelligence was set
+     negative exactly once in 28, which — with the 7.8:1 polarity skew on the same axis
+     — made 'not very bright' the least-supported character in the tool at both levels
+     at once. And assertiveness, the axis with the strongest grammar cross-link in the
+     matrix, was the one the presets spoke to least. */
+  const all = Object.values(A.ARCHETYPES);
+  const stat = {};
+  A.PERSONALITY_AXES.forEach(a=> stat[a.id] = {n:0, pos:0, neg:0});
+  all.forEach(arch => Object.entries(arch.pers || {}).forEach(([ax, v])=>{
+    if (!stat[ax] || !v) return;
+    stat[ax].n++; v > 0 ? stat[ax].pos++ : stat[ax].neg++;
+  }));
+  const bad = [];
+  Object.entries(stat).forEach(([ax, st])=>{
+    if (st.n < all.length * 0.3) bad.push(`${ax}: touched by only ${st.n}/${all.length} presets`);
+    if (st.n && st.neg < 3) bad.push(`${ax}: only ${st.neg} preset(s) push it negative`);
+    if (st.n && st.pos < 3) bad.push(`${ax}: only ${st.pos} preset(s) push it positive`);
+  });
+  assert(!bad.length, bad.join('\n       '));
+  const touched = Object.values(stat).map(x=>x.n);
+  return `${all.length} presets, each axis set in ${Math.min(...touched)}-${Math.max(...touched)} of them`;
+});
+check('every archetype names real vocabulary categories and real axes', ()=>{
+  const cats = new Set(A.catsOf('Vocabulary Traits'));
+  const axes = new Set(A.PERSONALITY_AXES.map(a=>a.id));
+  const bad = [];
+  Object.entries(A.ARCHETYPES).forEach(([key, a])=>{
+    if (!a.label) bad.push(key + ' has no label');
+    (a.vocabPref || []).forEach(c=>{ if (!cats.has(c)) bad.push(`${key}: unknown vocabulary category "${c}"`); });
+    Object.keys(a.pers || {}).forEach(ax=>{ if (!axes.has(ax)) bad.push(`${key}: unknown axis "${ax}"`); });
+    Object.values(a.pers || {}).forEach(v=>{ if (typeof v !== 'number' || Math.abs(v) > 100) bad.push(`${key}: axis value ${v} out of range`); });
+    ['verbosity','register','composure'].forEach(k=>{
+      if (a[k] !== undefined && (typeof a[k] !== 'number' || Math.abs(a[k]) > 2)) bad.push(`${key}: ${k} = ${a[k]} is not a -2..2 level`);
+    });
+  });
+  assert(!bad.length, bad.join('\n       '));
+  return Object.keys(A.ARCHETYPES).length + ' presets';
+});
+
+group('Motivation & Wound is wired in');
+/* The section the sheet leads with, that draws on every character, and that supplies
+   the pressure trigger, participated in the weight matrix in NEITHER direction: not one
+   of its seven categories was a WEIGHT_MATRIX target, none had a DEPTH_TO_PERSONALITY
+   entry, and it was excluded from WILDCARD_SECTIONS and PRESSURE_SHIFT_SECTIONS. Its
+   whole outbound influence was one hardcoded link to the Distinguishing Marks target. */
+check('a wound actually moves the categories downstream of it', ()=>{
+  const measure = (text) => {
+    const counts = {attachment:{}, values:{}, role:{}};
+    const fake = text ? [{trait:text, desc:text, intensity:4}] : [];
+    const _r = Math.random; Math.random = A.mulberry32(0x50117d);
+    try {
+      for (let i = 0; i < 600; i++){
+        A.setMotivationLinks(A.motivationCrosslinkMap(fake));
+        const cats = A.resolveProfileCategories('balanced', {}, null);
+        Object.keys(counts).forEach(k=>{ if (cats[k]) counts[k][cats[k]] = (counts[k][cats[k]]||0)+1; });
+      }
+    } finally { Math.random = _r; A.setMotivationLinks(null); }
+    return counts;
+  };
+  const share = (c, sec, cat) => (c[sec][cat] || 0) / 600;
+  const base = measure('');
+  const betrayed = measure('Betrayed by kin — a broken promise from the people who were meant to be safe');
+  const abandoned = measure('Fear of abandonment — terrified of being left behind and permanently alone');
+  const moves = [];
+  // The report's own worked example: this wound should pull Attachment toward Avoidant
+  // and Values toward Loyalty-Bound.
+  if (share(betrayed,'attachment','Avoidant') <= share(base,'attachment','Avoidant') * 1.2)
+    moves.push('betrayal did not pull Attachment toward Avoidant');
+  if (share(betrayed,'values','Loyalty-Bound') <= share(base,'values','Loyalty-Bound') * 1.3)
+    moves.push('betrayal did not pull Values toward Loyalty-Bound');
+  if (share(abandoned,'attachment','Anxious') <= share(base,'attachment','Anxious') * 1.3)
+    moves.push('abandonment did not pull Attachment toward Anxious');
+  // ...and it must NUDGE, not decide. A single wound taking a category past ~60% would
+  // mean the cross-link had become the whole character, which is the bug the
+  // CROSSLINK_STRENGTH scaling exists to prevent.
+  Object.entries(betrayed).forEach(([sec, m])=>
+    Object.entries(m).forEach(([cat, n])=>{ if (n/600 > 0.6) moves.push(`${sec}:${cat} took ${(100*n/600).toFixed(0)}% — deciding, not nudging`); }));
+  assert(!moves.length, moves.join('\n       '));
+  return `Avoidant ${(100*share(base,'attachment','Avoidant')).toFixed(0)}%→${(100*share(betrayed,'attachment','Avoidant')).toFixed(0)}%, ` +
+         `Loyalty-Bound ${(100*share(base,'values','Loyalty-Bound')).toFixed(0)}%→${(100*share(betrayed,'values','Loyalty-Bound')).toFixed(0)}%`;
+});
+check('the motivation keyword rules reach the section they are written for', ()=>{
+  /* Roughly half this section is written hyphenated ("Fear-of-becoming-a-burden") and
+     every rule is written in prose, so a rule reading /becoming a burden/ never once
+     matched the trait it was written for. */
+  const mt = T.filter(t=>t.section === 'Motivation & Wound');
+  const linked = mt.filter(t=> A.MOTIVATION_CROSSLINKS.some(([re])=> re.test(A.motivationText(t))));
+  const untagged = mt.filter(t=> !Object.keys(t.pol||{}).some(k=>t.pol[k]));
+  assert(linked.length / mt.length >= 0.35,
+    `only ${linked.length}/${mt.length} motivation traits match any cross-link rule`);
+  assert(untagged.length <= 90, `${untagged.length} motivation traits carry no polarity at all`);
+  return `${linked.length}/${mt.length} cross-linked, ${untagged.length} still untagged`;
+});
+check('Motivation & Wound reaches the systems it was excluded from', ()=>{
+  const gaps = [];
+  if (!A.WILDCARD_SECTIONS.includes('Motivation & Wound')) gaps.push('WILDCARD_SECTIONS');
+  if (!A.PRESSURE_SHIFT_SECTIONS.includes('motivation')) gaps.push('PRESSURE_SHIFT_SECTIONS');
+  const depth = A.catsOf('Motivation & Wound').filter(c => A.DEPTH_TO_PERSONALITY[c]);
+  if (!depth.length) gaps.push('DEPTH_TO_PERSONALITY');
+  assert(!gaps.length, 'still excluded from: ' + gaps.join(', '));
+  return `${depth.length}/${A.catsOf('Motivation & Wound').length} categories drive depth-first`;
+});
+
+group('Slot variety at default settings');
+/* The measurement that would have caught poolFloorTarget being inert. Its lift was a
+   no-op on every pool it was written for — max(target, 0.55 + 0.35) never beat a target
+   of 1.20 — and the engine comments claimed the fix had worked, because the top-trait
+   share DID improve (that was the separate rarityNorm change) while the distinct count
+   did not move at all. Nothing measured the distinct count, so nothing noticed.
+
+   These are the fixed-category slots: the ones whose variety is capped by how much
+   material one category holds near the target, rather than by picking a category first
+   the way vocab/manner/grammar/role do. Measured over 400 builds at defaults, they ran
+   9-19 distinct traits with a single trait taking 11-19% of every character generated. */
+check('the fixed-category slots draw from a real range', ()=>{
+  A.forgetRecentTraits(); A.forgetSlotDraws();
+  const N = 200;
+  const seen = new Map();
+  for (let i = 0; i < N; i++){
+    const st = A.buildCharacterState({verbLevel:0, regLevel:0, compLevel:0,
+      mannerCount:3, vocabCount:2, rarityPref:'balanced', vocabPref:null});
+    A.rememberGeneration(st);
+    Object.entries(st).forEach(([k, s])=>{
+      if (!s || !s.trait) return;
+      if (!seen.has(k)) seen.set(k, new Map());
+      const m = seen.get(k);
+      m.set(s.trait.id, (m.get(s.trait.id) || 0) + 1);
+    });
+  }
+  // This test runs 200 builds and would otherwise leave the recency window and the
+  // per-slot draw memory full for whatever runs next — which is enough to shift a
+  // later distribution check by several points. Reset both.
+  A.forgetRecentTraits(); A.forgetSlotDraws();
+  // slot id -> the floor it must clear over N builds. Set below what the engine
+  // currently achieves, so ordinary content churn doesn't trip it and a structural
+  // regression does.
+  const FLOORS = {register: 40, verbosity: 30, pers_honesty: 20, pers_confidence: 20,
+                  pers_curiosity: 20, pers_manners: 20, pers_activeness: 20};
+  const thin = [];
+  Object.entries(FLOORS).forEach(([slot, floor])=>{
+    const m = seen.get(slot);
+    if (!m) return thin.push(slot + ' never drew');
+    const total = [...m.values()].reduce((a,b)=>a+b, 0);
+    const topShare = Math.max(...m.values()) / total;
+    if (m.size < floor) thin.push(`${slot}: ${m.size} distinct in ${N} (want >= ${floor})`);
+    if (topShare > 0.14) thin.push(`${slot}: one trait in ${(100*topShare).toFixed(0)}% of characters`);
+  });
+  assert(!thin.length, thin.join('\n       '));
+  const sizes = Object.keys(FLOORS).map(k=> (seen.get(k) || new Map()).size);
+  return `${Math.min(...sizes)}-${Math.max(...sizes)} distinct across ${Object.keys(FLOORS).length} fixed-category slots`;
+});
+check('poolFloorTarget actually lifts a target off the pool floor', ()=>{
+  /* Directly asserts the thing that was broken: on a pool with one low outlier, the
+     returned target must sit inside the body of the material, not on its bottom edge.
+     The old min()+0.35 form returns the caller's target unchanged here. */
+  const pool = A.byFilter('Vocabulary Traits', 'Register & Formality Spectrum');
+  assert(pool.length > 40, 'test pool went missing');
+  const positions = pool.map(A.traitPos).sort((a,b)=>a-b);
+  const lo = positions[0];
+  const lifted = A.poolFloorTarget(pool, A.targetFromMag(18));
+  assert(lifted > lo + 0.5, `target ${lifted.toFixed(2)} is still sitting on the pool floor ${lo.toFixed(2)}`);
+  const inWindow = positions.filter(p => Math.abs(p - lifted) <= 0.75).length;
+  assert(inWindow >= 8, `only ${inWindow} traits within a default band of the lifted target`);
+  return `floor ${lo.toFixed(2)} -> target ${lifted.toFixed(2)}, ${inWindow} traits in band`;
+});
+check('rangeSelect scales its window to the pool, not just the precision slider', ()=>{
+  const small = A.byFilter('Appearance', 'Movement & Bearing');
+  const large = A.byFilter('Vocabulary Traits', 'Register & Formality Spectrum');
+  const rs = (pool) => A.rangeSelect(pool, A.poolFloorTarget(pool, A.targetFromMag(40)));
+  const a = rs(small), b = rs(large);
+  assert(a.list.length >= Math.min(10, small.length * 0.3),
+    `thin pool offered only ${a.list.length} of ${small.length} candidates`);
+  assert(b.list.length >= 20, `wide pool offered only ${b.list.length} of ${large.length}`);
+  return `${a.list.length}/${small.length} and ${b.list.length}/${large.length} eligible`;
 });
 
 group('Explanations');

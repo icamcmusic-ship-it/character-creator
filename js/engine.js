@@ -252,6 +252,12 @@ if (typeof location !== 'undefined' && /[?&]dev=1\b/.test(location.search || '')
     console.error(`[dev] ${problems.length} malformed trait entr${problems.length===1?'y':'ies'}:\n` + problems.join('\n'));
     if (typeof toast === 'function') toast(`${problems.length} malformed trait entries — see the console.`, 'warn', 9000);
   }, 0);
+  setTimeout(()=>{
+    const problems = assertAxisTables();
+    if (!problems.length){ console.info('[dev] axis tables OK'); return; }
+    console.error(`[dev] ${problems.length} axis-table problem(s):\n` + problems.join('\n'));
+    if (typeof toast === 'function') toast(`${problems.length} axis-table problems — see the console.`, 'warn', 9000);
+  }, 0);
 }
 
 
@@ -261,17 +267,32 @@ if (typeof location !== 'undefined' && /[?&]dev=1\b/.test(location.search || '')
 // Motivation & Wound is intentionally left untagged — its four sub-categories
 // (Want/Fear/Wound/Lie) aren't a pos/neg spectrum the way the other six are.
 const PROFILE_CATEGORY_POLARITY = {
-  "Fight (attack the threat)": {asrt:1, agr:-1}, "Flight (remove yourself)": {asrt:-1},
-  "Freeze (shut down)": {ego:-1, mood:-1}, "Fawn (appease the threat)": {agr:1, asrt:-1},
-  "Leader": {asrt:1, ego:1}, "Peacemaker": {agr:1, warm:1}, "Instigator": {rebel:1, agr:-1},
+  /* The rebel and intel entries below were one-directional: Instigator, Outsider,
+     Absurd & Chaotic and Risk & Escape all granted rebel:+1 and NOTHING in the whole
+     profile taxonomy granted rebel:-1; Skeptic, Pragmatic, Dry & Deadpan and
+     Intellectual & Wordplay all granted intel:+1 and nothing granted intel:-1. Measured
+     across the bank that produced 290:60 on rebelliousness and 436:93 on analytical
+     thinking, which polNormalise correctly stops reading as posture on the radar but
+     cannot fix in the draw — polarityFit had almost nothing to select on when either
+     slider went negative. Categories that genuinely read as deferring to the group, or
+     as acting rather than analysing, now say so. */
+  "Fight (attack the threat)": {asrt:1, agr:-1, intel:-1}, "Flight (remove yourself)": {asrt:-1},
+  "Freeze (shut down)": {ego:-1, mood:-1}, "Fawn (appease the threat)": {agr:1, asrt:-1, rebel:-1},
+  "Leader": {asrt:1, ego:1}, "Peacemaker": {agr:1, warm:1, rebel:-1, mood:1}, "Instigator": {rebel:1, agr:-1},
   "Outsider": {warm:-1, rebel:1}, "Caretaker": {warm:1, emo:1}, "Skeptic": {intel:1, pos:-1},
-  "Rigid & Principled": {disc:1, hon:1}, "Pragmatic & Flexible": {hon:-1, intel:1},
-  "Loyalty-Bound": {warm:1, agr:1}, "Self-Interested": {warm:-1, hon:-1},
-  "Secure": {ego:1, emo:1}, "Anxious": {ego:-1, emo:1}, "Avoidant": {emo:-1, warm:-1}, "Disorganized": {mood:-1, disc:-1},
+  "Rigid & Principled": {disc:1, hon:1, rebel:-1}, "Pragmatic & Flexible": {hon:-1, intel:1},
+  "Loyalty-Bound": {warm:1, agr:1, rebel:-1, intel:-1}, "Self-Interested": {warm:-1, hon:-1},
+  /* mood was the last one-directional code left in this table: Freeze, Disorganized,
+     Substance and Avoidance all pushed it down and nothing anywhere pushed it up, which
+     is most of why 93% of the bank's mood tags are negative and why generated
+     characters trend anxious. These four categories are the ones that genuinely assert
+     equanimity rather than a performance of it — the same distinction the MOOD_POSITIVE
+     id list is drawn on. */
+  "Secure": {ego:1, emo:1, mood:1}, "Anxious": {ego:-1, emo:1}, "Avoidant": {emo:-1, warm:-1}, "Disorganized": {mood:-1, disc:-1},
   "Dry & Deadpan": {intel:1, emo:-1}, "Self-Deprecating": {ego:-1}, "Cruel & Barbed": {warm:-1, agr:-1},
-  "Warm & Playful": {warm:1, pos:1}, "Absurd & Chaotic": {disc:-1, rebel:1}, "Humorless & Absent": {pos:-1, disc:1},
+  "Warm & Playful": {warm:1, pos:1, mood:1}, "Absurd & Chaotic": {disc:-1, rebel:1}, "Humorless & Absent": {pos:-1, disc:1},
   "Substance & Consumption": {disc:-1, mood:-1}, "Compulsion & Ritual": {disc:1, ego:-1},
-  "Risk & Escape": {disc:-1, rebel:1}, "Restraint & Discipline": {disc:1},
+  "Risk & Escape": {disc:-1, rebel:1}, "Restraint & Discipline": {disc:1, rebel:-1, mood:1},
   // Added for the 4 new sub-groups (Connector, Idealistic & Visionary, Intellectual &
   // Wordplay, Avoidance & Procrastination) — without these, traits in those categories
   // carry empty pol and are invisible to conflict detection and the Relationship/Ensemble
@@ -279,11 +300,24 @@ const PROFILE_CATEGORY_POLARITY = {
   "Connector": {warm:1, act:1}, "Idealistic & Visionary": {hon:1, pos:1},
   "Intellectual & Wordplay": {intel:1}, "Avoidance & Procrastination": {disc:-1, mood:-1},
 };
+let PROFILE_POLARITY_STATS = null;
 (function applyProfilePolarity(){
+  /* Same guard bug as applyPersonalityPolePolarity below: this only fired on a trait
+     whose pol was COMPLETELY empty, so an entry declaring a single orthogonal axis —
+     a Caretaker trait tagged {disc:1}, say — never received the warm/emo its category
+     determines. Merge per axis instead, leaving any axis the trait speaks to itself
+     alone, which is the rule the guard was reaching for. */
+  let tagged = 0, keptExplicit = 0;
   TRAITS.forEach(t=>{
     const tags = PROFILE_CATEGORY_POLARITY[t.category];
-    if (tags && t.pol && Object.keys(t.pol).length === 0) Object.assign(t.pol, tags);
+    if (!tags) return;
+    if (!t.pol) t.pol = {};
+    Object.entries(tags).forEach(([code, sign])=>{
+      if (t.pol[code]){ keptExplicit++; return; }
+      t.pol[code] = sign; tagged++;
+    });
   });
+  PROFILE_POLARITY_STATS = {tagged, keptExplicit};
 })();
 
 // ================= MOTIVATION & WOUND POLARITY TAGGING =================
@@ -297,6 +331,15 @@ const PROFILE_CATEGORY_POLARITY = {
 // keyword match against the trait's own text instead of by category. Rules run in
 // order and merge (a trait can match several); anything matching nothing stays
 // untagged exactly as before, so this is purely additive.
+/* Roughly half this section's entries are written hyphenated — "Fear-of-becoming-a-
+   burden", "'My-worth-is-conditional'" — and every rule below is written in prose, so a
+   rule reading /becoming a burden/ silently never matched the trait it was written for.
+   That is most of why 128 entries came back untagged despite 33 rules covering
+   apparently all of the ground. Normalise the separators once, here, for both the
+   polarity pass and the cross-link pass. */
+function motivationText(t){
+  return (t.trait + " " + t.desc).toLowerCase().replace(/[-_\u2010-\u2015]+/g, " ");
+}
 const MOTIVATION_POLARITY_RULES = [
   [/vengeance|suffer a specific consequence|specific person to suffer/i, {agr:-1, rebel:1}],
   [/\bsafety\b|nothing can reach them|structure and control|losing control|losing agency|\bchaos\b/i, {disc:1}],
@@ -330,12 +373,38 @@ const MOTIVATION_POLARITY_RULES = [
   [/\bcomfort\b|end to struggle|quiet ending|simple.normalcy/i, {act:-1}],
   [/protection of another|kept safe above|justice for another/i, {warm:1, agr:1}],
   [/all-consuming|swallowed every other priority|eaten the person/i, {disc:1}],
+  /* A second pass over the 128 entries the rules above still missed. The originals were
+     written against the four founding categories and never revisited when The Need, The
+     Ghost and The Defence were added, and several of the commonest Fear/Wound/Lie shapes
+     (humiliation, insignificance, powerlessness, survivor guilt, hurt by a protector)
+     had no rule at all — so the section's most archetypal entries were exactly the ones
+     falling through. Same additive contract: anything still matching nothing stays
+     untagged, and a rule never overwrites a tag a trait sets itself. */
+  [/humiliat|brought low|named.unworthy|declared unfit|shamed|took the fall|left.holding.the.blame/i, {ego:-1, emo:1}],
+  [/insignifican|amounting to nothing|leaving no trace|being ordinary|forgotten|fear.of.silence/i, {ego:-1, pos:-1}],
+  [/powerless|unable to act|losing control|spiraling beyond/i, {disc:1, ego:-1}],
+  [/failed to save|couldn't stop it|survived what others|alive by accident|survivor/i, {emo:1, ego:-1}],
+  [/harmed by a protector|meant to keep them safe|hurt by the person/i, {emo:1, warm:-1, hon:-1}],
+  [/exiled|cast out|removed from the place|home destroyed|taken or ruined/i, {warm:-1, pos:-1}],
+  [/lost faith|belief system collapsed|left nothing|being wrong|core belief is a mistake/i, {pos:-1, intel:1}],
+  [/ruin what I touch|inherently destructive|don't deserve|happiness is for other people/i, {ego:-1, pos:-1}],
+  [/unlovable|affection shown to them is a mistake/i, {ego:-1, warm:-1}],
+  [/world is rigged|effort is pointless|against the system/i, {pos:-1, rebel:1}],
+  [/restoration|put back something|undoing.a.mistake|fix one past error|broke a vow/i, {hon:1, emo:1}],
+  [/proving.capability|demonstrate they can|everyone doubts/i, {ego:1, disc:1}],
+  [/disappointing.a.mentor|letting down the one person|whose opinion matter/i, {agr:1, ego:-1}],
+  [/becoming a burden|needing more care than they can offer/i, {ego:-1, agr:1}],
+  [/fear of loss|losing what they've built/i, {disc:1, emo:1}],
+  [/repetition|becoming their parent/i, {disc:1, ego:-1}],
+  /* The four intensity-scale entries in each category ("A small doubt", "A defining,
+     unhealed wound") describe HOW MUCH rather than what, so they carry no direction and
+     are correctly left alone by every rule above. */
 ];
 (function applyMotivationPolarity(){
   TRAITS.forEach(t=>{
     if (t.section !== "Motivation & Wound") return;
     if (!t.pol || Object.keys(t.pol).length > 0) return; // never clobber existing tags
-    const text = (t.trait + " " + t.desc).toLowerCase();
+    const text = motivationText(t);
     const acc = {};
     MOTIVATION_POLARITY_RULES.forEach(([re, tags])=>{ if (re.test(text)) Object.assign(acc, tags); });
     if (Object.keys(acc).length) Object.assign(t.pol, acc);
@@ -366,15 +435,25 @@ const MOOD_POSITIVE_IDS = [
 ];
 let MOOD_TAG_STATS = null;
 (function applyMoodPositive(){
+  /* The stat used to be a bare matched/listed, which reported 30/31 — and a shortfall
+     of one is indistinguishable from a typo'd id that silently tags nothing. Count the
+     three outcomes separately: `tagged` (this pass set it), `alreadyTagged` (the entry
+     carried an explicit mood tag and the pass correctly refused to clobber it), and
+     `missing` (an id in the list that matches no trait, which IS a bug). Only `missing`
+     should ever be non-zero unexpectedly, and the test asserts exactly that. */
   const want = new Set(MOOD_POSITIVE_IDS);
-  let matched = 0;
+  const found = new Set();
+  let tagged = 0, alreadyTagged = 0;
   TRAITS.forEach(t=>{
     if (!want.has(t.id)) return;
+    found.add(t.id);
     if (!t.pol) t.pol = {};
-    if (t.pol.mood) return;         // never clobber an explicit tag
-    t.pol.mood = 1; matched++;
+    if (t.pol.mood) { alreadyTagged++; return; }   // never clobber an explicit tag
+    t.pol.mood = 1; tagged++;
   });
-  MOOD_TAG_STATS = {listed: MOOD_POSITIVE_IDS.length, matched};
+  const missing = MOOD_POSITIVE_IDS.filter(id=>!found.has(id));
+  MOOD_TAG_STATS = {listed: MOOD_POSITIVE_IDS.length, matched: found.size,
+                    tagged, alreadyTagged, missing};
 })();
 
 const VOCAB_CATS = catsOf("Vocabulary Traits");
@@ -455,6 +534,40 @@ let ARCHETYPES = {
              pers:{confidence:45, positivity:30, rebelliousness:40, manners:-40, emotionalcapacity:20, activeness:45, curiosity:35}},
   steadyOrganiser:     {label:"Steady Organiser", verbosity:0, register:0, composure:-2, vocabPref:["Pragmatic Focus & Speech Functions","Precision & Specificity Level"],
              pers:{discipline:60, agreeableness:45, friendliness:45, assertiveness:35, activeness:50, positivity:35, emotionalcapacity:15}},
+
+  /* ---- FILLING THE HOLES IN THE AXIS COVERAGE ----------------------------------
+     The previous widening pass fixed the THEMES — the note about nine of twenty being
+     variations on 'damaged person carrying a secret' is no longer true, and the 28
+     presets are genuinely varied. The imbalance that remains is in the numbers:
+
+       discipline    set in 20/28, and POSITIVE in 17 of them. There was effectively no
+                     undisciplined archetype outside unbotheredYoung and
+                     washedUpProdigy — no 'chaotic but likeable' preset at all.
+       intelligence  set in 10/28, and negative exactly ONCE (child, -45). Combined with
+                     the 7.8:1 polarity skew on the same axis, 'not very bright' was the
+                     least-supported character in the tool at both the archetype and the
+                     trait level. Both halves of that are fixed here.
+       assertiveness set in only 9/28 — the axis with the strongest grammar link
+                     (Turn-Taking Grammar at TIER_STRONG) was the one the archetypes
+                     spoke to least, so the preset that should most obviously drive
+                     someone's turn-taking barely ever did.
+
+     Six presets, chosen to be people rather than to be corrections: each is a character
+     someone would actually want, and between them they close the gaps. Written low on
+     intelligence WITHOUT being written stupid — the point of the axis is how someone
+     thinks, not how much they are worth. */
+  cheerfulMess:        {label:"Cheerful Mess", verbosity:1, register:-1, composure:1, vocabPref:["Pragmatic Focus & Speech Functions","Affective & Emotional Intensity"],
+             pers:{discipline:-70, friendliness:60, positivity:55, agreeableness:45, activeness:40, emotionalcapacity:35, manners:-20}},
+  plainSpoken:         {label:"Plain-Spoken Practical", verbosity:-1, register:-2, composure:-1, vocabPref:["Directness & Literalness","Precision & Specificity Level"],
+             pers:{intelligence:-50, honesty:60, assertiveness:45, curiosity:-30, discipline:40, manners:-25, emotionalcapacity:-20}},
+  softSpokenSecond:    {label:"Soft-Spoken Second", verbosity:-1, register:1, composure:0, vocabPref:["Semantic Density & Modifiers","Pragmatic Focus & Speech Functions"],
+             pers:{assertiveness:-70, agreeableness:60, manners:50, confidence:-35, friendliness:35, emotionalcapacity:25}},
+  bluntForeman:        {label:"Blunt Foreman", verbosity:-1, register:-2, composure:-1, vocabPref:["Directness & Literalness","Morphological & Structural Lexicon"],
+             pers:{assertiveness:75, discipline:45, manners:-50, agreeableness:-40, honesty:50, emotionalcapacity:-30, intelligence:-15}},
+  dreamyDrifter:       {label:"Dreamy Drifter", verbosity:0, register:1, composure:1, vocabPref:["Abstractness & Sensory Modality","Temporal Orientation & Tense Usage"],
+             pers:{discipline:-55, curiosity:65, intelligence:-25, activeness:-35, positivity:35, emotionalcapacity:40, assertiveness:-30}},
+  stubbornCraftsman:   {label:"Stubborn Craftsman", verbosity:-2, register:-1, composure:-2, vocabPref:["Precision & Specificity Level","Directness & Literalness"],
+             pers:{intelligence:-30, discipline:70, rebelliousness:-35, assertiveness:40, curiosity:-25, manners:-15, emotionalcapacity:-25}},
 };
 
 // user-defined archetypes loaded from storage
@@ -760,14 +873,44 @@ function recentPenalty(t){
    traits rather than on empty space. Only the neutral/unemphatic targets get this:
    a target the user actually asked for by moving a slider is left exactly where they
    put it, clamping and all. */
-function poolFloorTarget(pool, target, lift){
-  if (!pool || !pool.length) return target;
-  let lo = Infinity;
-  for (const t of pool){ const p = traitPos(t); if (p < lo) lo = p; }
-  if (!isFinite(lo)) return target;
-  return Math.max(target, lo + (lift === undefined ? 0.35 : lift));
+/* Quantile over an unsorted numeric array, linear interpolation between ranks.
+   Shared by poolFloorTarget and the density diagnostics. */
+function quantile(values, q){
+  if (!values || !values.length) return NaN;
+  const a = values.slice().sort((x,y)=>x-y);
+  if (a.length === 1) return a[0];
+  const pos = clamp(q, 0, 1) * (a.length - 1);
+  const lo = Math.floor(pos), hi = Math.ceil(pos);
+  return lo === hi ? a[lo] : a[lo] + (a[hi] - a[lo]) * (pos - lo);
 }
 
+/* BUG FIX (the lift was a no-op). This used to compute max(target, min(pool) + 0.35).
+   traitPos clamps to [0.55, 5.45] and the i1/i5 tail-fill content passes put at least
+   one intensity-1 trait in essentially every category, so min(pool) is 0.55 almost
+   everywhere, the lift produced 0.90, and max(1.20, 0.90) returned the ORIGINAL target
+   unchanged. Every pool this function was written for was still being aimed below its
+   own material — Register (neutral) was measured at 15 distinct traits out of 83, and
+   app_move's most frequent draw was still "Enters a room backwards", the exact trait
+   the original fix names as its symptom.
+
+   A single tail trait must not be allowed to define where the pool "starts". Use the
+   25th percentile of the pool's positions instead: robust to one or two outliers at
+   either end, and it lands the target inside the body of the material rather than on
+   its lower edge, which is what gives the proximity kernel traits on BOTH sides of
+   centre. `lift` is retained for callers that want to sit deliberately deeper in. */
+const POOL_FLOOR_QUANTILE = 0.25;
+function poolFloorTarget(pool, target, lift){
+  if (!pool || !pool.length) return target;
+  const positions = pool.map(traitPos);
+  const floor = quantile(positions, POOL_FLOOR_QUANTILE);
+  if (!isFinite(floor)) return target;
+  return Math.max(target, floor + (lift === undefined ? 0 : lift));
+}
+
+// A window should hold a real slice of its pool. 0.35 matches the clamped-case
+// requirement that was already shown to work; the cap keeps the big pools sharp.
+const POOL_ELIGIBLE_FRAC = 0.35;
+const POOL_ELIGIBLE_CAP = 26;
 function rangeSelect(pool, target, minCount){
   /* TARGET CLAMPING. The widening loop below reacts to how MANY candidates it found,
      never to WHERE they sit. When the target falls outside the pool's actual span —
@@ -791,7 +934,20 @@ function rangeSelect(pool, target, minCount){
      of the pool rather than the bare four candidates the tight band would return.
      Without this, clamping alone still bottoms out on the same handful of traits,
      because the band is narrow independently of where its centre sits. */
-  const wantCount = clamped ? Math.max(6, Math.ceil(pool.length * 0.35)) : (minCount || 4);
+  /* WINDOW WIDTH BY POOL DENSITY, not by the precision slider alone.
+     bandHalf() returns one width in position units for every pool in the bank. A
+     +/-0.73 window is a reasonable slice of a 120-trait Verbosity category and far too
+     narrow on a 40-trait Situational one, where the same width holds a dozen traits —
+     which is why the fixed-category slots collapsed to 11-19 distinct draws while the
+     category-choosing slots (vocab, manner, grammar, role) stayed healthy at 150-215.
+
+     So state the requirement as a COUNT and let the existing widening loop find the
+     width that satisfies it. The clamped case already did exactly this; the ordinary
+     case is the one that needed it. Capped so a very large pool keeps its precision —
+     the point is to stop thin pools starving, not to flatten fat ones. */
+  const density = Math.min(POOL_ELIGIBLE_CAP, Math.ceil(pool.length * POOL_ELIGIBLE_FRAC));
+  const wantCount = clamped ? Math.max(6, Math.ceil(pool.length * 0.35))
+                            : Math.max(minCount || 4, density);
   const need = Math.min(wantCount, pool.length);
   /* BOUNDARY REFLECTION. Clamping fixes a target that sits outside the pool; it does
      nothing for one that sits just inside the edge, which is the far more common case
@@ -1164,6 +1320,28 @@ function floatVal(idOrEl, fallback){
   const n = parseFloat(el.value);
   return Number.isFinite(n) ? n : fallback;
 }
+/* The string and boolean siblings of intVal/floatVal, plus the three write helpers.
+   Reading `document.getElementById('rarityPref').value` straight through is scattered
+   across all four files, and about half the sites already guard it — reapplyConstraints-
+   AfterMutation guards the exact read that adjustPin, rerollSlot and generateCharacter
+   do bare, three lines away. In a browser with the full index.html these never fire,
+   which is why they survived; the moment the app is embedded in a trimmed page, or a
+   panel is removed, or the file is loaded under test, they throw. togglePersonalityPanel
+   did exactly that as soon as js/app.js was brought under test coverage. */
+function strVal(idOrEl, fallback){
+  const el = typeof idOrEl === 'string' ? document.getElementById(idOrEl) : idOrEl;
+  return el && el.value != null ? el.value : fallback;
+}
+function boolVal(idOrEl, fallback){
+  const el = typeof idOrEl === 'string' ? document.getElementById(idOrEl) : idOrEl;
+  return el ? !!el.checked : fallback;
+}
+function setVal(id, v){ const el = document.getElementById(id); if (el) el.value = v; return el; }
+function setText(id, v){ const el = document.getElementById(id); if (el) el.textContent = v; return el; }
+function setHTML(id, v){ const el = document.getElementById(id); if (el) el.innerHTML = v; return el; }
+// The rarity preference is read on nearly every draw path; one name for it.
+function rarityPrefVal(){ return strVal('rarityPref', 'balanced'); }
+
 function AFFINITY(){ return floatVal('affinityBoost', 2.5); }
 
 function persLevel(id, overrides){
@@ -1340,6 +1518,187 @@ function _explainPickInner(slotId, s){
    while leaving room for a neutral roll to land somewhere the cascade didn't choose. */
 const CROSSLINK_STRENGTH = 0.45;
 
+/* ================= MOTIVATION & WOUND — THE CROSS-LINKS IT NEVER HAD ==========
+   The section the sheet leads with, that draws on every character, that supplies the
+   pressure trigger, participated in the weight matrix in NEITHER direction: not one of
+   its seven categories was a WEIGHT_MATRIX target, none had a DEPTH_TO_PERSONALITY
+   entry, and it was excluded from WILDCARD_SECTIONS and PRESSURE_SHIFT_SECTIONS. Its
+   entire outbound influence was one hardcoded link, wound intensity -> Distinguishing
+   Marks target.
+
+   The reason is real but it is an implementation constraint, not a design decision:
+   Motivation is drawAll:true, so it never resolves to a single category the cross-link
+   table can key on. A wound of "Betrayed by kin" should pull Attachment toward Avoidant
+   and Values toward Loyalty-Bound, and there was no mechanism by which it could.
+
+   So key on the drawn TRAIT rather than on the category. The signal is already being
+   extracted — MOTIVATION_POLARITY_RULES reads exactly these keywords off the same text
+   to derive polarity — it simply had nowhere to go afterwards. Same fragment-map
+   contract accumulateBoost already speaks, so everything downstream (bans, tiers,
+   coherence scoring, the why-this-category explanations) works unchanged.
+
+   Scaled by CROSSLINK_STRENGTH like every other resolved-fact link, for the reason
+   given there: a wound should colour what follows, not decide it. */
+const MOTIVATION_CROSSLINKS = [
+  [/betray|broken promise|exploited|deceived|trust.{0,15}wrong|blame|took the fall/i,
+   {attachment:{"Avoidant":TIER_MODERATE,"Disorganized":TIER_WEAK}, values:{"Loyalty-Bound":TIER_STRONG},
+    role:{"Skeptic":TIER_MODERATE}, stress:{"Fight":TIER_WEAK}}],
+  [/abandon|left behind|replaced|nobody stays|losing the last one|empty rooms|permanently alone/i,
+   {attachment:{"Anxious":TIER_STRONG}, role:{"Connector":TIER_MODERATE}, humor:{"Self-Deprecating":TIER_WEAK}}],
+  [/intimacy|dependence|needing anyone|genuinely known|being known/i,
+   {attachment:{"Avoidant":TIER_STRONG}, humor:{"Dry & Deadpan":TIER_MODERATE},
+    manner:{"Social & Boundary Mannerisms":TIER_WEAK}}],
+  [/humiliat|brought low|named.unworthy|declared unfit|shamed|publicly/i,
+   {stress:{"Fight":TIER_MODERATE,"Flight":TIER_WEAK}, role:{"Outsider":TIER_MODERATE},
+    vocab:{"Register & Formality Spectrum":TIER_WEAK}}],
+  [/\bpower\b|leverage|control prevents|only safety|real strength means no help|powerless/i,
+   {role:{"Leader":TIER_STRONG}, stress:{"Fight":TIER_MODERATE}, values:{"Self-Interested":TIER_WEAK},
+    grammar:{"Turn-Taking Grammar":TIER_MODERATE}}],
+  [/\bsafety\b|structure and control|losing control|nothing can reach them|\bchaos\b/i,
+   {vices:{"Compulsion & Ritual":TIER_STRONG,"Restraint & Discipline":TIER_MODERATE},
+    values:{"Rigid & Principled":TIER_MODERATE}}],
+  [/\bfreedom\b|answerable to nobody|independence|no masters|rigged|effort is pointless/i,
+   {role:{"Outsider":TIER_MODERATE}, vices:{"Risk & Escape":TIER_STRONG},
+    humor:{"Absurd & Chaotic":TIER_WEAK}}],
+  [/\btruth\b|fair hearing|actually happened|being.believed|honesty|being wrong/i,
+   {values:{"Rigid & Principled":TIER_STRONG}, vocab:{"Directness & Literalness":TIER_MODERATE},
+    role:{"Skeptic":TIER_MODERATE}}],
+  [/recognition|\blegacy\b|vindicat|proving.wrong|place in history|insignifican|leaving no trace|being ordinary|forgotten/i,
+   {role:{"Leader":TIER_MODERATE}, values:{"Idealistic & Visionary":TIER_MODERATE},
+    vocab:{"Semantic Density & Modifiers":TIER_WEAK}}],
+  [/belonging|reunion|community.standing|restored.family|quiet.partnership|place where they/i,
+   {role:{"Connector":TIER_STRONG,"Caretaker":TIER_MODERATE}, attachment:{"Secure":TIER_STRONG},
+    humor:{"Warm & Playful":TIER_MODERATE}}],
+  [/redemption|amends|clean conscience|balance a debt|forgive|undoing.a.mistake|fix one past error/i,
+   {values:{"Rigid & Principled":TIER_MODERATE}, role:{"Caretaker":TIER_MODERATE},
+    stress:{"Fawn":TIER_WEAK}, attachment:{"Secure":TIER_MODERATE}}],
+  [/conditional love|only.worth|must be useful|worth is conditional|becoming a burden|\bowe\b|service/i,
+   {stress:{"Fawn":TIER_STRONG}, role:{"Caretaker":TIER_STRONG}, attachment:{"Anxious":TIER_MODERATE}}],
+  [/hide what.{0,15}feel|silence is strength|showing feeling|exposure|\bfraud\b|specific vulnerability/i,
+   {humor:{"Dry & Deadpan":TIER_MODERATE}, attachment:{"Avoidant":TIER_MODERATE},
+    stress:{"Freeze":TIER_WEAK}, grammar:{"Spoken Compression":TIER_WEAK}}],
+  [/\bperfect\b|no mistakes|flawlessness|mastery|undeniably excellent|best at|proving.capability/i,
+   {vices:{"Restraint & Discipline":TIER_STRONG}, values:{"Rigid & Principled":TIER_MODERATE},
+    vocab:{"Precision & Specificity Level":TIER_MODERATE}}],
+  [/failed to save|couldn't stop it|survived what others|alive by accident|harmed by a protector/i,
+   {stress:{"Freeze":TIER_MODERATE}, attachment:{"Disorganized":TIER_MODERATE},
+    vices:{"Substance & Consumption":TIER_WEAK}, humor:{"Humorless & Absent":TIER_WEAK}}],
+  [/\bescape\b|isolat|genuinely alone|apart from|silence keeps|exiled|cast out/i,
+   {role:{"Outsider":TIER_STRONG}, stress:{"Flight":TIER_MODERATE},
+    vices:{"Avoidance & Procrastination":TIER_WEAK}}],
+  [/stagnation|irrelevance|outliving|no longer need|lost faith|belief system collapsed/i,
+   {humor:{"Humorless & Absent":TIER_MODERATE}, values:{"Pragmatic & Flexible":TIER_WEAK},
+    role:{"Skeptic":TIER_WEAK}}],
+  [/becoming.{0,15}them\b|repeat.*history|repeating on them|becoming their parent/i,
+   {vices:{"Restraint & Discipline":TIER_MODERATE}, attachment:{"Disorganized":TIER_WEAK},
+    stress:{"Freeze":TIER_WEAK}}],
+  [/\bcomfort\b|end to struggle|quiet ending|simple.normalcy|mild preference/i,
+   {role:{"Peacemaker":TIER_MODERATE}, vices:{"Avoidance & Procrastination":TIER_MODERATE},
+    humor:{"Warm & Playful":TIER_WEAK}}],
+  [/vengeance|suffer a specific consequence|specific person to suffer/i,
+   {humor:{"Cruel & Barbed":TIER_STRONG}, stress:{"Fight":TIER_STRONG}, values:{"Loyalty-Bound":TIER_WEAK}}],
+  [/protection of another|kept safe above|justice for another|harming others|what they might do/i,
+   {role:{"Caretaker":TIER_STRONG}, values:{"Loyalty-Bound":TIER_MODERATE},
+    stress:{"Fight":TIER_WEAK}}],
+  /* Second block, written against the entries the first still missed. Between them these
+     now reach a bit over half the section; the remainder are the intensity-scale entries
+     ("A small old hurt", "A defining, unhealed wound") which say how much rather than
+     what, and correctly pull nothing. */
+  [/restoration|put back something|taken or broken|home destroyed|place that defined them/i,
+   {values:{"Loyalty-Bound":TIER_MODERATE}, role:{"Caretaker":TIER_WEAK},
+    vices:{"Compulsion & Ritual":TIER_WEAK}}],
+  [/purpose|mean something specific|worthy death|being chosen|selected, not merely tolerated/i,
+   {values:{"Idealistic & Visionary":TIER_STRONG}, role:{"Leader":TIER_WEAK}}],
+  [/fear of loss|losing what they've built|fear of failure|falling short|public failure|failing where everyone/i,
+   {vices:{"Restraint & Discipline":TIER_MODERATE}, stress:{"Freeze":TIER_WEAK},
+    attachment:{"Anxious":TIER_WEAK}}],
+  [/chronically overlooked|grew up invisible|silenced when it mattered|prevented from speaking/i,
+   {role:{"Outsider":TIER_MODERATE}, grammar:{"Turn Taking Grammar":TIER_WEAK},
+    humor:{"Dry & Deadpan":TIER_WEAK}}],
+  [/poverty|formative deprivation|financial independence|earn rest|paid for with excessive labor/i,
+   {vices:{"Restraint & Discipline":TIER_STRONG}, values:{"Pragmatic & Flexible":TIER_MODERATE}}],
+  [/talent squandered|was capable and was prevented|wasted potential/i,
+   {humor:{"Cruel & Barbed":TIER_WEAK}, role:{"Skeptic":TIER_MODERATE},
+    values:{"Idealistic & Visionary":TIER_WEAK}}],
+  [/ruin what i touch|inherently destructive|ruin good things by wanting|desire itself/i,
+   {attachment:{"Avoidant":TIER_MODERATE}, vices:{"Avoidance & Procrastination":TIER_MODERATE},
+    humor:{"Self-Deprecating":TIER_MODERATE}}],
+  [/don't deserve good things|happiness is for other people|my fault|caused a harm they didn't/i,
+   {humor:{"Self-Deprecating":TIER_STRONG}, stress:{"Fawn":TIER_MODERATE}}],
+  [/unlovable|affection shown to them is a mistake|love always has a price|never freely given|only transacted/i,
+   {attachment:{"Avoidant":TIER_MODERATE,"Anxious":TIER_MODERATE}, values:{"Self-Interested":TIER_WEAK}}],
+  [/must not want|desire itself is dangerous|quiet ending|final chapter to be peaceful/i,
+   {vices:{"Restraint & Discipline":TIER_MODERATE}, role:{"Peacemaker":TIER_MODERATE},
+    attachment:{"Secure":TIER_MODERATE}}],
+  [/disappointing a mentor|letting down the one person|promise broken by them|broke a vow|never forgave themselves/i,
+   {values:{"Rigid & Principled":TIER_MODERATE}, stress:{"Fawn":TIER_WEAK},
+    attachment:{"Anxious":TIER_WEAK}}],
+  [/survived what took someone|took someone they loved instead|childhood cut short|adult responsibility far too young/i,
+   {role:{"Caretaker":TIER_STRONG}, stress:{"Freeze":TIER_WEAK}, humor:{"Humorless & Absent":TIER_WEAK}}],
+  [/loved someone who couldn't love back|incapable of returning it/i,
+   {attachment:{"Anxious":TIER_STRONG}, humor:{"Self-Deprecating":TIER_MODERATE}}],
+  [/my anger protects|rage is what keeps loved ones safe|kindness is a weakness|gentleness inevitably gets used/i,
+   {stress:{"Fight":TIER_STRONG}, humor:{"Cruel & Barbed":TIER_MODERATE}, values:{"Loyalty-Bound":TIER_MODERATE}}],
+  [/nobody actually changes|people are fixed|improvement is an illusion|fundamentally different from others|outside normal human connection/i,
+   {role:{"Outsider":TIER_STRONG,"Skeptic":TIER_MODERATE}, humor:{"Humorless & Absent":TIER_WEAK}}],
+];
+
+/* Reads the cross-link fragments off whatever Motivation traits a build has seated.
+   Returns the same {kind -> Map(fragment -> weight)} shape accumulateBoost builds, so
+   the two merge without either knowing about the other. */
+function motivationCrosslinkMap(motivationTraits){
+  const out = {};
+  if (!motivationTraits || !motivationTraits.length) return out;
+  const seen = new Set();
+  let peak = 0;
+  motivationTraits.forEach(t=>{
+    if (!t) return;
+    const text = motivationText(t);
+    /* A life-defining wound should pull harder than a small old hurt. The intensity is
+       already on the trait and said nothing to anything outside its own card. */
+    const weight = clamp((t.intensity || 3) / 3, 0.4, 1.6);
+    MOTIVATION_CROSSLINKS.forEach(([re, kinds], ruleIdx)=>{
+      if (!re.test(text)) return;
+      /* A rule fires once per build however many of the seven categories match it.
+         Without this, a character whose Want, Fear, Wound AND Lie all circle the same
+         theme — which is exactly what a coherent character looks like — would apply the
+         same link four times over and swamp everything else on the sheet. */
+      if (seen.has(ruleIdx)) return;
+      seen.add(ruleIdx);
+      Object.entries(kinds).forEach(([kind, frags])=>{
+        if (!out[kind]) out[kind] = new Map();
+        const m = out[kind];
+        Object.entries(frags).forEach(([frag, w])=>{
+          const v = (m.get(frag) || 0) + w * weight;
+          m.set(frag, v);
+          if (v > peak) peak = v;
+        });
+      });
+    });
+  });
+  /* ONE VOTE, NOT EIGHT. Motivation draws a trait from every one of its seven
+     categories on every sheet, so several different rules fire on a single build as a
+     matter of course — and unscaled that made this section the loudest voice on a
+     neutral sheet, which is precisely the bug CROSSLINK_STRENGTH was introduced to fix
+     for the resolved-category links (measured here as Leader taking 28% of a seven-way
+     Social Role split with every slider centred).
+
+     The section is entitled to a strong pull, not to an unbounded one. Normalise the
+     whole map so its single loudest fragment lands at exactly the strength of one
+     STRONG cross-link; the relative shape of what the wound is pointing at survives
+     intact, and it can no longer outvote the rest of the sheet by sheer arithmetic. */
+  if (peak > 0){
+    const scale = (TIER_STRONG * CROSSLINK_STRENGTH) / peak;
+    Object.values(out).forEach(m => m.forEach((w, frag)=> m.set(frag, w * scale)));
+  }
+  return out;
+}
+
+// Set for the duration of one build, once the Motivation traits are drawn, so every
+// later accumulateBoost call in that build can see them. Cleared per build.
+let CURRENT_MOTIVATION_LINKS = {};
+function setMotivationLinks(map){ CURRENT_MOTIVATION_LINKS = map || {}; }
+
 function accumulateBoost(kind, profileCats, overrides){
   const m = new Map();
   const add = (frag, s) => { if(!frag || s<=0) return; m.set(frag, (m.get(frag)||0) + s); };
@@ -1377,6 +1736,10 @@ function accumulateBoost(kind, profileCats, overrides){
       Object.entries(kindMap).forEach(([frag,w]) => add(frag, w * CROSSLINK_STRENGTH));
     });
   }
+  // Motivation & Wound's contribution, keyed on the drawn traits' own keywords rather
+  // than on a resolved category it does not have. See MOTIVATION_CROSSLINKS above.
+  const motiv = CURRENT_MOTIVATION_LINKS[kind];
+  if (motiv) motiv.forEach((w, frag)=> add(frag, w));
   return m;
 }
 // Converts a fragment->strength map into a real category->weight map via substring match.
@@ -1825,7 +2188,7 @@ const CONTRADICTION_QUESTIONS = {
   agr:  "What is the thing they will not go along with, however much easier it would be?",
   man:  "Whose rules do they observe, and whose do they treat as optional?",
   intel:"Which kind of problem makes them go quiet, and which makes them show off?",
-  reb:  "What authority do they actually accept, and what did it do to deserve that?",
+  rebel:"What authority do they actually accept, and what did it do to deserve that?",
   pos:  "Which future do they say out loud, and which one do they plan around?",
   act:  "What are they saving the energy for?",
   cur:  "What is the one subject they refuse to be curious about?",
@@ -1834,6 +2197,33 @@ const CONTRADICTION_QUESTIONS = {
   pace: "What makes them slow down?",
   mood: "How long has this been the mood, and what were they like before it?",
 };
+/* The `reb:` key above was dead for the entire life of this table: AXIS_LABELS spells
+   rebelliousness `rebel`, so every rebelliousness contradiction — one of the two most
+   heavily tagged axes in the bank — fell through to the generic fallback question. A
+   one-character typo with no symptom loud enough to notice.
+
+   Nothing checked that these axis-keyed tables agree with the axis vocabulary they are
+   keyed on, so nothing could. This does, for every such table at once: an unknown key
+   is a typo, and a missing key is a table that has fallen behind a newly added axis.
+   Wired into ?dev=1 alongside assertTraitShape and asserted by the test suite. */
+function assertAxisTables(){
+  const problems = [];
+  const tables = [
+    ['CONTRADICTION_QUESTIONS', CONTRADICTION_QUESTIONS, true],
+    ['AXIS_TO_POLCODE (values)', Object.fromEntries(Object.values(AXIS_TO_POLCODE).map(c=>[c,1])), false],
+  ];
+  tables.forEach(([name, table, requireTotal])=>{
+    Object.keys(table).forEach(k=>{
+      if (!AXIS_LABELS[k]) problems.push(`${name}: key "${k}" names no axis in AXIS_LABELS`);
+    });
+    if (!requireTotal) return;
+    Object.keys(AXIS_LABELS).forEach(k=>{
+      if (!(k in table)) problems.push(`${name}: no entry for axis "${k}" (${AXIS_LABELS[k]})`);
+    });
+  });
+  return problems;
+}
+
 function contradictionFor(stateObj){
   const items = Object.values(stateObj || {}).filter(s=> s && s.trait && s.trait.pol);
   let best = null;
@@ -1983,17 +2373,34 @@ let PERSONALITY_POLE_STATS = null;
     byCat.set(a.pos, {code, sign: 1});
     byCat.set(a.neg, {code, sign: -1});
   });
-  let tagged = 0;
+  /* BUG FIX. The guard here was `already says something on ANY axis`, so a trait sitting
+     in "Intelligence — Instinctive & Unanalytical" that happened to declare {warm:1} was
+     skipped entirely and never received its intel:-1. The category IS the statement
+     about its own axis; a tag on a different axis is orthogonal information and says
+     nothing about this one.
+
+     That left 519 Personality traits carrying no polarity at all despite a pass whose
+     whole job is to derive it from the category, and it fell hardest on exactly the two
+     axes measured as most lopsided: intel ran 289 positive to 37 negative and rebel
+     266 to 36, because the positive poles happened to carry fewer competing tags. Since
+     polarityFit can only select on what is tagged, pushing Intelligence or
+     Rebelliousness negative gave materially less trait-level steering than pushing
+     either positive — a slider that did less work in one direction than the other.
+
+     Skip only when the trait already declares THIS axis, which is the case the guard
+     was actually written for: a hand-authored tag that disagrees with its category
+     (a defiant trait in the compliant pool, say) must still win. */
+  let tagged = 0, keptExplicit = 0;
   TRAITS.forEach(t=>{
     if (t.section !== "Personality Traits") return;
-    if (t.pol && Object.keys(t.pol).some(k=>t.pol[k])) return;   // already says something
     const spec = byCat.get(t.category);
     if (!spec) return;                                            // Situational: correctly silent
     if (!t.pol) t.pol = {};
+    if (t.pol[spec.code]){ keptExplicit++; return; }              // explicit tag on THIS axis wins
     t.pol[spec.code] = spec.sign;
     tagged++;
   });
-  PERSONALITY_POLE_STATS = {tagged};
+  PERSONALITY_POLE_STATS = {tagged, keptExplicit};
 })();
 
 function liveAxisVector(overrides){
@@ -2066,6 +2473,9 @@ function setAffinityVec(overrides){ CURRENT_AFFINITY_VEC = liveAxisVector(overri
 const NEUTRAL_FULL = 14;   // below this: purely situational
 const NEUTRAL_NONE = 42;   // above this: purely the leaning side
 
+// How loud a pole trait may be and still read as a neutral-slider reading. 2.4 keeps
+// it to the i1/i2 material plus the quietest of i3 — "mildly one way", never a posture.
+const NEUTRAL_POLE_CEILING = 2.4;
 function pickPersonalitySlot(axis, level, rarityPref){
   const mag = Math.abs(level) * 50;                 // 0..100
   const sideCat = level >= 0 ? axis.pos : axis.neg;
@@ -2102,12 +2512,34 @@ function pickPersonalitySlot(axis, level, rarityPref){
     // START — so at slider 0 the target sits on the floor and the draw collapses onto
     // the two or three lowest entries (15 distinct out of 41, top trait 35%). Lift it
     // into the pool the same way every other neutral target now is.
-    const nTarget = poolFloorTarget(neutralPool, 1.5 + clamp(mag / NEUTRAL_NONE, 0, 1) * 2.1);
-    // minCount 7 forces the window to widen until there's real choice; variety
+    /* THE COLLAPSED-SLOT FIX. Every other healthy slot in the app picks a CATEGORY
+       first and then a trait inside it, so its variety is (categories x their spread).
+       These thirteen picked from exactly one pool per axis, and there variety is capped
+       by how many traits that single category holds near the target — which is why the
+       pers_* family returned 11-18 distinct traits over 400 characters while vocab and
+       manner returned 210+ from pools of comparable total size. Widening the window and
+       lifting the target help, and they cannot change the shape of the problem: a
+       40-trait pool is a 40-trait pool.
+
+       So give the slot a real choice. A centred slider does not only mean "situational
+       on this axis" — it equally means "mildly one way or the other", and a QUIET trait
+       from either pole is an honest reading of a neutral setting. Those are already
+       authored; they were simply unreachable from the middle of the slider, where most
+       of the traffic is. Pool the Situational category with the quiet end of both poles
+       and draw from all three.
+
+       Still flagged neutral:true, because it is still a neutral reading — that is what
+       keeps checkEnsembleBalance from counting it as posture, which would be the wrong
+       answer for a character whose slider was never moved. */
+    const quiet = cat => byFilter("Personality Traits", cat).filter(t => traitPos(t) <= NEUTRAL_POLE_CEILING);
+    const widened = neutralPool.concat(quiet(axis.pos), quiet(axis.neg));
+    const pool = widened.length > neutralPool.length ? widened : neutralPool;
+    const nTarget = poolFloorTarget(pool, 1.5 + clamp(mag / NEUTRAL_NONE, 0, 1) * 2.1);
+    // minCount 10 forces the window to widen until there's real choice; variety
     // matters more than precision here, since nothing in this pool is loud.
     return {slotId:"pers_"+axis.id, locked:false, label:axis.label,
             target: nTarget, neutral:true,
-            trait: withSlotMemory("pers_"+axis.id, ()=>pickInRange(neutralPool, rarityPref, nTarget, 10, true))};
+            trait: withSlotMemory("pers_"+axis.id, ()=>pickInRange(pool, rarityPref, nTarget, 10, true))};
   }
   return {slotId:"pers_"+axis.id, locked:false, label:axis.label,
           target, trait: withSlotMemory("pers_"+axis.id, ()=>pickInRange(byFilter("Personality Traits", sideCat), rarityPref, target))};
@@ -2257,7 +2689,11 @@ function profileTarget(sectionId){
   return targetFromMag(v);
 }
 
-function pickProfileSlots(rarityPref, resolvedCats){
+/* onlySectionId / skipSectionId let the caller split this into two passes. That exists
+   so Motivation & Wound can be drawn BEFORE the sections its keywords are meant to
+   influence: it is drawAll, so it needs no resolved category and can go first, and its
+   cross-links are then live for everything that follows. See MOTIVATION_CROSSLINKS. */
+function pickProfileSlots(rarityPref, resolvedCats, onlySectionId, skipSectionId){
   const out = {};
   const depthEl = document.getElementById('profileDepth');
   const want = intVal(depthEl, 1);
@@ -2271,7 +2707,10 @@ function pickProfileSlots(rarityPref, resolvedCats){
     out[id] = Object.assign({slotId:id, locked:false, label, sectionId, target:tgt, trait}, extra || {});
   };
 
-  PROFILE_SECTIONS.forEach(ps=>{
+  const sections = onlySectionId
+    ? PROFILE_SECTIONS.filter(ps=>ps.id === onlySectionId)
+    : PROFILE_SECTIONS.filter(ps=>ps.id !== skipSectionId);
+  sections.forEach(ps=>{
     const tog = document.getElementById('sec_'+ps.id);
     if (tog && !tog.checked) return;
     const target = profileTarget(ps.id);
@@ -2305,7 +2744,7 @@ function pickProfileSlots(rarityPref, resolvedCats){
         const t = _drawUnique(()=>pickInRange(pool, rarityPref, tgt));
         if (!t) break;
         // If the pool is genuinely exhausted _drawUnique may hand back a repeat; skip it.
-        if (Object.values(out).some(s => s.sectionId === ps.id && s.trait.id === t.id)) continue;
+        if (Object.values(out).some(s => s.sectionId === ps.id && s.trait && s.trait.id === t.id)) continue;
         seat(`prof_${ps.id}_${placed}`, cat, ps.id, tgt, t);
         placed++;
       }
@@ -2568,7 +3007,7 @@ const TENSION_RULES = [
 function softTensionsFor(st){
   const out = [];
   const catOf = id => slotCat(st["prof_"+id+"_0"]);
-  const motivText = Object.keys(st).filter(k=>k.startsWith("prof_motivation_"))
+  const motivText = Object.keys(st).filter(k=>k.startsWith("prof_motivation_") && st[k] && st[k].trait)
                     .map(k=>st[k].trait.trait+" "+st[k].trait.desc).join(" | ");
   const match = (spec) => {
     if (spec.sec === "motivation") return spec.fragment ? new RegExp(spec.fragment,"i").test(motivText) : false;
@@ -2633,7 +3072,7 @@ function secondOrderTensions(st){
 
 function coherenceScore(st){
   const chosen = {};
-  PROFILE_SECTIONS.forEach(ps=>{ const s = st["prof_"+ps.id+"_0"]; if (s) chosen[ps.id] = s.trait.category; });
+  PROFILE_SECTIONS.forEach(ps=>{ const c = slotCat(st["prof_"+ps.id+"_0"]); if (c) chosen[ps.id] = c; });
   let reinforced = 0, total = 0;
   const kinds = {vocab:VOCAB_CATS, grammar:GRAMMAR_CATS, manner:MANNER_CATS};
   Object.entries(kinds).forEach(([kind, cats])=>{
@@ -2643,7 +3082,7 @@ function coherenceScore(st){
       if (kind==='vocab') return k.startsWith('vocab');
       if (kind==='grammar') return k==='grammar';
       return k.startsWith('manner');
-    }).map(k=>st[k].trait.category);
+    }).map(k=>slotCat(st[k])).filter(Boolean);
     picked.forEach(c=>{ total++; if ((boostMap.get(c)||0) > 0) reinforced++; });
   });
   PROFILE_SECTIONS.forEach(ps=>{
@@ -2871,6 +3310,10 @@ function explainWhyNot(trait){
   }
   const tierNote = categoryTiers.get(cat);
   if (tierNote === 'rarely') out.push(`You've set "${cat}" to <b>rarely</b> (×¼), so its whole category is being suppressed.`);
+  if (cat === AXES.circular.category && tierNote !== 'prefer'){
+    out.push(`"${cat}" is only reached through the high-volume branch of the Verbosity slider, as a minority of those draws. ` +
+             `Push <b>Verbosity</b> up, or set this category to <b>prefer</b> in Constraints to make it the likely outcome instead.`);
+  }
   // The band: the real, checkable reason most of the time.
   const [lo, hi] = traitBand(trait);
   const axis = PERSONALITY_AXES.find(a=>a.pos===cat || a.neg===cat || a.mid===cat);
@@ -2915,6 +3358,15 @@ const DEPTH_TO_PERSONALITY = {
 function deriveDepthCategories(){
   // Resolve profile types with NO personality influence — pure roll / manual choice.
   const chosen = {};
+  /* Motivation & Wound resolves first here for the same reason it draws first in
+     buildCharacterState: it is drawAll, so it needs nothing resolved, and going first is
+     what lets its cross-links reach the six sections that follow. Without this,
+     depth-first mode derived nothing from the section the sheet leads with. */
+  setMotivationLinks(null);
+  const motivDepth = pickProfileSlots('balanced', null, MOTIVATION_SECTION_ID);
+  const motivTraits = Object.values(motivDepth).map(s0=>s0 && s0.trait).filter(Boolean);
+  setMotivationLinks(motivationCrosslinkMap(motivTraits));
+  lastDepthMotivation = motivTraits;
   PROFILE_SECTIONS.forEach(ps=>{
     if (ps.drawAll) return;
     const tog = document.getElementById('sec_'+ps.id);
@@ -2937,6 +3389,25 @@ function ZERO_PERSONALITY(){
   VOICE_AXES.forEach(a=>o[a.id]=0);
   return o;
 }
+/* Set by deriveDepthCategories so personalityFromDepth can see the wound it just drew.
+   Motivation is drawAll, so a category-keyed DEPTH_TO_PERSONALITY entry would apply
+   identically to every character ever generated and say nothing — the signal is in
+   WHICH trait was drawn, not which category it came from. */
+let lastDepthMotivation = [];
+/* Each Motivation category still gets a DEPTH_TO_PERSONALITY entry, because the section
+   IS a statement about a person even before you know which trait: someone with a
+   foregrounded wound and a named defence is, on average, more guarded and more driven
+   than someone without. Kept deliberately small — these apply to every character, so
+   they set a floor, and the trait-level derivation below is what actually varies. */
+Object.assign(DEPTH_TO_PERSONALITY, {
+  "Core Wound (the old injury)":{emotionalcapacity:-15, confidence:-10},
+  "The Defence (what they built on top)":{emotionalcapacity:-20, discipline:15},
+  "The Need (what would actually help)":{emotionalcapacity:20},
+  "The Ghost (who or what it's attached to)":{emotionalcapacity:15, positivity:-10},
+  "Core Fear (what they flee)":{confidence:-15},
+  "Core Want (conscious goal)":{discipline:15, curiosity:10},
+  "The Lie They Believe":{honesty:-10, positivity:-15},
+});
 function personalityFromDepth(chosen){
   const acc = {}; const counts = {};
   Object.values(chosen).forEach(cat=>{
@@ -2944,6 +3415,22 @@ function personalityFromDepth(chosen){
     if (!map) return;
     Object.entries(map).forEach(([axis,val])=>{
       acc[axis] = (acc[axis]||0) + val; counts[axis] = (counts[axis]||0)+1;
+    });
+  });
+  /* And the part that varies: the drawn wound's own polarity, read through the same
+     AXIS_TO_POLCODE mapping everything else uses, so a wound of "Betrayed by kin" and
+     one of "Chronically overlooked" derive different people rather than the same
+     average. Scaled well below a resolved category's contribution — a single trait
+     should colour the derived personality, not define it. */
+  const polToAxis = {};
+  Object.entries(AXIS_TO_POLCODE).forEach(([axisId, code])=> polToAxis[code] = axisId);
+  lastDepthMotivation.forEach(t=>{
+    const weight = clamp((t.intensity || 3) / 3, 0.4, 1.6);
+    Object.entries(t.pol || {}).forEach(([code, v])=>{
+      const axisId = polToAxis[code];
+      if (!axisId || !v) return;
+      acc[axisId] = (acc[axisId] || 0) + v * 22 * weight;
+      counts[axisId] = (counts[axisId] || 0) + 1;
     });
   });
   const out = {};
@@ -3007,7 +3494,7 @@ function renderSeedOptions(list){
   if ([...sel.options].some(o=>o.value===prevValue)) sel.value = prevValue;
 }
 function filterSeedPicker(){
-  const q = document.getElementById('seedTraitFilter').value.trim().toLowerCase();
+  const q = strVal('seedTraitFilter', '').trim().toLowerCase();
   if (!q){ renderSeedOptions(SEEDABLE_TRAITS); return; }
   const filtered = SEEDABLE_TRAITS.filter(t =>
     t.trait.toLowerCase().includes(q) || t.desc.toLowerCase().includes(q) || t.category.toLowerCase().includes(q));
@@ -3120,6 +3607,9 @@ function restoreSliders(s){
    relink, for the same reason. Traits that no longer exist in the pool (an older
    session, a trait since removed) keep their embedded copy, so undo cannot lose a slot
    the way a naive id-only store would. */
+/* Bumped when the on-disk shape of a save changes in a way a reader must know about.
+   Absent = a pre-compression save with full trait objects embedded, which still loads. */
+const SAVE_FORMAT = 2;
 function compressSlots(st){
   if (!st) return st;
   const out = {};
@@ -3181,10 +3671,10 @@ function _restoreSnapshot(prev){
   pressureState = expandSlots(prev.pressureState) || null;
   restoreSliders(prev.sliders);
   lastGeneratedSliders = prev.sliders; // the restored state now corresponds to these again
-  document.getElementById('charName').value = charMeta.name || "";
-  document.getElementById('charAge').value = charMeta.age || "";
-  document.getElementById('charContext').value = charMeta.context || "";
-  document.getElementById('archetypeTag').textContent = charMeta.archetypeLabel || "";
+  setVal('charName', charMeta.name || "");
+  setVal('charAge', charMeta.age || "");
+  setVal('charContext', charMeta.context || "");
+  setText('archetypeTag', charMeta.archetypeLabel || "");
   document.getElementById('pressureSheet').style.display = pressureState ? "block" : "none";
   diffLog = {}; rerollExclusions = {}; rerollHistory = {}; whyOpen = {};
   onSliderChange();
@@ -3204,13 +3694,19 @@ function redoLast(){
   _restoreSnapshot(redoStack.pop());
 }
 
+// Builds one of the sheet's fixed-spine slots, per the empty-slot convention above:
+// present either way, explicitly marked when the pool had nothing to give.
+function mkSlot(slotId, label, target, trait, extra){
+  if (!trait) return emptySlot(slotId, label, Object.assign({target}, extra || {}));
+  return Object.assign({slotId, locked:false, label, target, trait}, extra || {});
+}
 function pickVerbositySlot(verbLevel, rarityPref){
   // Crossover narrowed from ±0.3 (raw ±15) to ±0.12 (raw ±6): the old dead band
   // meant nearly a third of the slider produced identical pacing-pool draws.
   const target = targetFromLevel(verbLevel);
   if (verbLevel <= -0.12){
     const pool = byFilter(AXES.verbosityLow.section, AXES.verbosityLow.category);
-    return {slotId:"verbosity", locked:false, label:"Verbosity (minimal-leaning)", target, trait: pickInRange(pool, rarityPref, target)};
+    return mkSlot("verbosity", "Verbosity (minimal-leaning)", target, pickInRange(pool, rarityPref, target));
   } else if (verbLevel >= 0.12){
     /* "Repetitive & Circular" (48 authored traits) was the one category in the whole
        bank that no normal pick path could reach: AXES named four of this section's
@@ -3220,40 +3716,68 @@ function pickVerbositySlot(verbLevel, rarityPref){
        belongs on the high-volume branch — as a minority of it, because it is a
        narrower and more noticeable habit than plain wordiness. Rises with the slider:
        barely present at +0.12, about a third of high-volume draws at the top. */
-    const circularOdds = clamp((Math.abs(verbLevel) - 0.12) / 1.88, 0, 1) * 0.34;
-    const useCircular = Math.random() < circularOdds;
+    /* DIRECTLY REQUESTABLE. This branch was the ONLY path to Repetitive & Circular, and
+       it capped at 34% of high-volume draws — so a user who specifically wanted a
+       character who circles could not ask for one, only roll for one, and had to push
+       verbosity to the top to get even a third of a chance. Every other category in the
+       bank can be steered; this one could only be waited for.
+
+       The prefer/rarely tiers are the app's existing vocabulary for exactly this
+       request, so honour them here: 'prefer' makes circling the likely outcome of a
+       high-volume draw rather than the minority one, and 'rarely' takes it off the
+       table. Left as odds rather than a guarantee because it is still a narrower and
+       more noticeable habit than plain wordiness, and a sheet that circles every single
+       time is the caricature the whole rarity system exists to avoid. */
+    const circularTier = categoryTiers.get(AXES.circular.category);
+    const baseOdds = clamp((Math.abs(verbLevel) - 0.12) / 1.88, 0, 1) * 0.34;
+    const circularOdds = circularTier === 'rarely' ? 0
+                       : circularTier === 'prefer' ? clamp(0.55 + baseOdds, 0, 0.85)
+                       : baseOdds;
+    const useCircular = circularOdds > 0 && Math.random() < circularOdds;
     const ax = useCircular ? AXES.circular : AXES.verbosityHigh;
     const pool = byFilter(ax.section, ax.category);
-    return {slotId:"verbosity", locked:false,
-            label: useCircular ? "Verbosity (circling, high-volume)" : "Verbosity (high-volume-leaning)",
-            target, trait: pickInRange(pool, rarityPref, target)};
+    return mkSlot("verbosity", useCircular ? "Verbosity (circling, high-volume)" : "Verbosity (high-volume-leaning)",
+                  target, pickInRange(pool, rarityPref, target));
   } else {
     // Dead centre now means "situational pacing at low intensity" rather than an
     // unfiltered free-for-all — the neutral band respects the range engine too.
     const pool = byFilter(AXES.pacing.section, AXES.pacing.category);
     const t = poolFloorTarget(pool, targetFromMag(18));
-    return {slotId:"verbosity", locked:false, label:"Verbosity (pacing-driven)", target:t,
-            trait: withSlotMemory("verbosity", ()=>pickInRange(pool, rarityPref, t, 8, true))};
+    return mkSlot("verbosity", "Verbosity (pacing-driven)", t,
+                  withSlotMemory("verbosity", ()=>pickInRange(pool, rarityPref, t, 8, true)));
   }
 }
+/* What "no deliberate statement about register" can draw from. All three are ways of
+   saying nothing in particular about formality, and pooling them takes this slot from
+   one 83-trait category to about 235. */
+const NEUTRAL_REGISTER_CATS = ["Register & Formality Spectrum", "Directness & Literalness",
+                               "Phonetic & Auditory Qualities"];
 function pickRegisterSlot(regLevel, rarityPref){
   const target = targetFromLevel(regLevel);
   if (regLevel >= 0.12){
     const pool = byFilter(AXES.stylized.section, AXES.stylized.category);
-    return {slotId:"register", locked:false, label:"Register (elaborate-leaning)", target, trait: pickInRange(pool, rarityPref, target)};
+    return mkSlot("register", "Register (elaborate-leaning)", target, pickInRange(pool, rarityPref, target));
   } else if (regLevel <= -0.12){
     const plainPool = byFilter("Vocabulary Traits","Directness & Literalness")
       .concat(byFilter("Vocabulary Traits","Register & Formality Spectrum").filter(t=>/coarse|colloquial|vernacular|elementary|sermo|plain|casual|slang|shop-floor|locker-room|backroom|unpolished|reflexively casual|under-speak/i.test(t.trait)));
     const pool = plainPool.length ? plainPool : byFilter("Vocabulary Traits","Register & Formality Spectrum");
-    return {slotId:"register", locked:false, label:"Register (plain-leaning)", target, trait: pickInRange(pool, rarityPref, target)};
+    return mkSlot("register", "Register (plain-leaning)", target, pickInRange(pool, rarityPref, target));
   } else {
-    const pool = byFilter("Vocabulary Traits","Register & Formality Spectrum");
+    /* Same collapsed-slot shape as the neutral personality draw: one fixed category,
+       so variety was capped by that category's depth near the target rather than by
+       anything the user could influence. A centred Register slider does not mean
+       "Register & Formality Spectrum specifically" — it means the character has made no
+       deliberate statement about how formally they speak, and how PLAINLY they put
+       things and how they SOUND are equally good answers to that. Draw from all three,
+       weighted by depth so the widest category still leads. */
+    const pool = NEUTRAL_REGISTER_CATS
+      .flatMap(c => byFilter("Vocabulary Traits", c));
     // 83 traits returning 15, one of them ("Hushed-deliberate") in 28% of all
     // characters, because targetFromMag(18) sits below the pool's floor. See the
     // POOL-FLOOR TARGETS note above.
     const t = poolFloorTarget(pool, targetFromMag(18));
-    return {slotId:"register", locked:false, label:"Register (neutral)", target:t,
-            trait: withSlotMemory("register", ()=>pickInRange(pool, rarityPref, t, 10, true))};
+    return mkSlot("register", "Register (neutral)", t,
+                  withSlotMemory("register", ()=>pickInRange(pool, rarityPref, t, 10, true)));
   }
 }
 // Shared by pickVocabSlots/pickGrammarSlot/pickMannerSlots: when a category was actually
@@ -3298,7 +3822,7 @@ function pickGrammarSlot(verbLevel, compLevel, regLevel, rarityPref, profileCats
   const boosted = boostedGrammarCats(verbLevel, compLevel, regLevel, profileCats, overrides);
   const c = pickCategoryWeighted(GRAMMAR_CATS, boosted);
   const r = pickFromCategoryIntensityAware("Dialogue Grammar Traits", c, boosted, rarityPref);
-  return {slotId:"grammar", locked:false, label:"Dialogue Grammar — "+c, target:r.target, steered:r.steered, trait:r.trait};
+  return mkSlot("grammar", "Dialogue Grammar — "+c, r.target, r.trait, {steered:r.steered});
 }
 function pickMannerSlots(count, compLevel, regLevel, rarityPref, forcePool, profileCats, overrides){
   const boosted = boostedMannerCats(compLevel, regLevel, profileCats, overrides);
@@ -3387,7 +3911,7 @@ function pickAppearanceSlots(rarityPref, overrides, resolvedCats, sourceState){
   const mvPool = byFilter("Appearance","Movement & Bearing");
   const mvTarget = poolFloorTarget(mvPool, targetFromMag(Math.max(40, Math.abs(actLevel)*50)));
   const mv = withSlotMemory("app_move", ()=>pickInRange(mvPool, rarityPref, mvTarget, 8, true));
-  if (mv) out['app_move'] = {slotId:'app_move', locked:false, label:"Appearance \u2014 Movement & Bearing", target:mvTarget, trait:mv};
+  out['app_move'] = mkSlot('app_move', "Appearance \u2014 Movement & Bearing", mvTarget, mv);
   const pEl = document.getElementById('app_presence');
   const pMag = Math.abs(intVal(pEl, 0));
   // Wound intensity, read off whichever Motivation slots this build has already seated.
@@ -3403,7 +3927,7 @@ function pickAppearanceSlots(rarityPref, overrides, resolvedCats, sourceState){
   // were returning 9, and two of them were showing up in a quarter of all characters.
   const mkTarget = poolFloorTarget(mkPool, targetFromMag(Math.max(15, pMag, woundMag)));
   const mk = withSlotMemory("app_mark", ()=>pickInRange(mkPool, rarityPref, mkTarget, 8, true));
-  if (mk) out['app_mark'] = {slotId:'app_mark', locked:false, label:"Appearance \u2014 Distinguishing Marks", target:mkTarget, trait:mk};
+  out['app_mark'] = mkSlot('app_mark', "Appearance \u2014 Distinguishing Marks", mkTarget, mk);
   return out;
 }
 
@@ -3417,6 +3941,35 @@ function _markUsed(t){ if (t) _buildUsedIds.add(t.id); }
 // twice on one sheet with nothing said about it. Return null instead: every caller
 // already handles an empty draw, and traitCardHTML renders "no trait available at
 // these settings", which is the truth — a pool gap, visible as a pool gap.
+/* ================= THE EMPTY-SLOT CONVENTION =================
+   A draw can come back with nothing: the pool was banned out, a constraint emptied it,
+   the precision band is too tight, or _drawUnique exhausted a thin category. Three
+   different call sites had three different answers to that. pickProfileSlots and
+   pickAppearanceSlots guarded with `if (!trait) return;`, so the slot silently vanished
+   from the sheet. pickVerbositySlot, pickRegisterSlot and pickGrammarSlot returned the
+   slot object with trait:null, which then propagated into every consumer — and the
+   consumers that did not guard it (sheetToText, sheetToHTML, coherenceScore,
+   softTensionsFor) threw on export.
+
+   One rule, stated once, applied everywhere:
+
+     A slot the sheet ALWAYS has stays on the sheet as an explicit empty slot.
+     A slot that only exists because something asked for it is omitted when empty.
+
+   The first case is the fixed spine of the sheet — verbosity, register, grammar,
+   movement, marks. Those disappearing is worse than useless: the user has no way to
+   tell "this pool is empty at your settings" from "this section doesn't exist", and
+   traitCardHTML already renders exactly that message. The second case is the optional
+   depth — the fourth motivation facet, a counterpoint, an appearance axis the user left
+   centred. Nobody asked for those specifically, and an empty card for each would be
+   noise.
+
+   Every empty slot carries `empty:true` so a consumer can tell a deliberate gap from a
+   malformed one, and EVERY consumer guards on `.trait` regardless. */
+function emptySlot(slotId, label, extra){
+  return Object.assign({slotId, locked:false, label, trait:null, empty:true}, extra || {});
+}
+
 function _drawUnique(fn, tries){
   for (let i = 0; i < (tries || 24); i++){
     const cand = fn();
@@ -3443,8 +3996,11 @@ function _drawUnique(fn, tries){
    unreachable. Motivation & Wound stays out: those seven categories are the character's
    own explanation of themselves, and an outlier there reads as an error rather than a
    contradiction. */
+/* Motivation & Wound was left out, so the one slot in the app whose job is to be out
+   of character could never be an out-of-character FACT — only an out-of-character
+   habit. "The one thing that doesn't fit" about a person is very often what they want. */
 const WILDCARD_SECTIONS = ["Personality Traits","Mannerisms","Vocabulary Traits","Habits & Vices","Humor Style","Verbosity Traits","Dialogue Grammar Traits",
-  "Conflict & Stress Response","Social Role in a Group","Values & Moral Line","Attachment & Intimacy Style"];
+  "Conflict & Stress Response","Social Role in a Group","Values & Moral Line","Attachment & Intimacy Style","Motivation & Wound"];
 function wildcardCount(){
   if (!wildcardEnabled()) return 0;
   const el = document.getElementById('wildcardCount');
@@ -3459,13 +4015,28 @@ function pickWildcardSlot(rarityPref, index){
   WILDCARD_SECTIONS.forEach(s=> catsOf(s).forEach(c=>{ if (byFilter(s, c).length) pairs.push([s, c]); }));
   if (!pairs.length) return null;
   const [section, cat] = pairs[Math.floor(Math.random()*pairs.length)];
-  // Far tail, either end — an outlier can be a startlingly quiet thing as easily as
-  // a loud one. Affinity is suppressed for the draw so posture can't sand it down.
-  const target = Math.random() < 0.75 ? 4.6 : 1.2;
+  const pool = byFilter(section, cat);
+  /* Far tail, either end — an outlier can be a startlingly quiet thing as easily as a
+     loud one. Affinity is suppressed for the draw so posture can't sand it down.
+
+     The tail is now this CATEGORY's own tail rather than a fixed 4.6 / 1.2. Measured
+     against the absolute targets: a band around 4.6 holds 8.3 traits in an average
+     eligible category against 15.5 around 1.2 — so the end the slot preferred three
+     times in four was the half-empty one, and 3% of draws came back with nothing at all
+     because some categories have no material out there to find. A quantile always lands
+     on real content, whatever the category's own distribution happens to be, and the
+     odds are evened up now that both ends are equally reachable.
+
+     (The slot itself was NOT the repetition risk it looked like. Measured over 3,000
+     draws it returns 2,911 distinct traits with a top share of 0.03% — because it picks
+     a category uniformly from 112 first, which is the same thing that keeps vocab and
+     manner healthy. The tail was thin; the slot was not.) */
+  const positions = pool.map(traitPos);
+  const target = Math.random() < 0.55 ? quantile(positions, 0.9) : quantile(positions, 0.1);
   const prior = CURRENT_AFFINITY_VEC;
   CURRENT_AFFINITY_VEC = null;
   let trait;
-  try { trait = _drawUnique(()=>pickInRange(byFilter(section, cat), rarityPref, target, 3)); }
+  try { trait = _drawUnique(()=>pickInRange(pool, rarityPref, target, 3)); }
   finally { CURRENT_AFFINITY_VEC = prior; }
   if (!trait) return null;
   _markUsed(trait);
@@ -3478,8 +4049,10 @@ function wildcardEnabled(){
   return el ? !!el.checked : false;
 }
 
+const MOTIVATION_SECTION_ID = "motivation";
 function buildCharacterState(opts){
   _buildUsedIds = new Set();
+  setMotivationLinks(null);
   // One resolved read each per build rather than one per draw.
   invalidateSliderCache();
   _avoidRecentActive = avoidRecentEnabled();
@@ -3497,6 +4070,17 @@ function buildCharacterState(opts){
     composure: Math.round(clamp(compLevel,-2,2)*50),
   });
   setAffinityVec(fullOverrides);
+  /* Motivation & Wound genuinely goes first now, rather than nominally. It is drawAll,
+     so it needs nothing resolved to draw, and drawing it up front is what lets its
+     keywords reach resolveProfileCategories — which is where Stress, Role, Values,
+     Attachment, Humor and Vices are actually decided. Previously that call ran before
+     a single motivation trait existed, which is the mechanical reason the section could
+     influence nothing: not that the link table lacked entries, but that by the time it
+     had anything to say, every category it might have spoken to was already chosen. */
+  setMotivationLinks(null);
+  const motivationSlots = pickProfileSlots(rarityPref, null, MOTIVATION_SECTION_ID);
+  setMotivationLinks(motivationCrosslinkMap(
+    Object.values(motivationSlots).map(s0=>s0 && s0.trait).filter(Boolean)));
   // Decide WHO they are first (motivation-adjacent facts), then let that inform HOW they speak.
   const resolvedCats = resolveProfileCategories(rarityPref, fullOverrides, forcedProfileCats);
   // Group toggles: users generating only one kind of content (just a voice, just a
@@ -3539,9 +4123,10 @@ function buildCharacterState(opts){
       const t = pickInRange(byFilter("Mannerisms", s0.trait.category), rarityPref, s0.target);
       return t ? Object.assign({}, s0, {trait:t}) : s0;
     })));
-  const obj = {}; slots.forEach(s => obj[s.slotId] = s);
+  const obj = {}; slots.forEach(s => { if (s && s.slotId) obj[s.slotId] = s; });
   if (on('genPersonality')) Object.assign(obj, pickPersonalitySlots(rarityPref, fullOverrides));
-  Object.assign(obj, pickProfileSlots(rarityPref, resolvedCats));
+  Object.assign(obj, motivationSlots);
+  Object.assign(obj, pickProfileSlots(rarityPref, resolvedCats, null, MOTIVATION_SECTION_ID));
   // Appearance draws last on purpose: it now reads the Motivation slots this build
   // just seated (see the wound → distinguishing-marks link) and the resolved vice.
   if (on('genAppearance')) Object.assign(obj, pickAppearanceSlots(rarityPref, fullOverrides, resolvedCats, obj));
@@ -3557,7 +4142,10 @@ function buildCharacterState(opts){
 // went badly — it's the fixed thing the rest is reacting to. Humor and Vices are
 // excluded because their pressure behaviour is already covered by the mannerism and
 // grammar shifts (a vice under stress is a scene, not a different vice).
-const PRESSURE_SHIFT_SECTIONS = ["role", "values", "attachment"];
+/* Motivation & Wound was excluded from the pressure pass, which is odd on its face:
+   it supplies the pressure trigger. Under load a wound does not change, but which of
+   its facets is in the foreground very much does. */
+const PRESSURE_SHIFT_SECTIONS = ["role", "values", "attachment", "motivation"];
 
 /* How much pressure. The sheet used to be binary — calm, or maximum stress — which
    is the least interesting question you can ask about someone under load, and the
@@ -3711,6 +4299,16 @@ const escHTML = (v) => String(v==null?"":v)
 // for JS FIRST — the browser HTML-decodes the attribute before parsing it as JS, so
 // escaping in the other order turns O'Brien into a syntax error.
 const escAttr = (v) => escHTML(String(v==null?"":v).replace(/\\/g, "\\\\").replace(/'/g, "\\'"));
+/* Builds the declarative-action attributes for a template. JSON first (so a trait id
+   stays a number and an apostrophe in a section title stays an apostrophe), then
+   attribute escaping — in that order, because the reverse produces an attribute that
+   parses as HTML and then fails as JSON, which is exactly the bug an inline handler
+   containing "The one thing that doesn't fit" would have had. */
+function actAttr(events, action, ...args){
+  const json = JSON.stringify(args)
+    .replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return `data-on="${events}" data-act="${action}" data-args="${json}"`;
+}
 
 function refreshConstraintChips(){
   const box = document.getElementById('constraintChips');
@@ -3723,15 +4321,15 @@ function refreshConstraintChips(){
   const catSize = c => (TRAITS_BY_KEY.get((SECTION_OF_CATEGORY.get(c) || "") + "||" + c) || []).length;
   const secSize = sec => (catsOf(sec) || []).reduce((n,c)=> n + catSize(c), 0);
   const cost = n => n ? ` <span class="chipCost">(${n} trait${n===1?'':'s'})</span>` : ``;
-  bannedSections.forEach(sec=> h += `<span class="chip chip-ban">never (section): ${escHTML(sec)}${cost(secSize(sec))} <b onclick="removeBan('section','${escAttr(sec)}')" title="Remove">&times;</b></span>`);
-  bannedCategories.forEach(c=> h += `<span class="chip chip-ban">never: ${escHTML(c)}${cost(catSize(c))} <b onclick="removeBan('cat','${escAttr(c)}')" title="Remove">&times;</b></span>`);
-  categoryTiers.forEach((tier,c)=> h += `<span class="chip ${tierMultiplier(c)>1?'chip-req':'chip-tier'}">${escHTML(tierLabel(tier))}: ${escHTML(c)} <b onclick="removeTier('${escAttr(c)}')" title="Remove">&times;</b></span>`);
-  requiredCategories.forEach(c=> h += `<span class="chip chip-req">at least one: ${escHTML(c)} <b onclick="removeRequiredCategory('${escAttr(c)}')" title="Remove">&times;</b></span>`);
-  bannedTraitIds.forEach(id=>{ const t=byId.get(id); if(t) h += `<span class="chip chip-ban">never: ${escHTML(t.trait)} <b onclick="removeBan('trait','${id}')" title="Remove">&times;</b></span>`; });
-  requiredTraitIds.forEach(id=>{ const t=byId.get(id); if(t) h += `<span class="chip chip-req">always: ${escHTML(t.trait)} <b onclick="removeReq('${id}')" title="Remove">&times;</b></span>`; });
+  bannedSections.forEach(sec=> h += `<span class="chip chip-ban">never (section): ${escHTML(sec)}${cost(secSize(sec))} <b ${actAttr('click', 'removeBan', "section", sec)} title="Remove">&times;</b></span>`);
+  bannedCategories.forEach(c=> h += `<span class="chip chip-ban">never: ${escHTML(c)}${cost(catSize(c))} <b ${actAttr('click', 'removeBan', "cat", c)} title="Remove">&times;</b></span>`);
+  categoryTiers.forEach((tier,c)=> h += `<span class="chip ${tierMultiplier(c)>1?'chip-req':'chip-tier'}">${escHTML(tierLabel(tier))}: ${escHTML(c)} <b ${actAttr('click', 'removeTier', c)} title="Remove">&times;</b></span>`);
+  requiredCategories.forEach(c=> h += `<span class="chip chip-req">at least one: ${escHTML(c)} <b ${actAttr('click', 'removeRequiredCategory', c)} title="Remove">&times;</b></span>`);
+  bannedTraitIds.forEach(id=>{ const t=byId.get(id); if(t) h += `<span class="chip chip-ban">never: ${escHTML(t.trait)} <b ${actAttr('click', 'removeBan', "trait", "${id}")} title="Remove">&times;</b></span>`; });
+  requiredTraitIds.forEach(id=>{ const t=byId.get(id); if(t) h += `<span class="chip chip-req">always: ${escHTML(t.trait)} <b ${actAttr('click', 'removeReq', "${id}")} title="Remove">&times;</b></span>`; });
   exclusivePairs.forEach((pair,i)=>{
     const a = byId.get(pair[0]), b = byId.get(pair[1]);
-    if (a && b) h += `<span class="chip chip-tier">never together: ${escHTML(a.trait)} / ${escHTML(b.trait)} <b onclick="removeExclusivePair(${i})" title="Remove">&times;</b></span>`;
+    if (a && b) h += `<span class="chip chip-tier">never together: ${escHTML(a.trait)} / ${escHTML(b.trait)} <b ${actAttr('click', 'removeExclusivePair', i)} title="Remove">&times;</b></span>`;
   });
   box.innerHTML = h || '<span class="sub" style="margin:0;">No constraints active.</span>';
 }
@@ -3797,8 +4395,8 @@ function addExclusivePair(){
   if (!exclusivePairs.some(p=> (p[0]===a.id&&p[1]===b.id) || (p[0]===b.id&&p[1]===a.id))){
     exclusivePairs.push([a.id, b.id]);
   }
-  document.getElementById('exclusiveA').value = "";
-  document.getElementById('exclusiveB').value = "";
+  setVal('exclusiveA', "");
+  setVal('exclusiveB', "");
   refreshConstraintChips();
 }
 function removeExclusivePair(i){ exclusivePairs.splice(i,1); refreshConstraintChips(); }
@@ -3814,17 +4412,33 @@ function clearConstraints(){
   requiredTraitIds = []; requiredCategories = []; exclusivePairs = [];
   categoryTiers.clear(); refreshConstraintChips();
 }
+/* The (N traits) cost badge only appeared AFTER you had banned something, so the one
+   question you want answered while choosing — "how much am I about to remove?" — was
+   the one you could not ask without committing. The size travels with the option, and
+   the section headings carry their own totals, so the whole shape of the bank is
+   legible from the picker. Counted against the UNFILTERED bank on purpose: this is the
+   size of the thing you are about to ban, not what is left of it after other bans. */
+function categorySizeOf(section, cat){
+  return (TRAITS_BY_KEY.get(section + "||" + cat) || []).length;
+}
 function populateBanCategorySelect(){
   let h0 = '';
   CATS_BY_SECTION.forEach((cats, section)=>{
-    h0 += `<optgroup label="${section}">` + cats.map(c=>`<option value="${c}">${c}</option>`).join("") + `</optgroup>`;
+    const total = cats.reduce((n, c)=> n + categorySizeOf(section, c), 0);
+    h0 += `<optgroup label="${escHTML(section)} — ${total} traits">` + cats.map(c=>{
+      const n = categorySizeOf(section, c);
+      return `<option value="${escHTML(c)}">${escHTML(c)} · ${n}</option>`;
+    }).join("") + `</optgroup>`;
   });
   const ban = document.getElementById('banCategorySelect');
   if (ban) ban.innerHTML = '<option value="">— pick a category —</option>' + h0;
   const secSel = document.getElementById('banSectionSelect');
   if (secSel){
     let h1 = '';
-    CATS_BY_SECTION.forEach((cats, section)=>{ h1 += `<option value="${escHTML(section)}">${escHTML(section)}</option>`; });
+    CATS_BY_SECTION.forEach((cats, section)=>{
+      const total = cats.reduce((n, c)=> n + categorySizeOf(section, c), 0);
+      h1 += `<option value="${escHTML(section)}">${escHTML(section)} · ${total} traits across ${cats.length} categories</option>`;
+    });
     secSel.innerHTML = '<option value="">— pick a whole section to ban —</option>' + h1;
   }
   const tier = document.getElementById('tierCategorySelect');

@@ -33,6 +33,24 @@ function toast(message, kind, ms){
   }
 }
 
+// Same toast, with markup — for the answers that are a short paragraph rather than a
+// sentence (the why-not explanations), where plain text loses the structure.
+function toastHTML(html, ms){
+  const host = document.getElementById('toastHost');
+  if (!host) return;
+  const el = document.createElement('div');
+  el.className = 'toast toast-ok toastWide';
+  el.setAttribute('role', 'status');
+  el.innerHTML = html;
+  const close = document.createElement('button');
+  close.className = 'toastClose'; close.textContent = '\u00d7';
+  close.setAttribute('aria-label', 'Dismiss');
+  close.onclick = ()=> el.remove();
+  el.appendChild(close);
+  host.appendChild(el);
+  setTimeout(()=>{ el.classList.add('toastOut'); setTimeout(()=>el.remove(), 300); }, ms || 9000);
+}
+
 // A skeleton, shown for the frame between pressing Generate and the build finishing.
 function showSkeleton(){
   const empty = document.getElementById('emptyState');
@@ -83,9 +101,9 @@ const SECTION_COLORS = {
   "Humor Style": "var(--dusk-blue)",
   "Habits & Vices": "var(--emerald-deep)",
 };
-SECTION_COLORS["Appearance"] = "#8a6bbf";
-SECTION_COLORS["Required (constraints)"] = "#b8860b";
-SECTION_COLORS["The one thing that doesn't fit"] = "#c96f4a";
+SECTION_COLORS["Appearance"] = "var(--accent-violet)";
+SECTION_COLORS["Required (constraints)"] = "var(--accent-amber)";
+SECTION_COLORS["The one thing that doesn't fit"] = "var(--accent-rust)";
 SECTION_COLORS["Where They Stand Under Pressure"] = "var(--bubblegum)";
 function sectionColor(title){ return SECTION_COLORS[title] || "var(--dusk-blue)"; }
 
@@ -125,6 +143,35 @@ function bandHTML(t, slot){
 
 const RTIER_LABEL = {common:"common", uncommon:"uncommon", distinctive:"distinctive", signature:"signature"};
 
+/* HOW MUCH IS LEFT IN THIS SLOT. rerollExclusions grows silently on every toss, and the
+   only feedback the user ever got was the moment there was nothing left to draw — at
+   which point the honest answer ("you have rejected most of this category at these
+   settings") arrives far too late to act on. Show the headroom while it still means
+   something, and only once it is worth saying: a full pool is not information.
+
+   Counts what a reroll could ACTUALLY return — the category, minus what is banned,
+   minus what you have already tossed here, minus what is seated elsewhere on the sheet
+   — rather than the raw category size, which is the number that made this invisible. */
+function slotHeadroom(id, t){
+  if (!t || typeof byFilter !== 'function') return null;
+  const full = byFilter(t.section, t.category);
+  if (!full.length) return null;
+  const tossed = rerollExclusions[id] || new Set();
+  const seated = (typeof seatedTraitIds === 'function') ? seatedTraitIds(id) : new Set();
+  const left = full.filter(x => !tossed.has(x.id) && !seated.has(x.id) && x.id !== t.id).length;
+  return {left, total: full.length, tossed: tossed.size};
+}
+function slotDepthHTML(id, t){
+  const h = slotHeadroom(id, t);
+  if (!h || !h.tossed) return '';
+  const frac = h.left / h.total;
+  if (frac > 0.5) return '';                       // plenty left; saying so is noise
+  const cls = h.left === 0 ? 'depthOut' : frac <= 0.2 ? 'depthLow' : 'depthMid';
+  const msg = h.left === 0
+    ? `Nothing left to draw here — you have passed on all ${h.total}. Undo a toss, widen the precision slider, or ease a constraint.`
+    : `${h.left} of ${h.total} still available in ${t.category} at these settings — you have tossed ${h.tossed}.`;
+  return `<span class="slotDepth ${cls}" title="${escAttr(msg)}">${h.left === 0 ? 'pool empty' : h.left + ' left'}</span>`;
+}
 function traitCardHTML(id, s, includeControls, showDiff, accent, tagLabel){
   // BUG FIX: several code paths could produce a slot with a null trait (an empty
   // pool after filtering, a failed reroll), and this function dereferenced it
@@ -163,12 +210,12 @@ function traitCardHTML(id, s, includeControls, showDiff, accent, tagLabel){
         ${includeControls ? bandHTML(t, s) : ``}
         ${t.example ? `<div class="exampleLine">&ldquo;${escHTML(t.example)}&rdquo;</div>` : ``}
         ${includeControls ? freqBudgetHTML(t) : ``}
-        ${includeControls && traitNotes[id] ? `<div class="traitNote"><b>Note.</b> ${escHTML(traitNotes[id])} <button onclick="clearTraitNote('${escAttr(id)}')">remove</button></div>` : ``}
-        ${diff ? `<div class="diffNote">↺ was: "${escHTML(diff.from)}" <button onclick="dismissDiff('${escAttr(id)}')">dismiss</button></div>` : ``}
-        ${includeControls && whyOpen[id] ? `<div class="whyNote">${explainPick(id, s)}${(rerollExclusions[id]&&rerollExclusions[id].size)?`<div class="whyExcl">Excluded from rerolls here: ${rerollExclusions[id].size} trait${rerollExclusions[id].size>1?"s":""} you've already passed on. <button onclick="clearExclusions('${escAttr(id)}')">reset</button></div>`:``}</div>` : ``}
+        ${includeControls && traitNotes[id] ? `<div class="traitNote"><b>Note.</b> ${escHTML(traitNotes[id])} <button ${actAttr('click', 'clearTraitNote', id)}>remove</button></div>` : ``}
+        ${diff ? `<div class="diffNote">↺ was: "${escHTML(diff.from)}" <button ${actAttr('click', 'dismissDiff', id)}>dismiss</button></div>` : ``}
+        ${includeControls && whyOpen[id] ? `<div class="whyNote">${explainPick(id, s)}${(rerollExclusions[id]&&rerollExclusions[id].size)?`<div class="whyExcl">Excluded from rerolls here: ${rerollExclusions[id].size} trait${rerollExclusions[id].size>1?"s":""} you've already passed on. <button ${actAttr('click', 'clearExclusions', id)}>reset</button></div>`:``}</div>` : ``}
       </div>
       ${includeControls ? `
-      <button class="slotToggle" onclick="this.closest('.traitCard').classList.toggle('controlsOpen'); this.setAttribute('aria-expanded', this.closest('.traitCard').classList.contains('controlsOpen'));"
+      <button class="slotToggle" ${actAttr('click', 'toggleCardControls', "$el")}
               aria-expanded="false" aria-label="Show the controls for this card" title="Show the controls for this card">&ctdot;</button>
       <div class="slotBtns">
         ${s.required && id.startsWith("req_")
@@ -176,24 +223,25 @@ function traitCardHTML(id, s, includeControls, showDiff, accent, tagLabel){
              nothing for a reroll to draw, so the control says what would actually
              change it rather than rendering a button that cannot work. */
           ? `<span class="slotNote" title="This trait is here because you required it by name. Remove the constraint to change it.">required by name</span>`
-          : `<button class="rerollBtn" onclick="rerollSlot('${escAttr(id)}')" title="Draw a different trait for this slot (never repeats one you've already rejected here)"><span aria-hidden="true">✕</span> Toss</button>`}
-        <button class="lockBtn ${lockedClass}" onclick="toggleLock('${escAttr(id)}')" title="Keep this trait through rerolls and regeneration" aria-pressed="${s.locked?'true':'false'}"><span aria-hidden="true">📌</span> ${s.locked ? "Kept" : "Keep"}</button>
+          : `<button class="rerollBtn" ${actAttr('click', 'rerollSlot', id)} title="Draw a different trait for this slot (never repeats one you've already rejected here)"><span aria-hidden="true">✕</span> Toss</button>`}
+        <button class="lockBtn ${lockedClass}" ${actAttr('click', 'toggleLock', id)} title="Keep this trait through rerolls and regeneration" aria-pressed="${s.locked?'true':'false'}"><span aria-hidden="true">📌</span> ${s.locked ? "Kept" : "Keep"}</button>
         <div class="pinRow">
-          <button class="pinBtn ${pinnedTargets[id]!==undefined ? "pinned" : ""}" onclick="togglePin('${escAttr(id)}')" title="Pin this slot's intensity target (not the exact trait) so future generations/rerolls stay near this level even as sliders move elsewhere" aria-pressed="${pinnedTargets[id]!==undefined?'true':'false'}">${pinnedTargets[id]!==undefined ? "pinned "+pinnedTargets[id].toFixed(1) : "pin"}</button>
-          ${pinnedTargets[id]!==undefined ? `<button class="pinAdj" onclick="adjustPin('${escAttr(id)}',-0.2)" title="Nudge pinned intensity down" aria-label="Nudge pinned intensity down">−</button><button class="pinAdj" onclick="adjustPin('${escAttr(id)}',0.2)" title="Nudge pinned intensity up" aria-label="Nudge pinned intensity up">+</button>` : ``}
+          <button class="pinBtn ${pinnedTargets[id]!==undefined ? "pinned" : ""}" ${actAttr('click', 'togglePin', id)} title="Pin this slot's intensity target (not the exact trait) so future generations/rerolls stay near this level even as sliders move elsewhere" aria-pressed="${pinnedTargets[id]!==undefined?'true':'false'}">${pinnedTargets[id]!==undefined ? "pinned "+pinnedTargets[id].toFixed(1) : "pin"}</button>
+          ${pinnedTargets[id]!==undefined ? `<button class="pinAdj" ${actAttr('click', 'adjustPin', id, -0.2)} title="Nudge pinned intensity down" aria-label="Nudge pinned intensity down">−</button><button class="pinAdj" ${actAttr('click', 'adjustPin', id, 0.2)} title="Nudge pinned intensity up" aria-label="Nudge pinned intensity up">+</button>` : ``}
         </div>
-        ${history ? `<button class="rerollBtn" onclick="rerollBack('${escAttr(id)}')" title="Step back to the trait this slot held before the last toss">↺ back</button>` : ``}
-        <button class="whyBtn" onclick="toggleWhy('${escAttr(id)}')" title="Why did I get this trait?" aria-expanded="${whyOpen[id]?'true':'false'}">why?</button>
+        ${history ? `<button class="rerollBtn" ${actAttr('click', 'rerollBack', id)} title="Step back to the trait this slot held before the last toss">↺ back</button>` : ``}
+        ${slotDepthHTML(id, t)}
+        <button class="whyBtn" ${actAttr('click', 'toggleWhy', id)} title="Why did I get this trait?" aria-expanded="${whyOpen[id]?'true':'false'}">why?</button>
         <!-- Favouriting and banning previously meant leaving the sheet, opening
              Constraints, and finding the trait by name in a search box — for a trait
              that is right there on the card in front of you. -->
-        <button class="markBtn ${requiredTraitIds.includes(t.id) ? 'on' : ''}" onclick="favouriteTrait(${t.id})"
+        <button class="markBtn ${requiredTraitIds.includes(t.id) ? 'on' : ''}" ${actAttr('click', 'favouriteTrait', t.id)}
                 aria-pressed="${requiredTraitIds.includes(t.id) ? 'true' : 'false'}"
                 title="${requiredTraitIds.includes(t.id) ? 'Stop requiring this trait on every character' : 'Require this trait on every character from now on'}"><span aria-hidden="true">★</span><span class="srOnly">favourite</span></button>
-        <button class="markBtn ${bannedTraitIds.has(t.id) ? 'on' : ''}" onclick="banTrait(${t.id})"
+        <button class="markBtn ${bannedTraitIds.has(t.id) ? 'on' : ''}" ${actAttr('click', 'banTrait', t.id)}
                 aria-pressed="${bannedTraitIds.has(t.id) ? 'true' : 'false'}"
                 title="${bannedTraitIds.has(t.id) ? 'Allow this trait again' : 'Never draw this trait again'}"><span aria-hidden="true">🚫</span><span class="srOnly">never draw this again</span></button>
-        <button class="whyBtn" onclick="editTraitNote('${escAttr(id)}')" title="${traitNotes[id] ? 'Edit your note on this card' : 'Attach a note to this card'}">${traitNotes[id] ? 'note ✎' : '+ note'}</button>
+        <button class="whyBtn" ${actAttr('click', 'editTraitNote', id)} title="${traitNotes[id] ? 'Edit your note on this card' : 'Attach a note to this card'}">${traitNotes[id] ? 'note ✎' : '+ note'}</button>
       </div>` : ``}
     </div>`;
 }
@@ -457,6 +505,22 @@ const GROUP_TOGGLE_IDS = {
   "Personality": "genPersonality", "Speech Pattern": "genSpeech",
   "Vocabulary": "genVocab", "Mannerisms": "genManner", "Appearance": "genAppearance",
 };
+/* Which trait sections feed each sheet group. Lets a question asked from a section
+   header ("why didn't I get X here?") be answered against the pools that section
+   actually draws from, which is what makes a partial trait name usable — several
+   traits share a fragment across the bank and usually exactly one does inside the
+   section you were looking at. Built from PROFILE_SECTIONS so it cannot go stale. */
+const SECTIONS_FOR_GROUP = (function(){
+  const m = {
+    "Personality": ["Personality Traits"],
+    "Appearance": ["Appearance"],
+    "Speech Pattern": ["Verbosity Traits", "Vocabulary Traits", "Dialogue Grammar Traits"],
+    "Vocabulary": ["Vocabulary Traits"],
+    "Mannerisms": ["Mannerisms"],
+  };
+  (typeof PROFILE_SECTIONS !== 'undefined' ? PROFILE_SECTIONS : []).forEach(ps=>{ m[ps.label] = [ps.section]; });
+  return m;
+})();
 function emptyGroupReason(title){
   const toggleId = GROUP_TOGGLE_IDS[title];
   if (toggleId){
@@ -485,12 +549,12 @@ function renderSheet(){
   sheet.classList.add('show');
   const empty = document.getElementById('emptyState');
   if (empty) empty.style.display = 'none';
-  document.getElementById('sheetTitle').textContent = charMeta.name || "Character Voice";
+  setText('sheetTitle', charMeta.name || "Character Voice");
   const metaBits = [];
   if (charMeta.age) metaBits.push("Age " + charMeta.age);
   if (charMeta.context) metaBits.push(charMeta.context);
   if (charMeta.contextNotes && charMeta.contextNotes.length) metaBits.push("context bias: " + charMeta.contextNotes.join(", "));
-  document.getElementById('charMetaLine').textContent = metaBits.join(" · ");
+  setText('charMetaLine', metaBits.join(" · "));
 
   const body = document.getElementById('sheetBody');
   body.innerHTML = "";
@@ -526,6 +590,7 @@ function renderSheet(){
       if (why){
         const note = document.createElement('div');
         note.className = "axisGroup emptyGroup";
+        note.id = sectionAnchorId(g.title);
         note.innerHTML = `<div class="axisTitle static"><span class="axisGlyph" aria-hidden="true">${sectionGlyph(g.title)}</span>${escHTML(g.title)}<span class="axisCount">empty</span></div>`
           + `<div class="emptyGroupNote">${escHTML(why)}</div>`;
         body.appendChild(note);
@@ -535,6 +600,7 @@ function renderSheet(){
     const div = document.createElement('div');
     const collapsed = !!collapsedGroups[g.title];
     div.className = "axisGroup" + (collapsed ? " collapsed" : "");
+    div.id = sectionAnchorId(g.title);
     div.style.setProperty('--section-accent', sectionColor(g.title));
     // PERF FIX: innerHTML += inside a loop re-parses the accumulated HTML on every
     // iteration (quadratic), which was the main source of visible lag on large
@@ -543,12 +609,18 @@ function renderSheet(){
     // the section system unreadable for anyone who can't separate those hues.
     const keptHere = validIds.filter(id => state[id] && state[id].locked).length;
     let inner = `<div class="axisHead">`
-      + `<button class="axisTitle" onclick="toggleGroup('${escAttr(g.title)}')" aria-expanded="${collapsed?'false':'true'}" title="Collapse or expand this section">`
+      + `<button class="axisTitle" ${actAttr('click', 'toggleGroup', g.title)} aria-expanded="${collapsed?'false':'true'}" title="Collapse or expand this section">`
       + `<span class="axisGlyph" aria-hidden="true">${sectionGlyph(g.title)}</span>${escHTML(g.title)}`
       + `<span class="axisCount">${validIds.length}${keptHere ? ` · ${keptHere} kept` : ``}</span><span class="axisChev">${collapsed?'▸':'▾'}</span></button>`
       + `<span class="axisActions">`
-      + `<button class="axisAction" onclick="rerollGroup('${escAttr(g.title)}')" title="Draw a different trait for every unkept card in this section">reroll section</button>`
-      + `<button class="axisAction" onclick="lockGroup('${escAttr(g.title)}', ${keptHere < validIds.length})" title="${keptHere < validIds.length ? 'Keep every card in this section through rerolls and regeneration' : 'Release every card in this section'}">${keptHere < validIds.length ? 'keep section' : 'release section'}</button>`
+      + `<button class="axisAction" ${actAttr('click', 'rerollGroup', g.title)} title="Draw a different trait for every unkept card in this section">reroll section</button>`
+      + `<button class="axisAction" ${actAttr('click', 'lockGroup', g.title, keptHere < validIds.length)} title="${keptHere < validIds.length ? 'Keep every card in this section through rerolls and regeneration' : 'Release every card in this section'}">${keptHere < validIds.length ? 'keep section' : 'release section'}</button>`
+      /* explainWhyNot is one of the best things in the app and it lived behind a
+         free-text search box inside an Advanced panel two tabs away — so "why didn't I
+         get X?" was only askable by someone who already knew the feature existed and
+         could spell the trait. The question is always asked while looking at a section,
+         so it belongs on the section. */
+      + `<button class="axisAction" ${actAttr('click', 'askWhyNotHere', g.title)} title="Ask why a particular trait didn't come up in this section">why not…?</button>`
       + `</span></div>`;
     if (!collapsed) validIds.forEach(id=>{ inner += traitCardHTML(id, state[id], true, true, null, g.title); });
     div.innerHTML = inner;
@@ -660,7 +732,7 @@ function renderSheet(){
     try {
       prof = axisProfile(state);
       if (Object.keys(prof).length >= 3){
-        h += `<div style="margin-top:12px;"><div class="tensionTitle" style="color:var(--dusk-blue); margin-bottom:4px;">Axis profile</div>${radarSVG([{label:charMeta.name, color:"#4a6b8a", prof}])}
+        h += `<div style="margin-top:12px;"><div class="tensionTitle" style="color:var(--dusk-blue); margin-bottom:4px;">Axis profile</div>${radarSVG([{label:charMeta.name, color:"var(--cast-1)", prof}])}
         <div class="sub" style="margin:2px 0 0;">Summed trait polarity per axis. The dashed middle ring is zero; outside it the sheet leans positive on that axis, inside negative. Shape is the signal — which axes dominate — not absolute size.</div></div>`;
       }
     } catch(e){}
@@ -685,7 +757,7 @@ function renderSheet(){
         <div class="tensionTitle" style="color:var(--muted);">Recurring this session</div>
         <ul>` + rep.map(r=>
           `<li><b>${escHTML(r.trait.trait)}</b> — ${r.count} of your last ${r.window} characters `
-          + `<button class="markBtn" onclick="banTrait(${r.trait.id})" title="Never draw this trait again">🚫 never again</button></li>`
+          + `<button class="markBtn" ${actAttr('click', 'banTrait', r.trait.id)} title="Never draw this trait again">🚫 never again</button></li>`
         ).join("") + `</ul>
         <div class="sub" style="margin:6px 0 0;">These are already being penalised on every draw${avoidRecentEnabled() ? `` : ` — except that <b>Avoid recent traits</b> is currently off, so they are not`}. Banning one is the harder version of the same instruction.</div>
       </div>`;
@@ -699,6 +771,7 @@ function renderSheet(){
 
   renderChangeList();
   refreshBudgetMeters();
+  refreshJumpToSection();
 
   if (pressureState){
     const pbody = document.getElementById('pressureBody');
@@ -770,27 +843,117 @@ function snapshotSheetTraits(st){
   Object.entries(st || {}).forEach(([k,v])=>{ if (v && v.trait) m[k] = v.trait.trait; });
   return m;
 }
-function renderChangeList(){
-  const box = document.getElementById('changeList');
-  if (!box) return;
-  if (!lastSheetTraits){ box.style.display = 'none'; return; }
+/* A version the user has deliberately kept to compare against, as opposed to
+   lastSheetTraits, which is just "whatever the previous roll happened to be". The diff
+   machinery below already did all the work — snapshotSheetTraits produced the map and
+   renderChangeList rendered the comparison — and there was no way to point it at
+   anything except the immediately preceding generation. So "I liked the one three rolls
+   ago, what did I lose?" was unanswerable, which is the question the diff is for. */
+let pinnedSnapshot = null;      // {traits, label, at}
+function pinCurrentVersion(){
+  if (!Object.keys(state).length){ toast("Generate a character first.", "warn"); return; }
+  pinnedSnapshot = {
+    traits: snapshotSheetTraits(state),
+    label: (charMeta && charMeta.name) || (typeof emergentArchetypeName === 'function'
+              && (emergentArchetypeName(state)||{}).name) || "pinned version",
+    at: Date.now(),
+  };
+  renderChangeList();
+  toast(`Pinned "${pinnedSnapshot.label}". Every generation from now on shows what changed against it.`);
+}
+function clearPinnedVersion(){ pinnedSnapshot = null; renderChangeList(); toast("Stopped comparing against the pinned version."); }
+
+// Compares the sheet against one baseline map. Shared by both modes so they cannot
+// drift, and so "what changed" means the same thing whichever you are looking at.
+function diffAgainst(baseline){
   const now = snapshotSheetTraits(state);
   const changed = [], added = [], gone = [];
   Object.keys(now).forEach(k=>{
-    if (!(k in lastSheetTraits)) added.push(now[k]);
-    else if (lastSheetTraits[k] !== now[k]) changed.push({from:lastSheetTraits[k], to:now[k], slot:k});
+    if (!(k in baseline)) added.push(now[k]);
+    else if (baseline[k] !== now[k]) changed.push({from:baseline[k], to:now[k], slot:k});
   });
-  Object.keys(lastSheetTraits).forEach(k=>{ if (!(k in now)) gone.push(lastSheetTraits[k]); });
-  if (!changed.length && !added.length && !gone.length){ box.style.display='none'; return; }
-  let h = `<details><summary>What changed from your last generation (${changed.length} replaced, ${added.length} new, ${gone.length} dropped)</summary><div class="changeBody">`;
-  changed.slice(0, 40).forEach(c=>{
+  Object.keys(baseline).forEach(k=>{ if (!(k in now)) gone.push(baseline[k]); });
+  return {changed, added, gone};
+}
+function diffBodyHTML(d){
+  let h = '<div class="changeBody">';
+  d.changed.slice(0, 40).forEach(c=>{
     h += `<div><span class="changeSlot">${escHTML(titleForSlotId(c.slot))}</span> ${escHTML(c.from)} &rarr; <b>${escHTML(c.to)}</b></div>`;
   });
-  if (added.length) h += `<div style="margin-top:6px;"><b>New:</b> ${added.slice(0,20).map(escHTML).join(", ")}</div>`;
-  if (gone.length) h += `<div style="margin-top:6px;"><b>Dropped:</b> ${gone.slice(0,20).map(escHTML).join(", ")}</div>`;
-  h += `</div></details>`;
+  if (d.changed.length > 40) h += `<div class="sub" style="margin-top:4px;">…and ${d.changed.length - 40} more.</div>`;
+  if (d.added.length) h += `<div style="margin-top:6px;"><b>New:</b> ${d.added.slice(0,20).map(escHTML).join(", ")}</div>`;
+  if (d.gone.length) h += `<div style="margin-top:6px;"><b>Dropped:</b> ${d.gone.slice(0,20).map(escHTML).join(", ")}</div>`;
+  return h + '</div>';
+}
+function renderChangeList(){
+  const box = document.getElementById('changeList');
+  if (!box) return;
+  const hasSheet = Object.keys(state).length > 0;
+  if (!hasSheet || (!lastSheetTraits && !pinnedSnapshot)){ box.style.display = 'none'; return; }
+
+  let h = '';
+  if (lastSheetTraits){
+    const d = diffAgainst(lastSheetTraits);
+    if (d.changed.length || d.added.length || d.gone.length){
+      h += `<details><summary>What changed from your last generation (${d.changed.length} replaced, ${d.added.length} new, ${d.gone.length} dropped)</summary>${diffBodyHTML(d)}</details>`;
+    }
+  }
+  if (pinnedSnapshot){
+    const d = diffAgainst(pinnedSnapshot.traits);
+    const same = !d.changed.length && !d.added.length && !d.gone.length;
+    h += `<details${same ? '' : ' open'}><summary>Against the pinned "${escHTML(pinnedSnapshot.label)}" — ` +
+         (same ? 'identical so far' : `${d.changed.length} replaced, ${d.added.length} new, ${d.gone.length} dropped`) +
+         `</summary>${same ? '<div class="changeBody sub">Nothing has moved since you pinned it.</div>' : diffBodyHTML(d)}` +
+         `<div style="margin-top:8px;"><button class="btn-secondary" ${actAttr('click', 'clearPinnedVersion')}>Stop comparing</button></div></details>`;
+  } else if (hasSheet){
+    h += `<div style="margin-top:6px;"><button class="btn-secondary" ${actAttr('click', 'pinCurrentVersion')} title="Keep this version as a fixed point and show what changes against it from now on">📌 Pin this version to compare against</button></div>`;
+  }
+
+  const recurring = (typeof recurringTraits === 'function') ? recurringTraits(3) : [];
+  if (recurring.length){
+    /* recentTraitIds has held this the whole time and nothing ever showed it to
+       anyone — the engine comment says so out loud. It is the direct answer to
+       "why does everything I generate feel the same", and it names the specific
+       traits rather than leaving it as an impression. */
+    h += `<details><summary>Traits you keep getting (${recurring.length} across your last ${recurring[0].window} characters)</summary><div class="changeBody">` +
+      recurring.map(r=>
+        `<div><b>${escHTML(r.trait.trait)}</b> <span class="sub">— ${r.count} of the last ${r.window}, ${escHTML(r.trait.category)}</span> ` +
+        `<button class="markBtn" ${actAttr('click', 'banTrait', r.trait.id)} title="Never draw this trait again">🚫 never again</button></div>`).join('') +
+      `<div class="sub" style="margin-top:6px;">These are the pools your settings keep landing in. Banning one, or moving the slider that feeds it, is usually faster than rerolling.</div></div></details>`;
+  }
+
+  if (!h){ box.style.display = 'none'; return; }
   box.innerHTML = h;
   box.style.display = 'block';
+}
+
+/* Jump-to-section. renderSheet already knows the group titles and stamps each group
+   element; this just gives them ids and a way to reach them, because on a phone the
+   sheet is a very long scroll and the only navigation was collapse-all. */
+function sectionAnchorId(title){ return 'sec-anchor-' + String(title).toLowerCase().replace(/[^a-z0-9]+/g, '-'); }
+function refreshJumpToSection(){
+  const sel = document.getElementById('jumpToSection');
+  if (!sel) return;
+  const titles = (typeof SHEET_GROUPS !== 'undefined' ? SHEET_GROUPS : [])
+    .filter(g => document.getElementById(sectionAnchorId(g.title)))
+    .map(g => g.title);
+  if (!titles.length){ sel.style.display = 'none'; return; }
+  sel.style.display = '';
+  sel.innerHTML = '<option value="">Jump to…</option>' +
+    titles.map(t=>`<option value="${escAttr(t)}">${escHTML(t)}</option>`).join('');
+}
+function jumpToSection(title){
+  if (!title) return;
+  const el = document.getElementById(sectionAnchorId(title));
+  if (!el) return;
+  // A collapsed section is not a useful jump target — open it on the way.
+  if (collapsedGroups[title]){ collapsedGroups[title] = false; renderSheet(); }
+  const target = document.getElementById(sectionAnchorId(title));
+  if (!target) return;
+  const reduce = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  target.scrollIntoView({behavior: reduce ? 'auto' : 'smooth', block: 'start'});
+  const heading = target.querySelector('.axisTitle');
+  if (heading) heading.focus({preventScroll:true});
 }
 
 function checkConflicts(){
@@ -807,7 +970,7 @@ function checkConflicts(){
 }
 
 function sheetToText(st, meta, pState){
-  const showEx = document.getElementById('examplesToggle') ? document.getElementById('examplesToggle').checked : true;
+  const showEx = boolVal('examplesToggle', true);
   const L = [];
 
   // ---- Title & meta ----
@@ -835,7 +998,9 @@ function sheetToText(st, meta, pState){
     return out.join("\n");
   };
   const block = (title, ids) => {
-    const valid = ids.filter(id=>st[id]);
+    // A slot can legitimately hold trait:null (pool exhausted by constraints, or an
+    // older save file). Guard the TRAIT, not just the slot — fmt() dereferences it.
+    const valid = ids.filter(id=>st[id] && st[id].trait);
     if (!valid.length) return;
     L.push("", `## ${title}`, "");
     valid.forEach(id=> L.push(fmt(st[id])));
@@ -1031,7 +1196,7 @@ function buildBudgetUI(){
         <label for="cap_${tier}" class="budgetLabel"><span class="rarityBadge rarity-${tier}">${escHTML(RTIER_LABEL[tier])}</span></label>
         <input type="number" id="cap_${tier}" min="0" max="60" step="1" placeholder="no cap"
                aria-label="Maximum ${escHTML(RTIER_LABEL[tier])} cards on one sheet"
-               oninput="onRarityCapChange('${tier}')">
+               ${actAttr('input', 'onRarityCapChange', "${tier}")}>
       </div>`).join("");
   }
   const ig = document.getElementById('intensityCapGrid');
@@ -1041,14 +1206,14 @@ function buildBudgetUI(){
         <label for="icap_${g.id}" class="budgetLabel">${escHTML(g.label)}</label>
         <input type="number" id="icap_${g.id}" min="0" max="400" step="1" placeholder="off"
                aria-label="Maximum total intensity for ${escHTML(g.label)}"
-               oninput="onIntensityCapChange('${g.id}')">
+               ${actAttr('input', 'onIntensityCapChange', "${g.id}")}>
         <span class="budgetMeter" id="imeter_${g.id}"><i></i><b></b></span>
       </div>`).join("");
   }
   const pr = document.getElementById('budgetPresetRow');
   if (pr){
     pr.innerHTML = Object.entries(BUDGET_PRESETS).map(([k,p])=>
-      `<button class="btn-secondary" onclick="useBudgetPreset('${k}')">${escHTML(p.label)}</button>`).join("");
+      `<button class="btn-secondary" ${actAttr('click', 'useBudgetPreset', "${k}")}>${escHTML(p.label)}</button>`).join("");
   }
   refreshBudgetUI();
 }
@@ -1123,11 +1288,11 @@ function refreshBudgetChips(){
   let h = "";
   RTIER_ORDER.forEach(t=>{
     if (rarityCaps[t] == null) return;
-    h += `<span class="chip chip-tier">max ${rarityCaps[t]} ${escHTML(RTIER_LABEL[t])} <b onclick="clearOneBudget('rarity','${t}')" title="Remove">&times;</b></span>`;
+    h += `<span class="chip chip-tier">max ${rarityCaps[t]} ${escHTML(RTIER_LABEL[t])} <b ${actAttr('click', 'clearOneBudget', "rarity", "${t}")} title="Remove">&times;</b></span>`;
   });
   BUDGET_GROUPS.forEach(g=>{
     if (intensityCaps[g.id] == null) return;
-    h += `<span class="chip chip-tier">${escHTML(g.label)} intensity &le; ${intensityCaps[g.id]} <b onclick="clearOneBudget('intensity','${g.id}')" title="Remove">&times;</b></span>`;
+    h += `<span class="chip chip-tier">${escHTML(g.label)} intensity &le; ${intensityCaps[g.id]} <b ${actAttr('click', 'clearOneBudget', "intensity", "${g.id}")} title="Remove">&times;</b></span>`;
   });
   if (h && getBudgetMode() !== 'redraw') h += `<span class="chip chip-ban">over budget: ${getBudgetMode() === 'drop' ? 'drop the loudest' : 'warn only'}</span>`;
   box.innerHTML = h || '<span class="sub" style="margin:0;">No budgets set — every draw stands as dealt.</span>';
@@ -1274,10 +1439,10 @@ function importCharacterJSON(fileInput){
       if (p.settings) restoreSettings(p.settings);
       else if (p.sliders) restoreSliders(p.sliders);   // version 1 files
       lastGeneratedSliders = (p.settings && p.settings.sliders) || p.sliders || null;
-      document.getElementById('charName').value = charMeta.name || "";
-      document.getElementById('charAge').value = charMeta.age || "";
-      document.getElementById('charContext').value = charMeta.context || "";
-      document.getElementById('archetypeTag').textContent = charMeta.archetypeLabel || "Imported";
+      setVal('charName', charMeta.name || "");
+      setVal('charAge', charMeta.age || "");
+      setVal('charContext', charMeta.context || "");
+      setText('archetypeTag', charMeta.archetypeLabel || "Imported");
       document.getElementById('pressureSheet').style.display = pressureState ? "block" : "none";
       onSliderChange(); renderSheet(); checkConflicts();
       if (!p.settings) toast("Imported. This file predates full-settings export, so constraints and counts were left as they are.", "warn", 6000);

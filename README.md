@@ -31,6 +31,18 @@ into one shared scope.
 node tests/run.js
 ```
 
+There is also an end-to-end run in a real browser for the things a DOM stub cannot
+answer — that the declarative event dispatch actually dispatches, that no inline
+handler has crept back in, that the dark palette resolves, and that the whole app works
+under a Content-Security-Policy with no `'unsafe-inline'`:
+
+```bash
+npm i playwright            # node_modules is gitignored
+python3 -m http.server 8111 &
+node tests/browser.mjs http://localhost:8111          # behaviour
+CSP=1 node tests/browser.mjs http://localhost:8111    # ...and under script-src 'self'
+```
+
 They assert the things the UI states out loud and the things that have actually
 broken before: no duplicate ids or trait names, no duplicate example lines inside a
 category, both poles of every axis populated within 25% of each other, every
@@ -40,10 +52,33 @@ a real category, seeded generation reproducing a character exactly, that rarity 
 not a function of intensity, that a borrowed generator restores the presentation
 locks it borrowed, and that budgets never modify a slot the user locked.
 
-For content authoring there is also a load-time shape check: open the page with
-`?dev=1` and every trait is validated for a well-formed id, section, category, name,
-description, example, intensity, rarity tier and polarity vector, with any problems
-named in the console. It costs a normal load nothing.
+They also assert the properties whose absence let real bugs live for a long time:
+that no whole-sheet consumer throws on a slot holding `trait: null`; that every
+axis-keyed table agrees with `AXIS_LABELS` in both directions (a one-character typo
+made every rebelliousness contradiction unreachable, silently, for the entire life of
+that table); that rarity's dependence on intensity, measured as Cramér's V, stays
+below a ratchet rather than merely occupying every cell; that the fixed-category slots
+still return a real range of traits at default settings; that Motivation & Wound
+actually moves the categories downstream of it and does not decide them; and that the
+archetype presets push every axis in both directions.
+
+### Authoring content
+
+There is a load-time shape check for anyone editing the trait data: open the page with
+**`?dev=1`** and every trait is validated for a well-formed id, section, category, name,
+description, example, intensity, rarity tier and polarity vector, and every axis-keyed
+table is checked against `AXIS_LABELS` in both directions, with any problems named in
+the console. It costs a normal load nothing. The app links to it from its own footer.
+
+The trait bank lives in `js/data/`. Each file is a flat array pushed onto `TRAITS`, so
+adding content means adding a file, appending its `TRAITS.push(...)`, and listing it in
+`index.html` and in `ENGINE_FILES` in `tests/harness.js`. Ids are allocated in blocks
+per file (see the header comment in each) so two files can never collide.
+
+When adding traits, the two axes are independent and should be kept that way: a
+`signature` trait at intensity 1 is a rare, quiet habit and is exactly the kind of
+entry the bank is short of. `node tests/run.js` prints the live bank composition on
+every run and will fail if rarity starts collapsing back onto intensity.
 
 ## Rarity
 

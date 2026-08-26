@@ -112,11 +112,25 @@ async function saveCharacter(btnEl){
   const oldLabel = btn ? btn.textContent : null;
   if (btn){ btn.textContent = "Saving…"; btn.disabled = true; }
   try {
-    // Saved characters carry the same full-fidelity settings block the file export
-    // does, so loading one restores the setup that produced it rather than dropping
-    // the sheet into whatever the controls happen to say now.
+    /* Saved characters carry the same full-fidelity settings block the file export
+       does, so loading one restores the setup that produced it rather than dropping
+       the sheet into whatever the controls happen to say now.
+
+       Stored by trait ID rather than by embedded trait object. A sheet is ~37 slots
+       and every one of them was carrying a full copy of its trait — name, description,
+       example, polarity — which is roughly 17.8 KB per save against 3.7 KB for the
+       id-only form, so a 5 MB localStorage quota held about 290 characters instead of
+       about 1,400. compressSlots/expandSlots already did exactly this for the undo
+       stack; there was no reason storage was not using them. loadSavedCharacter relinks
+       every trait by id anyway, so the embedded copies were being thrown away on the
+       way back in — they were pure cost. SAVE_FORMAT lets an older save (embedded
+       traits, no marker) still load unchanged: expandSlots passes a trait through
+       untouched unless it carries the __id marker. */
     await storage.set('character:'+name, JSON.stringify({
-      state, charMeta, pressureState, pinnedTargets, charVariants, traitNotes,
+      format: SAVE_FORMAT,
+      state: compressSlots(state), charMeta,
+      pressureState: compressSlots(pressureState),
+      pinnedTargets, charVariants, traitNotes,
       settings: captureSettings(), savedAt: new Date().toISOString(),
     }));
     await loadSavedList();
@@ -172,8 +186,12 @@ async function loadSavedCharacter(name){
         if (s2 && s2.trait){ const live = TRAITS_BY_ID.get(s2.trait.id); if (live) s2.trait = live; else orphans++; }
       }); return st; };
     snapshotHistory();
-    parsed.state = relink(parsed.state);
-    parsed.pressureState = relink(parsed.pressureState);
+    /* expandSlots first, then relink. Compressed saves carry {__id} stubs that expand
+       straight back to the live trait; older saves carry full embedded copies that
+       expandSlots leaves alone and relink then reconnects. Both arrive here the same
+       way, so a save written by any build still loads. */
+    parsed.state = relink(expandSlots(parsed.state));
+    parsed.pressureState = relink(expandSlots(parsed.pressureState));
     state = parsed.state; charMeta = parsed.charMeta || {name, age:"", context:"", archetypeLabel:"Loaded"};
     pressureState = parsed.pressureState || null;
     pinnedTargets = parsed.pinnedTargets || {};
@@ -181,10 +199,10 @@ async function loadSavedCharacter(name){
     traitNotes = parsed.traitNotes || {};
     diffLog = {}; rerollExclusions = {}; rerollHistory = {}; whyOpen = {};
     if (parsed.settings) restoreSettings(parsed.settings);
-    document.getElementById('charName').value = charMeta.name || "";
-    document.getElementById('charAge').value = charMeta.age || "";
-    document.getElementById('charContext').value = charMeta.context || "";
-    document.getElementById('archetypeTag').textContent = "Loaded: "+name;
+    setVal('charName', charMeta.name || "");
+    setVal('charAge', charMeta.age || "");
+    setVal('charContext', charMeta.context || "");
+    setText('archetypeTag', "Loaded: "+name);
     document.getElementById('pressureSheet').style.display = pressureState ? "block" : "none";
     lastSheetTraits = null;
     onSliderChange(); renderSheet(); checkConflicts();
@@ -282,7 +300,7 @@ function generateCast(){
   // BUG FIX: the cast read your Generate-group checkboxes and per-section profile
   // toggles (via buildCharacterState) but hardcoded three mannerisms and a balanced
   // rarity, so it inherited some of your settings and silently ignored the rest.
-  const rarityPref = document.getElementById('rarityPref') ? document.getElementById('rarityPref').value : 0;
+  const rarityPref = rarityPrefVal();
   const mannerCount = intVal('mannerCount', 3);
   const vocabCount = intVal('vocabCount', 2);
   // The cast was the one generator with no reproducibility at all: pure Math.random,
@@ -299,24 +317,70 @@ function generateCast(){
   // withSavedVariants: each cast member rolls its own presentation locks, and the
   // single-character sheet's locks are restored once the whole batch is done — see
   // the note on withCharacterVariants in engine.js.
+  /* AROUND THIS CHARACTER. The cast ignored your sliders completely — randomAxisLevel()
+     uniform over the whole range, per axis, per member — so there was no way to ask for
+     "a cast around the person I just built", which is the commonest reason to want one.
+     Anchored mode keeps your settings as the centre of gravity and scatters each member
+     around them by a controllable spread; unanchored keeps the old behaviour, because a
+     cast of six strangers is also a real thing to want. */
+  const anchored = boolVal('castAnchor', false) && Object.keys(state).length > 0;
+  const spread = clamp(floatVal('castSpread', 0.55), 0.15, 1);
+  const baseVerb = rawToLevel(intVal('verbositySlider', 0));
+  const baseReg  = rawToLevel(intVal('registerSlider', 0));
+  const baseComp = rawToLevel(intVal('composureSlider', 0));
+  const around = (base, s) => clamp(base + (Math.random()*2 - 1) * 2 * s, -2, 2);
+
+  /* ANTI-SIMILARITY. Each member was an independent roll with nothing stopping two of
+     six landing on the same Role AND Values AND Attachment — which is the one thing an
+     ensemble must not do, and the thing a person notices immediately. Track what has
+     already been taken and re-roll a member that collides too heavily with one already
+     placed. Bounded attempts: with six members and seven roles a perfect spread is not
+     always reachable, and a slightly repetitive cast beats an infinite loop. */
+  const placed = [];
+  const KEY_SECTIONS = ['role', 'values', 'attachment', 'stress'];
+  const overlapWith = (st) => {
+    let worst = 0;
+    placed.forEach(prev=>{
+      const n = KEY_SECTIONS.filter(id=> slotCat(st['prof_'+id+'_0']) &&
+        slotCat(st['prof_'+id+'_0']) === slotCat(prev['prof_'+id+'_0'])).length;
+      if (n > worst) worst = n;
+    });
+    return worst;
+  };
+
+  let rerolled = 0;
   try { withoutContextBias(()=> withSavedVariants(()=>{
     Math.random = mulberry32(seedNum);
     for (let i=0;i<count;i++){
-      const verbLevel = randomAxisLevel();
-      const regLevel = randomAxisLevel();
-      const compLevel = randomAxisLevel();
-      const personalityOverrides = {};
-      PERSONALITY_AXES.forEach(axis=>{ personalityOverrides[axis.id] = Math.round(randomAxisLevel()*50); });
-      rollCharacterVariants();
-      const st = buildCharacterState({verbLevel, regLevel, compLevel, mannerCount, vocabCount,
-        rarityPref, vocabPref:null, personalityOverrides});
+      let st = null, variants = null;
+      // Accept immediately at <=1 shared key section; try a few times to beat 2+.
+      for (let attempt = 0; attempt < 6; attempt++){
+        const verbLevel = anchored ? around(baseVerb, spread) : randomAxisLevel();
+        const regLevel  = anchored ? around(baseReg,  spread) : randomAxisLevel();
+        const compLevel = anchored ? around(baseComp, spread) : randomAxisLevel();
+        const personalityOverrides = {};
+        PERSONALITY_AXES.forEach(axis=>{
+          personalityOverrides[axis.id] = anchored
+            ? Math.round(clamp(intVal('pers_'+axis.id, 0) + (Math.random()*2 - 1) * 100 * spread, -100, 100))
+            : Math.round(randomAxisLevel()*50);
+        });
+        rollCharacterVariants();
+        const cand = buildCharacterState({verbLevel, regLevel, compLevel, mannerCount, vocabCount,
+          rarityPref, vocabPref:null, personalityOverrides});
+        st = cand; variants = Object.assign({}, charVariants);
+        if (overlapWith(cand) <= 1) break;
+        rerolled++;
+      }
+      placed.push(st);
       // Carried on the cast entry rather than left in the global, so a cast member's
       // own locks travel with it (relationship analysis, cast export) instead of
       // whichever member happened to be generated last.
-      castStates.push({state: st, variants: Object.assign({}, charVariants),
-        meta: {name:"Character " + (i+1), age:"", context:"", archetypeLabel:"Cast member"}});
+      castStates.push({state: st, variants,
+        meta: {name:"Character " + (i+1), age:"", context:"",
+               archetypeLabel: anchored ? "Cast member (around your character)" : "Cast member"}});
     }
   })); } finally { Math.random = _origRandom; }
+  if (rerolled) console.info(`[cast] re-rolled ${rerolled} time(s) to keep members distinct`);
   const out = document.getElementById('castSeedReadout');
   if (out) out.textContent = "Cast seed: " + lastCastSeed;
   renderCast();
@@ -324,9 +388,26 @@ function generateCast(){
   // cast generated while sitting on that tab left stale (or empty) selectors behind.
   refreshRelSelectors();
 }
-const CAST_COLORS = ["#4a6b8a","#c2578a","#5a9a6f","#b8860b","#8a6bbf","#c96f4a"];
+/* Theme-aware: these are drawn into inline SVG fill/stroke attributes, which resolve
+   CSS custom properties just as a stylesheet would, so the cast overlay follows the
+   palette instead of being the one element that ignores it. */
+const CAST_COLORS = ["var(--cast-1)","var(--cast-2)","var(--cast-3)","var(--cast-4)","var(--cast-5)","var(--cast-6)"];
+function onCastAnchorChange(){
+  const row = document.getElementById('castSpreadRow');
+  if (row) row.style.display = boolVal('castAnchor', false) ? 'block' : 'none';
+  updateCastSpreadReadout();
+}
+function updateCastSpreadReadout(){
+  const v = floatVal('castSpread', 0.55);
+  setText('castSpreadReadout',
+    v < 0.3 ? "Close variations on the same person — siblings, a unit, a household"
+    : v < 0.6 ? "Related, but their own people"
+    : v < 0.85 ? "Same world, quite different people"
+    : "Barely anchored — near enough to a free roll");
+}
 function renderCast(){
   const grid = document.getElementById('castGrid');
+  if (!grid) return;   // container absent (embedded build, or a trimmed page)
   grid.innerHTML = "";
   // Cast overlay radar: every member's axis profile on one chart, so ensemble
   // gaps (an axis nobody covers) and pile-ups (everyone leaning the same way)
@@ -346,7 +427,7 @@ function renderCast(){
     card.className = "castCard";
     // Cast names are editable (rename below), so this is interpolated user text:
     // escape it rather than waiting for the day someone types a "<".
-    let inner = `<h3><span>${escHTML(c.meta.name)}</span><button class="savedAct" onclick="renameCastMember(${idx})">rename</button></h3>`;
+    let inner = `<h3><span>${escHTML(c.meta.name)}</span><button class="savedAct" ${actAttr('click', 'renameCastMember', idx)}>rename</button></h3>`;
     const addAll = (ids)=>{ ids.forEach(id=>{ inner += traitCardHTML(id, c.state[id], false, false, sectionColor(titleForSlotId(id))); }); };
     addAll(Object.keys(c.state).filter(k=>k.startsWith("pers_")));
     addAll(Object.keys(c.state).filter(k=>k.startsWith("prof_")));
@@ -649,8 +730,8 @@ function updateHeavyPreview(){
     });
     if (parts.length) profLine = `<div style="margin-top:6px; padding-top:6px; border-top:1px dashed var(--border);"><b>Character Profile (predicted):</b><br>${parts.join("<br>")}<div class="sub" style="margin:6px 0 0;">Deterministic prediction, not a draw — generation still rolls against these odds.</div></div>`;
   } catch(e){}
-  document.getElementById('affinityPreview').innerHTML =
-    fmt(gBoost,"Grammar") + fmt(vBoost,"Vocabulary") + fmt(mBoost,"Mannerisms") + profLine;
+  setHTML('affinityPreview',
+    fmt(gBoost,"Grammar") + fmt(vBoost,"Vocabulary") + fmt(mBoost,"Mannerisms") + profLine);
   updateRangeReadout();
 }
 
@@ -736,6 +817,7 @@ function axisReadout(axis, raw){
 
 function buildPersonalitySliders(){
   const grid = document.getElementById('personalitySlidersGrid');
+  if (!grid) return;   // container absent (embedded build, or a trimmed page)
   grid.innerHTML = "";
   const placed = new Set();
   const groups = PERSONALITY_GROUPS.map(g=>({...g}));
@@ -762,7 +844,7 @@ function buildPersonalitySliders(){
         <label for="pers_${axis.id}">${escHTML(axis.label)}</label>
         <div class="sliderWrap"><span class="neutralBand" aria-hidden="true"></span><span class="blendBand" aria-hidden="true"></span>
         <input type="range" id="pers_${axis.id}" min="-100" max="100" value="0" step="1"
-               oninput="onSliderChange()" aria-label="${escHTML(axis.label)}: ${escHTML(lo)} to ${escHTML(hi)}"
+               ${actAttr('input', 'onSliderChange')} aria-label="${escHTML(axis.label)}: ${escHTML(lo)} to ${escHTML(hi)}"
                aria-describedby="persVal_${axis.id}"></div>
         <div class="scaleLabels"><span>${escHTML(lo)}</span><span>${escHTML(hi)}</span></div>
         <div class="sliderVal" id="persVal_${axis.id}" title="Below 14 either side of centre, this axis draws from its Situational pool.">0 · situational</div>
@@ -774,12 +856,13 @@ function buildPersonalitySliders(){
   });
 }
 function togglePersonalityPanel(){
-  const enabled = document.getElementById('personalityToggle').checked;
-  document.getElementById('personalitySlidersGrid').classList.toggle('disabled', !enabled);
+  const enabled = boolVal('personalityToggle', true);
+  const grid = document.getElementById('personalitySlidersGrid');
+  if (grid) grid.classList.toggle('disabled', !enabled);
 }
 
 function toggleExamples(){
-  const show = document.getElementById('examplesToggle').checked;
+  const show = boolVal('examplesToggle', true);
   document.body.classList.toggle('hide-examples', !show);
 }
 
@@ -934,11 +1017,120 @@ function randomRawSlider(){
   return Math.round(clamp(v, -100, 100));
 }
 
+/* "Surprise me entirely." randomizeSliders(scope) has existed the whole time and was
+   only ever surfaced as two separate half-measures behind the Advanced panel — voice OR
+   personality, never the whole thing, and never the archetype or the divergence that
+   actually decide what kind of person comes out. The empty state offered three specific
+   starting points and no way to say "I don't know, show me something".
+
+   Deliberately also rolls the archetype and pushes divergence up: randomising thirteen
+   sliders around the centre produces a very average person by the central limit theorem,
+   which is the opposite of a surprise. */
+/* ================= DECLARATIVE EVENT DISPATCH =================
+   The app carried about 140 inline on* attributes. They work, and they make a strict
+   Content-Security-Policy impossible: any policy without 'unsafe-inline' in script-src
+   turns every button in the app into a dead button. That is a real constraint for
+   anyone embedding this, and it is the kind of thing that cannot be retrofitted a
+   handler at a time later.
+
+   One delegated listener per event type, reading a declared action and a JSON argument
+   list off the element. The arguments keep their types (a trait id stays a number)
+   because they travel as JSON rather than as attribute strings, and two tokens stand in
+   for the things an inline handler had lexical access to and a delegated one does not:
+
+     "$el"    -> the element the action is declared on   (was `this`)
+     "$event" -> the event object                        (was `event`)
+
+   Handlers that were multi-statement inline bodies are named functions now, which is
+   where they should have been anyway. */
+const ACTION_EVENTS = ['click', 'change', 'input', 'keydown'];
+function _actionArgs(el, ev){
+  let raw = el.getAttribute('data-args');
+  if (!raw) return [];
+  let parsed;
+  try { parsed = JSON.parse(raw); }
+  catch (e){ console.error('[action] bad data-args on', el, raw); return []; }
+  if (!Array.isArray(parsed)) parsed = [parsed];
+  return parsed.map(a => a === "$el" ? el : a === "$event" ? ev : a);
+}
+function _runAction(el, ev){
+  const name = el.getAttribute('data-act');
+  const fn = name && globalThis[name];
+  if (typeof fn !== 'function'){ console.error('[action] no such action:', name); return; }
+  try { fn.apply(null, _actionArgs(el, ev)); }
+  catch (err){ console.error('[action] ' + name + ' threw', err); }
+}
+ACTION_EVENTS.forEach(type=>{
+  document.addEventListener(type, (ev)=>{
+    const target = ev.target && ev.target.closest && ev.target.closest('[data-act]');
+    if (!target) return;
+    // An element declares which events it wants; without this, a text input carrying a
+    // keydown action would also fire on every click inside it.
+    const wants = (target.getAttribute('data-on') || 'click').split(/\s+/);
+    if (!wants.includes(type)) return;
+    if (type === 'click' && target.tagName === 'BUTTON' && target.type !== 'submit') ev.preventDefault();
+    _runAction(target, ev);
+  });
+});
+
+// ---- The handlers that used to be multi-statement inline bodies ----
+function openHelpPanel(){
+  const p = document.getElementById('helpPanel');
+  if (!p) return;
+  p.open = true;
+  p.scrollIntoView({block:'nearest'});
+}
+function jumpToSectionFromSelect(el){
+  if (!el) return;
+  const v = el.value;
+  el.value = '';
+  jumpToSection(v);
+}
+function toggleCardControls(el){
+  const card = el && el.closest('.traitCard');
+  if (!card) return;
+  card.classList.toggle('controlsOpen');
+  el.setAttribute('aria-expanded', String(card.classList.contains('controlsOpen')));
+}
+function randomizeAndGenerate(){ randomizeSliders('all'); generateCharacter(); }
+function printSheet(){ if (typeof print === 'function') print(); }
+
+function surpriseMe(){
+  const keys = Object.keys(ARCHETYPES);
+  const pick = keys[Math.floor(Math.random() * keys.length)];
+  const sel = document.getElementById('archetypeSelect');
+  // Half the time take a preset and pull it around; half the time go from nothing.
+  const useArchetype = sel && Math.random() < 0.5;
+  if (sel) sel.value = useArchetype ? pick : "";
+  if (useArchetype) applyArchetypeSetup(); else randomizeSliders('all');
+  if (useArchetype){
+    // Nudge every axis off the preset so two rolls of the same archetype differ.
+    PERSONALITY_AXES.forEach(axis=>{
+      const el = document.getElementById('pers_'+axis.id);
+      if (!el) return;
+      el.value = String(clamp(intVal(el, 0) + Math.round((Math.random()*2-1) * 45), -100, 100));
+    });
+  }
+  randomizeProfileTypes();
+  // divergence is a 0..1 range in steps of 0.05, not a 0..100 slider.
+  const div = document.getElementById('divergence');
+  if (div) div.value = (0.35 + Math.round(Math.random() * 8) * 0.05).toFixed(2);
+  const wild = document.getElementById('wildcardToggle');
+  if (wild) wild.checked = true;
+  setVal('charName', "");
+  invalidateSliderCache();
+  onSliderChange();
+  runGeneration();
+  toast(useArchetype
+    ? `Surprised you from "${ARCHETYPES[pick].label}", pulled well off its defaults. Everything is still yours to change.`
+    : "Every slider rolled, sections rolled, and the wildcard turned on. Everything is still yours to change.");
+}
+
 function randomizeSliders(scope){
   if (scope === 'voice' || scope === 'all'){
-    document.getElementById('verbositySlider').value = randomRawSlider();
-    document.getElementById('registerSlider').value = randomRawSlider();
-    document.getElementById('composureSlider').value = randomRawSlider();
+    setVal('verbositySlider', randomRawSlider());
+    setVal('registerSlider', randomRawSlider());
+    setVal('composureSlider', randomRawSlider());
   }
   if (scope === 'personality' || scope === 'all'){
     PERSONALITY_AXES.forEach(axis=>{
@@ -952,7 +1144,7 @@ function randomizeSliders(scope){
 
 // ================= CUSTOM ARCHETYPES =================
 async function saveCustomArchetype(btnEl){
-  const name = document.getElementById('customArchName').value.trim();
+  const name = strVal('customArchName', '').trim();
   if(!name){ toast("Give the archetype a name first.", "warn"); return; }
   const btn = btnEl || null;
   const oldLabel = btn ? btn.textContent : null;
@@ -979,7 +1171,7 @@ async function saveCustomArchetype(btnEl){
     await storage.set('archetype:'+name, JSON.stringify(arch));
     CUSTOM_ARCHETYPES['custom_'+name] = arch;
     await loadCustomArchetypes();
-    document.getElementById('customArchName').value = "";
+    setVal('customArchName', "");
   } catch(e){ console.error(e); toast("Could not save archetype.", "warn"); }
   finally { if (btn){ btn.textContent = oldLabel; btn.disabled = false; } }
 }
@@ -1027,6 +1219,7 @@ async function loadCustomArchetypes(){
   } catch(e){}
   // rebuild dropdown
   const sel = document.getElementById('archetypeSelect');
+  if (!sel) return;   // no dropdown on this page — the archetypes are still loaded
   const current = sel.value;
   [...sel.querySelectorAll('option')].forEach(o=>{ if(o.value.startsWith('custom_')) o.remove(); });
   Object.entries(CUSTOM_ARCHETYPES).forEach(([key,arch])=>{
@@ -1155,7 +1348,7 @@ function categoryPairNotesFor(stA, stB){
   return [...new Set(notes)];
 }
 function analyseRelationship(){
-  const ka = document.getElementById('relA').value, kb = document.getElementById('relB').value;
+  const ka = strVal('relA', ''), kb = strVal('relB', '');
   const A = getCharByKey(ka), B = getCharByKey(kb);
   if (!A || !B){ toast("Generate a character or cast first.", "warn"); return; }
   if (ka === kb){ toast("Pick two different characters.", "warn"); return; }
@@ -1209,8 +1402,9 @@ function analyseRelationship(){
   else verdict = "Mixed — real common ground with real fault lines. The most dramatically useful kind.";
 
   const sheet = document.getElementById('relSheet');
+  if (!sheet) return;   // container absent (embedded build, or a trimmed page)
   sheet.classList.add('show');
-  document.getElementById('relTitle').textContent = (A.meta.name||"A") + "  ×  " + (B.meta.name||"B");
+  setText('relTitle', (A.meta.name||"A") + "  ×  " + (B.meta.name||"B"));
   let h = `<div class="charMeta">${verdict}</div>`;
   if (clashes.length){
     h += `<div class="axisGroup"><div class="axisTitle">Friction points</div>`;
@@ -1242,10 +1436,11 @@ function analyseRelationship(){
   if (!clashes.length && !alignments.length && !notes.length){
     h += `<div class="charMeta">Not enough personality signal to compare — generate both characters with the personality profile enabled.</div>`;
   }
-  document.getElementById('relBody').innerHTML = h;
+  setHTML('relBody', h);
 }
 function copyRelationship(btnEl){
-  const t = document.getElementById('relTitle').textContent + "\n\n" + document.getElementById('relBody').innerText;
+  const titleEl = document.getElementById('relTitle'), bodyEl = document.getElementById('relBody');
+  const t = (titleEl ? titleEl.textContent : "") + "\n\n" + (bodyEl ? bodyEl.innerText : "");
   /* BUG FIX: this used navigator.clipboard directly, bypassing copyText() — which was
      hardened for non-secure contexts (file://, plain http) precisely because
      navigator.clipboard is undefined there. On file:// this threw an unhandled
@@ -1419,7 +1614,7 @@ function _generateFoilInner(seedLabel){
     }
   });
 
-  const rarityPref = document.getElementById('rarityPref').value;
+  const rarityPref = rarityPrefVal();
   const mannerCount = intVal('mannerCount', 3);
   const vocabCount = intVal('vocabCount', 2);
   // Verbosity and register invert by default — a foil that talks and phrases things
@@ -1586,11 +1781,12 @@ function checkEnsembleBalance(){
   if (clustered.length || profClustered.length){
     lastBalanceGaps = {clustered: clustered.map(c=>({id:c.axis.id, dir:c.dir})), profClustered: profClustered.map(c=>({section:c.section, cat:c.cat}))};
     h += `<div class="actionRow" style="margin-top:14px;">
-      <button class="btn-primary" onclick="generateGapFiller()">Generate a member who fills these gaps</button>
+      <button class="btn-primary" ${actAttr('click', 'generateGapFiller')}>Generate a member who fills these gaps</button>
     </div>`;
   } else lastBalanceGaps = null;
 
   const box = document.getElementById('balanceResult');
+  if (!box) return;   // container absent (embedded build, or a trimmed page)
   box.classList.add('show');
   box.innerHTML = h;
 }
@@ -1612,7 +1808,7 @@ function generateGapFiller(){
     const others = catsOf(ps.section).filter(c=>c !== pc.cat);
     if (others.length) forcedProfileCats[ps.id] = others[Math.floor(Math.random()*others.length)];
   });
-  const rarityPref = document.getElementById('rarityPref') ? document.getElementById('rarityPref').value : 0;
+  const rarityPref = rarityPrefVal();
   // The gap-filler exists to break clustering; inheriting the last character's context
   // bias reinforced exactly what it was called in to counteract. Its presentation
   // locks are its own and are restored afterwards for the same reason.
@@ -1637,6 +1833,7 @@ function generateGapFiller(){
 // ================= PROFILE SECTION UI =================
 function buildProfileSectionUI(){
   const grid = document.getElementById('profileSectionsGrid');
+  if (!grid) return;   // container absent (embedded build, or a trimmed page)
   grid.innerHTML = "";
   PROFILE_SECTIONS.forEach(ps=>{
     const cats = catsOf(ps.section);
@@ -1839,7 +2036,7 @@ function searchTraits(inputId, resultsId, onPick){
     } else {
       box.innerHTML = hits.map((t, i)=>
         `<button type="button" class="searchHit" role="option" id="${escAttr(resultsId)}_opt${i}" aria-selected="false" tabindex="-1"`
-        + ` onclick="pickSearchResult('${escAttr(inputId)}','${escAttr(resultsId)}',${t.id})">`
+        + ` ${actAttr('click', 'pickSearchResult', inputId, resultsId, t.id)}>`
         + `<b>${escHTML(t.trait)}</b><span>${escHTML(t.category)} · intensity ${t.intensity}</span>`
         + `<i>${escHTML(t.desc)}</i></button>`).join("")
         + (hits.length >= 40 ? `<div class="searchEmpty">Showing the first 40 matches — keep typing to narrow.</div>` : ``);
@@ -1926,6 +2123,37 @@ function srAnnounce(message){
   if (live) live.textContent = message;
 }
 // "Why didn't I get X?" — the inverse of the per-card why? panel.
+/* Asks the why-not question from wherever you are, rather than requiring a trip to the
+   Constraints panel. Pre-filters the shortlist to the section you asked from, which is
+   also what makes a partial name usable: "hushed" matches several traits across the
+   bank and usually exactly one inside the section you were looking at. */
+async function askWhyNotHere(groupTitle){
+  const name = await askForName(`Which trait were you expecting in "${groupTitle}"?`, "");
+  if (!name) return;
+  const sections = SECTIONS_FOR_GROUP[groupTitle] || null;
+  const matches = TRAITS.filter(t=>{
+    if (sections && !sections.some(sec => t.section === sec)) return false;
+    return t.trait.toLowerCase().includes(name.trim().toLowerCase());
+  });
+  const pool = matches.length ? matches
+    : TRAITS.filter(t => t.trait.toLowerCase().includes(name.trim().toLowerCase()));
+  if (!pool.length){ toast(`No trait matching "${name}".`, "warn", 5000); return; }
+  if (pool.length > 1 && pool.length <= 8){
+    toast(`${pool.length} traits match "${name}" — showing the closest.`, "warn", 4000);
+  }
+  // Shortest name containing the query is almost always the one meant.
+  const t = pool.slice().sort((a,b)=> a.trait.length - b.trait.length)[0];
+  const out = document.getElementById('whyNotResult');
+  const inp = document.getElementById('whyNotSearch');
+  if (inp) inp.value = t.trait;
+  if (out){
+    out.innerHTML = `<div class="whyNote"><b>${escHTML(t.trait)}</b> — ${escHTML(t.category)}<div style="margin-top:6px;">${explainWhyNot(t)}</div></div>`;
+    out.style.display = 'block';
+  }
+  // Show it where it was asked, not two tabs away.
+  toastHTML(`<b>${escHTML(t.trait)}</b> — ${escHTML(t.category)}<div style="margin-top:5px;">${explainWhyNot(t)}</div>`, 14000);
+}
+
 function explainWhyNotFromInput(){
   const inp = document.getElementById('whyNotSearch');
   const out = document.getElementById('whyNotResult');
