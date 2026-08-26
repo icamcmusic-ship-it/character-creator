@@ -39,7 +39,96 @@
     --radius: 22px;
     --radius-sm: 14px;
     --dot: rgba(42,33,64,.11);
+
+    /* The two washes in the body background. Named so the dark theme can restate them
+       rather than the body rule having to be duplicated wholesale. */
+    --wash-a: rgba(232,50,125,.06);
+    --wash-b: rgba(139,154,46,.07);
+
+    /* Accents used outside the four-colour core: the Appearance and constraint section
+       stripes, the wildcard card, and the six cast-overlay lines. They were hardcoded
+       hexes in js/render.js and js/app.js, so they were the one part of the palette a
+       theme could not reach. */
+    --accent-violet: #8a6bbf;
+    --accent-amber:  #b8860b;
+    --accent-rust:   #c96f4a;
+    --cast-1: #4a6b8a; --cast-2: #c2578a; --cast-3: #5a9a6f;
+    --cast-4: #b8860b; --cast-5: #8a6bbf; --cast-6: #c96f4a;
   }
+
+  /* ---------- Dark theme ----------------------------------------------------------
+     The app had no prefers-color-scheme support at all — one fixed palette, in a tool
+     people use for long sessions of reading dense text. Everything above is already
+     tokenised, so this is a restatement of the tokens rather than a second stylesheet:
+     the accents keep their identity (the workbench pink, the olive, the gold) and are
+     lifted for contrast against a dark ground, and the surfaces invert.
+
+     Written under BOTH the media query and an explicit [data-theme] attribute, so a
+     future in-app toggle has somewhere to write and the OS setting works today. */
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --dusk-blue: #cfc6e8;
+      --dusk-blue-light: #2b2440;
+      --dusk-blue-mid: #a396c9;
+      --bubblegum: #ff6fa6;
+      --bubblegum-light: #3a1f2c;
+      --golden: #e9c96f;
+      --golden-deep: #d6b04a;
+      --golden-light: #332c17;
+      --emerald: #b6c65a;
+      --emerald-deep: #9db046;
+      --emerald-light: #262d16;
+      --porcelain: #16131f;
+
+      --bg: var(--porcelain);
+      --panel: #1e1a2b;
+      --panel2: #241f33;
+      --border: #322b45;
+      --border-strong: #443b5c;
+      --text: #ece8f5;
+      --muted: #9d95b3;
+      --accent: var(--bubblegum);
+      --accent2: var(--dusk-blue);
+      --danger: var(--bubblegum);
+      --diff: var(--golden-deep);
+
+      --shadow-sm: 0 1px 2px rgba(0,0,0,0.35), 0 1px 3px rgba(0,0,0,0.25);
+      --shadow-md: 0 10px 26px rgba(0,0,0,0.45), 0 2px 6px rgba(0,0,0,0.3);
+      --shadow-lg: 0 22px 50px rgba(0,0,0,0.55), 0 6px 14px rgba(0,0,0,0.35);
+      --dot: rgba(236,232,245,.07);
+      --wash-a: rgba(255,111,166,.07);
+      --accent-violet: #b79ae6; --accent-amber: #e0b64a; --accent-rust: #e4936c;
+      --cast-1: #7fa9d0; --cast-2: #ec86b4; --cast-3: #8ec99f;
+      --cast-4: #e0b64a; --cast-5: #b79ae6; --cast-6: #e4936c;
+      --wash-b: rgba(182,198,90,.06);
+    }
+  }
+  /* The same palette again, keyed on an explicit choice, so an in-app toggle wins in
+     both directions rather than only being able to turn dark ON. */
+  :root[data-theme="dark"] {
+    --dusk-blue: #cfc6e8; --dusk-blue-light: #2b2440; --dusk-blue-mid: #a396c9;
+    --bubblegum: #ff6fa6; --bubblegum-light: #3a1f2c;
+    --golden: #e9c96f; --golden-deep: #d6b04a; --golden-light: #332c17;
+    --emerald: #b6c65a; --emerald-deep: #9db046; --emerald-light: #262d16;
+    --porcelain: #16131f;
+    --bg: var(--porcelain); --panel: #1e1a2b; --panel2: #241f33;
+    --border: #322b45; --border-strong: #443b5c;
+    --text: #ece8f5; --muted: #9d95b3;
+    --accent: var(--bubblegum); --accent2: var(--dusk-blue);
+    --danger: var(--bubblegum); --diff: var(--golden-deep);
+    --shadow-sm: 0 1px 2px rgba(0,0,0,0.35), 0 1px 3px rgba(0,0,0,0.25);
+    --shadow-md: 0 10px 26px rgba(0,0,0,0.45), 0 2px 6px rgba(0,0,0,0.3);
+    --shadow-lg: 0 22px 50px rgba(0,0,0,0.55), 0 6px 14px rgba(0,0,0,0.35);
+    --dot: rgba(236,232,245,.07);
+    --wash-a: rgba(255,111,166,.07); --wash-b: rgba(182,198,90,.06);
+      --accent-violet: #b79ae6; --accent-amber: #e0b64a; --accent-rust: #e4936c;
+      --cast-1: #7fa9d0; --cast-2: #ec86b4; --cast-3: #8ec99f;
+      --cast-4: #e0b64a; --cast-5: #b79ae6; --cast-6: #e4936c;
+  }
+  /* Native form controls, scrollbars and the like follow this. */
+  :root { color-scheme: light; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { color-scheme: dark; } }
+  :root[data-theme="dark"] { color-scheme: dark; }
 
   * { box-sizing:border-box; }
   ::selection { background: var(--golden); color: var(--dusk-blue); }
@@ -49,8 +138,8 @@
        backdrop the mockups sit the cards on. */
     margin:0; background:
       radial-gradient(var(--dot) 1px, transparent 1.2px),
-      radial-gradient(ellipse 900px 520px at 6% -10%, rgba(232,50,125,.06) 0%, transparent 60%),
-      radial-gradient(ellipse 900px 520px at 100% 2%, rgba(139,154,46,.07) 0%, transparent 58%),
+      radial-gradient(ellipse 900px 520px at 6% -10%, var(--wash-a) 0%, transparent 60%),
+      radial-gradient(ellipse 900px 520px at 100% 2%, var(--wash-b) 0%, transparent 58%),
       var(--bg);
     background-size: 19px 19px, auto, auto, auto;
     background-attachment: fixed;
@@ -102,12 +191,12 @@
   }
   input[type=range]::-webkit-slider-thumb {
     -webkit-appearance:none; appearance:none; width:20px; height:20px; border-radius:50%;
-    background:var(--bubblegum); border:3px solid #fff; box-shadow:0 2px 6px rgba(239,71,111,0.45);
+    background:var(--bubblegum); border:3px solid var(--panel); box-shadow:0 2px 6px rgba(239,71,111,0.45);
     cursor:pointer; transition: transform .12s ease;
   }
   input[type=range]::-webkit-slider-thumb:hover { transform:scale(1.15); }
   input[type=range]::-moz-range-thumb {
-    width:16px; height:16px; border-radius:50%; background:var(--bubblegum); border:3px solid #fff;
+    width:16px; height:16px; border-radius:50%; background:var(--bubblegum); border:3px solid var(--panel);
     box-shadow:0 2px 6px rgba(239,71,111,0.45); cursor:pointer;
   }
   .persField input[type=range]::-webkit-slider-thumb { background:var(--emerald); box-shadow:0 2px 6px rgba(6,214,160,0.45); }
@@ -198,7 +287,7 @@
 
   .slotBtns { display:flex; flex-direction:column; gap:5px; align-items:flex-end; flex-shrink:0; }
   .rerollBtn, .lockBtn {
-    background:#fff; border:1.5px solid var(--border-strong); color:var(--muted); border-radius:999px;
+    background:var(--panel); border:1.5px solid var(--border-strong); color:var(--muted); border-radius:999px;
     padding:5px 11px; font-size:.68rem; white-space:nowrap; font-weight:700;
   }
   .lockBtn.locked { color:#fff; background:var(--dusk-blue); border-color:var(--dusk-blue); }
@@ -208,13 +297,13 @@
   /* ---------- Pin-intensity control ---------- */
   .pinRow { display:flex; align-items:center; gap:4px; }
   .pinBtn {
-    background:#fff; border:1.5px solid var(--border-strong); color:var(--muted); border-radius:999px;
+    background:var(--panel); border:1.5px solid var(--border-strong); color:var(--muted); border-radius:999px;
     padding:5px 11px; font-size:.68rem; white-space:nowrap; font-weight:700;
   }
   .pinBtn:hover:not(.pinned) { color:var(--golden-deep); border-color:var(--golden-deep); }
   .pinBtn.pinned { color:#fff; background:var(--golden-deep); border-color:var(--golden-deep); }
   .pinAdj {
-    background:#fff; border:1.5px solid var(--border-strong); color:var(--golden-deep); border-radius:999px;
+    background:var(--panel); border:1.5px solid var(--border-strong); color:var(--golden-deep); border-radius:999px;
     width:22px; height:22px; line-height:1; font-size:.85rem; font-weight:800; padding:0; flex-shrink:0;
   }
   .pinAdj:hover { background:var(--golden-light); }
@@ -373,10 +462,6 @@
     .axisTitle { break-after:avoid; page-break-after:avoid; }
   }
 
-  @media (max-width: 640px) {
-    h1 { font-size:1.6rem; }
-    .sheet, .controls { padding:18px; }
-  }
 
   /* ============================================================
      ADDED: header controls, quick/advanced mode, toasts, skeleton,
@@ -597,13 +682,6 @@
   }
   /* The control strip is 5-7 buttons per card, and at 40 cards on a 460px viewport that
      wraps into two or three rows each. Collapse it behind a disclosure instead. */
-  @media (max-width: 560px){
-    .axisActions { display:none; }
-    .traitCard .slotBtns { max-height:0; overflow:hidden; padding:0; transition:max-height .18s ease; }
-    .traitCard.controlsOpen .slotBtns { max-height:220px; padding-top:6px; }
-    .traitCard .slotToggle { display:inline-flex; }
-    .searchResults { position:static; max-height:240px; }
-  }
   .slotToggle {
     display:none; align-self:flex-start; border:1px solid var(--border); background:transparent;
     color:var(--muted); border-radius:999px; padding:2px 10px; cursor:pointer; font-size:.8rem;
@@ -664,7 +742,7 @@
   .wildBadge {
     font-family:var(--font-mono); font-size:.58rem; text-transform:uppercase; letter-spacing:.06em;
     padding:2px 8px; border-radius:999px; margin-left:8px; vertical-align:middle; font-weight:700;
-    color:#fff; background:#c96f4a; border:1px solid #c96f4a;
+    color:#fff; background:var(--accent-rust); border:1px solid var(--accent-rust);
   }
   .wildcardCard { border-left-width:5px; }
 
@@ -769,8 +847,16 @@
   }
 
   /* ---------- Mobile ---------- */
+  /* THREE BREAKPOINTS, NOT FIVE. 720 / 640 / 600 / 560 / 460 had accumulated one at a
+     time, each added for whatever was being fixed that day, so a phone at 620px picked
+     up the 640 rules and not the 600 ones for no reason anybody chose and two of the
+     five differed by 40px. Consolidated to the three that correspond to real device
+     classes — tablet / phone / small phone — with the 640 and 560 rules folded into
+     their nearest neighbour. */
   @media (max-width: 720px) {
     body { padding:22px 12px 96px; }
+    h1 { font-size:1.6rem; }
+    .sheet, .controls { padding:18px; }
     .row { gap:14px; }
     .field { min-width:100%; }
     .persGroupGrid { grid-template-columns:1fr 1fr; gap:12px 14px; }
@@ -807,7 +893,19 @@
     .slotBtns button { min-height:34px; padding:6px 11px; }
     .bandTrack { display:none; }
     .bandRow { flex-wrap:wrap; font-size:.72rem; }
+  
+    /* Folded in from the old 560px breakpoint. */
+    .axisActions { display:none; }
+    .traitCard .slotBtns { max-height:0; overflow:hidden; padding:0; transition:max-height .18s ease; }
+    .traitCard.controlsOpen .slotBtns { max-height:220px; padding-top:6px; }
+    .traitCard .slotToggle { display:inline-flex; }
+    .searchResults { position:static; max-height:240px; }
   }
+
+  .emptyPresets .surpriseBtn {
+    border-color:var(--bubblegum); color:var(--bubblegum); font-weight:700;
+  }
+  .emptyPresets .surpriseBtn:hover { background:var(--bubblegum); color:#fff; }
 
   /* File-input buttons are <label>s, and the global `label` rule (mono, uppercase,
      block) was overriding the button styling on them. */
@@ -876,7 +974,7 @@
 
   /* ---------- Inputs ---------- */
   input[type=text], input[type=number], select {
-    background:#fff; border-color:var(--border-strong); border-radius:12px;
+    background:var(--panel); border-color:var(--border-strong); border-radius:12px;
     padding:13px 15px; font-size:.95rem; font-weight:600;
   }
   input[type=text]::placeholder { font-weight:500; color:#9a93ac; }
@@ -891,7 +989,7 @@
     background:linear-gradient(90deg, var(--bubblegum) 0 var(--fill,50%), var(--border) var(--fill,50%) 100%);
   }
   input[type=range]::-webkit-slider-thumb {
-    width:17px; height:17px; background:var(--bubblegum); border:3px solid #fff;
+    width:17px; height:17px; background:var(--bubblegum); border:3px solid var(--panel);
     box-shadow:0 2px 7px rgba(232,50,125,.5);
   }
   input[type=range]::-moz-range-thumb { width:14px; height:14px; }
@@ -954,11 +1052,11 @@
 
   /* ---------- Trait cards ---------- */
   .traitCard {
-    background:#fff; border:1px solid var(--border); border-left:1px solid var(--border);
+    background:var(--panel); border:1px solid var(--border); border-left:1px solid var(--border);
     border-radius:16px; padding:18px 20px; margin-bottom:14px; box-shadow:var(--shadow-sm);
     gap:16px; transition:box-shadow .15s ease, transform .15s ease;
   }
-  .traitCard:hover { background:#fff; box-shadow:var(--shadow-md); transform:translateY(-1px); }
+  .traitCard:hover { background:var(--panel); box-shadow:var(--shadow-md); transform:translateY(-1px); }
   .traitCard.tagged { position:relative; margin-top:20px; }
   .traitTag {
     position:absolute; top:-11px; left:16px; z-index:1;
@@ -985,7 +1083,7 @@
   }
   .rerollBtn { color:var(--dusk-blue); }
   .rerollBtn:hover { color:#fff; background:var(--bubblegum); border-color:var(--bubblegum); }
-  .lockBtn { color:var(--bubblegum); border-color:var(--bubblegum); background:#fff; }
+  .lockBtn { color:var(--bubblegum); border-color:var(--bubblegum); background:var(--panel); }
   .lockBtn:hover:not(.locked) { color:#fff; background:var(--bubblegum); border-color:var(--bubblegum); }
   .lockBtn.locked { background:var(--emerald-deep); border-color:var(--emerald-deep); color:#fff; }
 

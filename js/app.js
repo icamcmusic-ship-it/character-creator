@@ -112,11 +112,25 @@ async function saveCharacter(btnEl){
   const oldLabel = btn ? btn.textContent : null;
   if (btn){ btn.textContent = "Saving…"; btn.disabled = true; }
   try {
-    // Saved characters carry the same full-fidelity settings block the file export
-    // does, so loading one restores the setup that produced it rather than dropping
-    // the sheet into whatever the controls happen to say now.
+    /* Saved characters carry the same full-fidelity settings block the file export
+       does, so loading one restores the setup that produced it rather than dropping
+       the sheet into whatever the controls happen to say now.
+
+       Stored by trait ID rather than by embedded trait object. A sheet is ~37 slots
+       and every one of them was carrying a full copy of its trait — name, description,
+       example, polarity — which is roughly 17.8 KB per save against 3.7 KB for the
+       id-only form, so a 5 MB localStorage quota held about 290 characters instead of
+       about 1,400. compressSlots/expandSlots already did exactly this for the undo
+       stack; there was no reason storage was not using them. loadSavedCharacter relinks
+       every trait by id anyway, so the embedded copies were being thrown away on the
+       way back in — they were pure cost. SAVE_FORMAT lets an older save (embedded
+       traits, no marker) still load unchanged: expandSlots passes a trait through
+       untouched unless it carries the __id marker. */
     await storage.set('character:'+name, JSON.stringify({
-      state, charMeta, pressureState, pinnedTargets, charVariants, traitNotes,
+      format: SAVE_FORMAT,
+      state: compressSlots(state), charMeta,
+      pressureState: compressSlots(pressureState),
+      pinnedTargets, charVariants, traitNotes,
       settings: captureSettings(), savedAt: new Date().toISOString(),
     }));
     await loadSavedList();
@@ -172,8 +186,12 @@ async function loadSavedCharacter(name){
         if (s2 && s2.trait){ const live = TRAITS_BY_ID.get(s2.trait.id); if (live) s2.trait = live; else orphans++; }
       }); return st; };
     snapshotHistory();
-    parsed.state = relink(parsed.state);
-    parsed.pressureState = relink(parsed.pressureState);
+    /* expandSlots first, then relink. Compressed saves carry {__id} stubs that expand
+       straight back to the live trait; older saves carry full embedded copies that
+       expandSlots leaves alone and relink then reconnects. Both arrive here the same
+       way, so a save written by any build still loads. */
+    parsed.state = relink(expandSlots(parsed.state));
+    parsed.pressureState = relink(expandSlots(parsed.pressureState));
     state = parsed.state; charMeta = parsed.charMeta || {name, age:"", context:"", archetypeLabel:"Loaded"};
     pressureState = parsed.pressureState || null;
     pinnedTargets = parsed.pinnedTargets || {};
@@ -324,7 +342,10 @@ function generateCast(){
   // cast generated while sitting on that tab left stale (or empty) selectors behind.
   refreshRelSelectors();
 }
-const CAST_COLORS = ["#4a6b8a","#c2578a","#5a9a6f","#b8860b","#8a6bbf","#c96f4a"];
+/* Theme-aware: these are drawn into inline SVG fill/stroke attributes, which resolve
+   CSS custom properties just as a stylesheet would, so the cast overlay follows the
+   palette instead of being the one element that ignores it. */
+const CAST_COLORS = ["var(--cast-1)","var(--cast-2)","var(--cast-3)","var(--cast-4)","var(--cast-5)","var(--cast-6)"];
 function renderCast(){
   const grid = document.getElementById('castGrid');
   if (!grid) return;   // container absent (embedded build, or a trimmed page)
@@ -935,6 +956,46 @@ function randomRawSlider(){
   if (r < 0.6) { v = (Math.random()*2-1) * 100; }           // 60%: anywhere in range
   else { v = (Math.random() < 0.5 ? -1 : 1) * (60 + Math.random()*40); } // 40%: pushed toward an extreme
   return Math.round(clamp(v, -100, 100));
+}
+
+/* "Surprise me entirely." randomizeSliders(scope) has existed the whole time and was
+   only ever surfaced as two separate half-measures behind the Advanced panel — voice OR
+   personality, never the whole thing, and never the archetype or the divergence that
+   actually decide what kind of person comes out. The empty state offered three specific
+   starting points and no way to say "I don't know, show me something".
+
+   Deliberately also rolls the archetype and pushes divergence up: randomising thirteen
+   sliders around the centre produces a very average person by the central limit theorem,
+   which is the opposite of a surprise. */
+function surpriseMe(){
+  const keys = Object.keys(ARCHETYPES);
+  const pick = keys[Math.floor(Math.random() * keys.length)];
+  const sel = document.getElementById('archetypeSelect');
+  // Half the time take a preset and pull it around; half the time go from nothing.
+  const useArchetype = sel && Math.random() < 0.5;
+  if (sel) sel.value = useArchetype ? pick : "";
+  if (useArchetype) applyArchetypeSetup(); else randomizeSliders('all');
+  if (useArchetype){
+    // Nudge every axis off the preset so two rolls of the same archetype differ.
+    PERSONALITY_AXES.forEach(axis=>{
+      const el = document.getElementById('pers_'+axis.id);
+      if (!el) return;
+      el.value = String(clamp(intVal(el, 0) + Math.round((Math.random()*2-1) * 45), -100, 100));
+    });
+  }
+  randomizeProfileTypes();
+  // divergence is a 0..1 range in steps of 0.05, not a 0..100 slider.
+  const div = document.getElementById('divergence');
+  if (div) div.value = (0.35 + Math.round(Math.random() * 8) * 0.05).toFixed(2);
+  const wild = document.getElementById('wildcardToggle');
+  if (wild) wild.checked = true;
+  setVal('charName', "");
+  invalidateSliderCache();
+  onSliderChange();
+  runGeneration();
+  toast(useArchetype
+    ? `Surprised you from "${ARCHETYPES[pick].label}", pulled well off its defaults. Everything is still yours to change.`
+    : "Every slider rolled, sections rolled, and the wildcard turned on. Everything is still yours to change.");
 }
 
 function randomizeSliders(scope){

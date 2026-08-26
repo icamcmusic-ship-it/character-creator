@@ -3603,6 +3603,9 @@ function restoreSliders(s){
    relink, for the same reason. Traits that no longer exist in the pool (an older
    session, a trait since removed) keep their embedded copy, so undo cannot lose a slot
    the way a naive id-only store would. */
+/* Bumped when the on-disk shape of a save changes in a way a reader must know about.
+   Absent = a pre-compression save with full trait objects embedded, which still loads. */
+const SAVE_FORMAT = 2;
 function compressSlots(st){
   if (!st) return st;
   const out = {};

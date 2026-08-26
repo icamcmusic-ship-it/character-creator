@@ -83,9 +83,9 @@ const SECTION_COLORS = {
   "Humor Style": "var(--dusk-blue)",
   "Habits & Vices": "var(--emerald-deep)",
 };
-SECTION_COLORS["Appearance"] = "#8a6bbf";
-SECTION_COLORS["Required (constraints)"] = "#b8860b";
-SECTION_COLORS["The one thing that doesn't fit"] = "#c96f4a";
+SECTION_COLORS["Appearance"] = "var(--accent-violet)";
+SECTION_COLORS["Required (constraints)"] = "var(--accent-amber)";
+SECTION_COLORS["The one thing that doesn't fit"] = "var(--accent-rust)";
 SECTION_COLORS["Where They Stand Under Pressure"] = "var(--bubblegum)";
 function sectionColor(title){ return SECTION_COLORS[title] || "var(--dusk-blue)"; }
 
@@ -660,7 +660,7 @@ function renderSheet(){
     try {
       prof = axisProfile(state);
       if (Object.keys(prof).length >= 3){
-        h += `<div style="margin-top:12px;"><div class="tensionTitle" style="color:var(--dusk-blue); margin-bottom:4px;">Axis profile</div>${radarSVG([{label:charMeta.name, color:"#4a6b8a", prof}])}
+        h += `<div style="margin-top:12px;"><div class="tensionTitle" style="color:var(--dusk-blue); margin-bottom:4px;">Axis profile</div>${radarSVG([{label:charMeta.name, color:"var(--cast-1)", prof}])}
         <div class="sub" style="margin:2px 0 0;">Summed trait polarity per axis. The dashed middle ring is zero; outside it the sheet leans positive on that axis, inside negative. Shape is the signal — which axes dominate — not absolute size.</div></div>`;
       }
     } catch(e){}
