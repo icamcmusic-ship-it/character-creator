@@ -534,6 +534,40 @@ let ARCHETYPES = {
              pers:{confidence:45, positivity:30, rebelliousness:40, manners:-40, emotionalcapacity:20, activeness:45, curiosity:35}},
   steadyOrganiser:     {label:"Steady Organiser", verbosity:0, register:0, composure:-2, vocabPref:["Pragmatic Focus & Speech Functions","Precision & Specificity Level"],
              pers:{discipline:60, agreeableness:45, friendliness:45, assertiveness:35, activeness:50, positivity:35, emotionalcapacity:15}},
+
+  /* ---- FILLING THE HOLES IN THE AXIS COVERAGE ----------------------------------
+     The previous widening pass fixed the THEMES — the note about nine of twenty being
+     variations on 'damaged person carrying a secret' is no longer true, and the 28
+     presets are genuinely varied. The imbalance that remains is in the numbers:
+
+       discipline    set in 20/28, and POSITIVE in 17 of them. There was effectively no
+                     undisciplined archetype outside unbotheredYoung and
+                     washedUpProdigy — no 'chaotic but likeable' preset at all.
+       intelligence  set in 10/28, and negative exactly ONCE (child, -45). Combined with
+                     the 7.8:1 polarity skew on the same axis, 'not very bright' was the
+                     least-supported character in the tool at both the archetype and the
+                     trait level. Both halves of that are fixed here.
+       assertiveness set in only 9/28 — the axis with the strongest grammar link
+                     (Turn-Taking Grammar at TIER_STRONG) was the one the archetypes
+                     spoke to least, so the preset that should most obviously drive
+                     someone's turn-taking barely ever did.
+
+     Six presets, chosen to be people rather than to be corrections: each is a character
+     someone would actually want, and between them they close the gaps. Written low on
+     intelligence WITHOUT being written stupid — the point of the axis is how someone
+     thinks, not how much they are worth. */
+  cheerfulMess:        {label:"Cheerful Mess", verbosity:1, register:-1, composure:1, vocabPref:["Pragmatic Focus & Speech Functions","Affective & Emotional Intensity"],
+             pers:{discipline:-70, friendliness:60, positivity:55, agreeableness:45, activeness:40, emotionalcapacity:35, manners:-20}},
+  plainSpoken:         {label:"Plain-Spoken Practical", verbosity:-1, register:-2, composure:-1, vocabPref:["Directness & Literalness","Precision & Specificity Level"],
+             pers:{intelligence:-50, honesty:60, assertiveness:45, curiosity:-30, discipline:40, manners:-25, emotionalcapacity:-20}},
+  softSpokenSecond:    {label:"Soft-Spoken Second", verbosity:-1, register:1, composure:0, vocabPref:["Semantic Density & Modifiers","Pragmatic Focus & Speech Functions"],
+             pers:{assertiveness:-70, agreeableness:60, manners:50, confidence:-35, friendliness:35, emotionalcapacity:25}},
+  bluntForeman:        {label:"Blunt Foreman", verbosity:-1, register:-2, composure:-1, vocabPref:["Directness & Literalness","Morphological & Structural Lexicon"],
+             pers:{assertiveness:75, discipline:45, manners:-50, agreeableness:-40, honesty:50, emotionalcapacity:-30, intelligence:-15}},
+  dreamyDrifter:       {label:"Dreamy Drifter", verbosity:0, register:1, composure:1, vocabPref:["Abstractness & Sensory Modality","Temporal Orientation & Tense Usage"],
+             pers:{discipline:-55, curiosity:65, intelligence:-25, activeness:-35, positivity:35, emotionalcapacity:40, assertiveness:-30}},
+  stubbornCraftsman:   {label:"Stubborn Craftsman", verbosity:-2, register:-1, composure:-2, vocabPref:["Precision & Specificity Level","Directness & Literalness"],
+             pers:{intelligence:-30, discipline:70, rebelliousness:-35, assertiveness:40, curiosity:-25, manners:-15, emotionalcapacity:-25}},
 };
 
 // user-defined archetypes loaded from storage
@@ -1533,11 +1567,11 @@ const MOTIVATION_CROSSLINKS = [
    {role:{"Leader":TIER_MODERATE}, values:{"Idealistic & Visionary":TIER_MODERATE},
     vocab:{"Semantic Density & Modifiers":TIER_WEAK}}],
   [/belonging|reunion|community.standing|restored.family|quiet.partnership|place where they/i,
-   {role:{"Connector":TIER_STRONG,"Caretaker":TIER_MODERATE}, attachment:{"Secure":TIER_WEAK},
+   {role:{"Connector":TIER_STRONG,"Caretaker":TIER_MODERATE}, attachment:{"Secure":TIER_STRONG},
     humor:{"Warm & Playful":TIER_MODERATE}}],
   [/redemption|amends|clean conscience|balance a debt|forgive|undoing.a.mistake|fix one past error/i,
    {values:{"Rigid & Principled":TIER_MODERATE}, role:{"Caretaker":TIER_MODERATE},
-    stress:{"Fawn":TIER_WEAK}}],
+    stress:{"Fawn":TIER_WEAK}, attachment:{"Secure":TIER_MODERATE}}],
   [/conditional love|only.worth|must be useful|worth is conditional|becoming a burden|\bowe\b|service/i,
    {stress:{"Fawn":TIER_STRONG}, role:{"Caretaker":TIER_STRONG}, attachment:{"Anxious":TIER_MODERATE}}],
   [/hide what.{0,15}feel|silence is strength|showing feeling|exposure|\bfraud\b|specific vulnerability/i,
@@ -1594,7 +1628,8 @@ const MOTIVATION_CROSSLINKS = [
   [/unlovable|affection shown to them is a mistake|love always has a price|never freely given|only transacted/i,
    {attachment:{"Avoidant":TIER_MODERATE,"Anxious":TIER_MODERATE}, values:{"Self-Interested":TIER_WEAK}}],
   [/must not want|desire itself is dangerous|quiet ending|final chapter to be peaceful/i,
-   {vices:{"Restraint & Discipline":TIER_MODERATE}, role:{"Peacemaker":TIER_MODERATE}}],
+   {vices:{"Restraint & Discipline":TIER_MODERATE}, role:{"Peacemaker":TIER_MODERATE},
+    attachment:{"Secure":TIER_MODERATE}}],
   [/disappointing a mentor|letting down the one person|promise broken by them|broke a vow|never forgave themselves/i,
    {values:{"Rigid & Principled":TIER_MODERATE}, stress:{"Fawn":TIER_WEAK},
     attachment:{"Anxious":TIER_WEAK}}],

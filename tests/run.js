@@ -1092,6 +1092,49 @@ check('the readout word helpers cover their whole input range', ()=>{
   return 'no gaps';
 });
 
+group('Archetype coverage');
+check('the archetype presets cover both directions of every axis', ()=>{
+  /* The prior widening pass fixed the THEMES; the imbalance that remained was in the
+     numbers. discipline was set in 20 of 28 presets and POSITIVE in 17 of them, so
+     there was no 'chaotic but likeable' archetype at all. intelligence was set
+     negative exactly once in 28, which — with the 7.8:1 polarity skew on the same axis
+     — made 'not very bright' the least-supported character in the tool at both levels
+     at once. And assertiveness, the axis with the strongest grammar cross-link in the
+     matrix, was the one the presets spoke to least. */
+  const all = Object.values(A.ARCHETYPES);
+  const stat = {};
+  A.PERSONALITY_AXES.forEach(a=> stat[a.id] = {n:0, pos:0, neg:0});
+  all.forEach(arch => Object.entries(arch.pers || {}).forEach(([ax, v])=>{
+    if (!stat[ax] || !v) return;
+    stat[ax].n++; v > 0 ? stat[ax].pos++ : stat[ax].neg++;
+  }));
+  const bad = [];
+  Object.entries(stat).forEach(([ax, st])=>{
+    if (st.n < all.length * 0.3) bad.push(`${ax}: touched by only ${st.n}/${all.length} presets`);
+    if (st.n && st.neg < 3) bad.push(`${ax}: only ${st.neg} preset(s) push it negative`);
+    if (st.n && st.pos < 3) bad.push(`${ax}: only ${st.pos} preset(s) push it positive`);
+  });
+  assert(!bad.length, bad.join('\n       '));
+  const touched = Object.values(stat).map(x=>x.n);
+  return `${all.length} presets, each axis set in ${Math.min(...touched)}-${Math.max(...touched)} of them`;
+});
+check('every archetype names real vocabulary categories and real axes', ()=>{
+  const cats = new Set(A.catsOf('Vocabulary Traits'));
+  const axes = new Set(A.PERSONALITY_AXES.map(a=>a.id));
+  const bad = [];
+  Object.entries(A.ARCHETYPES).forEach(([key, a])=>{
+    if (!a.label) bad.push(key + ' has no label');
+    (a.vocabPref || []).forEach(c=>{ if (!cats.has(c)) bad.push(`${key}: unknown vocabulary category "${c}"`); });
+    Object.keys(a.pers || {}).forEach(ax=>{ if (!axes.has(ax)) bad.push(`${key}: unknown axis "${ax}"`); });
+    Object.values(a.pers || {}).forEach(v=>{ if (typeof v !== 'number' || Math.abs(v) > 100) bad.push(`${key}: axis value ${v} out of range`); });
+    ['verbosity','register','composure'].forEach(k=>{
+      if (a[k] !== undefined && (typeof a[k] !== 'number' || Math.abs(a[k]) > 2)) bad.push(`${key}: ${k} = ${a[k]} is not a -2..2 level`);
+    });
+  });
+  assert(!bad.length, bad.join('\n       '));
+  return Object.keys(A.ARCHETYPES).length + ' presets';
+});
+
 group('Motivation & Wound is wired in');
 /* The section the sheet leads with, that draws on every character, and that supplies
    the pressure trigger, participated in the weight matrix in NEITHER direction: not one
