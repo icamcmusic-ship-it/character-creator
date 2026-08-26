@@ -2054,6 +2054,37 @@ function srAnnounce(message){
   if (live) live.textContent = message;
 }
 // "Why didn't I get X?" — the inverse of the per-card why? panel.
+/* Asks the why-not question from wherever you are, rather than requiring a trip to the
+   Constraints panel. Pre-filters the shortlist to the section you asked from, which is
+   also what makes a partial name usable: "hushed" matches several traits across the
+   bank and usually exactly one inside the section you were looking at. */
+async function askWhyNotHere(groupTitle){
+  const name = await askForName(`Which trait were you expecting in "${groupTitle}"?`, "");
+  if (!name) return;
+  const sections = SECTIONS_FOR_GROUP[groupTitle] || null;
+  const matches = TRAITS.filter(t=>{
+    if (sections && !sections.some(sec => t.section === sec)) return false;
+    return t.trait.toLowerCase().includes(name.trim().toLowerCase());
+  });
+  const pool = matches.length ? matches
+    : TRAITS.filter(t => t.trait.toLowerCase().includes(name.trim().toLowerCase()));
+  if (!pool.length){ toast(`No trait matching "${name}".`, "warn", 5000); return; }
+  if (pool.length > 1 && pool.length <= 8){
+    toast(`${pool.length} traits match "${name}" — showing the closest.`, "warn", 4000);
+  }
+  // Shortest name containing the query is almost always the one meant.
+  const t = pool.slice().sort((a,b)=> a.trait.length - b.trait.length)[0];
+  const out = document.getElementById('whyNotResult');
+  const inp = document.getElementById('whyNotSearch');
+  if (inp) inp.value = t.trait;
+  if (out){
+    out.innerHTML = `<div class="whyNote"><b>${escHTML(t.trait)}</b> — ${escHTML(t.category)}<div style="margin-top:6px;">${explainWhyNot(t)}</div></div>`;
+    out.style.display = 'block';
+  }
+  // Show it where it was asked, not two tabs away.
+  toastHTML(`<b>${escHTML(t.trait)}</b> — ${escHTML(t.category)}<div style="margin-top:5px;">${explainWhyNot(t)}</div>`, 14000);
+}
+
 function explainWhyNotFromInput(){
   const inp = document.getElementById('whyNotSearch');
   const out = document.getElementById('whyNotResult');

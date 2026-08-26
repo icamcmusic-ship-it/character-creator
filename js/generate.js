@@ -228,6 +228,80 @@ function generateCharacter(){
   requestAnimationFrame(()=> requestAnimationFrame(()=>{ runGeneration(); }));
 }
 
+/* ================= BATCH GENERATION =================
+   "Give me five and let me pick one" is how people actually use a generator, and there
+   was no way to ask for it: every roll overwrote the last, so choosing between two
+   candidates meant generating, deciding, and either keeping it or losing it forever.
+   The engine is more than fast enough — 400 full builds run in a couple of seconds —
+   so the only thing missing was somewhere to put them.
+
+   Each candidate is a complete, real generation, so picking one is exactly equivalent
+   to having rolled it directly: same seed handling, same locks, same pressure sheet.
+   The candidates that are not picked cost nothing and are discarded. */
+let batchCandidates = [];
+function generateBatch(n){
+  const count = clamp(parseInt(n, 10) || 5, 2, 8);
+  const host = document.getElementById('batchTray');
+  if (!host) return;
+  batchCandidates = [];
+  const before = {state, charMeta, pressureState, lastSheetTraits};
+  try {
+    for (let i = 0; i < count; i++){
+      // Each candidate needs its OWN seed, or a fixed seed in the box would produce
+      // the same character five times, which is a confusing way to present a choice.
+      const seedEl = document.getElementById('seedInput');
+      const userSeed = seedEl ? seedEl.value : "";
+      if (seedEl && userSeed) seedEl.value = userSeed + "#" + (i + 1);
+      try {
+        if (!_runGeneration()) continue;
+        batchCandidates.push({state, meta: Object.assign({}, charMeta), pressure: pressureState});
+      } finally { if (seedEl) seedEl.value = userSeed; }
+    }
+  } finally {
+    // Put the sheet back to whatever it was before the batch. Nothing is committed
+    // until the user picks one.
+    state = before.state; charMeta = before.charMeta;
+    pressureState = before.pressureState; lastSheetTraits = before.lastSheetTraits;
+  }
+  renderBatchTray();
+  renderSheet();
+  if (batchCandidates.length) srAnnounce(`${batchCandidates.length} candidates ready. Pick one to keep it.`);
+}
+function renderBatchTray(){
+  const host = document.getElementById('batchTray');
+  if (!host) return;
+  if (!batchCandidates.length){ host.style.display = 'none'; host.innerHTML = ''; return; }
+  const loudest = (st) => Object.values(st)
+    .filter(x=> x && x.trait)
+    .sort((a,b)=> b.trait.intensity - a.trait.intensity)
+    .slice(0, 3).map(x=> x.trait.trait);
+  host.innerHTML = `<div class="batchHead"><b>Pick one of ${batchCandidates.length}</b>` +
+    `<button class="btn-secondary" onclick="dismissBatch()">Discard all</button></div>` +
+    `<div class="batchGrid">` + batchCandidates.map((c, i)=>{
+      const em = (typeof emergentArchetypeName === 'function') ? emergentArchetypeName(c.state) : null;
+      const title = (c.meta && c.meta.name && c.meta.name !== "Unnamed Character") ? c.meta.name
+                  : (em && em.name) || ("Candidate " + (i + 1));
+      return `<button type="button" class="batchCard" onclick="chooseBatch(${i})" title="Keep this one">` +
+        `<b>${escHTML(title)}</b>` +
+        `<span class="sub">${loudest(c.state).map(escHTML).join(" · ")}</span></button>`;
+    }).join('') + `</div>`;
+  host.style.display = 'block';
+}
+function chooseBatch(i){
+  const pick = batchCandidates[i];
+  if (!pick) return;
+  snapshotHistory();
+  lastSheetTraits = Object.keys(state).length ? snapshotSheetTraits(state) : null;
+  state = pick.state; charMeta = pick.meta; pressureState = pick.pressure;
+  markChangedSlots();
+  dismissBatch();
+  const pEl = document.getElementById('pressureSheet');
+  if (pEl) pEl.style.display = pressureState ? "block" : "none";
+  renderSheet(); checkConflicts();
+  toast(`Kept "${charMeta.name && charMeta.name !== "Unnamed Character" ? charMeta.name : "that one"}". The rest are gone.`);
+}
+function dismissBatch(){ batchCandidates = []; renderBatchTray(); }
+
 function runGeneration(){
   try {
     return _runGeneration();

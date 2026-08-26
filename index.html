@@ -478,6 +478,7 @@
            middle of them) made the primary action hard to find. Four labelled groups. -->
       <div class="buildRow">
         <button class="btn-primary btn-build" onclick="generateCharacter()"><span aria-hidden="true">✦</span> Build &amp; Roll</button>
+        <button class="btn-secondary" onclick="generateBatch(5)" title="Generate five complete characters at once and pick the one you want — the rest are discarded">Roll 5, pick one</button>
         <button class="btn-primary btn-roll" onclick="randomizeSliders('all'); generateCharacter();" title="Randomize every slider, then build">🎲 Randomize All</button>
       </div>
       <label class="modeSwitch tinkerBar" title="Quick shows the essentials; Tinker Mode reveals every control. Hidden controls keep their values.">
@@ -568,6 +569,9 @@
       </div>
       <div class="charMeta" id="charMetaLine"></div>
       <div id="noveltyReadout" style="display:none;"></div>
+      <!-- "Give me five and let me pick one" is how people actually use a generator,
+           and every roll used to overwrite the last one. -->
+      <div id="batchTray" class="batchTray" style="display:none;"></div>
       <div id="changeList" class="changeList" style="display:none;"></div>
       <div id="insightPanel" style="display:none;"></div>
       <details class="legendBox" id="sheetLegend">
@@ -694,12 +698,25 @@
 
   <div class="stickyBar" id="stickyBar">
     <button class="btn-primary" onclick="generateCharacter()">✦ Build &amp; Roll</button>
+    <button class="btn-secondary" onclick="generateBatch(5)" title="Roll five and pick one">Roll 5</button>
     <button class="btn-secondary" onclick="randomizeSliders('all'); generateCharacter();">🎲 Randomize</button>
     <button class="btn-secondary" onclick="undoLast()">Undo</button>
+    <!-- A ~37-card sheet on a phone is a very long scroll, and the only navigation was
+         collapse-all. This jumps straight to a section. -->
+    <select id="jumpToSection" class="jumpSelect" aria-label="Jump to a section of the sheet"
+            onchange="jumpToSection(this.value); this.value='';">
+      <option value="">Jump to…</option>
+    </select>
     <span class="stickySeed" id="stickySeed">no character yet</span>
   </div>
 
   <div class="footerNote" id="footerTraitCount">Intensity, rarity, and conflict polarity are heuristically scored — a starting point, not gospel.</div>
+  <!-- The shape checker was excellent and completely undiscoverable: documented in the
+       README, mentioned nowhere in the app it validates. -->
+  <div class="footerNote" style="margin-top:6px;">
+    Editing the trait data? Load this page with <a href="?dev=1" title="Validates every trait's shape and every axis-keyed table at load time, and names any problems in the console"><code>?dev=1</code></a>
+    to shape-check the whole bank and the axis tables on load — problems are named in the console, and it costs a normal load nothing.
+  </div>
 </div>
 
 <script src="js/data/traits-core.js" defer></script>

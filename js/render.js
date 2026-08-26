@@ -33,6 +33,24 @@ function toast(message, kind, ms){
   }
 }
 
+// Same toast, with markup — for the answers that are a short paragraph rather than a
+// sentence (the why-not explanations), where plain text loses the structure.
+function toastHTML(html, ms){
+  const host = document.getElementById('toastHost');
+  if (!host) return;
+  const el = document.createElement('div');
+  el.className = 'toast toast-ok toastWide';
+  el.setAttribute('role', 'status');
+  el.innerHTML = html;
+  const close = document.createElement('button');
+  close.className = 'toastClose'; close.textContent = '\u00d7';
+  close.setAttribute('aria-label', 'Dismiss');
+  close.onclick = ()=> el.remove();
+  el.appendChild(close);
+  host.appendChild(el);
+  setTimeout(()=>{ el.classList.add('toastOut'); setTimeout(()=>el.remove(), 300); }, ms || 9000);
+}
+
 // A skeleton, shown for the frame between pressing Generate and the build finishing.
 function showSkeleton(){
   const empty = document.getElementById('emptyState');
@@ -125,6 +143,35 @@ function bandHTML(t, slot){
 
 const RTIER_LABEL = {common:"common", uncommon:"uncommon", distinctive:"distinctive", signature:"signature"};
 
+/* HOW MUCH IS LEFT IN THIS SLOT. rerollExclusions grows silently on every toss, and the
+   only feedback the user ever got was the moment there was nothing left to draw — at
+   which point the honest answer ("you have rejected most of this category at these
+   settings") arrives far too late to act on. Show the headroom while it still means
+   something, and only once it is worth saying: a full pool is not information.
+
+   Counts what a reroll could ACTUALLY return — the category, minus what is banned,
+   minus what you have already tossed here, minus what is seated elsewhere on the sheet
+   — rather than the raw category size, which is the number that made this invisible. */
+function slotHeadroom(id, t){
+  if (!t || typeof byFilter !== 'function') return null;
+  const full = byFilter(t.section, t.category);
+  if (!full.length) return null;
+  const tossed = rerollExclusions[id] || new Set();
+  const seated = (typeof seatedTraitIds === 'function') ? seatedTraitIds(id) : new Set();
+  const left = full.filter(x => !tossed.has(x.id) && !seated.has(x.id) && x.id !== t.id).length;
+  return {left, total: full.length, tossed: tossed.size};
+}
+function slotDepthHTML(id, t){
+  const h = slotHeadroom(id, t);
+  if (!h || !h.tossed) return '';
+  const frac = h.left / h.total;
+  if (frac > 0.5) return '';                       // plenty left; saying so is noise
+  const cls = h.left === 0 ? 'depthOut' : frac <= 0.2 ? 'depthLow' : 'depthMid';
+  const msg = h.left === 0
+    ? `Nothing left to draw here — you have passed on all ${h.total}. Undo a toss, widen the precision slider, or ease a constraint.`
+    : `${h.left} of ${h.total} still available in ${t.category} at these settings — you have tossed ${h.tossed}.`;
+  return `<span class="slotDepth ${cls}" title="${escAttr(msg)}">${h.left === 0 ? 'pool empty' : h.left + ' left'}</span>`;
+}
 function traitCardHTML(id, s, includeControls, showDiff, accent, tagLabel){
   // BUG FIX: several code paths could produce a slot with a null trait (an empty
   // pool after filtering, a failed reroll), and this function dereferenced it
@@ -183,6 +230,7 @@ function traitCardHTML(id, s, includeControls, showDiff, accent, tagLabel){
           ${pinnedTargets[id]!==undefined ? `<button class="pinAdj" onclick="adjustPin('${escAttr(id)}',-0.2)" title="Nudge pinned intensity down" aria-label="Nudge pinned intensity down">−</button><button class="pinAdj" onclick="adjustPin('${escAttr(id)}',0.2)" title="Nudge pinned intensity up" aria-label="Nudge pinned intensity up">+</button>` : ``}
         </div>
         ${history ? `<button class="rerollBtn" onclick="rerollBack('${escAttr(id)}')" title="Step back to the trait this slot held before the last toss">↺ back</button>` : ``}
+        ${slotDepthHTML(id, t)}
         <button class="whyBtn" onclick="toggleWhy('${escAttr(id)}')" title="Why did I get this trait?" aria-expanded="${whyOpen[id]?'true':'false'}">why?</button>
         <!-- Favouriting and banning previously meant leaving the sheet, opening
              Constraints, and finding the trait by name in a search box — for a trait
@@ -457,6 +505,22 @@ const GROUP_TOGGLE_IDS = {
   "Personality": "genPersonality", "Speech Pattern": "genSpeech",
   "Vocabulary": "genVocab", "Mannerisms": "genManner", "Appearance": "genAppearance",
 };
+/* Which trait sections feed each sheet group. Lets a question asked from a section
+   header ("why didn't I get X here?") be answered against the pools that section
+   actually draws from, which is what makes a partial trait name usable — several
+   traits share a fragment across the bank and usually exactly one does inside the
+   section you were looking at. Built from PROFILE_SECTIONS so it cannot go stale. */
+const SECTIONS_FOR_GROUP = (function(){
+  const m = {
+    "Personality": ["Personality Traits"],
+    "Appearance": ["Appearance"],
+    "Speech Pattern": ["Verbosity Traits", "Vocabulary Traits", "Dialogue Grammar Traits"],
+    "Vocabulary": ["Vocabulary Traits"],
+    "Mannerisms": ["Mannerisms"],
+  };
+  (typeof PROFILE_SECTIONS !== 'undefined' ? PROFILE_SECTIONS : []).forEach(ps=>{ m[ps.label] = [ps.section]; });
+  return m;
+})();
 function emptyGroupReason(title){
   const toggleId = GROUP_TOGGLE_IDS[title];
   if (toggleId){
@@ -526,6 +590,7 @@ function renderSheet(){
       if (why){
         const note = document.createElement('div');
         note.className = "axisGroup emptyGroup";
+        note.id = sectionAnchorId(g.title);
         note.innerHTML = `<div class="axisTitle static"><span class="axisGlyph" aria-hidden="true">${sectionGlyph(g.title)}</span>${escHTML(g.title)}<span class="axisCount">empty</span></div>`
           + `<div class="emptyGroupNote">${escHTML(why)}</div>`;
         body.appendChild(note);
@@ -535,6 +600,7 @@ function renderSheet(){
     const div = document.createElement('div');
     const collapsed = !!collapsedGroups[g.title];
     div.className = "axisGroup" + (collapsed ? " collapsed" : "");
+    div.id = sectionAnchorId(g.title);
     div.style.setProperty('--section-accent', sectionColor(g.title));
     // PERF FIX: innerHTML += inside a loop re-parses the accumulated HTML on every
     // iteration (quadratic), which was the main source of visible lag on large
@@ -549,6 +615,12 @@ function renderSheet(){
       + `<span class="axisActions">`
       + `<button class="axisAction" onclick="rerollGroup('${escAttr(g.title)}')" title="Draw a different trait for every unkept card in this section">reroll section</button>`
       + `<button class="axisAction" onclick="lockGroup('${escAttr(g.title)}', ${keptHere < validIds.length})" title="${keptHere < validIds.length ? 'Keep every card in this section through rerolls and regeneration' : 'Release every card in this section'}">${keptHere < validIds.length ? 'keep section' : 'release section'}</button>`
+      /* explainWhyNot is one of the best things in the app and it lived behind a
+         free-text search box inside an Advanced panel two tabs away — so "why didn't I
+         get X?" was only askable by someone who already knew the feature existed and
+         could spell the trait. The question is always asked while looking at a section,
+         so it belongs on the section. */
+      + `<button class="axisAction" onclick="askWhyNotHere('${escAttr(g.title)}')" title="Ask why a particular trait didn't come up in this section">why not…?</button>`
       + `</span></div>`;
     if (!collapsed) validIds.forEach(id=>{ inner += traitCardHTML(id, state[id], true, true, null, g.title); });
     div.innerHTML = inner;
@@ -699,6 +771,7 @@ function renderSheet(){
 
   renderChangeList();
   refreshBudgetMeters();
+  refreshJumpToSection();
 
   if (pressureState){
     const pbody = document.getElementById('pressureBody');
@@ -852,6 +925,35 @@ function renderChangeList(){
   if (!h){ box.style.display = 'none'; return; }
   box.innerHTML = h;
   box.style.display = 'block';
+}
+
+/* Jump-to-section. renderSheet already knows the group titles and stamps each group
+   element; this just gives them ids and a way to reach them, because on a phone the
+   sheet is a very long scroll and the only navigation was collapse-all. */
+function sectionAnchorId(title){ return 'sec-anchor-' + String(title).toLowerCase().replace(/[^a-z0-9]+/g, '-'); }
+function refreshJumpToSection(){
+  const sel = document.getElementById('jumpToSection');
+  if (!sel) return;
+  const titles = (typeof SHEET_GROUPS !== 'undefined' ? SHEET_GROUPS : [])
+    .filter(g => document.getElementById(sectionAnchorId(g.title)))
+    .map(g => g.title);
+  if (!titles.length){ sel.style.display = 'none'; return; }
+  sel.style.display = '';
+  sel.innerHTML = '<option value="">Jump to…</option>' +
+    titles.map(t=>`<option value="${escAttr(t)}">${escHTML(t)}</option>`).join('');
+}
+function jumpToSection(title){
+  if (!title) return;
+  const el = document.getElementById(sectionAnchorId(title));
+  if (!el) return;
+  // A collapsed section is not a useful jump target — open it on the way.
+  if (collapsedGroups[title]){ collapsedGroups[title] = false; renderSheet(); }
+  const target = document.getElementById(sectionAnchorId(title));
+  if (!target) return;
+  const reduce = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  target.scrollIntoView({behavior: reduce ? 'auto' : 'smooth', block: 'start'});
+  const heading = target.querySelector('.axisTitle');
+  if (heading) heading.focus({preventScroll:true});
 }
 
 function checkConflicts(){
