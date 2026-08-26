@@ -31,6 +31,18 @@ into one shared scope.
 node tests/run.js
 ```
 
+There is also an end-to-end run in a real browser for the things a DOM stub cannot
+answer — that the declarative event dispatch actually dispatches, that no inline
+handler has crept back in, that the dark palette resolves, and that the whole app works
+under a Content-Security-Policy with no `'unsafe-inline'`:
+
+```bash
+npm i playwright            # node_modules is gitignored
+python3 -m http.server 8111 &
+node tests/browser.mjs http://localhost:8111          # behaviour
+CSP=1 node tests/browser.mjs http://localhost:8111    # ...and under script-src 'self'
+```
+
 They assert the things the UI states out loud and the things that have actually
 broken before: no duplicate ids or trait names, no duplicate example lines inside a
 category, both poles of every axis populated within 25% of each other, every

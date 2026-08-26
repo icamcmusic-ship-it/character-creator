@@ -20,7 +20,7 @@
       <div class="sub" id="taglineSub">Build a character, compare a cast, and see how any two would get along. One card at a time.</div>
     </div>
     <button type="button" class="benchBadge" title="How this works"
-            onclick="document.getElementById('helpPanel').open = true; document.getElementById('helpPanel').scrollIntoView({block:'nearest'});"
+            data-on="click" data-act="openHelpPanel" data-args="[]"
             aria-label="How this works">🛠</button>
   </header>
 
@@ -31,9 +31,9 @@
   <a class="skipLink" href="#controlsStart">Skip to the controls</a>
 
   <div class="tabs" role="tablist" aria-label="Views">
-    <button id="tabSingleBtn" class="active" role="tab" aria-selected="true" aria-controls="view-single" onclick="switchTab('single')"><span class="tabIcon" aria-hidden="true">👤</span>Single Character</button>
-    <button id="tabCastBtn" role="tab" aria-selected="false" aria-controls="view-cast" tabindex="-1" onclick="switchTab('cast')"><span class="tabIcon" aria-hidden="true">🎭</span>Cast Comparison</button>
-    <button id="tabRelBtn" role="tab" aria-selected="false" aria-controls="view-rel" tabindex="-1" onclick="switchTab('rel')"><span class="tabIcon" aria-hidden="true">🔗</span>Relationships</button>
+    <button id="tabSingleBtn" class="active" role="tab" aria-selected="true" aria-controls="view-single" data-on="click" data-act="switchTab" data-args="[&quot;single&quot;]"><span class="tabIcon" aria-hidden="true">👤</span>Single Character</button>
+    <button id="tabCastBtn" role="tab" aria-selected="false" aria-controls="view-cast" tabindex="-1" data-on="click" data-act="switchTab" data-args="[&quot;cast&quot;]"><span class="tabIcon" aria-hidden="true">🎭</span>Cast Comparison</button>
+    <button id="tabRelBtn" role="tab" aria-selected="false" aria-controls="view-rel" tabindex="-1" data-on="click" data-act="switchTab" data-args="[&quot;rel&quot;]"><span class="tabIcon" aria-hidden="true">🔗</span>Relationships</button>
   </div>
   <details class="legendBox" id="helpPanel" style="margin:0 0 18px;">
     <summary>How to use, and how generation works</summary>
@@ -84,19 +84,19 @@
       <div class="row dialBox">
         <div class="field">
           <label>Verbosity (Terse &rarr; Voluble)</label>
-          <input type="range" id="verbositySlider" min="-100" max="100" value="0" step="1" oninput="onSliderChange()">
+          <input type="range" id="verbositySlider" min="-100" max="100" value="0" step="1" data-on="input" data-act="onSliderChange" data-args="[]">
           <div class="scaleLabels"><span>Silent</span><span>Balanced</span><span>Torrential</span></div>
           <div class="sliderVal" id="verbosityVal">0</div>
         </div>
         <div class="field">
           <label>Register (Plain &rarr; Elaborate)</label>
-          <input type="range" id="registerSlider" min="-100" max="100" value="0" step="1" oninput="onSliderChange()">
+          <input type="range" id="registerSlider" min="-100" max="100" value="0" step="1" data-on="input" data-act="onSliderChange" data-args="[]">
           <div class="scaleLabels"><span>Blunt</span><span>Neutral</span><span>Ornate</span></div>
           <div class="sliderVal" id="registerVal">0</div>
         </div>
         <div class="field">
           <label>Composure (Steady &rarr; Volatile)</label>
-          <input type="range" id="composureSlider" min="-100" max="100" value="0" step="1" oninput="onSliderChange()">
+          <input type="range" id="composureSlider" min="-100" max="100" value="0" step="1" data-on="input" data-act="onSliderChange" data-args="[]">
           <div class="scaleLabels"><span>Calm</span><span>Mixed</span><span>Erratic</span></div>
           <div class="sliderVal" id="composureVal">0</div>
         </div>
@@ -108,13 +108,13 @@
       <div class="row">
         <div class="field" style="max-width:230px;">
           <label for="divergence">Surprise me</label>
-          <input type="range" id="divergence" min="0" max="1" value="0.15" step="0.05" oninput="onSliderChange()">
+          <input type="range" id="divergence" min="0" max="1" value="0.15" step="0.05" data-on="input" data-act="onSliderChange" data-args="[]">
           <div class="scaleLabels"><span>Never</span><span>Sometimes</span><span>Often</span></div>
           <div class="sub" style="margin:2px 0 0;">How often a trait is drawn against the character's grain.</div>
         </div>
         <div class="field" style="max-width:230px;">
           <label for="rangeFocus">How strictly sliders decide</label>
-          <input type="range" id="rangeFocus" min="0" max="1" value="0.62" step="0.01" oninput="onSliderChange()">
+          <input type="range" id="rangeFocus" min="0" max="1" value="0.62" step="0.01" data-on="input" data-act="onSliderChange" data-args="[]">
           <div class="scaleLabels"><span>Loosely</span><span>Strictly</span></div>
           <div class="sub" style="margin:2px 0 0;">Loose gives more variety; strict makes the sliders dictate.</div>
         </div>
@@ -126,17 +126,17 @@
         <div class="row" style="margin-top:10px;">
           <div class="field">
             <label>Stature (Slight &rarr; Imposing)</label>
-            <input type="range" id="app_stature" min="-100" max="100" value="0" step="1" oninput="onSliderChange()">
+            <input type="range" id="app_stature" min="-100" max="100" value="0" step="1" data-on="input" data-act="onSliderChange" data-args="[]">
             <div class="scaleLabels"><span>Slight</span><span>Average</span><span>Imposing</span></div>
           </div>
           <div class="field">
             <label>Upkeep (Unkempt &rarr; Immaculate)</label>
-            <input type="range" id="app_upkeep" min="-100" max="100" value="0" step="1" oninput="onSliderChange()">
+            <input type="range" id="app_upkeep" min="-100" max="100" value="0" step="1" data-on="input" data-act="onSliderChange" data-args="[]">
             <div class="scaleLabels"><span>Unkempt</span><span>Ordinary</span><span>Immaculate</span></div>
           </div>
           <div class="field">
             <label>Presence (Unremarkable &rarr; Striking)</label>
-            <input type="range" id="app_presence" min="-100" max="100" value="0" step="1" oninput="onSliderChange()">
+            <input type="range" id="app_presence" min="-100" max="100" value="0" step="1" data-on="input" data-act="onSliderChange" data-args="[]">
             <div class="scaleLabels"><span>Forgettable</span><span>Ordinary</span><span>Striking</span></div>
           </div>
         </div>
@@ -162,25 +162,25 @@
             <label for="banCategorySelect">Category</label>
             <select id="banCategorySelect"></select>
             <div class="actionRow" style="margin-top:6px;">
-              <button class="btn-secondary" onclick="addCategoryBan()">Never</button>
-              <button class="btn-secondary" onclick="addRequiredCategory()">At least one</button>
+              <button class="btn-secondary" data-on="click" data-act="addCategoryBan" data-args="[]">Never</button>
+              <button class="btn-secondary" data-on="click" data-act="addRequiredCategory" data-args="[]">At least one</button>
             </div>
           </div>
           <div class="field" style="max-width:320px;">
             <label for="banSectionSelect">Whole section</label>
             <select id="banSectionSelect"></select>
-            <button class="btn-secondary" style="margin-top:6px;" onclick="addSectionBan()">Ban section</button>
+            <button class="btn-secondary" style="margin-top:6px;" data-on="click" data-act="addSectionBan" data-args="[]">Ban section</button>
           </div>
           <div class="field" style="max-width:320px;">
             <label for="tierCategorySelect">Weighted tier (softer than a ban)</label>
             <select id="tierCategorySelect"></select>
             <div class="actionRow" style="margin-top:6px;">
-              <button class="btn-secondary" onclick="addCategoryTier('prefer')">Prefer &times;3</button>
-              <button class="btn-secondary" onclick="addCategoryTier('rarely')">Rarely &times;&frac14;</button>
+              <button class="btn-secondary" data-on="click" data-act="addCategoryTier" data-args="[&quot;prefer&quot;]">Prefer &times;3</button>
+              <button class="btn-secondary" data-on="click" data-act="addCategoryTier" data-args="[&quot;rarely&quot;]">Rarely &times;&frac14;</button>
             </div>
             <div class="actionRow" style="margin-top:6px;">
               <input type="number" id="tierCustomValue" step="0.05" min="0.05" max="20" placeholder="e.g. 1.5" style="max-width:110px;" aria-label="Custom category multiplier">
-              <button class="btn-secondary" onclick="addCategoryTier('custom')">Use this multiplier</button>
+              <button class="btn-secondary" data-on="click" data-act="addCategoryTier" data-args="[&quot;custom&quot;]">Use this multiplier</button>
             </div>
           </div>
         </div>
@@ -188,29 +188,29 @@
           <div class="field" style="max-width:420px;">
             <label for="constraintTraitSearch">Trait by name</label>
             <input type="text" id="constraintTraitSearch" placeholder="type at least two letters — searches names and descriptions…"
-                   autocomplete="off" oninput="searchTraits('constraintTraitSearch','constraintSearchResults')"
-                   onkeydown="searchKeydown(event,'constraintTraitSearch','constraintSearchResults')" role="combobox" aria-expanded="false" aria-autocomplete="list">
+                   autocomplete="off" data-on="input" data-act="searchTraits" data-args="[&quot;constraintTraitSearch&quot;,&quot;constraintSearchResults&quot;]"
+                   data-on="keydown" data-act="searchKeydown" data-args="[&quot;$event&quot;,&quot;constraintTraitSearch&quot;,&quot;constraintSearchResults&quot;]" role="combobox" aria-expanded="false" aria-autocomplete="list">
             <div class="searchResults" id="constraintSearchResults" style="display:none;"></div>
             <div class="actionRow" style="margin-top:6px;">
-              <button class="btn-secondary" onclick="addTraitConstraint('req')">Always include</button>
-              <button class="btn-secondary" onclick="addTraitConstraint('ban')">Never include</button>
+              <button class="btn-secondary" data-on="click" data-act="addTraitConstraint" data-args="[&quot;req&quot;]">Always include</button>
+              <button class="btn-secondary" data-on="click" data-act="addTraitConstraint" data-args="[&quot;ban&quot;]">Never include</button>
             </div>
           </div>
           <div class="field" style="max-width:420px;">
             <label>Mutually exclusive pair</label>
             <input type="text" id="exclusiveA" placeholder="first trait…" autocomplete="off"
-                   oninput="searchTraits('exclusiveA','exclusiveAResults')"
-                   onkeydown="searchKeydown(event,'exclusiveA','exclusiveAResults')" role="combobox" aria-expanded="false" aria-autocomplete="list" aria-label="First trait of the exclusive pair">
+                   data-on="input" data-act="searchTraits" data-args="[&quot;exclusiveA&quot;,&quot;exclusiveAResults&quot;]"
+                   data-on="keydown" data-act="searchKeydown" data-args="[&quot;$event&quot;,&quot;exclusiveA&quot;,&quot;exclusiveAResults&quot;]" role="combobox" aria-expanded="false" aria-autocomplete="list" aria-label="First trait of the exclusive pair">
             <div class="searchResults" id="exclusiveAResults" style="display:none;"></div>
             <input type="text" id="exclusiveB" placeholder="second trait…" autocomplete="off" style="margin-top:6px;"
-                   oninput="searchTraits('exclusiveB','exclusiveBResults')"
-                   onkeydown="searchKeydown(event,'exclusiveB','exclusiveBResults')" role="combobox" aria-expanded="false" aria-autocomplete="list" aria-label="Second trait of the exclusive pair">
+                   data-on="input" data-act="searchTraits" data-args="[&quot;exclusiveB&quot;,&quot;exclusiveBResults&quot;]"
+                   data-on="keydown" data-act="searchKeydown" data-args="[&quot;$event&quot;,&quot;exclusiveB&quot;,&quot;exclusiveBResults&quot;]" role="combobox" aria-expanded="false" aria-autocomplete="list" aria-label="Second trait of the exclusive pair">
             <div class="searchResults" id="exclusiveBResults" style="display:none;"></div>
-            <button class="btn-secondary" style="margin-top:6px;" onclick="addExclusivePair()">Never both</button>
+            <button class="btn-secondary" style="margin-top:6px;" data-on="click" data-act="addExclusivePair" data-args="[]">Never both</button>
           </div>
           <div class="field">
             <label>&nbsp;</label>
-            <button class="btn-secondary" onclick="clearConstraints()">Clear all constraints</button>
+            <button class="btn-secondary" data-on="click" data-act="clearConstraints" data-args="[]">Clear all constraints</button>
           </div>
         </div>
         <div id="constraintChips" style="margin-top:10px; display:flex; flex-wrap:wrap; gap:6px;"></div>
@@ -232,14 +232,14 @@
           </div>
           <div class="field" style="max-width:260px;">
             <label for="budgetMode">When a budget is exceeded</label>
-            <select id="budgetMode" onchange="onBudgetModeChange()">
+            <select id="budgetMode" data-on="change" data-act="onBudgetModeChange" data-args="[]">
               <option value="redraw" selected>Redraw quieter</option>
               <option value="drop">Drop the loudest</option>
               <option value="warn">Warn only</option>
             </select>
             <label style="margin-top:10px;">Presets</label>
             <div class="actionRow" id="budgetPresetRow"></div>
-            <button class="btn-secondary" style="margin-top:6px;" onclick="clearBudgetsUI()">Clear all budgets</button>
+            <button class="btn-secondary" style="margin-top:6px;" data-on="click" data-act="clearBudgetsUI" data-args="[]">Clear all budgets</button>
           </div>
         </div>
         <div id="budgetChips" style="margin-top:10px; display:flex; flex-wrap:wrap; gap:6px;"></div>
@@ -252,13 +252,13 @@
           <div class="field" style="max-width:420px;">
             <label for="whyNotSearch">Trait name</label>
             <input type="text" id="whyNotSearch" placeholder="type at least two letters…" autocomplete="off"
-                   oninput="searchTraits('whyNotSearch','whyNotResults')"
-                   onkeydown="searchKeydown(event,'whyNotSearch','whyNotResults')" role="combobox" aria-expanded="false" aria-autocomplete="list">
+                   data-on="input" data-act="searchTraits" data-args="[&quot;whyNotSearch&quot;,&quot;whyNotResults&quot;]"
+                   data-on="keydown" data-act="searchKeydown" data-args="[&quot;$event&quot;,&quot;whyNotSearch&quot;,&quot;whyNotResults&quot;]" role="combobox" aria-expanded="false" aria-autocomplete="list">
             <div class="searchResults" id="whyNotResults" style="display:none;"></div>
           </div>
           <div class="field">
             <label>&nbsp;</label>
-            <button class="btn-secondary" onclick="explainWhyNotFromInput()">Explain</button>
+            <button class="btn-secondary" data-on="click" data-act="explainWhyNotFromInput" data-args="[]">Explain</button>
           </div>
         </div>
         <div id="whyNotResult" style="display:none; margin-top:8px;"></div>
@@ -311,12 +311,12 @@
         </div>
         <div class="field advOnly">
           <label for="mannerCount"># of Mannerisms</label>
-          <input type="range" id="mannerCount" min="1" max="10" value="3" step="1" oninput="onSliderChange()">
+          <input type="range" id="mannerCount" min="1" max="10" value="3" step="1" data-on="input" data-act="onSliderChange" data-args="[]">
           <div class="sliderVal" id="mannerCountVal">3</div>
         </div>
         <div class="field advOnly">
           <label for="rarityPref">Trait rarity preference</label>
-          <input type="range" id="rarityPref" min="-1" max="1" value="0" step="0.05" oninput="onSliderChange()">
+          <input type="range" id="rarityPref" min="-1" max="1" value="0" step="0.05" data-on="input" data-act="onSliderChange" data-args="[]">
           <div class="scaleLabels"><span>Ordinary</span><span>Balanced</span><span>Sharply defining</span></div>
           <div class="sub" style="margin:4px 0 0;">Four authored tiers: <b>common</b> (texture, not identity) &middot; <b>uncommon</b> (noticeable, unremarkable) &middot; <b>distinctive</b> (a reader would remember it) &middot; <b>signature</b> (defines the voice; two is a caricature). Rarity now answers <i>how many people are like this</i> and intensity answers <i>how loudly it shows</i> — they used to be the same number wearing two hats, which is why a quiet signature trait was unreachable.</div>
         </div>
@@ -324,21 +324,21 @@
       <div class="row">
         <div class="field advOnly">
 <label for="vocabCount"># of Vocabulary traits</label>
-          <input type="range" id="vocabCount" min="1" max="8" value="2" step="1" oninput="onSliderChange()">
+          <input type="range" id="vocabCount" min="1" max="8" value="2" step="1" data-on="input" data-act="onSliderChange" data-args="[]">
           <div class="sliderVal" id="vocabCountVal">2</div>
         </div>
         <div class="field advOnly">
           <label for="personalityCount"># of Personality traits shown</label>
-          <input type="range" id="personalityCount" min="3" max="13" value="13" step="1" oninput="onSliderChange()">
+          <input type="range" id="personalityCount" min="3" max="13" value="13" step="1" data-on="input" data-act="onSliderChange" data-args="[]">
           <div class="sliderVal" id="personalityCountVal">13 of 13 axes</div>
         </div>
         <div class="field advOnly">
           <label>&nbsp;</label>
           <div class="actionRow">
-            <button class="btn-secondary" onclick="surpriseMe()" title="Roll everything at once — sliders, archetype, sections, divergence — and generate">🎲 Roll everything</button>
-              <button class="btn-secondary" onclick="randomizeSliders('voice')">🎲 Randomize Voice</button>
-            <button class="btn-secondary" onclick="randomizeSliders('personality')">🎲 Randomize Personality</button>
-            <button class="btn-secondary" onclick="suggestVoiceFromPersonality()">↳ Suggest voice from personality</button>
+            <button class="btn-secondary" data-on="click" data-act="surpriseMe" data-args="[]" title="Roll everything at once — sliders, archetype, sections, divergence — and generate">🎲 Roll everything</button>
+              <button class="btn-secondary" data-on="click" data-act="randomizeSliders" data-args="[&quot;voice&quot;]">🎲 Randomize Voice</button>
+            <button class="btn-secondary" data-on="click" data-act="randomizeSliders" data-args="[&quot;personality&quot;]">🎲 Randomize Personality</button>
+            <button class="btn-secondary" data-on="click" data-act="suggestVoiceFromPersonality" data-args="[]">↳ Suggest voice from personality</button>
           </div>
         </div>
       </div>
@@ -347,11 +347,11 @@
         <label style="margin:0; text-transform:none; font-size:.85rem; color:var(--text);" for="stressToggle">Also generate an "Under Pressure" variant (situational mode)</label>
       </div>
       <div class="stressToggleRow checkboxRow advOnly" style="margin-top:8px;">
-        <input type="checkbox" id="personalityToggle" checked onchange="togglePersonalityPanel()">
+        <input type="checkbox" id="personalityToggle" checked data-on="change" data-act="togglePersonalityPanel" data-args="[]">
         <label style="margin:0; text-transform:none; font-size:.85rem; color:var(--text);" for="personalityToggle">Include personality profile</label>
       </div>
       <div class="stressToggleRow checkboxRow advOnly" style="margin-top:8px;">
-        <input type="checkbox" id="examplesToggle" checked onchange="toggleExamples()">
+        <input type="checkbox" id="examplesToggle" checked data-on="change" data-act="toggleExamples" data-args="[]">
         <label style="margin:0; text-transform:none; font-size:.85rem; color:var(--text);" for="examplesToggle">Show example dialogue lines</label>
       </div>
 
@@ -369,7 +369,7 @@
       <div class="stressToggleRow checkboxRow advOnly" style="margin-top:8px;">
         <div class="field" style="max-width:230px;">
           <label for="wildcardCount">How many outliers</label>
-          <input type="range" id="wildcardCount" min="0" max="3" value="1" step="1" oninput="onSliderChange()">
+          <input type="range" id="wildcardCount" min="0" max="3" value="1" step="1" data-on="input" data-act="onSliderChange" data-args="[]">
           <div class="scaleLabels"><span>0</span><span>1</span><span>2</span><span>3</span></div>
           <div class="sub" style="margin:2px 0 0;">Outliers can now land in the deep profile sections too — "the devoted caretaker whose actual vice is gambling" is a better outlier than "the terse person who sometimes rambles".</div>
         </div>
@@ -387,13 +387,13 @@
         <div class="row">
           <div class="field" style="flex:2;">
             <label>Seed trait</label>
-            <input type="text" id="seedTraitFilter" placeholder="Filter (e.g. 'betrayed', 'leader', 'dry')..." oninput="filterSeedPicker()" style="margin-bottom:6px;">
+            <input type="text" id="seedTraitFilter" placeholder="Filter (e.g. 'betrayed', 'leader', 'dry')..." data-on="input" data-act="filterSeedPicker" data-args="[]" style="margin-bottom:6px;">
             <select id="seedTraitSelect"></select>
           </div>
           <div class="field">
             <label>&nbsp;</label>
             <div class="actionRow">
-              <button class="btn-primary" onclick="generateFromSeed()">Build outward from seed</button>
+              <button class="btn-primary" data-on="click" data-act="generateFromSeed" data-args="[]">Build outward from seed</button>
             </div>
           </div>
         </div>
@@ -414,9 +414,9 @@
           <div class="field">
             <label>&nbsp;</label>
             <div class="actionRow">
-              <button class="btn-secondary" onclick="randomizeProfileTypes()">🎲 Randomize types</button>
-              <button class="btn-secondary" onclick="setAllProfileSections(true)">Enable all</button>
-              <button class="btn-secondary" onclick="setAllProfileSections(false)">Disable all</button>
+              <button class="btn-secondary" data-on="click" data-act="randomizeProfileTypes" data-args="[]">🎲 Randomize types</button>
+              <button class="btn-secondary" data-on="click" data-act="setAllProfileSections" data-args="[true]">Enable all</button>
+              <button class="btn-secondary" data-on="click" data-act="setAllProfileSections" data-args="[false]">Disable all</button>
             </div>
           </div>
         </div>
@@ -435,13 +435,13 @@
             <label>Boost strength</label>
             <!-- Was a bare number input with a 400-word explanation attached, in a UI
                  where every other dial is a slider with a resolved word beside it. -->
-            <input type="range" id="affinityBoost" value="2.5" min="0" max="10" step="0.5" oninput="onSliderChange()">
+            <input type="range" id="affinityBoost" value="2.5" min="0" max="10" step="0.5" data-on="input" data-act="onSliderChange" data-args="[]">
             <div class="scaleLabels"><span>Pure random</span><span>Balanced</span><span>Sliders dictate</span></div>
             <div class="sliderVal" id="affinityBoostVal">2.5</div>
           </div>
           <div class="field" style="max-width:200px;">
             <label for="profileWeight">Profile weight (Motivation, Values, etc.)</label>
-            <input type="range" id="profileWeight" min="0" max="100" value="62" step="1" oninput="onSliderChange()">
+            <input type="range" id="profileWeight" min="0" max="100" value="62" step="1" data-on="input" data-act="onSliderChange" data-args="[]">
             <div class="scaleLabels"><span>Quiet, background</span><span>Life-defining</span></div>
           </div>
           <div class="field">
@@ -463,11 +463,11 @@
           <div class="field">
             <label>&nbsp;</label>
             <div class="actionRow">
-              <button class="btn-secondary" onclick="saveCustomArchetype(this)">Save current setup as archetype</button>
-              <button class="btn-secondary" onclick="applyArchetypeSetup()">Restore selected archetype's full setup</button>
-              <button class="btn-secondary" onclick="deleteCustomArchetype()">Delete selected</button>
-              <button class="btn-secondary" onclick="exportArchetypes()">Export library</button>
-              <label class="btn-secondary" style="cursor:pointer;">Import library<input type="file" accept=".json,application/json" style="display:none;" onchange="importArchetypes(this)"></label>
+              <button class="btn-secondary" data-on="click" data-act="saveCustomArchetype" data-args="[&quot;$el&quot;]">Save current setup as archetype</button>
+              <button class="btn-secondary" data-on="click" data-act="applyArchetypeSetup" data-args="[]">Restore selected archetype's full setup</button>
+              <button class="btn-secondary" data-on="click" data-act="deleteCustomArchetype" data-args="[]">Delete selected</button>
+              <button class="btn-secondary" data-on="click" data-act="exportArchetypes" data-args="[]">Export library</button>
+              <label class="btn-secondary" style="cursor:pointer;">Import library<input type="file" accept=".json,application/json" style="display:none;" data-on="change" data-act="importArchetypes" data-args="[&quot;$el&quot;]"></label>
             </div>
           </div>
         </div>
@@ -477,12 +477,12 @@
       <!-- Thirteen buttons in one undifferentiated row (with a stray checkbox in the
            middle of them) made the primary action hard to find. Four labelled groups. -->
       <div class="buildRow">
-        <button class="btn-primary btn-build" onclick="generateCharacter()"><span aria-hidden="true">✦</span> Build &amp; Roll</button>
-        <button class="btn-secondary" onclick="generateBatch(5)" title="Generate five complete characters at once and pick the one you want — the rest are discarded">Roll 5, pick one</button>
-        <button class="btn-primary btn-roll" onclick="randomizeSliders('all'); generateCharacter();" title="Randomize every slider, then build">🎲 Randomize All</button>
+        <button class="btn-primary btn-build" data-on="click" data-act="generateCharacter" data-args="[]"><span aria-hidden="true">✦</span> Build &amp; Roll</button>
+        <button class="btn-secondary" data-on="click" data-act="generateBatch" data-args="[5]" title="Generate five complete characters at once and pick the one you want — the rest are discarded">Roll 5, pick one</button>
+        <button class="btn-primary btn-roll" data-on="click" data-act="randomizeAndGenerate" data-args="[]" title="Randomize every slider, then build">🎲 Randomize All</button>
       </div>
       <label class="modeSwitch tinkerBar" title="Quick shows the essentials; Tinker Mode reveals every control. Hidden controls keep their values.">
-        <input type="checkbox" id="advancedToggle" onchange="applyAdvancedMode()">
+        <input type="checkbox" id="advancedToggle" data-on="change" data-act="applyAdvancedMode" data-args="[]">
         <span class="tinkerLabel"><span aria-hidden="true">🔧</span> Tinker Mode</span>
         <span class="tinkerState" id="advancedToggleLabel">Quick</span>
         <span class="tinkerChev" aria-hidden="true">⌄</span>
@@ -492,28 +492,28 @@
         <div class="actionGroup">
           <span class="actionGroupLabel">Refine</span>
           <div class="actionRow">
-            <button class="btn-secondary" onclick="undoLast()" id="undoBtn" disabled>Undo</button>
-            <button class="btn-secondary" onclick="redoLast()" id="redoBtn" disabled title="Step forward again through anything you have undone">Redo</button>
-            <button class="btn-secondary" onclick="duplicateCharacter()" title="Copy this character into the Cast tab so you can keep it while you carry on tweaking this one">Duplicate</button>
-            <button class="btn-secondary" onclick="resetAllToDefaults()">↺ Reset to Defaults</button>
-            <button class="btn-secondary" onclick="saveCharacter(this)">Save Character</button>
+            <button class="btn-secondary" data-on="click" data-act="undoLast" data-args="[]" id="undoBtn" disabled>Undo</button>
+            <button class="btn-secondary" data-on="click" data-act="redoLast" data-args="[]" id="redoBtn" disabled title="Step forward again through anything you have undone">Redo</button>
+            <button class="btn-secondary" data-on="click" data-act="duplicateCharacter" data-args="[]" title="Copy this character into the Cast tab so you can keep it while you carry on tweaking this one">Duplicate</button>
+            <button class="btn-secondary" data-on="click" data-act="resetAllToDefaults" data-args="[]">↺ Reset to Defaults</button>
+            <button class="btn-secondary" data-on="click" data-act="saveCharacter" data-args="[&quot;$el&quot;]">Save Character</button>
           </div>
         </div>
         <div class="actionGroup">
           <span class="actionGroupLabel">Export</span>
           <div class="actionRow">
-            <button class="btn-secondary" onclick="copySheet(this)">Copy Sheet</button>
-            <button class="btn-secondary" onclick="downloadSheet()">Download .md</button>
-            <button class="btn-secondary" onclick="exportCharacterJSON()" title="Full-fidelity save: traits, pins, sliders, constraints, counts and toggles — re-importable exactly as-is">Export .json</button>
-            <label class="btn-secondary" style="cursor:pointer;" title="Restore a previously exported .character.json exactly, including the settings that produced it">Import .json<input type="file" accept=".json,application/json" style="display:none;" onchange="importCharacterJSON(this)"></label>
-            <button class="btn-secondary" onclick="printSheet(false)">Print</button>
-            <button class="btn-secondary" onclick="printSheet(true)" title="One page: the name, the brief, the headline traits and the voice fingerprint — the card you keep at the desk">Print summary</button>
+            <button class="btn-secondary" data-on="click" data-act="copySheet" data-args="[&quot;$el&quot;]">Copy Sheet</button>
+            <button class="btn-secondary" data-on="click" data-act="downloadSheet" data-args="[]">Download .md</button>
+            <button class="btn-secondary" data-on="click" data-act="exportCharacterJSON" data-args="[]" title="Full-fidelity save: traits, pins, sliders, constraints, counts and toggles — re-importable exactly as-is">Export .json</button>
+            <label class="btn-secondary" style="cursor:pointer;" title="Restore a previously exported .character.json exactly, including the settings that produced it">Import .json<input type="file" accept=".json,application/json" style="display:none;" data-on="change" data-act="importCharacterJSON" data-args="[&quot;$el&quot;]"></label>
+            <button class="btn-secondary" data-on="click" data-act="printSheet" data-args="[false]">Print</button>
+            <button class="btn-secondary" data-on="click" data-act="printSheet" data-args="[true]" title="One page: the name, the brief, the headline traits and the voice fingerprint — the card you keep at the desk">Print summary</button>
           </div>
         </div>
         <div class="actionGroup advOnly">
           <span class="actionGroupLabel">Derive</span>
           <div class="actionRow">
-            <button class="btn-secondary" onclick="generateFoil()">⚔ Generate Foil</button>
+            <button class="btn-secondary" data-on="click" data-act="generateFoil" data-args="[]">⚔ Generate Foil</button>
             <input type="text" id="foilSeed" placeholder="foil seed (optional)" style="max-width:170px;" aria-label="Foil seed">
             <label class="inlineToggle">
               <input type="checkbox" id="foilOpposeComposure">Foils should also clash under pressure
@@ -539,12 +539,12 @@
            deciding what thirteen sliders should be. -->
       <p class="sub" style="margin:14px auto 6px;">Or start from one of these:</p>
       <div class="emptyPresets">
-        <button type="button" onclick="applyStartingPoint('liar')">A liar</button>
-        <button type="button" onclick="applyStartingPoint('kindtired')">Someone kind who is tired</button>
-        <button type="button" onclick="applyStartingPoint('menace')">A cheerful menace</button>
+        <button type="button" data-on="click" data-act="applyStartingPoint" data-args="[&quot;liar&quot;]">A liar</button>
+        <button type="button" data-on="click" data-act="applyStartingPoint" data-args="[&quot;kindtired&quot;]">Someone kind who is tired</button>
+        <button type="button" data-on="click" data-act="applyStartingPoint" data-args="[&quot;menace&quot;]">A cheerful menace</button>
         <!-- The three above all require you to already have an idea. This one is for
              when you don't, which is the more common way to arrive at a generator. -->
-        <button type="button" class="surpriseBtn" onclick="surpriseMe()">🎲 Surprise me entirely</button>
+        <button type="button" class="surpriseBtn" data-on="click" data-act="surpriseMe" data-args="[]">🎲 Surprise me entirely</button>
       </div>
     </div>
 
@@ -556,7 +556,7 @@
         <span class="handKept" id="handKept" hidden></span>
         <span class="handDensity">
           <label for="sheetDensity" class="srOnly">Sheet density</label>
-          <select id="sheetDensity" onchange="onDensityChange()" title="How much of the sheet is expanded on arrival. Standard is the behaviour this app has always had.">
+          <select id="sheetDensity" data-on="change" data-act="onDensityChange" data-args="[]" title="How much of the sheet is expanded on arrival. Standard is the behaviour this app has always had.">
             <option value="summary">Summary</option>
             <option value="standard" selected>Standard</option>
             <option value="everything">Everything</option>
@@ -592,13 +592,13 @@
         </div>
       </details>
       <div class="actionRow" style="margin:0 0 14px;">
-        <button class="btn-secondary" onclick="unpinAll()">Unpin all</button>
-        <button class="btn-secondary" onclick="lockAll()">Lock all</button>
-        <button class="btn-secondary" onclick="unlockAll()">Unlock all</button>
-        <button class="btn-secondary" onclick="setAllGroups(true)">Collapse all sections</button>
-        <button class="btn-secondary" onclick="setAllGroups(false)">Expand all</button>
+        <button class="btn-secondary" data-on="click" data-act="unpinAll" data-args="[]">Unpin all</button>
+        <button class="btn-secondary" data-on="click" data-act="lockAll" data-args="[]">Lock all</button>
+        <button class="btn-secondary" data-on="click" data-act="unlockAll" data-args="[]">Unlock all</button>
+        <button class="btn-secondary" data-on="click" data-act="setAllGroups" data-args="[true]">Collapse all sections</button>
+        <button class="btn-secondary" data-on="click" data-act="setAllGroups" data-args="[false]">Expand all</button>
         <label class="inlineToggle">
-          <input type="checkbox" id="compactToggle" onchange="toggleCompact()">Compact view
+          <input type="checkbox" id="compactToggle" data-on="change" data-act="toggleCompact" data-args="[]">Compact view
         </label>
       </div>
       <div id="sheetBody"></div>
@@ -607,7 +607,7 @@
         <div class="pressureTitle">Under Pressure</div>
         <div class="field" style="max-width:240px; margin:0 0 12px;">
           <label for="pressureLevel">How much pressure</label>
-          <input type="range" id="pressureLevel" min="0" max="100" value="100" step="5" oninput="onSliderChange()">
+          <input type="range" id="pressureLevel" min="0" max="100" value="100" step="5" data-on="input" data-act="onSliderChange" data-args="[]">
           <div class="scaleLabels"><span>A bad hour</span><span>A bad day</span><span>The worst day</span></div>
           <div class="sliderVal" id="pressureLevelVal">the worst day</div>
         </div>
@@ -639,25 +639,25 @@
              expressible, which is the commonest reason to want one. -->
         <div class="field" style="max-width:280px;">
           <label for="castAnchor">Build around your character</label>
-          <label class="inlineCheck"><input type="checkbox" id="castAnchor" onchange="onCastAnchorChange()"> Use your current sliders as the centre</label>
+          <label class="inlineCheck"><input type="checkbox" id="castAnchor" data-on="change" data-act="onCastAnchorChange" data-args="[]"> Use your current sliders as the centre</label>
           <div id="castSpreadRow" style="display:none;margin-top:8px;">
             <label for="castSpread">How far they wander</label>
-            <input type="range" id="castSpread" min="0.15" max="1" step="0.05" value="0.55" oninput="updateCastSpreadReadout()">
+            <input type="range" id="castSpread" min="0.15" max="1" step="0.05" value="0.55" data-on="input" data-act="updateCastSpreadReadout" data-args="[]">
             <div class="sub" style="margin:2px 0 0;" id="castSpreadReadout">Related, but their own people</div>
           </div>
         </div>
         <div class="field">
           <label>&nbsp;</label>
           <div class="actionRow">
-            <button class="btn-primary" onclick="generateCast()">Generate Cast</button>
-            <button class="btn-secondary" onclick="copyCast(this)">Copy Cast</button>
-            <button class="btn-secondary" onclick="downloadCast()">Download .md</button>
-            <button class="btn-secondary" onclick="exportCastJSON()" title="Round-trips the whole ensemble, re-importable exactly as-is">Export cast .json</button>
+            <button class="btn-primary" data-on="click" data-act="generateCast" data-args="[]">Generate Cast</button>
+            <button class="btn-secondary" data-on="click" data-act="copyCast" data-args="[&quot;$el&quot;]">Copy Cast</button>
+            <button class="btn-secondary" data-on="click" data-act="downloadCast" data-args="[]">Download .md</button>
+            <button class="btn-secondary" data-on="click" data-act="exportCastJSON" data-args="[]" title="Round-trips the whole ensemble, re-importable exactly as-is">Export cast .json</button>
             <label class="btn-secondary" style="cursor:pointer;">Import cast .json
-              <input type="file" accept="application/json,.json" style="display:none;" onchange="importCastJSON(this)">
+              <input type="file" accept="application/json,.json" style="display:none;" data-on="change" data-act="importCastJSON" data-args="[&quot;$el&quot;]">
             </label>
-            <button class="btn-secondary" onclick="checkEnsembleBalance()">⚖ Check Ensemble Balance</button>
-            <button class="btn-secondary" onclick="window.print()">Print</button>
+            <button class="btn-secondary" data-on="click" data-act="checkEnsembleBalance" data-args="[]">⚖ Check Ensemble Balance</button>
+            <button class="btn-secondary" data-on="click" data-act="printSheet" data-args="[]">Print</button>
           </div>
         </div>
       </div>
@@ -683,9 +683,9 @@
         <div class="field">
           <label>&nbsp;</label>
           <div class="actionRow">
-            <button class="btn-primary" onclick="analyseRelationship()">Analyse Relationship</button>
-            <button class="btn-secondary" onclick="copyRelationship(this)">Copy</button>
-            <button class="btn-secondary" onclick="window.print()">Print</button>
+            <button class="btn-primary" data-on="click" data-act="analyseRelationship" data-args="[]">Analyse Relationship</button>
+            <button class="btn-secondary" data-on="click" data-act="copyRelationship" data-args="[&quot;$el&quot;]">Copy</button>
+            <button class="btn-secondary" data-on="click" data-act="printSheet" data-args="[]">Print</button>
           </div>
         </div>
       </div>
@@ -697,14 +697,20 @@
   </div>
 
   <div class="stickyBar" id="stickyBar">
-    <button class="btn-primary" onclick="generateCharacter()">✦ Build &amp; Roll</button>
-    <button class="btn-secondary" onclick="generateBatch(5)" title="Roll five and pick one">Roll 5</button>
-    <button class="btn-secondary" onclick="randomizeSliders('all'); generateCharacter();">🎲 Randomize</button>
-    <button class="btn-secondary" onclick="undoLast()">Undo</button>
+    <button class="btn-primary" data-on="click" data-act="generateCharacter" data-args="[]">✦ Build &amp; Roll</button>
+    <button class="btn-secondary" data-on="click" data-act="generateBatch" data-args="[5]" title="Roll five and pick one">Roll 5</button>
+    <!-- Was randomizeSliders('all') + generate, which rolls the thirteen personality
+         sliders and nothing else. surpriseMe rolls the archetype, the profile sections
+         and the divergence too, which is what actually decides what kind of person
+         comes out — and this is the only place it is reachable once you have generated
+         something, since the empty state is gone by then and the Advanced copy is
+         hidden in quick mode. -->
+    <button class="btn-secondary" data-on="click" data-act="surpriseMe" data-args="[]" title="Roll everything — sliders, archetype, sections, divergence — and generate">🎲 Surprise me</button>
+    <button class="btn-secondary" data-on="click" data-act="undoLast" data-args="[]">Undo</button>
     <!-- A ~37-card sheet on a phone is a very long scroll, and the only navigation was
          collapse-all. This jumps straight to a section. -->
     <select id="jumpToSection" class="jumpSelect" aria-label="Jump to a section of the sheet"
-            onchange="jumpToSection(this.value); this.value='';">
+            data-on="change" data-act="jumpToSectionFromSelect" data-args="[&quot;$el&quot;]">
       <option value="">Jump to…</option>
     </select>
     <span class="stickySeed" id="stickySeed">no character yet</span>

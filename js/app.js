@@ -427,7 +427,7 @@ function renderCast(){
     card.className = "castCard";
     // Cast names are editable (rename below), so this is interpolated user text:
     // escape it rather than waiting for the day someone types a "<".
-    let inner = `<h3><span>${escHTML(c.meta.name)}</span><button class="savedAct" onclick="renameCastMember(${idx})">rename</button></h3>`;
+    let inner = `<h3><span>${escHTML(c.meta.name)}</span><button class="savedAct" ${actAttr('click', 'renameCastMember', idx)}>rename</button></h3>`;
     const addAll = (ids)=>{ ids.forEach(id=>{ inner += traitCardHTML(id, c.state[id], false, false, sectionColor(titleForSlotId(id))); }); };
     addAll(Object.keys(c.state).filter(k=>k.startsWith("pers_")));
     addAll(Object.keys(c.state).filter(k=>k.startsWith("prof_")));
@@ -844,7 +844,7 @@ function buildPersonalitySliders(){
         <label for="pers_${axis.id}">${escHTML(axis.label)}</label>
         <div class="sliderWrap"><span class="neutralBand" aria-hidden="true"></span><span class="blendBand" aria-hidden="true"></span>
         <input type="range" id="pers_${axis.id}" min="-100" max="100" value="0" step="1"
-               oninput="onSliderChange()" aria-label="${escHTML(axis.label)}: ${escHTML(lo)} to ${escHTML(hi)}"
+               ${actAttr('input', 'onSliderChange')} aria-label="${escHTML(axis.label)}: ${escHTML(lo)} to ${escHTML(hi)}"
                aria-describedby="persVal_${axis.id}"></div>
         <div class="scaleLabels"><span>${escHTML(lo)}</span><span>${escHTML(hi)}</span></div>
         <div class="sliderVal" id="persVal_${axis.id}" title="Below 14 either side of centre, this axis draws from its Situational pool.">0 · situational</div>
@@ -1026,6 +1026,75 @@ function randomRawSlider(){
    Deliberately also rolls the archetype and pushes divergence up: randomising thirteen
    sliders around the centre produces a very average person by the central limit theorem,
    which is the opposite of a surprise. */
+/* ================= DECLARATIVE EVENT DISPATCH =================
+   The app carried about 140 inline on* attributes. They work, and they make a strict
+   Content-Security-Policy impossible: any policy without 'unsafe-inline' in script-src
+   turns every button in the app into a dead button. That is a real constraint for
+   anyone embedding this, and it is the kind of thing that cannot be retrofitted a
+   handler at a time later.
+
+   One delegated listener per event type, reading a declared action and a JSON argument
+   list off the element. The arguments keep their types (a trait id stays a number)
+   because they travel as JSON rather than as attribute strings, and two tokens stand in
+   for the things an inline handler had lexical access to and a delegated one does not:
+
+     "$el"    -> the element the action is declared on   (was `this`)
+     "$event" -> the event object                        (was `event`)
+
+   Handlers that were multi-statement inline bodies are named functions now, which is
+   where they should have been anyway. */
+const ACTION_EVENTS = ['click', 'change', 'input', 'keydown'];
+function _actionArgs(el, ev){
+  let raw = el.getAttribute('data-args');
+  if (!raw) return [];
+  let parsed;
+  try { parsed = JSON.parse(raw); }
+  catch (e){ console.error('[action] bad data-args on', el, raw); return []; }
+  if (!Array.isArray(parsed)) parsed = [parsed];
+  return parsed.map(a => a === "$el" ? el : a === "$event" ? ev : a);
+}
+function _runAction(el, ev){
+  const name = el.getAttribute('data-act');
+  const fn = name && globalThis[name];
+  if (typeof fn !== 'function'){ console.error('[action] no such action:', name); return; }
+  try { fn.apply(null, _actionArgs(el, ev)); }
+  catch (err){ console.error('[action] ' + name + ' threw', err); }
+}
+ACTION_EVENTS.forEach(type=>{
+  document.addEventListener(type, (ev)=>{
+    const target = ev.target && ev.target.closest && ev.target.closest('[data-act]');
+    if (!target) return;
+    // An element declares which events it wants; without this, a text input carrying a
+    // keydown action would also fire on every click inside it.
+    const wants = (target.getAttribute('data-on') || 'click').split(/\s+/);
+    if (!wants.includes(type)) return;
+    if (type === 'click' && target.tagName === 'BUTTON' && target.type !== 'submit') ev.preventDefault();
+    _runAction(target, ev);
+  });
+});
+
+// ---- The handlers that used to be multi-statement inline bodies ----
+function openHelpPanel(){
+  const p = document.getElementById('helpPanel');
+  if (!p) return;
+  p.open = true;
+  p.scrollIntoView({block:'nearest'});
+}
+function jumpToSectionFromSelect(el){
+  if (!el) return;
+  const v = el.value;
+  el.value = '';
+  jumpToSection(v);
+}
+function toggleCardControls(el){
+  const card = el && el.closest('.traitCard');
+  if (!card) return;
+  card.classList.toggle('controlsOpen');
+  el.setAttribute('aria-expanded', String(card.classList.contains('controlsOpen')));
+}
+function randomizeAndGenerate(){ randomizeSliders('all'); generateCharacter(); }
+function printSheet(){ if (typeof print === 'function') print(); }
+
 function surpriseMe(){
   const keys = Object.keys(ARCHETYPES);
   const pick = keys[Math.floor(Math.random() * keys.length)];
@@ -1712,7 +1781,7 @@ function checkEnsembleBalance(){
   if (clustered.length || profClustered.length){
     lastBalanceGaps = {clustered: clustered.map(c=>({id:c.axis.id, dir:c.dir})), profClustered: profClustered.map(c=>({section:c.section, cat:c.cat}))};
     h += `<div class="actionRow" style="margin-top:14px;">
-      <button class="btn-primary" onclick="generateGapFiller()">Generate a member who fills these gaps</button>
+      <button class="btn-primary" ${actAttr('click', 'generateGapFiller')}>Generate a member who fills these gaps</button>
     </div>`;
   } else lastBalanceGaps = null;
 
@@ -1967,7 +2036,7 @@ function searchTraits(inputId, resultsId, onPick){
     } else {
       box.innerHTML = hits.map((t, i)=>
         `<button type="button" class="searchHit" role="option" id="${escAttr(resultsId)}_opt${i}" aria-selected="false" tabindex="-1"`
-        + ` onclick="pickSearchResult('${escAttr(inputId)}','${escAttr(resultsId)}',${t.id})">`
+        + ` ${actAttr('click', 'pickSearchResult', inputId, resultsId, t.id)}>`
         + `<b>${escHTML(t.trait)}</b><span>${escHTML(t.category)} · intensity ${t.intensity}</span>`
         + `<i>${escHTML(t.desc)}</i></button>`).join("")
         + (hits.length >= 40 ? `<div class="searchEmpty">Showing the first 40 matches — keep typing to narrow.</div>` : ``);

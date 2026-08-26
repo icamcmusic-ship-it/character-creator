@@ -210,12 +210,12 @@ function traitCardHTML(id, s, includeControls, showDiff, accent, tagLabel){
         ${includeControls ? bandHTML(t, s) : ``}
         ${t.example ? `<div class="exampleLine">&ldquo;${escHTML(t.example)}&rdquo;</div>` : ``}
         ${includeControls ? freqBudgetHTML(t) : ``}
-        ${includeControls && traitNotes[id] ? `<div class="traitNote"><b>Note.</b> ${escHTML(traitNotes[id])} <button onclick="clearTraitNote('${escAttr(id)}')">remove</button></div>` : ``}
-        ${diff ? `<div class="diffNote">↺ was: "${escHTML(diff.from)}" <button onclick="dismissDiff('${escAttr(id)}')">dismiss</button></div>` : ``}
-        ${includeControls && whyOpen[id] ? `<div class="whyNote">${explainPick(id, s)}${(rerollExclusions[id]&&rerollExclusions[id].size)?`<div class="whyExcl">Excluded from rerolls here: ${rerollExclusions[id].size} trait${rerollExclusions[id].size>1?"s":""} you've already passed on. <button onclick="clearExclusions('${escAttr(id)}')">reset</button></div>`:``}</div>` : ``}
+        ${includeControls && traitNotes[id] ? `<div class="traitNote"><b>Note.</b> ${escHTML(traitNotes[id])} <button ${actAttr('click', 'clearTraitNote', id)}>remove</button></div>` : ``}
+        ${diff ? `<div class="diffNote">↺ was: "${escHTML(diff.from)}" <button ${actAttr('click', 'dismissDiff', id)}>dismiss</button></div>` : ``}
+        ${includeControls && whyOpen[id] ? `<div class="whyNote">${explainPick(id, s)}${(rerollExclusions[id]&&rerollExclusions[id].size)?`<div class="whyExcl">Excluded from rerolls here: ${rerollExclusions[id].size} trait${rerollExclusions[id].size>1?"s":""} you've already passed on. <button ${actAttr('click', 'clearExclusions', id)}>reset</button></div>`:``}</div>` : ``}
       </div>
       ${includeControls ? `
-      <button class="slotToggle" onclick="this.closest('.traitCard').classList.toggle('controlsOpen'); this.setAttribute('aria-expanded', this.closest('.traitCard').classList.contains('controlsOpen'));"
+      <button class="slotToggle" ${actAttr('click', 'toggleCardControls', "$el")}
               aria-expanded="false" aria-label="Show the controls for this card" title="Show the controls for this card">&ctdot;</button>
       <div class="slotBtns">
         ${s.required && id.startsWith("req_")
@@ -223,25 +223,25 @@ function traitCardHTML(id, s, includeControls, showDiff, accent, tagLabel){
              nothing for a reroll to draw, so the control says what would actually
              change it rather than rendering a button that cannot work. */
           ? `<span class="slotNote" title="This trait is here because you required it by name. Remove the constraint to change it.">required by name</span>`
-          : `<button class="rerollBtn" onclick="rerollSlot('${escAttr(id)}')" title="Draw a different trait for this slot (never repeats one you've already rejected here)"><span aria-hidden="true">✕</span> Toss</button>`}
-        <button class="lockBtn ${lockedClass}" onclick="toggleLock('${escAttr(id)}')" title="Keep this trait through rerolls and regeneration" aria-pressed="${s.locked?'true':'false'}"><span aria-hidden="true">📌</span> ${s.locked ? "Kept" : "Keep"}</button>
+          : `<button class="rerollBtn" ${actAttr('click', 'rerollSlot', id)} title="Draw a different trait for this slot (never repeats one you've already rejected here)"><span aria-hidden="true">✕</span> Toss</button>`}
+        <button class="lockBtn ${lockedClass}" ${actAttr('click', 'toggleLock', id)} title="Keep this trait through rerolls and regeneration" aria-pressed="${s.locked?'true':'false'}"><span aria-hidden="true">📌</span> ${s.locked ? "Kept" : "Keep"}</button>
         <div class="pinRow">
-          <button class="pinBtn ${pinnedTargets[id]!==undefined ? "pinned" : ""}" onclick="togglePin('${escAttr(id)}')" title="Pin this slot's intensity target (not the exact trait) so future generations/rerolls stay near this level even as sliders move elsewhere" aria-pressed="${pinnedTargets[id]!==undefined?'true':'false'}">${pinnedTargets[id]!==undefined ? "pinned "+pinnedTargets[id].toFixed(1) : "pin"}</button>
-          ${pinnedTargets[id]!==undefined ? `<button class="pinAdj" onclick="adjustPin('${escAttr(id)}',-0.2)" title="Nudge pinned intensity down" aria-label="Nudge pinned intensity down">−</button><button class="pinAdj" onclick="adjustPin('${escAttr(id)}',0.2)" title="Nudge pinned intensity up" aria-label="Nudge pinned intensity up">+</button>` : ``}
+          <button class="pinBtn ${pinnedTargets[id]!==undefined ? "pinned" : ""}" ${actAttr('click', 'togglePin', id)} title="Pin this slot's intensity target (not the exact trait) so future generations/rerolls stay near this level even as sliders move elsewhere" aria-pressed="${pinnedTargets[id]!==undefined?'true':'false'}">${pinnedTargets[id]!==undefined ? "pinned "+pinnedTargets[id].toFixed(1) : "pin"}</button>
+          ${pinnedTargets[id]!==undefined ? `<button class="pinAdj" ${actAttr('click', 'adjustPin', id, -0.2)} title="Nudge pinned intensity down" aria-label="Nudge pinned intensity down">−</button><button class="pinAdj" ${actAttr('click', 'adjustPin', id, 0.2)} title="Nudge pinned intensity up" aria-label="Nudge pinned intensity up">+</button>` : ``}
         </div>
-        ${history ? `<button class="rerollBtn" onclick="rerollBack('${escAttr(id)}')" title="Step back to the trait this slot held before the last toss">↺ back</button>` : ``}
+        ${history ? `<button class="rerollBtn" ${actAttr('click', 'rerollBack', id)} title="Step back to the trait this slot held before the last toss">↺ back</button>` : ``}
         ${slotDepthHTML(id, t)}
-        <button class="whyBtn" onclick="toggleWhy('${escAttr(id)}')" title="Why did I get this trait?" aria-expanded="${whyOpen[id]?'true':'false'}">why?</button>
+        <button class="whyBtn" ${actAttr('click', 'toggleWhy', id)} title="Why did I get this trait?" aria-expanded="${whyOpen[id]?'true':'false'}">why?</button>
         <!-- Favouriting and banning previously meant leaving the sheet, opening
              Constraints, and finding the trait by name in a search box — for a trait
              that is right there on the card in front of you. -->
-        <button class="markBtn ${requiredTraitIds.includes(t.id) ? 'on' : ''}" onclick="favouriteTrait(${t.id})"
+        <button class="markBtn ${requiredTraitIds.includes(t.id) ? 'on' : ''}" ${actAttr('click', 'favouriteTrait', t.id)}
                 aria-pressed="${requiredTraitIds.includes(t.id) ? 'true' : 'false'}"
                 title="${requiredTraitIds.includes(t.id) ? 'Stop requiring this trait on every character' : 'Require this trait on every character from now on'}"><span aria-hidden="true">★</span><span class="srOnly">favourite</span></button>
-        <button class="markBtn ${bannedTraitIds.has(t.id) ? 'on' : ''}" onclick="banTrait(${t.id})"
+        <button class="markBtn ${bannedTraitIds.has(t.id) ? 'on' : ''}" ${actAttr('click', 'banTrait', t.id)}
                 aria-pressed="${bannedTraitIds.has(t.id) ? 'true' : 'false'}"
                 title="${bannedTraitIds.has(t.id) ? 'Allow this trait again' : 'Never draw this trait again'}"><span aria-hidden="true">🚫</span><span class="srOnly">never draw this again</span></button>
-        <button class="whyBtn" onclick="editTraitNote('${escAttr(id)}')" title="${traitNotes[id] ? 'Edit your note on this card' : 'Attach a note to this card'}">${traitNotes[id] ? 'note ✎' : '+ note'}</button>
+        <button class="whyBtn" ${actAttr('click', 'editTraitNote', id)} title="${traitNotes[id] ? 'Edit your note on this card' : 'Attach a note to this card'}">${traitNotes[id] ? 'note ✎' : '+ note'}</button>
       </div>` : ``}
     </div>`;
 }
@@ -609,18 +609,18 @@ function renderSheet(){
     // the section system unreadable for anyone who can't separate those hues.
     const keptHere = validIds.filter(id => state[id] && state[id].locked).length;
     let inner = `<div class="axisHead">`
-      + `<button class="axisTitle" onclick="toggleGroup('${escAttr(g.title)}')" aria-expanded="${collapsed?'false':'true'}" title="Collapse or expand this section">`
+      + `<button class="axisTitle" ${actAttr('click', 'toggleGroup', g.title)} aria-expanded="${collapsed?'false':'true'}" title="Collapse or expand this section">`
       + `<span class="axisGlyph" aria-hidden="true">${sectionGlyph(g.title)}</span>${escHTML(g.title)}`
       + `<span class="axisCount">${validIds.length}${keptHere ? ` · ${keptHere} kept` : ``}</span><span class="axisChev">${collapsed?'▸':'▾'}</span></button>`
       + `<span class="axisActions">`
-      + `<button class="axisAction" onclick="rerollGroup('${escAttr(g.title)}')" title="Draw a different trait for every unkept card in this section">reroll section</button>`
-      + `<button class="axisAction" onclick="lockGroup('${escAttr(g.title)}', ${keptHere < validIds.length})" title="${keptHere < validIds.length ? 'Keep every card in this section through rerolls and regeneration' : 'Release every card in this section'}">${keptHere < validIds.length ? 'keep section' : 'release section'}</button>`
+      + `<button class="axisAction" ${actAttr('click', 'rerollGroup', g.title)} title="Draw a different trait for every unkept card in this section">reroll section</button>`
+      + `<button class="axisAction" ${actAttr('click', 'lockGroup', g.title, keptHere < validIds.length)} title="${keptHere < validIds.length ? 'Keep every card in this section through rerolls and regeneration' : 'Release every card in this section'}">${keptHere < validIds.length ? 'keep section' : 'release section'}</button>`
       /* explainWhyNot is one of the best things in the app and it lived behind a
          free-text search box inside an Advanced panel two tabs away — so "why didn't I
          get X?" was only askable by someone who already knew the feature existed and
          could spell the trait. The question is always asked while looking at a section,
          so it belongs on the section. */
-      + `<button class="axisAction" onclick="askWhyNotHere('${escAttr(g.title)}')" title="Ask why a particular trait didn't come up in this section">why not…?</button>`
+      + `<button class="axisAction" ${actAttr('click', 'askWhyNotHere', g.title)} title="Ask why a particular trait didn't come up in this section">why not…?</button>`
       + `</span></div>`;
     if (!collapsed) validIds.forEach(id=>{ inner += traitCardHTML(id, state[id], true, true, null, g.title); });
     div.innerHTML = inner;
@@ -757,7 +757,7 @@ function renderSheet(){
         <div class="tensionTitle" style="color:var(--muted);">Recurring this session</div>
         <ul>` + rep.map(r=>
           `<li><b>${escHTML(r.trait.trait)}</b> — ${r.count} of your last ${r.window} characters `
-          + `<button class="markBtn" onclick="banTrait(${r.trait.id})" title="Never draw this trait again">🚫 never again</button></li>`
+          + `<button class="markBtn" ${actAttr('click', 'banTrait', r.trait.id)} title="Never draw this trait again">🚫 never again</button></li>`
         ).join("") + `</ul>
         <div class="sub" style="margin:6px 0 0;">These are already being penalised on every draw${avoidRecentEnabled() ? `` : ` — except that <b>Avoid recent traits</b> is currently off, so they are not`}. Banning one is the harder version of the same instruction.</div>
       </div>`;
@@ -904,9 +904,9 @@ function renderChangeList(){
     h += `<details${same ? '' : ' open'}><summary>Against the pinned "${escHTML(pinnedSnapshot.label)}" — ` +
          (same ? 'identical so far' : `${d.changed.length} replaced, ${d.added.length} new, ${d.gone.length} dropped`) +
          `</summary>${same ? '<div class="changeBody sub">Nothing has moved since you pinned it.</div>' : diffBodyHTML(d)}` +
-         `<div style="margin-top:8px;"><button class="btn-secondary" onclick="clearPinnedVersion()">Stop comparing</button></div></details>`;
+         `<div style="margin-top:8px;"><button class="btn-secondary" ${actAttr('click', 'clearPinnedVersion')}>Stop comparing</button></div></details>`;
   } else if (hasSheet){
-    h += `<div style="margin-top:6px;"><button class="btn-secondary" onclick="pinCurrentVersion()" title="Keep this version as a fixed point and show what changes against it from now on">📌 Pin this version to compare against</button></div>`;
+    h += `<div style="margin-top:6px;"><button class="btn-secondary" ${actAttr('click', 'pinCurrentVersion')} title="Keep this version as a fixed point and show what changes against it from now on">📌 Pin this version to compare against</button></div>`;
   }
 
   const recurring = (typeof recurringTraits === 'function') ? recurringTraits(3) : [];
@@ -918,7 +918,7 @@ function renderChangeList(){
     h += `<details><summary>Traits you keep getting (${recurring.length} across your last ${recurring[0].window} characters)</summary><div class="changeBody">` +
       recurring.map(r=>
         `<div><b>${escHTML(r.trait.trait)}</b> <span class="sub">— ${r.count} of the last ${r.window}, ${escHTML(r.trait.category)}</span> ` +
-        `<button class="markBtn" onclick="banTrait(${r.trait.id})" title="Never draw this trait again">🚫 never again</button></div>`).join('') +
+        `<button class="markBtn" ${actAttr('click', 'banTrait', r.trait.id)} title="Never draw this trait again">🚫 never again</button></div>`).join('') +
       `<div class="sub" style="margin-top:6px;">These are the pools your settings keep landing in. Banning one, or moving the slider that feeds it, is usually faster than rerolling.</div></div></details>`;
   }
 
@@ -1196,7 +1196,7 @@ function buildBudgetUI(){
         <label for="cap_${tier}" class="budgetLabel"><span class="rarityBadge rarity-${tier}">${escHTML(RTIER_LABEL[tier])}</span></label>
         <input type="number" id="cap_${tier}" min="0" max="60" step="1" placeholder="no cap"
                aria-label="Maximum ${escHTML(RTIER_LABEL[tier])} cards on one sheet"
-               oninput="onRarityCapChange('${tier}')">
+               ${actAttr('input', 'onRarityCapChange', "${tier}")}>
       </div>`).join("");
   }
   const ig = document.getElementById('intensityCapGrid');
@@ -1206,14 +1206,14 @@ function buildBudgetUI(){
         <label for="icap_${g.id}" class="budgetLabel">${escHTML(g.label)}</label>
         <input type="number" id="icap_${g.id}" min="0" max="400" step="1" placeholder="off"
                aria-label="Maximum total intensity for ${escHTML(g.label)}"
-               oninput="onIntensityCapChange('${g.id}')">
+               ${actAttr('input', 'onIntensityCapChange', "${g.id}")}>
         <span class="budgetMeter" id="imeter_${g.id}"><i></i><b></b></span>
       </div>`).join("");
   }
   const pr = document.getElementById('budgetPresetRow');
   if (pr){
     pr.innerHTML = Object.entries(BUDGET_PRESETS).map(([k,p])=>
-      `<button class="btn-secondary" onclick="useBudgetPreset('${k}')">${escHTML(p.label)}</button>`).join("");
+      `<button class="btn-secondary" ${actAttr('click', 'useBudgetPreset', "${k}")}>${escHTML(p.label)}</button>`).join("");
   }
   refreshBudgetUI();
 }
@@ -1288,11 +1288,11 @@ function refreshBudgetChips(){
   let h = "";
   RTIER_ORDER.forEach(t=>{
     if (rarityCaps[t] == null) return;
-    h += `<span class="chip chip-tier">max ${rarityCaps[t]} ${escHTML(RTIER_LABEL[t])} <b onclick="clearOneBudget('rarity','${t}')" title="Remove">&times;</b></span>`;
+    h += `<span class="chip chip-tier">max ${rarityCaps[t]} ${escHTML(RTIER_LABEL[t])} <b ${actAttr('click', 'clearOneBudget', "rarity", "${t}")} title="Remove">&times;</b></span>`;
   });
   BUDGET_GROUPS.forEach(g=>{
     if (intensityCaps[g.id] == null) return;
-    h += `<span class="chip chip-tier">${escHTML(g.label)} intensity &le; ${intensityCaps[g.id]} <b onclick="clearOneBudget('intensity','${g.id}')" title="Remove">&times;</b></span>`;
+    h += `<span class="chip chip-tier">${escHTML(g.label)} intensity &le; ${intensityCaps[g.id]} <b ${actAttr('click', 'clearOneBudget', "intensity", "${g.id}")} title="Remove">&times;</b></span>`;
   });
   if (h && getBudgetMode() !== 'redraw') h += `<span class="chip chip-ban">over budget: ${getBudgetMode() === 'drop' ? 'drop the loudest' : 'warn only'}</span>`;
   box.innerHTML = h || '<span class="sub" style="margin:0;">No budgets set — every draw stands as dealt.</span>';

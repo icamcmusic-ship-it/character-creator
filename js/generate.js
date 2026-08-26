@@ -276,12 +276,12 @@ function renderBatchTray(){
     .sort((a,b)=> b.trait.intensity - a.trait.intensity)
     .slice(0, 3).map(x=> x.trait.trait);
   host.innerHTML = `<div class="batchHead"><b>Pick one of ${batchCandidates.length}</b>` +
-    `<button class="btn-secondary" onclick="dismissBatch()">Discard all</button></div>` +
+    `<button class="btn-secondary" ${actAttr('click', 'dismissBatch')}>Discard all</button></div>` +
     `<div class="batchGrid">` + batchCandidates.map((c, i)=>{
       const em = (typeof emergentArchetypeName === 'function') ? emergentArchetypeName(c.state) : null;
       const title = (c.meta && c.meta.name && c.meta.name !== "Unnamed Character") ? c.meta.name
                   : (em && em.name) || ("Candidate " + (i + 1));
-      return `<button type="button" class="batchCard" onclick="chooseBatch(${i})" title="Keep this one">` +
+      return `<button type="button" class="batchCard" ${actAttr('click', 'chooseBatch', i)} title="Keep this one">` +
         `<b>${escHTML(title)}</b>` +
         `<span class="sub">${loudest(c.state).map(escHTML).join(" · ")}</span></button>`;
     }).join('') + `</div>`;

@@ -7,7 +7,7 @@
    true: duplicate ids, out-of-range intensities, an axis with only one pole, an
    inverted position mapping that made the printed "active range" a lie, and the
    claim that a seed reproduces a character exactly. */
-const {loadEngine} = require('./harness');
+const {loadEngine, ROOT} = require('./harness');
 
 let passed = 0, failed = 0;
 const failures = [];
@@ -1090,6 +1090,53 @@ check('the readout word helpers cover their whole input range', ()=>{
   }
   assert(!gaps.length, gaps.slice(0,5).join(', '));
   return 'no gaps';
+});
+
+group('Content-Security-Policy');
+check('no source file contains an inline event handler', ()=>{
+  /* The app carried about 140 inline on* attributes. They work, and they make a strict
+     CSP impossible: any policy without 'unsafe-inline' in script-src turns every button
+     in the app into a dead button, which is a real constraint for anyone embedding
+     this. They are declared actions now, dispatched by one delegated listener per event
+     type. This is the cheap guard against one creeping back — tests/browser.mjs checks
+     the same property in a real browser AND that the whole app works under
+     script-src 'self'. */
+  const fs = require('fs'), path = require('path');
+  const files = ['index.html', 'js/app.js', 'js/engine.js', 'js/generate.js', 'js/render.js'];
+  const bad = [];
+  files.forEach(f=>{
+    const src = fs.readFileSync(path.join(ROOT, f), 'utf8');
+    src.split('\n').forEach((line, i)=>{
+      const m = line.match(/\son(click|change|input|keydown|submit|focus|blur|mouseover)\s*=\s*"/);
+      if (m) bad.push(`${f}:${i+1} ${m[1]}`);
+    });
+  });
+  assert(!bad.length, bad.length + ' inline handler(s):\n       ' + bad.slice(0, 8).join('\n       '));
+  return files.length + ' files clean';
+});
+check('every declared action names a function that exists', ()=>{
+  /* A typo in a data-act is silent at author time and dead at click time, which is
+     strictly worse than the inline handler it replaced — an inline typo at least
+     throws a ReferenceError naming the symbol. Check the static markup here; the
+     template-generated ones go through actAttr() and are covered in the browser run. */
+  const fs = require('fs'), path = require('path');
+  const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+  const names = [...html.matchAll(/data-act="([A-Za-z_$][\w$]*)"/g)].map(m=>m[1]);
+  const missing = [...new Set(names)].filter(n => typeof ctx[n] !== 'function' && typeof A[n] !== 'function');
+  assert(!missing.length, 'actions with no function: ' + missing.join(', '));
+  return new Set(names).size + ' distinct actions, all resolvable';
+});
+check('every declared argument list is valid JSON', ()=>{
+  const fs = require('fs'), path = require('path');
+  const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+  const bad = [];
+  [...html.matchAll(/data-args="([^"]*)"/g)].forEach(m=>{
+    const raw = m[1].replace(/&quot;/g, '"').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
+    try { const v = JSON.parse(raw); if (!Array.isArray(v)) bad.push(raw); }
+    catch (e){ bad.push(raw); }
+  });
+  assert(!bad.length, bad.length + ' unparseable: ' + bad.slice(0,3).join(' | '));
+  return 'all parse';
 });
 
 group('Archetype coverage');

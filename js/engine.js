@@ -4299,6 +4299,16 @@ const escHTML = (v) => String(v==null?"":v)
 // for JS FIRST — the browser HTML-decodes the attribute before parsing it as JS, so
 // escaping in the other order turns O'Brien into a syntax error.
 const escAttr = (v) => escHTML(String(v==null?"":v).replace(/\\/g, "\\\\").replace(/'/g, "\\'"));
+/* Builds the declarative-action attributes for a template. JSON first (so a trait id
+   stays a number and an apostrophe in a section title stays an apostrophe), then
+   attribute escaping — in that order, because the reverse produces an attribute that
+   parses as HTML and then fails as JSON, which is exactly the bug an inline handler
+   containing "The one thing that doesn't fit" would have had. */
+function actAttr(events, action, ...args){
+  const json = JSON.stringify(args)
+    .replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return `data-on="${events}" data-act="${action}" data-args="${json}"`;
+}
 
 function refreshConstraintChips(){
   const box = document.getElementById('constraintChips');
@@ -4311,15 +4321,15 @@ function refreshConstraintChips(){
   const catSize = c => (TRAITS_BY_KEY.get((SECTION_OF_CATEGORY.get(c) || "") + "||" + c) || []).length;
   const secSize = sec => (catsOf(sec) || []).reduce((n,c)=> n + catSize(c), 0);
   const cost = n => n ? ` <span class="chipCost">(${n} trait${n===1?'':'s'})</span>` : ``;
-  bannedSections.forEach(sec=> h += `<span class="chip chip-ban">never (section): ${escHTML(sec)}${cost(secSize(sec))} <b onclick="removeBan('section','${escAttr(sec)}')" title="Remove">&times;</b></span>`);
-  bannedCategories.forEach(c=> h += `<span class="chip chip-ban">never: ${escHTML(c)}${cost(catSize(c))} <b onclick="removeBan('cat','${escAttr(c)}')" title="Remove">&times;</b></span>`);
-  categoryTiers.forEach((tier,c)=> h += `<span class="chip ${tierMultiplier(c)>1?'chip-req':'chip-tier'}">${escHTML(tierLabel(tier))}: ${escHTML(c)} <b onclick="removeTier('${escAttr(c)}')" title="Remove">&times;</b></span>`);
-  requiredCategories.forEach(c=> h += `<span class="chip chip-req">at least one: ${escHTML(c)} <b onclick="removeRequiredCategory('${escAttr(c)}')" title="Remove">&times;</b></span>`);
-  bannedTraitIds.forEach(id=>{ const t=byId.get(id); if(t) h += `<span class="chip chip-ban">never: ${escHTML(t.trait)} <b onclick="removeBan('trait','${id}')" title="Remove">&times;</b></span>`; });
-  requiredTraitIds.forEach(id=>{ const t=byId.get(id); if(t) h += `<span class="chip chip-req">always: ${escHTML(t.trait)} <b onclick="removeReq('${id}')" title="Remove">&times;</b></span>`; });
+  bannedSections.forEach(sec=> h += `<span class="chip chip-ban">never (section): ${escHTML(sec)}${cost(secSize(sec))} <b ${actAttr('click', 'removeBan', "section", sec)} title="Remove">&times;</b></span>`);
+  bannedCategories.forEach(c=> h += `<span class="chip chip-ban">never: ${escHTML(c)}${cost(catSize(c))} <b ${actAttr('click', 'removeBan', "cat", c)} title="Remove">&times;</b></span>`);
+  categoryTiers.forEach((tier,c)=> h += `<span class="chip ${tierMultiplier(c)>1?'chip-req':'chip-tier'}">${escHTML(tierLabel(tier))}: ${escHTML(c)} <b ${actAttr('click', 'removeTier', c)} title="Remove">&times;</b></span>`);
+  requiredCategories.forEach(c=> h += `<span class="chip chip-req">at least one: ${escHTML(c)} <b ${actAttr('click', 'removeRequiredCategory', c)} title="Remove">&times;</b></span>`);
+  bannedTraitIds.forEach(id=>{ const t=byId.get(id); if(t) h += `<span class="chip chip-ban">never: ${escHTML(t.trait)} <b ${actAttr('click', 'removeBan', "trait", "${id}")} title="Remove">&times;</b></span>`; });
+  requiredTraitIds.forEach(id=>{ const t=byId.get(id); if(t) h += `<span class="chip chip-req">always: ${escHTML(t.trait)} <b ${actAttr('click', 'removeReq', "${id}")} title="Remove">&times;</b></span>`; });
   exclusivePairs.forEach((pair,i)=>{
     const a = byId.get(pair[0]), b = byId.get(pair[1]);
-    if (a && b) h += `<span class="chip chip-tier">never together: ${escHTML(a.trait)} / ${escHTML(b.trait)} <b onclick="removeExclusivePair(${i})" title="Remove">&times;</b></span>`;
+    if (a && b) h += `<span class="chip chip-tier">never together: ${escHTML(a.trait)} / ${escHTML(b.trait)} <b ${actAttr('click', 'removeExclusivePair', i)} title="Remove">&times;</b></span>`;
   });
   box.innerHTML = h || '<span class="sub" style="margin:0;">No constraints active.</span>';
 }
