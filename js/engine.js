@@ -331,6 +331,15 @@ let PROFILE_POLARITY_STATS = null;
 // keyword match against the trait's own text instead of by category. Rules run in
 // order and merge (a trait can match several); anything matching nothing stays
 // untagged exactly as before, so this is purely additive.
+/* Roughly half this section's entries are written hyphenated — "Fear-of-becoming-a-
+   burden", "'My-worth-is-conditional'" — and every rule below is written in prose, so a
+   rule reading /becoming a burden/ silently never matched the trait it was written for.
+   That is most of why 128 entries came back untagged despite 33 rules covering
+   apparently all of the ground. Normalise the separators once, here, for both the
+   polarity pass and the cross-link pass. */
+function motivationText(t){
+  return (t.trait + " " + t.desc).toLowerCase().replace(/[-_\u2010-\u2015]+/g, " ");
+}
 const MOTIVATION_POLARITY_RULES = [
   [/vengeance|suffer a specific consequence|specific person to suffer/i, {agr:-1, rebel:1}],
   [/\bsafety\b|nothing can reach them|structure and control|losing control|losing agency|\bchaos\b/i, {disc:1}],
@@ -395,7 +404,7 @@ const MOTIVATION_POLARITY_RULES = [
   TRAITS.forEach(t=>{
     if (t.section !== "Motivation & Wound") return;
     if (!t.pol || Object.keys(t.pol).length > 0) return; // never clobber existing tags
-    const text = (t.trait + " " + t.desc).toLowerCase();
+    const text = motivationText(t);
     const acc = {};
     MOTIVATION_POLARITY_RULES.forEach(([re, tags])=>{ if (re.test(text)) Object.assign(acc, tags); });
     if (Object.keys(acc).length) Object.assign(t.pol, acc);
@@ -1475,6 +1484,186 @@ function _explainPickInner(slotId, s){
    while leaving room for a neutral roll to land somewhere the cascade didn't choose. */
 const CROSSLINK_STRENGTH = 0.45;
 
+/* ================= MOTIVATION & WOUND — THE CROSS-LINKS IT NEVER HAD ==========
+   The section the sheet leads with, that draws on every character, that supplies the
+   pressure trigger, participated in the weight matrix in NEITHER direction: not one of
+   its seven categories was a WEIGHT_MATRIX target, none had a DEPTH_TO_PERSONALITY
+   entry, and it was excluded from WILDCARD_SECTIONS and PRESSURE_SHIFT_SECTIONS. Its
+   entire outbound influence was one hardcoded link, wound intensity -> Distinguishing
+   Marks target.
+
+   The reason is real but it is an implementation constraint, not a design decision:
+   Motivation is drawAll:true, so it never resolves to a single category the cross-link
+   table can key on. A wound of "Betrayed by kin" should pull Attachment toward Avoidant
+   and Values toward Loyalty-Bound, and there was no mechanism by which it could.
+
+   So key on the drawn TRAIT rather than on the category. The signal is already being
+   extracted — MOTIVATION_POLARITY_RULES reads exactly these keywords off the same text
+   to derive polarity — it simply had nowhere to go afterwards. Same fragment-map
+   contract accumulateBoost already speaks, so everything downstream (bans, tiers,
+   coherence scoring, the why-this-category explanations) works unchanged.
+
+   Scaled by CROSSLINK_STRENGTH like every other resolved-fact link, for the reason
+   given there: a wound should colour what follows, not decide it. */
+const MOTIVATION_CROSSLINKS = [
+  [/betray|broken promise|exploited|deceived|trust.{0,15}wrong|blame|took the fall/i,
+   {attachment:{"Avoidant":TIER_MODERATE,"Disorganized":TIER_WEAK}, values:{"Loyalty-Bound":TIER_STRONG},
+    role:{"Skeptic":TIER_MODERATE}, stress:{"Fight":TIER_WEAK}}],
+  [/abandon|left behind|replaced|nobody stays|losing the last one|empty rooms|permanently alone/i,
+   {attachment:{"Anxious":TIER_STRONG}, role:{"Connector":TIER_MODERATE}, humor:{"Self-Deprecating":TIER_WEAK}}],
+  [/intimacy|dependence|needing anyone|genuinely known|being known/i,
+   {attachment:{"Avoidant":TIER_STRONG}, humor:{"Dry & Deadpan":TIER_MODERATE},
+    manner:{"Social & Boundary Mannerisms":TIER_WEAK}}],
+  [/humiliat|brought low|named.unworthy|declared unfit|shamed|publicly/i,
+   {stress:{"Fight":TIER_MODERATE,"Flight":TIER_WEAK}, role:{"Outsider":TIER_MODERATE},
+    vocab:{"Register & Formality Spectrum":TIER_WEAK}}],
+  [/\bpower\b|leverage|control prevents|only safety|real strength means no help|powerless/i,
+   {role:{"Leader":TIER_STRONG}, stress:{"Fight":TIER_MODERATE}, values:{"Self-Interested":TIER_WEAK},
+    grammar:{"Turn-Taking Grammar":TIER_MODERATE}}],
+  [/\bsafety\b|structure and control|losing control|nothing can reach them|\bchaos\b/i,
+   {vices:{"Compulsion & Ritual":TIER_STRONG,"Restraint & Discipline":TIER_MODERATE},
+    values:{"Rigid & Principled":TIER_MODERATE}}],
+  [/\bfreedom\b|answerable to nobody|independence|no masters|rigged|effort is pointless/i,
+   {role:{"Outsider":TIER_MODERATE}, vices:{"Risk & Escape":TIER_STRONG},
+    humor:{"Absurd & Chaotic":TIER_WEAK}}],
+  [/\btruth\b|fair hearing|actually happened|being.believed|honesty|being wrong/i,
+   {values:{"Rigid & Principled":TIER_STRONG}, vocab:{"Directness & Literalness":TIER_MODERATE},
+    role:{"Skeptic":TIER_MODERATE}}],
+  [/recognition|\blegacy\b|vindicat|proving.wrong|place in history|insignifican|leaving no trace|being ordinary|forgotten/i,
+   {role:{"Leader":TIER_MODERATE}, values:{"Idealistic & Visionary":TIER_MODERATE},
+    vocab:{"Semantic Density & Modifiers":TIER_WEAK}}],
+  [/belonging|reunion|community.standing|restored.family|quiet.partnership|place where they/i,
+   {role:{"Connector":TIER_STRONG,"Caretaker":TIER_MODERATE}, attachment:{"Secure":TIER_WEAK},
+    humor:{"Warm & Playful":TIER_MODERATE}}],
+  [/redemption|amends|clean conscience|balance a debt|forgive|undoing.a.mistake|fix one past error/i,
+   {values:{"Rigid & Principled":TIER_MODERATE}, role:{"Caretaker":TIER_MODERATE},
+    stress:{"Fawn":TIER_WEAK}}],
+  [/conditional love|only.worth|must be useful|worth is conditional|becoming a burden|\bowe\b|service/i,
+   {stress:{"Fawn":TIER_STRONG}, role:{"Caretaker":TIER_STRONG}, attachment:{"Anxious":TIER_MODERATE}}],
+  [/hide what.{0,15}feel|silence is strength|showing feeling|exposure|\bfraud\b|specific vulnerability/i,
+   {humor:{"Dry & Deadpan":TIER_MODERATE}, attachment:{"Avoidant":TIER_MODERATE},
+    stress:{"Freeze":TIER_WEAK}, grammar:{"Spoken Compression":TIER_WEAK}}],
+  [/\bperfect\b|no mistakes|flawlessness|mastery|undeniably excellent|best at|proving.capability/i,
+   {vices:{"Restraint & Discipline":TIER_STRONG}, values:{"Rigid & Principled":TIER_MODERATE},
+    vocab:{"Precision & Specificity Level":TIER_MODERATE}}],
+  [/failed to save|couldn't stop it|survived what others|alive by accident|harmed by a protector/i,
+   {stress:{"Freeze":TIER_MODERATE}, attachment:{"Disorganized":TIER_MODERATE},
+    vices:{"Substance & Consumption":TIER_WEAK}, humor:{"Humorless & Absent":TIER_WEAK}}],
+  [/\bescape\b|isolat|genuinely alone|apart from|silence keeps|exiled|cast out/i,
+   {role:{"Outsider":TIER_STRONG}, stress:{"Flight":TIER_MODERATE},
+    vices:{"Avoidance & Procrastination":TIER_WEAK}}],
+  [/stagnation|irrelevance|outliving|no longer need|lost faith|belief system collapsed/i,
+   {humor:{"Humorless & Absent":TIER_MODERATE}, values:{"Pragmatic & Flexible":TIER_WEAK},
+    role:{"Skeptic":TIER_WEAK}}],
+  [/becoming.{0,15}them\b|repeat.*history|repeating on them|becoming their parent/i,
+   {vices:{"Restraint & Discipline":TIER_MODERATE}, attachment:{"Disorganized":TIER_WEAK},
+    stress:{"Freeze":TIER_WEAK}}],
+  [/\bcomfort\b|end to struggle|quiet ending|simple.normalcy|mild preference/i,
+   {role:{"Peacemaker":TIER_MODERATE}, vices:{"Avoidance & Procrastination":TIER_MODERATE},
+    humor:{"Warm & Playful":TIER_WEAK}}],
+  [/vengeance|suffer a specific consequence|specific person to suffer/i,
+   {humor:{"Cruel & Barbed":TIER_STRONG}, stress:{"Fight":TIER_STRONG}, values:{"Loyalty-Bound":TIER_WEAK}}],
+  [/protection of another|kept safe above|justice for another|harming others|what they might do/i,
+   {role:{"Caretaker":TIER_STRONG}, values:{"Loyalty-Bound":TIER_MODERATE},
+    stress:{"Fight":TIER_WEAK}}],
+  /* Second block, written against the entries the first still missed. Between them these
+     now reach a bit over half the section; the remainder are the intensity-scale entries
+     ("A small old hurt", "A defining, unhealed wound") which say how much rather than
+     what, and correctly pull nothing. */
+  [/restoration|put back something|taken or broken|home destroyed|place that defined them/i,
+   {values:{"Loyalty-Bound":TIER_MODERATE}, role:{"Caretaker":TIER_WEAK},
+    vices:{"Compulsion & Ritual":TIER_WEAK}}],
+  [/purpose|mean something specific|worthy death|being chosen|selected, not merely tolerated/i,
+   {values:{"Idealistic & Visionary":TIER_STRONG}, role:{"Leader":TIER_WEAK}}],
+  [/fear of loss|losing what they've built|fear of failure|falling short|public failure|failing where everyone/i,
+   {vices:{"Restraint & Discipline":TIER_MODERATE}, stress:{"Freeze":TIER_WEAK},
+    attachment:{"Anxious":TIER_WEAK}}],
+  [/chronically overlooked|grew up invisible|silenced when it mattered|prevented from speaking/i,
+   {role:{"Outsider":TIER_MODERATE}, grammar:{"Turn Taking Grammar":TIER_WEAK},
+    humor:{"Dry & Deadpan":TIER_WEAK}}],
+  [/poverty|formative deprivation|financial independence|earn rest|paid for with excessive labor/i,
+   {vices:{"Restraint & Discipline":TIER_STRONG}, values:{"Pragmatic & Flexible":TIER_MODERATE}}],
+  [/talent squandered|was capable and was prevented|wasted potential/i,
+   {humor:{"Cruel & Barbed":TIER_WEAK}, role:{"Skeptic":TIER_MODERATE},
+    values:{"Idealistic & Visionary":TIER_WEAK}}],
+  [/ruin what i touch|inherently destructive|ruin good things by wanting|desire itself/i,
+   {attachment:{"Avoidant":TIER_MODERATE}, vices:{"Avoidance & Procrastination":TIER_MODERATE},
+    humor:{"Self-Deprecating":TIER_MODERATE}}],
+  [/don't deserve good things|happiness is for other people|my fault|caused a harm they didn't/i,
+   {humor:{"Self-Deprecating":TIER_STRONG}, stress:{"Fawn":TIER_MODERATE}}],
+  [/unlovable|affection shown to them is a mistake|love always has a price|never freely given|only transacted/i,
+   {attachment:{"Avoidant":TIER_MODERATE,"Anxious":TIER_MODERATE}, values:{"Self-Interested":TIER_WEAK}}],
+  [/must not want|desire itself is dangerous|quiet ending|final chapter to be peaceful/i,
+   {vices:{"Restraint & Discipline":TIER_MODERATE}, role:{"Peacemaker":TIER_MODERATE}}],
+  [/disappointing a mentor|letting down the one person|promise broken by them|broke a vow|never forgave themselves/i,
+   {values:{"Rigid & Principled":TIER_MODERATE}, stress:{"Fawn":TIER_WEAK},
+    attachment:{"Anxious":TIER_WEAK}}],
+  [/survived what took someone|took someone they loved instead|childhood cut short|adult responsibility far too young/i,
+   {role:{"Caretaker":TIER_STRONG}, stress:{"Freeze":TIER_WEAK}, humor:{"Humorless & Absent":TIER_WEAK}}],
+  [/loved someone who couldn't love back|incapable of returning it/i,
+   {attachment:{"Anxious":TIER_STRONG}, humor:{"Self-Deprecating":TIER_MODERATE}}],
+  [/my anger protects|rage is what keeps loved ones safe|kindness is a weakness|gentleness inevitably gets used/i,
+   {stress:{"Fight":TIER_STRONG}, humor:{"Cruel & Barbed":TIER_MODERATE}, values:{"Loyalty-Bound":TIER_MODERATE}}],
+  [/nobody actually changes|people are fixed|improvement is an illusion|fundamentally different from others|outside normal human connection/i,
+   {role:{"Outsider":TIER_STRONG,"Skeptic":TIER_MODERATE}, humor:{"Humorless & Absent":TIER_WEAK}}],
+];
+
+/* Reads the cross-link fragments off whatever Motivation traits a build has seated.
+   Returns the same {kind -> Map(fragment -> weight)} shape accumulateBoost builds, so
+   the two merge without either knowing about the other. */
+function motivationCrosslinkMap(motivationTraits){
+  const out = {};
+  if (!motivationTraits || !motivationTraits.length) return out;
+  const seen = new Set();
+  let peak = 0;
+  motivationTraits.forEach(t=>{
+    if (!t) return;
+    const text = motivationText(t);
+    /* A life-defining wound should pull harder than a small old hurt. The intensity is
+       already on the trait and said nothing to anything outside its own card. */
+    const weight = clamp((t.intensity || 3) / 3, 0.4, 1.6);
+    MOTIVATION_CROSSLINKS.forEach(([re, kinds], ruleIdx)=>{
+      if (!re.test(text)) return;
+      /* A rule fires once per build however many of the seven categories match it.
+         Without this, a character whose Want, Fear, Wound AND Lie all circle the same
+         theme — which is exactly what a coherent character looks like — would apply the
+         same link four times over and swamp everything else on the sheet. */
+      if (seen.has(ruleIdx)) return;
+      seen.add(ruleIdx);
+      Object.entries(kinds).forEach(([kind, frags])=>{
+        if (!out[kind]) out[kind] = new Map();
+        const m = out[kind];
+        Object.entries(frags).forEach(([frag, w])=>{
+          const v = (m.get(frag) || 0) + w * weight;
+          m.set(frag, v);
+          if (v > peak) peak = v;
+        });
+      });
+    });
+  });
+  /* ONE VOTE, NOT EIGHT. Motivation draws a trait from every one of its seven
+     categories on every sheet, so several different rules fire on a single build as a
+     matter of course — and unscaled that made this section the loudest voice on a
+     neutral sheet, which is precisely the bug CROSSLINK_STRENGTH was introduced to fix
+     for the resolved-category links (measured here as Leader taking 28% of a seven-way
+     Social Role split with every slider centred).
+
+     The section is entitled to a strong pull, not to an unbounded one. Normalise the
+     whole map so its single loudest fragment lands at exactly the strength of one
+     STRONG cross-link; the relative shape of what the wound is pointing at survives
+     intact, and it can no longer outvote the rest of the sheet by sheer arithmetic. */
+  if (peak > 0){
+    const scale = (TIER_STRONG * CROSSLINK_STRENGTH) / peak;
+    Object.values(out).forEach(m => m.forEach((w, frag)=> m.set(frag, w * scale)));
+  }
+  return out;
+}
+
+// Set for the duration of one build, once the Motivation traits are drawn, so every
+// later accumulateBoost call in that build can see them. Cleared per build.
+let CURRENT_MOTIVATION_LINKS = {};
+function setMotivationLinks(map){ CURRENT_MOTIVATION_LINKS = map || {}; }
+
 function accumulateBoost(kind, profileCats, overrides){
   const m = new Map();
   const add = (frag, s) => { if(!frag || s<=0) return; m.set(frag, (m.get(frag)||0) + s); };
@@ -1512,6 +1701,10 @@ function accumulateBoost(kind, profileCats, overrides){
       Object.entries(kindMap).forEach(([frag,w]) => add(frag, w * CROSSLINK_STRENGTH));
     });
   }
+  // Motivation & Wound's contribution, keyed on the drawn traits' own keywords rather
+  // than on a resolved category it does not have. See MOTIVATION_CROSSLINKS above.
+  const motiv = CURRENT_MOTIVATION_LINKS[kind];
+  if (motiv) motiv.forEach((w, frag)=> add(frag, w));
   return m;
 }
 // Converts a fragment->strength map into a real category->weight map via substring match.
@@ -2461,7 +2654,11 @@ function profileTarget(sectionId){
   return targetFromMag(v);
 }
 
-function pickProfileSlots(rarityPref, resolvedCats){
+/* onlySectionId / skipSectionId let the caller split this into two passes. That exists
+   so Motivation & Wound can be drawn BEFORE the sections its keywords are meant to
+   influence: it is drawAll, so it needs no resolved category and can go first, and its
+   cross-links are then live for everything that follows. See MOTIVATION_CROSSLINKS. */
+function pickProfileSlots(rarityPref, resolvedCats, onlySectionId, skipSectionId){
   const out = {};
   const depthEl = document.getElementById('profileDepth');
   const want = intVal(depthEl, 1);
@@ -2475,7 +2672,10 @@ function pickProfileSlots(rarityPref, resolvedCats){
     out[id] = Object.assign({slotId:id, locked:false, label, sectionId, target:tgt, trait}, extra || {});
   };
 
-  PROFILE_SECTIONS.forEach(ps=>{
+  const sections = onlySectionId
+    ? PROFILE_SECTIONS.filter(ps=>ps.id === onlySectionId)
+    : PROFILE_SECTIONS.filter(ps=>ps.id !== skipSectionId);
+  sections.forEach(ps=>{
     const tog = document.getElementById('sec_'+ps.id);
     if (tog && !tog.checked) return;
     const target = profileTarget(ps.id);
@@ -3119,6 +3319,15 @@ const DEPTH_TO_PERSONALITY = {
 function deriveDepthCategories(){
   // Resolve profile types with NO personality influence — pure roll / manual choice.
   const chosen = {};
+  /* Motivation & Wound resolves first here for the same reason it draws first in
+     buildCharacterState: it is drawAll, so it needs nothing resolved, and going first is
+     what lets its cross-links reach the six sections that follow. Without this,
+     depth-first mode derived nothing from the section the sheet leads with. */
+  setMotivationLinks(null);
+  const motivDepth = pickProfileSlots('balanced', null, MOTIVATION_SECTION_ID);
+  const motivTraits = Object.values(motivDepth).map(s0=>s0 && s0.trait).filter(Boolean);
+  setMotivationLinks(motivationCrosslinkMap(motivTraits));
+  lastDepthMotivation = motivTraits;
   PROFILE_SECTIONS.forEach(ps=>{
     if (ps.drawAll) return;
     const tog = document.getElementById('sec_'+ps.id);
@@ -3141,6 +3350,25 @@ function ZERO_PERSONALITY(){
   VOICE_AXES.forEach(a=>o[a.id]=0);
   return o;
 }
+/* Set by deriveDepthCategories so personalityFromDepth can see the wound it just drew.
+   Motivation is drawAll, so a category-keyed DEPTH_TO_PERSONALITY entry would apply
+   identically to every character ever generated and say nothing — the signal is in
+   WHICH trait was drawn, not which category it came from. */
+let lastDepthMotivation = [];
+/* Each Motivation category still gets a DEPTH_TO_PERSONALITY entry, because the section
+   IS a statement about a person even before you know which trait: someone with a
+   foregrounded wound and a named defence is, on average, more guarded and more driven
+   than someone without. Kept deliberately small — these apply to every character, so
+   they set a floor, and the trait-level derivation below is what actually varies. */
+Object.assign(DEPTH_TO_PERSONALITY, {
+  "Core Wound (the old injury)":{emotionalcapacity:-15, confidence:-10},
+  "The Defence (what they built on top)":{emotionalcapacity:-20, discipline:15},
+  "The Need (what would actually help)":{emotionalcapacity:20},
+  "The Ghost (who or what it's attached to)":{emotionalcapacity:15, positivity:-10},
+  "Core Fear (what they flee)":{confidence:-15},
+  "Core Want (conscious goal)":{discipline:15, curiosity:10},
+  "The Lie They Believe":{honesty:-10, positivity:-15},
+});
 function personalityFromDepth(chosen){
   const acc = {}; const counts = {};
   Object.values(chosen).forEach(cat=>{
@@ -3148,6 +3376,22 @@ function personalityFromDepth(chosen){
     if (!map) return;
     Object.entries(map).forEach(([axis,val])=>{
       acc[axis] = (acc[axis]||0) + val; counts[axis] = (counts[axis]||0)+1;
+    });
+  });
+  /* And the part that varies: the drawn wound's own polarity, read through the same
+     AXIS_TO_POLCODE mapping everything else uses, so a wound of "Betrayed by kin" and
+     one of "Chronically overlooked" derive different people rather than the same
+     average. Scaled well below a resolved category's contribution — a single trait
+     should colour the derived personality, not define it. */
+  const polToAxis = {};
+  Object.entries(AXIS_TO_POLCODE).forEach(([axisId, code])=> polToAxis[code] = axisId);
+  lastDepthMotivation.forEach(t=>{
+    const weight = clamp((t.intensity || 3) / 3, 0.4, 1.6);
+    Object.entries(t.pol || {}).forEach(([code, v])=>{
+      const axisId = polToAxis[code];
+      if (!axisId || !v) return;
+      acc[axisId] = (acc[axisId] || 0) + v * 22 * weight;
+      counts[axisId] = (counts[axisId] || 0) + 1;
     });
   });
   const out = {};
@@ -3694,8 +3938,11 @@ function _drawUnique(fn, tries){
    unreachable. Motivation & Wound stays out: those seven categories are the character's
    own explanation of themselves, and an outlier there reads as an error rather than a
    contradiction. */
+/* Motivation & Wound was left out, so the one slot in the app whose job is to be out
+   of character could never be an out-of-character FACT — only an out-of-character
+   habit. "The one thing that doesn't fit" about a person is very often what they want. */
 const WILDCARD_SECTIONS = ["Personality Traits","Mannerisms","Vocabulary Traits","Habits & Vices","Humor Style","Verbosity Traits","Dialogue Grammar Traits",
-  "Conflict & Stress Response","Social Role in a Group","Values & Moral Line","Attachment & Intimacy Style"];
+  "Conflict & Stress Response","Social Role in a Group","Values & Moral Line","Attachment & Intimacy Style","Motivation & Wound"];
 function wildcardCount(){
   if (!wildcardEnabled()) return 0;
   const el = document.getElementById('wildcardCount');
@@ -3729,8 +3976,10 @@ function wildcardEnabled(){
   return el ? !!el.checked : false;
 }
 
+const MOTIVATION_SECTION_ID = "motivation";
 function buildCharacterState(opts){
   _buildUsedIds = new Set();
+  setMotivationLinks(null);
   // One resolved read each per build rather than one per draw.
   invalidateSliderCache();
   _avoidRecentActive = avoidRecentEnabled();
@@ -3748,6 +3997,17 @@ function buildCharacterState(opts){
     composure: Math.round(clamp(compLevel,-2,2)*50),
   });
   setAffinityVec(fullOverrides);
+  /* Motivation & Wound genuinely goes first now, rather than nominally. It is drawAll,
+     so it needs nothing resolved to draw, and drawing it up front is what lets its
+     keywords reach resolveProfileCategories — which is where Stress, Role, Values,
+     Attachment, Humor and Vices are actually decided. Previously that call ran before
+     a single motivation trait existed, which is the mechanical reason the section could
+     influence nothing: not that the link table lacked entries, but that by the time it
+     had anything to say, every category it might have spoken to was already chosen. */
+  setMotivationLinks(null);
+  const motivationSlots = pickProfileSlots(rarityPref, null, MOTIVATION_SECTION_ID);
+  setMotivationLinks(motivationCrosslinkMap(
+    Object.values(motivationSlots).map(s0=>s0 && s0.trait).filter(Boolean)));
   // Decide WHO they are first (motivation-adjacent facts), then let that inform HOW they speak.
   const resolvedCats = resolveProfileCategories(rarityPref, fullOverrides, forcedProfileCats);
   // Group toggles: users generating only one kind of content (just a voice, just a
@@ -3792,7 +4052,8 @@ function buildCharacterState(opts){
     })));
   const obj = {}; slots.forEach(s => { if (s && s.slotId) obj[s.slotId] = s; });
   if (on('genPersonality')) Object.assign(obj, pickPersonalitySlots(rarityPref, fullOverrides));
-  Object.assign(obj, pickProfileSlots(rarityPref, resolvedCats));
+  Object.assign(obj, motivationSlots);
+  Object.assign(obj, pickProfileSlots(rarityPref, resolvedCats, null, MOTIVATION_SECTION_ID));
   // Appearance draws last on purpose: it now reads the Motivation slots this build
   // just seated (see the wound → distinguishing-marks link) and the resolved vice.
   if (on('genAppearance')) Object.assign(obj, pickAppearanceSlots(rarityPref, fullOverrides, resolvedCats, obj));
@@ -3808,7 +4069,10 @@ function buildCharacterState(opts){
 // went badly — it's the fixed thing the rest is reacting to. Humor and Vices are
 // excluded because their pressure behaviour is already covered by the mannerism and
 // grammar shifts (a vice under stress is a scene, not a different vice).
-const PRESSURE_SHIFT_SECTIONS = ["role", "values", "attachment"];
+/* Motivation & Wound was excluded from the pressure pass, which is odd on its face:
+   it supplies the pressure trigger. Under load a wound does not change, but which of
+   its facets is in the foreground very much does. */
+const PRESSURE_SHIFT_SECTIONS = ["role", "values", "attachment", "motivation"];
 
 /* How much pressure. The sheet used to be binary — calm, or maximum stress — which
    is the least interesting question you can ask about someone under load, and the

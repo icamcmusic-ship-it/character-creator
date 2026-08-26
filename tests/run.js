@@ -46,6 +46,8 @@ const ctx = loadEngine([
   'axisProfile','analyseRelationship','checkEnsembleBalance','randomAxisLevel','secondOrderTensions',
   'suggestVoiceFromPersonality','intensityWord','axisPoleWord','voiceSliderWord','assertAxisTables',
   'strVal','boolVal','rarityPrefVal','ARCHETYPES','sheetToText','sheetToHTML','quantile','emptySlot',
+  'MOTIVATION_CROSSLINKS','motivationCrosslinkMap','motivationText','setMotivationLinks','resolveProfileCategories',
+  'WILDCARD_SECTIONS','PRESSURE_SHIFT_SECTIONS','DEPTH_TO_PERSONALITY','clearContextBias',
 ]);
 const A = ctx.api;
 const T = A.TRAITS;
@@ -552,7 +554,12 @@ check('every context rule names categories that exist', ()=>{
     r.bias.forEach((_, cat)=>{ if (!known.has(cat)) bad.push(cat); });
   });
   assert(!bad.length, 'unknown categories in context rules: ' + [...new Set(bad)].join(', '));
-});
+});/* buildContextBias sets module-level CONTEXT_BIAS / CONTEXT_AXIS_NUDGE as a side
+   effect, and nothing in this group put them back — so every check after it ran against
+   a character quietly conditioned as a 34-year-old dockside smuggler. Nothing measured
+   a distribution, so nothing noticed for as long as that was true. */
+ctx.evalIn('clearContextBias()');
+
 
 group('Coverage invariants');
 // Each of these encodes a bug that shipped: a silently-unmapped axis, a target the
@@ -708,6 +715,28 @@ check('at neutral sliders no profile category dominates its section', ()=>{
      intermittently on noise and telling nobody anything when it did. Measured over
      1,500 characters the real shares sit at 10-18% against a 14% uniform, comfortably
      inside the band; the seed makes that reproducible rather than probable. */
+  /* Reset the workspace first. Earlier checks deliberately leave sliders, per-section
+     profile weights and constraint sets dirty to prove they round-trip, and this check
+     is specifically about what happens when NOTHING is set — so inheriting their state
+     measures something other than what it claims to. */
+  /* clearContextBias in particular: the Context conditioning group above sets a live
+     age/occupation bias and never clears it, so every check after it was silently
+     generating conditioned characters. Harmless while nothing measured a distribution,
+     and it moved Social Role's Leader share from 14% to 28% the moment something did. */
+  ctx.evalIn("clearContextBias();" +
+             "bannedCategories.clear(); bannedSections.clear(); bannedTraitIds.clear();" +
+             "requiredTraitIds.length = 0; requiredCategories.length = 0; exclusivePairs.length = 0;" +
+             "categoryTiers.clear(); clearBudgets(); forgetRecentTraits(); forgetSlotDraws();");
+  ['verbositySlider','registerSlider','composureSlider','profileWeight','rangeFocus','affinityBoost']
+    .forEach(id=> ctx.document._set(id, {value:''}));
+  A.PERSONALITY_AXES.forEach(a=> ctx.document._set('pers_'+a.id, {value:'0'}));
+  A.PROFILE_SECTIONS.forEach(ps=>{
+    ctx.document._set('sec_'+ps.id, {checked:true});
+    ctx.document._set('pw_'+ps.id, {value:'', tagName:'SELECT', options:[{value:''}]});
+    ctx.document._set('type_'+ps.id, {value:'', tagName:'SELECT', options:[{value:''}]});
+  });
+  ctx.evalIn('invalidateSliderCache()');
+
   const N = 1200;
   const counts = {};
   const _rnd = Math.random;
@@ -1063,6 +1092,70 @@ check('the readout word helpers cover their whole input range', ()=>{
   return 'no gaps';
 });
 
+group('Motivation & Wound is wired in');
+/* The section the sheet leads with, that draws on every character, and that supplies
+   the pressure trigger, participated in the weight matrix in NEITHER direction: not one
+   of its seven categories was a WEIGHT_MATRIX target, none had a DEPTH_TO_PERSONALITY
+   entry, and it was excluded from WILDCARD_SECTIONS and PRESSURE_SHIFT_SECTIONS. Its
+   whole outbound influence was one hardcoded link to the Distinguishing Marks target. */
+check('a wound actually moves the categories downstream of it', ()=>{
+  const measure = (text) => {
+    const counts = {attachment:{}, values:{}, role:{}};
+    const fake = text ? [{trait:text, desc:text, intensity:4}] : [];
+    const _r = Math.random; Math.random = A.mulberry32(0x50117d);
+    try {
+      for (let i = 0; i < 600; i++){
+        A.setMotivationLinks(A.motivationCrosslinkMap(fake));
+        const cats = A.resolveProfileCategories('balanced', {}, null);
+        Object.keys(counts).forEach(k=>{ if (cats[k]) counts[k][cats[k]] = (counts[k][cats[k]]||0)+1; });
+      }
+    } finally { Math.random = _r; A.setMotivationLinks(null); }
+    return counts;
+  };
+  const share = (c, sec, cat) => (c[sec][cat] || 0) / 600;
+  const base = measure('');
+  const betrayed = measure('Betrayed by kin — a broken promise from the people who were meant to be safe');
+  const abandoned = measure('Fear of abandonment — terrified of being left behind and permanently alone');
+  const moves = [];
+  // The report's own worked example: this wound should pull Attachment toward Avoidant
+  // and Values toward Loyalty-Bound.
+  if (share(betrayed,'attachment','Avoidant') <= share(base,'attachment','Avoidant') * 1.2)
+    moves.push('betrayal did not pull Attachment toward Avoidant');
+  if (share(betrayed,'values','Loyalty-Bound') <= share(base,'values','Loyalty-Bound') * 1.3)
+    moves.push('betrayal did not pull Values toward Loyalty-Bound');
+  if (share(abandoned,'attachment','Anxious') <= share(base,'attachment','Anxious') * 1.3)
+    moves.push('abandonment did not pull Attachment toward Anxious');
+  // ...and it must NUDGE, not decide. A single wound taking a category past ~60% would
+  // mean the cross-link had become the whole character, which is the bug the
+  // CROSSLINK_STRENGTH scaling exists to prevent.
+  Object.entries(betrayed).forEach(([sec, m])=>
+    Object.entries(m).forEach(([cat, n])=>{ if (n/600 > 0.6) moves.push(`${sec}:${cat} took ${(100*n/600).toFixed(0)}% — deciding, not nudging`); }));
+  assert(!moves.length, moves.join('\n       '));
+  return `Avoidant ${(100*share(base,'attachment','Avoidant')).toFixed(0)}%→${(100*share(betrayed,'attachment','Avoidant')).toFixed(0)}%, ` +
+         `Loyalty-Bound ${(100*share(base,'values','Loyalty-Bound')).toFixed(0)}%→${(100*share(betrayed,'values','Loyalty-Bound')).toFixed(0)}%`;
+});
+check('the motivation keyword rules reach the section they are written for', ()=>{
+  /* Roughly half this section is written hyphenated ("Fear-of-becoming-a-burden") and
+     every rule is written in prose, so a rule reading /becoming a burden/ never once
+     matched the trait it was written for. */
+  const mt = T.filter(t=>t.section === 'Motivation & Wound');
+  const linked = mt.filter(t=> A.MOTIVATION_CROSSLINKS.some(([re])=> re.test(A.motivationText(t))));
+  const untagged = mt.filter(t=> !Object.keys(t.pol||{}).some(k=>t.pol[k]));
+  assert(linked.length / mt.length >= 0.35,
+    `only ${linked.length}/${mt.length} motivation traits match any cross-link rule`);
+  assert(untagged.length <= 90, `${untagged.length} motivation traits carry no polarity at all`);
+  return `${linked.length}/${mt.length} cross-linked, ${untagged.length} still untagged`;
+});
+check('Motivation & Wound reaches the systems it was excluded from', ()=>{
+  const gaps = [];
+  if (!A.WILDCARD_SECTIONS.includes('Motivation & Wound')) gaps.push('WILDCARD_SECTIONS');
+  if (!A.PRESSURE_SHIFT_SECTIONS.includes('motivation')) gaps.push('PRESSURE_SHIFT_SECTIONS');
+  const depth = A.catsOf('Motivation & Wound').filter(c => A.DEPTH_TO_PERSONALITY[c]);
+  if (!depth.length) gaps.push('DEPTH_TO_PERSONALITY');
+  assert(!gaps.length, 'still excluded from: ' + gaps.join(', '));
+  return `${depth.length}/${A.catsOf('Motivation & Wound').length} categories drive depth-first`;
+});
+
 group('Slot variety at default settings');
 /* The measurement that would have caught poolFloorTarget being inert. Its lift was a
    no-op on every pool it was written for — max(target, 0.55 + 0.35) never beat a target
@@ -1089,7 +1182,10 @@ check('the fixed-category slots draw from a real range', ()=>{
       m.set(s.trait.id, (m.get(s.trait.id) || 0) + 1);
     });
   }
-  A.forgetRecentTraits();
+  // This test runs 200 builds and would otherwise leave the recency window and the
+  // per-slot draw memory full for whatever runs next — which is enough to shift a
+  // later distribution check by several points. Reset both.
+  A.forgetRecentTraits(); A.forgetSlotDraws();
   // slot id -> the floor it must clear over N builds. Set below what the engine
   // currently achieves, so ordinary content churn doesn't trip it and a structural
   // regression does.
