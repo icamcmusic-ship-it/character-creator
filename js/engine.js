@@ -3310,6 +3310,10 @@ function explainWhyNot(trait){
   }
   const tierNote = categoryTiers.get(cat);
   if (tierNote === 'rarely') out.push(`You've set "${cat}" to <b>rarely</b> (×¼), so its whole category is being suppressed.`);
+  if (cat === AXES.circular.category && tierNote !== 'prefer'){
+    out.push(`"${cat}" is only reached through the high-volume branch of the Verbosity slider, as a minority of those draws. ` +
+             `Push <b>Verbosity</b> up, or set this category to <b>prefer</b> in Constraints to make it the likely outcome instead.`);
+  }
   // The band: the real, checkable reason most of the time.
   const [lo, hi] = traitBand(trait);
   const axis = PERSONALITY_AXES.find(a=>a.pos===cat || a.neg===cat || a.mid===cat);
@@ -3712,8 +3716,24 @@ function pickVerbositySlot(verbLevel, rarityPref){
        belongs on the high-volume branch — as a minority of it, because it is a
        narrower and more noticeable habit than plain wordiness. Rises with the slider:
        barely present at +0.12, about a third of high-volume draws at the top. */
-    const circularOdds = clamp((Math.abs(verbLevel) - 0.12) / 1.88, 0, 1) * 0.34;
-    const useCircular = Math.random() < circularOdds;
+    /* DIRECTLY REQUESTABLE. This branch was the ONLY path to Repetitive & Circular, and
+       it capped at 34% of high-volume draws — so a user who specifically wanted a
+       character who circles could not ask for one, only roll for one, and had to push
+       verbosity to the top to get even a third of a chance. Every other category in the
+       bank can be steered; this one could only be waited for.
+
+       The prefer/rarely tiers are the app's existing vocabulary for exactly this
+       request, so honour them here: 'prefer' makes circling the likely outcome of a
+       high-volume draw rather than the minority one, and 'rarely' takes it off the
+       table. Left as odds rather than a guarantee because it is still a narrower and
+       more noticeable habit than plain wordiness, and a sheet that circles every single
+       time is the caricature the whole rarity system exists to avoid. */
+    const circularTier = categoryTiers.get(AXES.circular.category);
+    const baseOdds = clamp((Math.abs(verbLevel) - 0.12) / 1.88, 0, 1) * 0.34;
+    const circularOdds = circularTier === 'rarely' ? 0
+                       : circularTier === 'prefer' ? clamp(0.55 + baseOdds, 0, 0.85)
+                       : baseOdds;
+    const useCircular = circularOdds > 0 && Math.random() < circularOdds;
     const ax = useCircular ? AXES.circular : AXES.verbosityHigh;
     const pool = byFilter(ax.section, ax.category);
     return mkSlot("verbosity", useCircular ? "Verbosity (circling, high-volume)" : "Verbosity (high-volume-leaning)",
