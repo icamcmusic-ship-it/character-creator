@@ -72,6 +72,12 @@ const DEFAULT_EXPORTS = [
   'PROFILE_SECTIONS','WEIGHT_MATRIX','traitPos','magFromPos','targetFromMag','targetFromLevel',
   'buildCharacterState','pickInRange','byFilter','catsOf','mulberry32','hashSeedString',
   'rollCharacterVariants','coherenceScore','checkConflictsFor','PRESENTATION_VARIANTS',
+  'RTIER_ORDER','RTIER_SCORE','rarityTier','withCharacterVariants','withSavedVariants',
+  'charVariants','VARIANT_ODDS','POL_COUNTS','polNormalise','poolFloorTarget','rangeSelect',
+  'rarityNorm','proximityWeights','profileTarget','applyBudgets','budgetCapacity',
+  'BUDGET_GROUPS','BUDGET_PRESETS','applyBudgetPreset','clearBudgets','rarityCaps',
+  'intensityCaps','getBudgetMode','setBudgetMode','getBudgetReport','getCharVariants',
+  'SECTION_OF_CATEGORY','forgetSlotDraws',
 ];
 
 module.exports = {loadEngine, makeDocument, ROOT, ENGINE_FILES};

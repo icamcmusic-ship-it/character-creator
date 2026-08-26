@@ -34,7 +34,7 @@ jobs:
       # activate-purge loop was a permanent no-op and returning users could hold stale
       # JS indefinitely. Stamp the commit SHA in at deploy time.
       - name: Stamp service worker cache version
-        run: sed -i "s/character-voice-v1/character-voice-${GITHUB_SHA::12}/" sw.js && grep -q "character-voice-${GITHUB_SHA::12}" sw.js
+        run: sed -i "s/^const BUILD_ID = 'dev';/const BUILD_ID = '${GITHUB_SHA::12}';/" sw.js && grep -q "const BUILD_ID = '${GITHUB_SHA::12}';" sw.js
       # Pages serves the repo root, so tests/, .github/ and LICENSE were all being
       # published alongside the app. .nojekyll stops Pages ignoring underscore-prefixed
       # paths.

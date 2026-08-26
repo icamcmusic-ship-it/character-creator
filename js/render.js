@@ -123,7 +123,7 @@ function bandHTML(t, slot){
   </div>`;
 }
 
-const RTIER_LABEL = {common:"common", distinctive:"distinctive", signature:"signature"};
+const RTIER_LABEL = {common:"common", uncommon:"uncommon", distinctive:"distinctive", signature:"signature"};
 
 function traitCardHTML(id, s, includeControls, showDiff, accent, tagLabel){
   // BUG FIX: several code paths could produce a slot with a null trait (an empty
@@ -156,18 +156,27 @@ function traitCardHTML(id, s, includeControls, showDiff, accent, tagLabel){
           <span class="intensityDots" title="Intensity ${t.intensity}/5 (continuous position ${traitPos(t).toFixed(2)})"><span aria-hidden="true">${intensityDots(t.intensity)}</span><span class="srOnly">intensity ${t.intensity} of 5</span></span>
           ${s.wildcard ? `<span class="wildBadge" title="Deliberately drawn against the grain — see 'the one thing that doesn't fit'">outlier</span>` : ``}
           ${s.derived ? `<span class="wildBadge" style="background:var(--emerald-deep);border-color:var(--emerald-deep);" title="Derived from this character's psychology rather than a slider">derived</span>` : ``}
+          ${s.budgeted ? `<span class="wildBadge budgetBadge" title="${escHTML(s.budgetWhy || 'Adjusted to fit a budget you set')}">budgeted</span>` : ``}
         </div>
         <div class="traitCat">${escHTML(t.category)}</div>
         <div class="traitDesc">${escHTML(t.desc)}</div>
         ${includeControls ? bandHTML(t, s) : ``}
         ${t.example ? `<div class="exampleLine">&ldquo;${escHTML(t.example)}&rdquo;</div>` : ``}
         ${includeControls ? freqBudgetHTML(t) : ``}
+        ${includeControls && traitNotes[id] ? `<div class="traitNote"><b>Note.</b> ${escHTML(traitNotes[id])} <button onclick="clearTraitNote('${escAttr(id)}')">remove</button></div>` : ``}
         ${diff ? `<div class="diffNote">↺ was: "${escHTML(diff.from)}" <button onclick="dismissDiff('${escAttr(id)}')">dismiss</button></div>` : ``}
         ${includeControls && whyOpen[id] ? `<div class="whyNote">${explainPick(id, s)}${(rerollExclusions[id]&&rerollExclusions[id].size)?`<div class="whyExcl">Excluded from rerolls here: ${rerollExclusions[id].size} trait${rerollExclusions[id].size>1?"s":""} you've already passed on. <button onclick="clearExclusions('${escAttr(id)}')">reset</button></div>`:``}</div>` : ``}
       </div>
       ${includeControls ? `
+      <button class="slotToggle" onclick="this.closest('.traitCard').classList.toggle('controlsOpen'); this.setAttribute('aria-expanded', this.closest('.traitCard').classList.contains('controlsOpen'));"
+              aria-expanded="false" aria-label="Show the controls for this card" title="Show the controls for this card">&ctdot;</button>
       <div class="slotBtns">
-        <button class="rerollBtn" onclick="rerollSlot('${escAttr(id)}')" title="Draw a different trait for this slot (never repeats one you've already rejected here)"><span aria-hidden="true">✕</span> Toss</button>
+        ${s.required && id.startsWith("req_")
+          /* "Always include this exact trait" is the user's own instruction — there is
+             nothing for a reroll to draw, so the control says what would actually
+             change it rather than rendering a button that cannot work. */
+          ? `<span class="slotNote" title="This trait is here because you required it by name. Remove the constraint to change it.">required by name</span>`
+          : `<button class="rerollBtn" onclick="rerollSlot('${escAttr(id)}')" title="Draw a different trait for this slot (never repeats one you've already rejected here)"><span aria-hidden="true">✕</span> Toss</button>`}
         <button class="lockBtn ${lockedClass}" onclick="toggleLock('${escAttr(id)}')" title="Keep this trait through rerolls and regeneration" aria-pressed="${s.locked?'true':'false'}"><span aria-hidden="true">📌</span> ${s.locked ? "Kept" : "Keep"}</button>
         <div class="pinRow">
           <button class="pinBtn ${pinnedTargets[id]!==undefined ? "pinned" : ""}" onclick="togglePin('${escAttr(id)}')" title="Pin this slot's intensity target (not the exact trait) so future generations/rerolls stay near this level even as sliders move elsewhere" aria-pressed="${pinnedTargets[id]!==undefined?'true':'false'}">${pinnedTargets[id]!==undefined ? "pinned "+pinnedTargets[id].toFixed(1) : "pin"}</button>
@@ -175,13 +184,24 @@ function traitCardHTML(id, s, includeControls, showDiff, accent, tagLabel){
         </div>
         ${history ? `<button class="rerollBtn" onclick="rerollBack('${escAttr(id)}')" title="Step back to the trait this slot held before the last toss">↺ back</button>` : ``}
         <button class="whyBtn" onclick="toggleWhy('${escAttr(id)}')" title="Why did I get this trait?" aria-expanded="${whyOpen[id]?'true':'false'}">why?</button>
+        <!-- Favouriting and banning previously meant leaving the sheet, opening
+             Constraints, and finding the trait by name in a search box — for a trait
+             that is right there on the card in front of you. -->
+        <button class="markBtn ${requiredTraitIds.includes(t.id) ? 'on' : ''}" onclick="favouriteTrait(${t.id})"
+                aria-pressed="${requiredTraitIds.includes(t.id) ? 'true' : 'false'}"
+                title="${requiredTraitIds.includes(t.id) ? 'Stop requiring this trait on every character' : 'Require this trait on every character from now on'}"><span aria-hidden="true">★</span><span class="srOnly">favourite</span></button>
+        <button class="markBtn ${bannedTraitIds.has(t.id) ? 'on' : ''}" onclick="banTrait(${t.id})"
+                aria-pressed="${bannedTraitIds.has(t.id) ? 'true' : 'false'}"
+                title="${bannedTraitIds.has(t.id) ? 'Allow this trait again' : 'Never draw this trait again'}"><span aria-hidden="true">🚫</span><span class="srOnly">never draw this again</span></button>
+        <button class="whyBtn" onclick="editTraitNote('${escAttr(id)}')" title="${traitNotes[id] ? 'Edit your note on this card' : 'Attach a note to this card'}">${traitNotes[id] ? 'note ✎' : '+ note'}</button>
       </div>` : ``}
     </div>`;
 }
 const RARITY_TIER_HINT = {
-  common: "Ordinary human behaviour — texture, not identity.",
-  distinctive: "Specific enough to notice, not loud enough to define the voice on its own.",
-  signature: "Distinctive AND loud: this is one of the two or three things that define the voice.",
+  common:      "Ordinary human behaviour — texture, not identity.",
+  uncommon:    "Noticeable, but not remarkable. Good for building a specific person out of small parts.",
+  distinctive: "A reader would remember this about the character.",
+  signature:   "Defines the voice. Two of these is a caricature.",
 };
 function titleForSlotId(id){
   if (id.startsWith("app_")) return "Appearance";
@@ -204,6 +224,66 @@ function titleForSlotId(id){
    there was no way to fold any of it away. */
 let collapsedGroups = {};
 function toggleGroup(title){ collapsedGroups[title] = !collapsedGroups[title]; renderSheet(); }
+
+/* ================= SHEET DENSITY =================
+   A default build produces ~38 populated slots and at profileDepth 4 with everything on
+   it passes forty, in engine order, all expanded. The summary card gave that a front
+   door but not a shape.
+
+   Collapsing the deep sections by default would fix the reading order and change how
+   the sheet behaves for everyone already using it, which is why it was never done. A
+   density preference resolves that: STANDARD is exactly the current behaviour and stays
+   the default, so nothing changes for anyone who doesn't ask for it, and the other two
+   settings are available to anyone who does.
+
+   Applied on the first render after a generate only — once you have started opening and
+   closing sections by hand, that is your arrangement and the setting stops overriding it. */
+const DENSITY_DEEP_GROUPS = ["Motivation & Wound","Conflict & Stress Response","Social Role in a Group",
+  "Values & Moral Line","Attachment & Intimacy","Humor Style","Habits & Vices","Appearance","Vocabulary","Mannerisms"];
+function sheetDensity(){
+  const el = document.getElementById('sheetDensity');
+  return el ? el.value : 'standard';
+}
+let _densityPending = false;
+function markDensityPending(){ _densityPending = true; }
+function applySheetDensity(titles){
+  if (!_densityPending) return;
+  _densityPending = false;
+  const mode = sheetDensity();
+  if (mode === 'standard') return;                    // the historical behaviour, untouched
+  titles.forEach(t=>{
+    if (mode === 'everything') collapsedGroups[t] = false;
+    else collapsedGroups[t] = DENSITY_DEEP_GROUPS.includes(t);   // 'summary'
+  });
+}
+function onDensityChange(){
+  markDensityPending();
+  if (Object.keys(state).length) renderSheet();
+  if (typeof savePrefs === 'function') savePrefs();
+}
+
+/* Section-level actions. Until now the only granularities were one card and the whole
+   sheet, which is a strange gap on a forty-card document organised into sections. */
+function rerollGroup(title){
+  const ids = groupSlotIds(title).filter(id => state[id] && state[id].trait && !state[id].locked
+    && !(state[id].required && id.startsWith('req_')));
+  if (!ids.length){ toast("Nothing in this section can be rerolled — it's all kept, or required by name.", "warn"); return; }
+  ids.forEach(id => rerollSlot(id));
+  toast(`Rerolled ${ids.length} card${ids.length===1?'':'s'} in ${title}.`);
+}
+function lockGroup(title, locked){
+  const ids = groupSlotIds(title).filter(id => state[id] && state[id].trait);
+  ids.forEach(id => { state[id].locked = locked; });
+  renderSheet();
+}
+// One definition of "which slots belong to this section", shared by renderSheet and the
+// section actions, so a section button can never operate on a different set of cards
+// than the section it sits on.
+function groupSlotIds(title){
+  const g = (SHEET_GROUPS || []).find(x => x.title === title);
+  return g ? g.ids.filter(id => state[id]) : [];
+}
+let SHEET_GROUPS = [];
 function setAllGroups(collapsed){
   document.querySelectorAll('#sheetBody .axisGroup').forEach(()=>{});
   SHEET_GROUP_TITLES.forEach(t=>{ collapsedGroups[t] = collapsed; });
@@ -258,6 +338,9 @@ function summaryCardHTML(){
       ${sub ? `<div class="summarySub">${escHTML(sub)}</div>` : ``}
     </div>`;
 
+  const brief = characterBriefHTML();
+  if (brief) h += brief;
+
   if (loudest.length){
     h += `<ul class="summaryTraits">` + loudest.map(s=>
       `<li><b>${escHTML(s.trait.trait)}</b> <span class="summaryCat">${escHTML(s.trait.category)}</span></li>`
@@ -277,6 +360,56 @@ function summaryCardHTML(){
   if (why) h += why;
 
   return h + `</div>`;
+}
+
+/* ================= THE CHARACTER BRIEF =================
+   The summary card was three loud traits and a coherence figure — an entry point, but
+   still a list. Everything needed to say who this person actually IS has been resolved
+   during the build and is sitting in `state`: the Want, the Fear, the Wound, the
+   resolved Role and Values, and one signature voice trait. Assembling those into three
+   plain sentences is pure composition of data that already exists, and it turns the
+   top of the sheet from "here are some traits" into a brief a writer can act on.
+
+   Written to degrade gracefully: every clause is optional, and a sheet with the deep
+   sections switched off simply produces a shorter brief rather than an awkward one. */
+function characterBriefHTML(){
+  const catTrait = (prefix, catRe) => {
+    const id = Object.keys(state).find(k => k.startsWith(prefix) && state[k] && state[k].trait
+      && catRe.test(state[k].trait.category));
+    return id ? state[id].trait : null;
+  };
+  const want  = catTrait("prof_motivation_", /Core Want/i);
+  const fear  = catTrait("prof_motivation_", /Core Fear/i);
+  const wound = catTrait("prof_motivation_", /Core Wound/i);
+  const role  = slotCat(state["prof_role_0"]);
+  const values= slotCat(state["prof_values_0"]);
+
+  // One voice trait, preferring the rarest: the point of this line is what they sound
+  // like, and the rarest voice trait is the one that actually distinguishes them.
+  const voiceIds = Object.keys(state).filter(k =>
+    ['verbosity','register','grammar'].includes(k) || k.startsWith('vocab'));
+  const rank = t => RTIER_ORDER.indexOf(t.rarity);
+  const voice = voiceIds.map(k=>state[k]).filter(s=>s && s.trait).map(s=>s.trait)
+    .sort((a,b)=> rank(b) - rank(a) || b.intensity - a.intensity)[0];
+
+  /* Trait names are authored as titles ("Loyalty-Bound", "Fear-of-wasted-potential"),
+     so lower-casing them to fit a sentence produces "loyalty-Bound" and worse. Every
+     clause below is shaped so the name can be dropped in exactly as written. */
+  const sentences = [];
+  if (want) sentences.push(`Wants <b>${escHTML(want.trait)}</b>.`);
+  if (fear) sentences.push(`Afraid of <b>${escHTML(fear.trait)}</b>${wound ? `, and carrying <b>${escHTML(wound.trait)}</b>` : ``}.`);
+  else if (wound) sentences.push(`Carrying <b>${escHTML(wound.trait)}</b>.`);
+
+  const room = [];
+  if (role) room.push(`takes the <b>${escHTML(role)}</b>'s seat`);
+  if (values) room.push(`measures things by <b>${escHTML(values)}</b>`);
+  if (room.length){
+    sentences.push(`In a room, ${room.join(" and ")}.`);
+  }
+  if (voice) sentences.push(`Sounds like: <b>${escHTML(voice.trait)}</b>${voice.example ? ` &mdash; &ldquo;${escHTML(voice.example)}&rdquo;` : ``}`);
+  // Two clauses is the point where this reads as a brief rather than a fragment.
+  if (sentences.length < 2) return "";
+  return `<p class="summaryBrief">${sentences.join(" ")}</p>`;
 }
 
 /* The per-slot "why?" panel is the best thing in the UI and it is per-slot and
@@ -317,6 +450,36 @@ function whyThisCharacterHTML(){
   return h + `</div></details>`;
 }
 
+/* Why a section came out empty, in the user's own terms. Returns null for the ordinary
+   case of a section that was never going to produce anything (no constraints set on an
+   optional group), so the sheet does not fill up with notes about nothing. */
+const GROUP_TOGGLE_IDS = {
+  "Personality": "genPersonality", "Speech Pattern": "genSpeech",
+  "Vocabulary": "genVocab", "Mannerisms": "genManner", "Appearance": "genAppearance",
+};
+function emptyGroupReason(title){
+  const toggleId = GROUP_TOGGLE_IDS[title];
+  if (toggleId){
+    const el = document.getElementById(toggleId);
+    if (el && !el.checked) return "Switched off in the generation options — nothing was drawn for this section.";
+  }
+  const ps = PROFILE_SECTIONS.find(p=>p.label === title);
+  if (ps){
+    const tog = document.getElementById('sec_'+ps.id);
+    if (tog && !tog.checked) return "Switched off in the Character Profile panel.";
+    if (bannedSections.has(ps.section)) return `The whole "${ps.section}" section is banned in your constraints, so nothing here can ever be drawn.`;
+    const cats = catsOf(ps.section);
+    if (cats.length && cats.every(c => bannedCategories.has(c)))
+      return "Every category in this section is banned in your constraints.";
+    if (cats.length && cats.every(c => !byFilter(ps.section, c).length))
+      return "Nothing in this section is drawable at your current constraints — the banned traits cover it entirely.";
+    return "Nothing was drawable here at these settings. Ease a constraint or widen the slider precision.";
+  }
+  if (title === "The one thing that doesn't fit" && !wildcardEnabled()) return null;
+  if (title === "Required (constraints)") return null;
+  return null;
+}
+
 function renderSheet(){
   const sheet = document.getElementById('sheet');
   sheet.classList.add('show');
@@ -332,10 +495,13 @@ function renderSheet(){
   const body = document.getElementById('sheetBody');
   body.innerHTML = "";
   body.innerHTML = summaryCardHTML();
+  /* Not filtered on ids.length any more: a profile section that produced nothing is
+     exactly the case emptyGroupReason exists to explain, and filtering it out here
+     removed it from the sheet before that could happen. */
   const profGroups = PROFILE_SECTIONS.map(ps=>({
     title: ps.label,
     ids: Object.keys(state).filter(k=>k.startsWith("prof_"+ps.id+"_"))
-  })).filter(g=>g.ids.length);
+  }));
   const groups = [
     {title:"Required (constraints)", ids:Object.keys(state).filter(k=>k.startsWith("req_")||k.startsWith("reqcat_"))},
     {title:"Personality", ids:Object.keys(state).filter(k=>k.startsWith("pers_"))},
@@ -347,9 +513,25 @@ function renderSheet(){
     {title:"The one thing that doesn't fit", ids:Object.keys(state).filter(k=>k.startsWith("wild_"))},
   ];
   SHEET_GROUP_TITLES = groups.map(g=>g.title);
+  SHEET_GROUPS = groups;
+  applySheetDensity(SHEET_GROUP_TITLES);
   groups.forEach(g=>{
     const validIds = g.ids.filter(id=>state[id]);
-    if(!validIds.length) return;
+    /* A section that produced nothing simply vanished, so "off because I turned it off",
+       "off because I banned it" and "empty because nothing was drawable at these
+       settings" were indistinguishable — and the last of those is a real result the
+       user needs to see, not an absence. */
+    if(!validIds.length){
+      const why = emptyGroupReason(g.title);
+      if (why){
+        const note = document.createElement('div');
+        note.className = "axisGroup emptyGroup";
+        note.innerHTML = `<div class="axisTitle static"><span class="axisGlyph" aria-hidden="true">${sectionGlyph(g.title)}</span>${escHTML(g.title)}<span class="axisCount">empty</span></div>`
+          + `<div class="emptyGroupNote">${escHTML(why)}</div>`;
+        body.appendChild(note);
+      }
+      return;
+    }
     const div = document.createElement('div');
     const collapsed = !!collapsedGroups[g.title];
     div.className = "axisGroup" + (collapsed ? " collapsed" : "");
@@ -359,9 +541,15 @@ function renderSheet(){
     // sheets. Build the string once, assign once.
     // The shape marker beside each title is a non-colour cue: the palette alone made
     // the section system unreadable for anyone who can't separate those hues.
-    let inner = `<button class="axisTitle" onclick="toggleGroup('${escAttr(g.title)}')" aria-expanded="${collapsed?'false':'true'}" title="Collapse or expand this section">`
+    const keptHere = validIds.filter(id => state[id] && state[id].locked).length;
+    let inner = `<div class="axisHead">`
+      + `<button class="axisTitle" onclick="toggleGroup('${escAttr(g.title)}')" aria-expanded="${collapsed?'false':'true'}" title="Collapse or expand this section">`
       + `<span class="axisGlyph" aria-hidden="true">${sectionGlyph(g.title)}</span>${escHTML(g.title)}`
-      + `<span class="axisCount">${validIds.length}</span><span class="axisChev">${collapsed?'▸':'▾'}</span></button>`;
+      + `<span class="axisCount">${validIds.length}${keptHere ? ` · ${keptHere} kept` : ``}</span><span class="axisChev">${collapsed?'▸':'▾'}</span></button>`
+      + `<span class="axisActions">`
+      + `<button class="axisAction" onclick="rerollGroup('${escAttr(g.title)}')" title="Draw a different trait for every unkept card in this section">reroll section</button>`
+      + `<button class="axisAction" onclick="lockGroup('${escAttr(g.title)}', ${keptHere < validIds.length})" title="${keptHere < validIds.length ? 'Keep every card in this section through rerolls and regeneration' : 'Release every card in this section'}">${keptHere < validIds.length ? 'keep section' : 'release section'}</button>`
+      + `</span></div>`;
     if (!collapsed) validIds.forEach(id=>{ inner += traitCardHTML(id, state[id], true, true, null, g.title); });
     div.innerHTML = inner;
     body.appendChild(div);
@@ -379,6 +567,23 @@ function renderSheet(){
   })();
 
   // Coherence score + soft tension notes
+  /* "8 kept, 29 will reroll" — invisible until now, and it is the single most
+     decision-relevant fact about a sheet you have been curating for ten minutes. */
+  (function(){
+    const el = document.getElementById('handKept');
+    if (!el) return;
+    const all = Object.values(state).filter(s=> s && s.trait);
+    const kept = all.filter(s=> s.locked).length;
+    if (!all.length){ el.hidden = true; return; }
+    el.hidden = false;
+    el.textContent = kept
+      ? `${kept} kept · ${all.length - kept} will reroll`
+      : `${all.length} cards · none kept`;
+    el.title = kept
+      ? `Pressing Generate redraws ${all.length - kept} of ${all.length} cards; the ${kept} you kept stay exactly as they are.`
+      : `Pressing Generate redraws all ${all.length} cards. Use Keep on a card to hold it.`;
+  })();
+
   const co = coherenceScore(state);
   const tensions = softTensionsFor(state);
   // The "Your hand" strip carries the coherence figure as a small meter, so the
@@ -404,16 +609,32 @@ function renderSheet(){
           <span style="width:${co.pct}%; background:${barColor};"></span>
           <i class="coherenceBaseline" style="left:${co.basePct}%;" title="Chance baseline for these settings: ${co.basePct}%"></i>
         </div>
-      </div><div class="coherenceNote">${co.label} (${co.reinforced} of ${co.total} picks reinforced. A random character with these same settings would score about ${co.basePct}%, and with only ${co.total} picks that baseline itself carries a &plusmn;${co.baseBand}-point 95% band — so a lift smaller than that isn't a real difference.)</div>`;
+      </div><div class="coherenceNote">${coherenceAsking(co)} (${co.reinforced} of ${co.total} picks reinforced. A random character with these same settings would score about ${co.basePct}%, and with only ${co.total} picks that baseline itself carries a &plusmn;${co.baseBand}-point 95% band — so a lift smaller than that isn't a real difference.)</div>`;
     }
-    // Caricature guard — the compound effect the per-trait frequency budget can't see.
-    const loud = loudnessCheck(state);
+    h += budgetReportHTML();
+    /* Caricature guard — the compound effect the per-trait frequency budget can't see.
+       Redundant once an intensity budget is set: the budget answers the same question
+       ("is this sheet louder than you asked for?") with a number the user chose, and
+       the report above already says what it did about it. */
+    const loud = intensityBudgetSet() ? null : loudnessCheck(state);
     if (loud){
       h += `<div class="tensionBlock" style="border-left-color:var(--bubblegum);"><div class="tensionTitle" style="color:var(--bubblegum);">Loud in ${loud.count} directions</div><div style="margin:6px 0;">${loud.note}</div></div>`;
     }
     if (tensions.length){
       h += `<div class="tensionBlock"><div class="tensionTitle">Uncommon combinations — not errors</div><ul>` +
            tensions.map(t=>`<li>${t}</li>`).join("") + `</ul></div>`;
+    }
+    /* Framed as a prompt, not a defect — see the CONTRADICTION AS CONTENT note in
+       engine.js. Sits above the tension list, because it is the one a writer can
+       actually use tonight. */
+    const contra = contradictionFor(state);
+    if (contra){
+      h += `<div class="tensionBlock" style="border-left-color:var(--golden-deep); margin-top:10px;">
+        <div class="tensionTitle" style="color:var(--golden-deep);">The contradiction &mdash; ${escHTML(contra.axisLabel)}</div>
+        <div style="margin:6px 0;">They are <b>${escHTML(contra.hi.trait)}</b> and also <b>${escHTML(contra.lo.trait)}</b>.</div>
+        <div style="margin:6px 0; font-style:italic;">${escHTML(contra.question)}</div>
+        <div class="sub" style="margin:6px 0 0;">Not an error to fix. A ${escHTML(contra.tier.toLowerCase())} opposition on one axis is where a character stops being a list of traits — answer the question and the rest of the sheet reorganises around it.</div>
+      </div>`;
     }
     const patterns = secondOrderTensions(state);
     if (patterns.length){
@@ -453,6 +674,22 @@ function renderSheet(){
         </div><div class="coherenceNote">${escHTML(dist.label)} Measured against the centroid of all ${dist.count} characters generated this session — a different question from the novelty note above, which only compares you to the last one.</div>`;
       }
     } catch(e){}
+    /* The anti-repetition system works and has always been invisible: it is a silent
+       weight applied to traits you can't see being penalised. Naming the traits that
+       keep coming back makes the mechanism legible — and is the fastest route to the
+       ban button for anyone who is tired of one of them. */
+    (function(){
+      const rep = recurringTraits(3);
+      if (!rep.length) return;
+      h += `<div class="tensionBlock" style="border-left-color:var(--muted); margin-top:10px;">
+        <div class="tensionTitle" style="color:var(--muted);">Recurring this session</div>
+        <ul>` + rep.map(r=>
+          `<li><b>${escHTML(r.trait.trait)}</b> — ${r.count} of your last ${r.window} characters `
+          + `<button class="markBtn" onclick="banTrait(${r.trait.id})" title="Never draw this trait again">🚫 never again</button></li>`
+        ).join("") + `</ul>
+        <div class="sub" style="margin:6px 0 0;">These are already being penalised on every draw${avoidRecentEnabled() ? `` : ` — except that <b>Avoid recent traits</b> is currently off, so they are not`}. Banning one is the harder version of the same instruction.</div>
+      </div>`;
+    })();
     if (lastDepthUntouched.length){
       h += `<div class="depthNote"><b>Depth-first note:</b> no resolved profile category implies ${lastDepthUntouched.join(", ")}, so ${lastDepthUntouched.length>1?"those sliders were":"that slider was"} left exactly as you set ${lastDepthUntouched.length>1?"them":"it"} rather than being reset to centre.</div>`;
     }
@@ -461,10 +698,24 @@ function renderSheet(){
   }
 
   renderChangeList();
+  refreshBudgetMeters();
 
   if (pressureState){
     const pbody = document.getElementById('pressureBody');
     pbody.innerHTML = "";
+    /* The sheet described a degradation with no cause, no fingerprint and no aftermath —
+       three things it already had the data for. They go first, because "what does this
+       to them" is the question a writer is actually holding. */
+    const pm = pressureState.__pressure || {};
+    let head = "";
+    if (pm.level !== undefined && pm.level < 0.99){
+      head += `<div class="shiftNote holds">Shown at <b>${Math.round(pm.level*100)}%</b> pressure — a bad afternoon rather than the worst day.</div>`;
+    }
+    if (pm.trigger) head += `<div class="pressureBlock"><b>What sets it off.</b> ${pm.trigger}</div>`;
+    const pfp = voiceFingerprint(pressureState, charMeta);
+    if (pfp) head += `<div class="pressureBlock"><b>How they sound once it starts.</b> <i>${escHTML(pfp)}</i></div>`;
+    if (pm.recovery) head += `<div class="pressureBlock"><b>Afterwards.</b> ${escHTML(pm.recovery)}</div>`;
+    pbody.innerHTML = head;
     const pgroups = [
       {title:"Speech Under Pressure", ids:["verbosity","register","grammar"]},
       {title:"Mannerisms Under Pressure", ids:Object.keys(pressureState).filter(k=>k.startsWith("p_manner"))},
@@ -615,6 +866,15 @@ function sheetToText(st, meta, pState){
   // ---- Under pressure ----
   if (pState){
     L.push("", "## Under Pressure", "");
+    /* The trigger is authored as HTML for the panel; the text export needs it plain,
+       entities included — stripping tags alone leaves "&#39;" on the page. */
+    const pm = pState.__pressure || {};
+    const plainify = v => String(v || "").replace(/<[^>]+>/g, "")
+      .replace(/&#39;/g, "'").replace(/&quot;/g, '"').replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">").replace(/&amp;/g, "&");
+    if (pm.level !== undefined && pm.level < 0.99) L.push(`_Shown at ${Math.round(pm.level*100)}% pressure._`, "");
+    if (pm.trigger) L.push(`**What sets it off.** ${plainify(pm.trigger)}`, "");
+    if (pm.recovery) L.push(`**Afterwards.** ${pm.recovery}`, "");
     ["verbosity","register","grammar"].forEach(id=>{ if(pState[id]) L.push(fmt(pState[id])); });
     Object.keys(pState).filter(k=>k.startsWith("p_manner")).forEach(id=> L.push(fmt(pState[id])));
     const shifts = Object.keys(pState).filter(k=>k.startsWith("p_prof_"));
@@ -682,7 +942,7 @@ const CHAR_FORMAT_VERSION = 2;
 // Every control that changes what a generation produces.
 const SETTING_FIELDS = ['mannerCount','vocabCount','personalityCount','profileDepth',
   'rarityPref','affinityBoost','rangeFocus','profileWeight','divergence',
-  'app_stature','app_upkeep','app_presence','archetypeSelect','seedInput',
+  'app_stature','app_upkeep','app_presence','archetypeSelect','seedInput','sheetDensity','wildcardCount','pressureLevel',
   'charName','charAge','charContext','castCount'];
 const SETTING_TOGGLES = ['personalityToggle','depthFirstToggle','examplesToggle','stressToggle',
   'genPersonality','genSpeech','genVocab','genManner','genAppearance',
@@ -711,6 +971,12 @@ function captureSettings(){
       requiredCategories: [...requiredCategories],
       exclusivePairs: exclusivePairs.map(p=>p.slice()),
       categoryTiers: [...categoryTiers.entries()],
+      // Budgets are non-DOM state like the constraint sets, so they take the same
+      // route and inherit workspace persistence, character export and archetype
+      // setups for free.
+      rarityCaps: Object.assign({}, rarityCaps),
+      intensityCaps: Object.assign({}, intensityCaps),
+      budgetMode: getBudgetMode(),
     },
     rerollExclusions: excl,
   };
@@ -739,12 +1005,194 @@ function restoreSettings(s){
   requiredCategories = (c.requiredCategories || []).slice();
   exclusivePairs   = (c.exclusivePairs || []).map(p=>p.slice());
   categoryTiers    = new Map(c.categoryTiers || []);
+  clearBudgets();
+  Object.assign(rarityCaps, c.rarityCaps || {});
+  Object.assign(intensityCaps, c.intensityCaps || {});
+  setBudgetMode(c.budgetMode || 'redraw');
+  if (typeof refreshBudgetUI === 'function') refreshBudgetUI();
   rerollExclusions = {};
   Object.entries(s.rerollExclusions || {}).forEach(([k,v])=>{ rerollExclusions[k] = new Set(v); });
   refreshConstraintChips();
+  if (typeof refreshBudgetChips === 'function') refreshBudgetChips();
   if (typeof togglePersonalityPanel === 'function') togglePersonalityPanel();
   if (typeof toggleExamples === 'function') toggleExamples();
   invalidateSliderCache();
+}
+
+/* ================= BUDGETS UI =================
+   Built from BUDGET_GROUPS / RTIER_ORDER rather than hand-written markup, so adding a
+   tier or a group needs no HTML change and the panel can never disagree with what the
+   engine actually enforces. */
+function buildBudgetUI(){
+  const rg = document.getElementById('rarityCapGrid');
+  if (rg){
+    rg.innerHTML = RTIER_ORDER.map(tier=>`
+      <div class="budgetRow">
+        <label for="cap_${tier}" class="budgetLabel"><span class="rarityBadge rarity-${tier}">${escHTML(RTIER_LABEL[tier])}</span></label>
+        <input type="number" id="cap_${tier}" min="0" max="60" step="1" placeholder="no cap"
+               aria-label="Maximum ${escHTML(RTIER_LABEL[tier])} cards on one sheet"
+               oninput="onRarityCapChange('${tier}')">
+      </div>`).join("");
+  }
+  const ig = document.getElementById('intensityCapGrid');
+  if (ig){
+    ig.innerHTML = BUDGET_GROUPS.map(g=>`
+      <div class="budgetRow${g.id==='sheet' ? ' budgetRowTotal' : ''}">
+        <label for="icap_${g.id}" class="budgetLabel">${escHTML(g.label)}</label>
+        <input type="number" id="icap_${g.id}" min="0" max="400" step="1" placeholder="off"
+               aria-label="Maximum total intensity for ${escHTML(g.label)}"
+               oninput="onIntensityCapChange('${g.id}')">
+        <span class="budgetMeter" id="imeter_${g.id}"><i></i><b></b></span>
+      </div>`).join("");
+  }
+  const pr = document.getElementById('budgetPresetRow');
+  if (pr){
+    pr.innerHTML = Object.entries(BUDGET_PRESETS).map(([k,p])=>
+      `<button class="btn-secondary" onclick="useBudgetPreset('${k}')">${escHTML(p.label)}</button>`).join("");
+  }
+  refreshBudgetUI();
+}
+// Push engine state back into the controls (used after import, load, preset, reset).
+function refreshBudgetUI(){
+  RTIER_ORDER.forEach(t=>{
+    const el = document.getElementById('cap_'+t);
+    if (el) el.value = rarityCaps[t] == null ? "" : rarityCaps[t];
+  });
+  BUDGET_GROUPS.forEach(g=>{
+    const el = document.getElementById('icap_'+g.id);
+    if (el) el.value = intensityCaps[g.id] == null ? "" : intensityCaps[g.id];
+  });
+  const m = document.getElementById('budgetMode');
+  if (m) m.value = getBudgetMode();
+  refreshBudgetChips();
+  refreshBudgetMeters();
+}
+// Live "N of M possible" readouts, so a typed number has a scale attached.
+function refreshBudgetMeters(){
+  const cap = (typeof budgetCapacity === 'function') ? budgetCapacity(state) : {};
+  BUDGET_GROUPS.forEach(g=>{
+    const el = document.getElementById('imeter_'+g.id);
+    if (!el) return;
+    const c = cap[g.id];
+    if (!c || !c.slots){ el.hidden = true; return; }
+    el.hidden = false;
+    const set = intensityCaps[g.id];
+    const shown = set == null ? c.typical : set;
+    el.querySelector('i').style.width = Math.min(100, c.max ? (100*shown/c.max) : 0) + '%';
+    el.querySelector('b').textContent = `${c.typical} of ${c.max}`;
+    el.title = `${c.slots} slot${c.slots===1?'':'s'} on this sheet, currently totalling ${c.typical} intensity out of a possible ${c.max}.`;
+  });
+}
+const _capNum = el => {
+  const v = (el.value || "").trim();
+  if (v === "") return null;
+  const n = parseInt(v, 10);
+  return Number.isNaN(n) ? null : Math.max(0, n);
+};
+function onRarityCapChange(tier){
+  const el = document.getElementById('cap_'+tier);
+  if (el) rarityCaps[tier] = _capNum(el);
+  refreshBudgetChips(); savePrefs();
+}
+function onIntensityCapChange(id){
+  const el = document.getElementById('icap_'+id);
+  if (el){
+    const n = _capNum(el);
+    if (n == null) delete intensityCaps[id]; else intensityCaps[id] = n;
+  }
+  refreshBudgetChips(); refreshBudgetMeters(); savePrefs();
+}
+function onBudgetModeChange(){
+  const m = document.getElementById('budgetMode');
+  if (m) setBudgetMode(m.value);
+  refreshBudgetChips(); savePrefs();
+}
+function useBudgetPreset(key){
+  if (!applyBudgetPreset(key)) return;
+  refreshBudgetUI(); savePrefs();
+  toast(`Budget preset: ${BUDGET_PRESETS[key].label}. Generate to apply it.`);
+}
+function clearBudgetsUI(){
+  clearBudgets();
+  refreshBudgetUI(); savePrefs();
+  toast("Budgets cleared.");
+}
+function refreshBudgetChips(){
+  const box = document.getElementById('budgetChips');
+  if (!box) return;
+  let h = "";
+  RTIER_ORDER.forEach(t=>{
+    if (rarityCaps[t] == null) return;
+    h += `<span class="chip chip-tier">max ${rarityCaps[t]} ${escHTML(RTIER_LABEL[t])} <b onclick="clearOneBudget('rarity','${t}')" title="Remove">&times;</b></span>`;
+  });
+  BUDGET_GROUPS.forEach(g=>{
+    if (intensityCaps[g.id] == null) return;
+    h += `<span class="chip chip-tier">${escHTML(g.label)} intensity &le; ${intensityCaps[g.id]} <b onclick="clearOneBudget('intensity','${g.id}')" title="Remove">&times;</b></span>`;
+  });
+  if (h && getBudgetMode() !== 'redraw') h += `<span class="chip chip-ban">over budget: ${getBudgetMode() === 'drop' ? 'drop the loudest' : 'warn only'}</span>`;
+  box.innerHTML = h || '<span class="sub" style="margin:0;">No budgets set — every draw stands as dealt.</span>';
+}
+function clearOneBudget(kind, key){
+  if (kind === 'rarity') rarityCaps[key] = null; else delete intensityCaps[key];
+  refreshBudgetUI(); savePrefs();
+}
+
+/* The app's whole character is that it explains itself, so a budget that silently
+   swapped traits would be the first mechanism that doesn't. Every substitution is
+   listed, and every unmet cap is stated as unmet rather than quietly dropped. */
+/* The DIVERGENCE comment states the structural problem plainly: the matrix makes traits
+   reinforce each other, the coherence score rewards exactly that reinforcement, and the
+   system therefore optimises toward the modal member of each cluster and then
+   congratulates you for it. Reporting the lift over a chance baseline was a real
+   mitigation, but the LABEL still reads as a grade — "Tightly coherent" against
+   "Deliberately scattered" — and users optimise against grades.
+
+   Same number, reframed as a position on a dial the user set. Divergence is literally
+   "how often to draw against the grain", so it already IS the asked-for figure; saying
+   what was asked for next to what arrived turns a score into a readout. */
+function coherenceAsking(co){
+  const div = (typeof divergenceLevel === 'function') ? divergenceLevel() : 0;
+  // Divergence 0 means "never diverge", so the implied ask is maximum coherence.
+  const asked = Math.round(100 * (1 - div));
+  const gap = Math.abs(co.pct - asked);
+  // co.label already says "within the noise" in this branch, so don't say it twice.
+  if (!co.significant) return `You asked for about ${asked}% coherence (Surprise me at ${div.toFixed(2)}) and this sheet came out at ${co.pct}% &mdash; but with this many picks that gap is inside the noise either way, so it isn't a real difference.`;
+  if (gap <= 12) return `You asked for about ${asked}% coherence (Surprise me at ${div.toFixed(2)}); this sheet came out at ${co.pct}% — close to where you set it.`;
+  return `You asked for about ${asked}% coherence (Surprise me at ${div.toFixed(2)}); this sheet came out at ${co.pct}%. ${co.pct > asked ? 'Tighter than you asked — raise Surprise me if you want more friction.' : 'Looser than you asked — lower Surprise me, or raise Boost strength, to pull it together.'}`;
+}
+
+function intensityBudgetSet(){
+  return typeof BUDGET_GROUPS !== 'undefined' && BUDGET_GROUPS.some(g => intensityCaps[g.id] != null);
+}
+function budgetReportHTML(){
+  const r = getBudgetReport();
+  if (!r || !r.active) return "";
+  const bits = [];
+  Object.entries(r.rarity).forEach(([tier, info])=>{
+    if (info.unmet) bits.push(`<div><b>${escHTML(RTIER_LABEL[tier]||tier)}</b> is capped at ${info.cap} but ${info.unmet} more ${info.unmet===1?'is':'are'} still on the sheet — the slots holding them are locked, pinned or required, or their categories have nothing else to offer.</div>`);
+    else bits.push(`<div>${escHTML(RTIER_LABEL[tier]||tier)}: <b>${info.count > info.cap ? info.cap : info.count}</b> of ${info.cap} allowed.</div>`);
+  });
+  Object.entries(r.intensity).forEach(([, info])=>{
+    bits.push(`<div>${escHTML(info.label)}: <b>${info.total}</b> of ${info.cap} intensity${info.unmet ? ` — <b>over budget</b>, and nothing quieter was available to redraw into. That is a gap in the trait bank for those categories, not a setting you can fix.` : ``}.</div>`);
+  });
+  if (r.actions.length){
+    bits.push(`<div style="margin-top:6px;"><b>${r.actions.length} adjustment${r.actions.length===1?'':'s'}:</b></div><ul style="margin:4px 0 0 16px;">` +
+      r.actions.map(a=> `<li>${escHTML(a.from)} &rarr; ${a.to ? escHTML(a.to) : '<i>removed</i>'} <span class="sub" style="display:inline;margin:0;">(${escHTML(a.why)})</span></li>`).join("") + `</ul>`);
+  }
+  if (!bits.length) return "";
+  return `<div class="tensionBlock" style="border-left-color:var(--golden); margin-top:10px;"><div class="tensionTitle" style="color:var(--golden-deep);">Budget adjustments</div>${bits.join("")}</div>`;
+}
+
+/* Print scoping. window.print() is synchronous in every engine that matters, but the
+   afterprint fallback covers the ones where it isn't, so the class can never be left
+   stuck on the body. */
+function printSheet(summaryOnly){
+  if (!Object.keys(state).length){ toast("Generate a character first.", "warn"); return; }
+  const cls = 'print-summary-only';
+  const off = ()=> document.body.classList.remove(cls);
+  if (summaryOnly) document.body.classList.add(cls);
+  window.addEventListener('afterprint', off, {once:true});
+  try { window.print(); } finally { if (summaryOnly) setTimeout(off, 0); }
 }
 
 function exportCharacterJSON(){
@@ -752,7 +1200,7 @@ function exportCharacterJSON(){
   const payload = {
     format: "character-voice-sheet", version: CHAR_FORMAT_VERSION,
     exported: new Date().toISOString(),
-    charMeta, state, pressureState, pinnedTargets, charVariants,
+    charMeta, state, pressureState, pinnedTargets, charVariants, traitNotes,
     sliders: captureSliders(),
     settings: captureSettings(),
   };
@@ -809,7 +1257,7 @@ function importCharacterJSON(fileInput){
       // characters keep working with reroll/pin/why (which need live trait objects)
       // and quietly survive trait-text updates between app versions. Unmatched ids
       // (removed traits) keep their embedded copy, flagged so the user knows.
-      const byId = new Map(TRAITS.map(t=>[t.id,t]));
+      const byId = TRAITS_BY_ID;   // PERF: was rebuilding the 7,073-entry map per import
       let orphans = 0;
       const relink = (st)=>{ if(!st) return st;
         Object.values(st).forEach(s=>{
@@ -821,6 +1269,7 @@ function importCharacterJSON(fileInput){
       charMeta = p.charMeta || {name:"Imported", age:"", context:"", archetypeLabel:"Imported"};
       pinnedTargets = p.pinnedTargets || {};
       charVariants = p.charVariants || {};
+      traitNotes = p.traitNotes || {};
       diffLog = {}; rerollExclusions = {}; rerollHistory = {}; whyOpen = {};
       if (p.settings) restoreSettings(p.settings);
       else if (p.sliders) restoreSliders(p.sliders);   // version 1 files
@@ -902,6 +1351,12 @@ function sheetToHTML(st, meta, pState){
   });
   if (pState){
     h += `<h2 style="font-family:Georgia,serif;font-size:1.05em;border-bottom:1px solid #ccc;padding-bottom:2px;margin:16px 0 6px;">Under Pressure</h2>`;
+    // The trigger and the aftermath are the two most useful lines on this sheet, and
+    // the styled-clipboard export was dropping both.
+    const pm = pState.__pressure || {};
+    if (pm.level !== undefined && pm.level < 0.99) h += `<p style="margin:6px 0;color:#555;"><i>Shown at ${Math.round(pm.level*100)}% pressure.</i></p>`;
+    if (pm.trigger) h += `<p style="margin:6px 0;"><b>What sets it off.</b> ${pm.trigger}</p>`;
+    if (pm.recovery) h += `<p style="margin:6px 0;"><b>Afterwards.</b> ${esc(pm.recovery)}</p>`;
     Object.values(pState).forEach(s=>{
       if (!s || !s.trait) return;
       h += `<p style="margin:6px 0;"><b>${esc(s.trait.trait)}</b><br>${esc(s.trait.desc)}<br><i style="color:#555;">"${esc(s.trait.example)}"</i></p>`;

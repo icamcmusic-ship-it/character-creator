@@ -14,9 +14,11 @@ const AXES = {
 const TRAITS_BY_ID = new Map();       // id -> trait (undo/import re-linking)
 const TRAITS_BY_KEY = new Map();      // "section||category" -> trait[]
 const CATS_BY_SECTION = new Map();    // section -> category[] (first-seen order)
+const SECTION_OF_CATEGORY = new Map(); // category -> section (categories are unique to one)
 (function indexTraits(){
   TRAITS.forEach(t=>{
     TRAITS_BY_ID.set(t.id, t);
+    if (!SECTION_OF_CATEGORY.has(t.category)) SECTION_OF_CATEGORY.set(t.category, t.section);
     const key = t.section + "||" + t.category;
     if (!TRAITS_BY_KEY.has(key)) TRAITS_BY_KEY.set(key, []);
     TRAITS_BY_KEY.get(key).push(t);
@@ -123,14 +125,70 @@ function tierWeight(t, target){
 // Locked variant per category for the CURRENT character. Chosen at generation,
 // preserved through rerolls, and exported with the character.
 let charVariants = {};
+
+/* The a/b coin used to be exactly 50/50 over pools that are nothing like even. The
+   tagging pass leaves roughly 38/11, 37/12 and 43/11 on the three affected categories,
+   so half of every character that landed on one of those poles was drawing from a
+   17-trait pool instead of 55 — a 3x pool collapse, invisible to the user, on one
+   character in two. Weight the coin by how much material each side actually has, with
+   a floor so the thinner side never disappears entirely: the sheet still commits to a
+   presentation, it just stops committing to the empty cupboard half the time.
+
+   This is a stopgap for a content gap, and it is deliberately shaped like one — the
+   right fix is authoring more of the thin side, and when that happens these weights
+   move on their own. */
+const VARIANT_FLOOR = 0.25;   // the thin side never drops below this share
+let VARIANT_ODDS = {};
+(function computeVariantOdds(){
+  Object.keys(PRESENTATION_VARIANTS).forEach(cat=>{
+    let a = 0, b = 0, untagged = 0;
+    TRAITS.forEach(t=>{
+      if (t.category !== cat) return;
+      if (t.variant === 'a') a++; else if (t.variant === 'b') b++; else untagged++;
+    });
+    // Untagged traits are eligible under BOTH locks, so they count toward each side's
+    // realised pool — which is the quantity the coin should actually be weighing.
+    const poolA = a + untagged, poolB = b + untagged;
+    const raw = (poolA + poolB) ? poolA / (poolA + poolB) : 0.5;
+    VARIANT_ODDS[cat] = clamp(raw, VARIANT_FLOOR, 1 - VARIANT_FLOOR);
+  });
+})();
+
 function rollCharacterVariants(){
   charVariants = {};
   Object.keys(PRESENTATION_VARIANTS).forEach(cat=>{
-    charVariants[cat] = Math.random() < 0.5 ? "a" : "b";
+    const pA = VARIANT_ODDS[cat] === undefined ? 0.5 : VARIANT_ODDS[cat];
+    charVariants[cat] = Math.random() < pA ? "a" : "b";
   });
 }
-function variantLabelFor(cat){
-  const spec = PRESENTATION_VARIANTS[cat], v = charVariants[cat];
+
+/* BUG FIX — charVariants was module-global and every generator that rolled it left it
+   rolled. generateCast, the foil builder and the gap-filler all called
+   rollCharacterVariants() and never restored, so after generating a four-person cast
+   the global held cast member #4's locks. Pressing Toss on a Confidence card back on
+   the single-character sheet then filtered against a stranger's presentation lock —
+   the sheet could end up mixing self-loathing with preening, exactly the failure the
+   variant system exists to prevent, and the why? panel would confidently name the
+   wrong lock. Export had the same defect: exportCharacterJSON writes charVariants,
+   which after a cast generation was not this character's.
+
+   Same shape of leak, and the same fix, as withoutContextBias(): save and restore
+   around the borrowing generator rather than clearing, because the single-character
+   sheet's locks are live state the why? panel reads back. */
+function withCharacterVariants(fn){
+  const saved = charVariants;
+  try { rollCharacterVariants(); return fn(); }
+  finally { charVariants = saved; }
+}
+// For generators that roll their own variants per item (the cast loop) — restore the
+// caller's locks once the whole batch is done.
+function withSavedVariants(fn){
+  const saved = charVariants;
+  try { return fn(); }
+  finally { charVariants = saved; }
+}
+function variantLabelFor(cat, variants){
+  const spec = PRESENTATION_VARIANTS[cat], v = (variants || charVariants)[cat];
   return (spec && v) ? spec[v].label : null;
 }
 
@@ -154,6 +212,47 @@ function byFilter(section, category){
   return pool;
 }
 function catsOf(section){ return CATS_BY_SECTION.get(section) || []; }
+
+/* ================= TRAIT SHAPE ASSERTIONS =================
+   TRAITS entries are assumed everywhere to carry {id, section, category, trait, desc,
+   example, intensity, rarity, pol}. A malformed entry — a missing example, an intensity
+   of 0, a rarity string that is not one of the four tiers — does not fail at the data
+   file. It fails much later, at an arbitrary draw, in a stack that says nothing about
+   which line of which file is wrong.
+
+   The test suite covers this for CI. It does not cover somebody hand-editing a data
+   file locally and reloading, which is exactly when the feedback is worth having. Runs
+   only with ?dev=1 in the URL, so it costs a normal load nothing. */
+function assertTraitShape(){
+  const problems = [];
+  const seenIds = new Set();
+  const push = (t, msg) => { if (problems.length < 40) problems.push(`#${t && t.id} ${(t && t.trait) || '(no name)'}: ${msg}`); };
+  TRAITS.forEach(t=>{
+    if (!t || typeof t !== 'object') return problems.push('a non-object entry in TRAITS');
+    if (t.id === undefined) return push(t, 'no id');
+    if (seenIds.has(t.id)) push(t, 'duplicate id');
+    seenIds.add(t.id);
+    ['section','category','trait','desc','example'].forEach(k=>{
+      if (typeof t[k] !== 'string' || !t[k].trim()) push(t, `${k} is missing or empty`);
+    });
+    if (!Number.isInteger(t.intensity) || t.intensity < 1 || t.intensity > 5) push(t, `intensity ${t.intensity} is not 1-5`);
+    if (!RTIER_SET.has(t.rarity)) push(t, `rarity "${t.rarity}" is not one of ${RTIER_ORDER.join('/')}`);
+    if (t.pol && typeof t.pol !== 'object') push(t, 'pol is not an object');
+    Object.entries(t.pol || {}).forEach(([ax, v])=>{
+      if (!AXIS_LABELS[ax]) push(t, `pol names an unknown axis "${ax}"`);
+      if (typeof v !== 'number') push(t, `pol.${ax} is not a number`);
+    });
+  });
+  return problems;
+}
+if (typeof location !== 'undefined' && /[?&]dev=1\b/.test(location.search || '')){
+  setTimeout(()=>{
+    const problems = assertTraitShape();
+    if (!problems.length){ console.info(`[dev] trait shape OK — ${TRAITS.length} entries`); return; }
+    console.error(`[dev] ${problems.length} malformed trait entr${problems.length===1?'y':'ies'}:\n` + problems.join('\n'));
+    if (typeof toast === 'function') toast(`${problems.length} malformed trait entries — see the console.`, 'warn', 9000);
+  }, 0);
+}
 
 
 // Coarse polarity for the 7 Profile sections, mirroring DEPTH_TO_PERSONALITY's logic
@@ -520,7 +619,11 @@ function targetFromLevel(level){ return targetFromMag(Math.abs(level) * 50); }
 // from onSliderChange and after any programmatic slider write) drops it.
 let _rangeFocusEl = null;
 let _bandHalfMemo = null;
-function invalidateSliderCache(){ _rangeFocusEl = null; _bandHalfMemo = null; }
+function invalidateSliderCache(){
+  _rangeFocusEl = null; _bandHalfMemo = null;
+  // The loudness estimate is measured against the band width, so it goes stale with it.
+  if (typeof _loudPCache !== 'undefined') _loudPCache.clear();
+}
 function bandHalf(){
   if (_bandHalfMemo !== null) return _bandHalfMemo;
   if (!_rangeFocusEl) _rangeFocusEl = document.getElementById('rangeFocus');
@@ -556,14 +659,67 @@ function traitBand(t, half){
 const RECENT_WINDOW = 12;         // how many past characters are remembered
 const RECENT_PENALTY = 0.4;       // multiplier applied to a trait seen in that window
 let recentTraitIds = [];          // array of Sets, newest last
+
+/* SLOT-LEVEL REPETITION MEMORY. Distinct from the cross-character recentTraitIds
+   above, and unconditional: recentTraitIds is gated on the "avoid recent traits"
+   toggle and remembers whole characters, which is the right tool for "stop showing me
+   the same person" and the wrong one for "stop showing me the same Register card".
+   The pools where the collapse is worst are the ones drawn on every single sheet, so
+   the same slot returning the same trait twice running is the most visible symptom
+   there is. Halve a trait's weight if this exact slot returned it last time; nothing
+   is excluded, so a genuinely small pool still works. */
+const SLOT_REPEAT_PENALTY = 0.5;
+let lastBySlot = {};              // slotId -> trait id the last COMMITTED character had
+let _slotDrawKey = null;          // which slot the current draw is for, if any
+function forgetSlotDraws(){ lastBySlot = {}; }
+/* Recorded from rememberGeneration — when a character is committed — rather than
+   during the draw itself. Writing it per-draw meant every speculative build polluted
+   it: cast members, foils, gap-fillers and the pressure variant all overwrote the
+   single character's memory, and a build could even perturb its own later slots. */
+function rememberSlotDraws(st){
+  Object.entries(st || {}).forEach(([id, s2])=>{ if (s2 && s2.trait) lastBySlot[id] = s2.trait.id; });
+}
+// Names the slot a draw belongs to, so slotRepeatPenalty can ask "did this same slot
+// return this same trait for the last character?".
+function withSlotMemory(slotId, fn){
+  const prior = _slotDrawKey;
+  _slotDrawKey = slotId;
+  try { return fn(); }
+  finally { _slotDrawKey = prior; }
+}
+function slotRepeatPenalty(t){
+  if (!_slotDrawKey || !t) return 1;
+  // Gated on the same toggle as the cross-character memory, and for the same reason:
+  // both take PREVIOUS characters as an input, so a seed can only replay exactly with
+  // them switched off. That exception is already stated on the seed field; this
+  // belongs under it rather than becoming a second, undocumented one.
+  if (!_avoidRecentActive) return 1;
+  return lastBySlot[_slotDrawKey] === t.id ? SLOT_REPEAT_PENALTY : 1;
+}
+
 function rememberGeneration(st){
   const ids = new Set();
   Object.values(st || {}).forEach(s=>{ if (s && s.trait) ids.add(s.trait.id); });
   if (!ids.size) return;
   recentTraitIds.push(ids);
   while (recentTraitIds.length > RECENT_WINDOW) recentTraitIds.shift();
+  rememberSlotDraws(st);
 }
 function forgetRecentTraits(){ recentTraitIds = []; }
+/* Which traits keep coming back across the session's recent window. recentTraitIds has
+   held this the whole time and nothing ever showed it to anyone. */
+function recurringTraits(minCount){
+  const window = recentTraitIds.length;
+  if (window < 3) return [];
+  const counts = new Map();
+  recentTraitIds.forEach(set => set.forEach(id => counts.set(id, (counts.get(id)||0) + 1)));
+  return [...counts.entries()]
+    .filter(([, n]) => n >= (minCount || 3))
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5)
+    .map(([id, n]) => ({trait: TRAITS_BY_ID.get(id), count: n, window}))
+    .filter(r => r.trait);
+}
 function avoidRecentEnabled(){
   const el = document.getElementById('avoidRecentToggle');
   return el ? !!el.checked : true;   // default-on; see RECENT_WINDOW above
@@ -580,6 +736,38 @@ function recentPenalty(t){
 // Returns the eligible slice around `target`, widening only if the pool is too
 // thin to draw from. `widened` is surfaced in the UI so a sparse category is
 // visible as a data gap rather than silently behaving like a loose one.
+/* ================= POOL-FLOOR TARGETS =================
+   rangeSelect clamps a target into the pool's span and reflects the window at the
+   boundary, and both help — but neither can put material where there is none. When the
+   requested target sits AT the pool's floor, every candidate is above it and the draw
+   concentrates on the two or three lowest-position traits no matter how wide the
+   window gets. Measured over 1,000 draws each, before this:
+
+     Register (neutral slot)               83-trait pool ->  15 distinct, top trait 28.4%
+     Situational Friendliness @ slider 0   41-trait pool ->  15 distinct, top trait 35.0%
+     Movement & Bearing @ default          39-trait pool ->  11 distinct, top trait 33.4%
+     Distinguishing Marks @ default        38-trait pool ->   9 distinct, top trait 26.1%
+
+   And over 300 default-settings characters the consequence is visible from orbit:
+   "Hushed-deliberate" in 83 of 300, "Sailor's roll on dry land" in 81, "Enters a room
+   backwards" in 79. Nothing is more corrosive to a generator than a distinctive image
+   turning up every fourth time.
+
+   The cause is targetFromMag(18) = 1.20 (and targetFromMag(15) = 1.09 for Marks)
+   against pools whose floors sit at 1.5-1.9. The target is below the pool entirely.
+   Lift a neutral target to sit a real distance INSIDE its own pool, so the proximity
+   kernel has material on both sides of centre and the window is spending its width on
+   traits rather than on empty space. Only the neutral/unemphatic targets get this:
+   a target the user actually asked for by moving a slider is left exactly where they
+   put it, clamping and all. */
+function poolFloorTarget(pool, target, lift){
+  if (!pool || !pool.length) return target;
+  let lo = Infinity;
+  for (const t of pool){ const p = traitPos(t); if (p < lo) lo = p; }
+  if (!isFinite(lo)) return target;
+  return Math.max(target, lo + (lift === undefined ? 0.35 : lift));
+}
+
 function rangeSelect(pool, target, minCount){
   /* TARGET CLAMPING. The widening loop below reacts to how MANY candidates it found,
      never to WHERE they sit. When the target falls outside the pool's actual span —
@@ -673,15 +861,30 @@ function rangeSelect(pool, target, minCount){
    they are per-draw context, not a property of the window. */
 function proximityWeights(list, centre, half, flatten){
   const exp = flatten ? 0.8 : clamp(0.9 + list.length/40, 0.9, 2.4);
-  const floor = flatten ? 0.03 : (0.03 + 0.9/Math.max(4, list.length));
+  /* BUG FIX: `flatten` pinned the tail floor at a flat 0.03 while the ordinary path
+     scaled it with list size — so on a short list, asking to FLATTEN the draw made the
+     tail nearly thirty times thinner than not asking (0.03 against 0.11 for eleven
+     candidates), which is the opposite of what the flag means and it was being passed
+     on exactly the thin pools that needed it most. The floor is a small-pool
+     protection either way; only the exponent is the flatten/precision knob. */
+  const floor = 0.03 + 0.9/Math.max(4, list.length);
   return list.map(t => {
     const d = Math.abs(traitPos(t) - centre) / half;      // 0 at centre, 1 at edge
     return floor + Math.pow(1 - Math.min(d, 0.9999), exp); // smooth falloff
   });
 }
 
+// Set for the duration of a single draw when divergence's coin comes up — see the
+// note in pickCategoryWeighted and the affinity inversion below.
+let _divergeThisDraw = false;
 function pickInRange(pool, rarityPref, target, minCount, flatten){
   if (!pool || !pool.length) return null;
+  const div = divergenceLevel();
+  _divergeThisDraw = div > 0 && Math.random() < div;
+  try { return _pickInRangeInner(pool, rarityPref, target, minCount, flatten); }
+  finally { _divergeThisDraw = false; }
+}
+function _pickInRangeInner(pool, rarityPref, target, minCount, flatten){
   if (target === undefined || target === null) return pickWeighted(pool, rarityPref);
   const sel = rangeSelect(pool, target, minCount);
   const {list, half} = sel;
@@ -697,15 +900,35 @@ function pickInRange(pool, rarityPref, target, minCount, flatten){
      of candidates in the band there is nothing left to vary. Scale both with pool
      size: small pools flatten and lift their tail automatically, large ones keep the
      precision they were tuned for. */
-  const norm = rarityNorm(list);
+  /* BUG FIX — the single largest repetition driver in the app, and it was hiding
+     inside the fix for a different problem.
+
+     rarityNorm equalises the rarity classes by dividing each trait's weight by how
+     many of its class are present, so "Balanced" means an even split between classes
+     regardless of how a category is composed. That is right — but it was being
+     computed over `list`, the narrow post-window slice, and a window is not a
+     population. A 15-candidate window holding 14 common traits and one uncommon one
+     handed that single trait a full class share: 30% of the draw, on a slot that runs
+     on every sheet. Measured, that is exactly why "Hushed-deliberate" turned up in 83
+     of 300 default characters out of an 83-trait pool, and "Enters a room backwards"
+     in 79 out of a 39-trait one.
+
+     Normalise against the POOL instead. The pool is the population the class balance
+     is a statement about, it does not change shape as the window widens, and a
+     singleton inside one window is no longer mistaken for a whole class. */
+  const norm = rarityNorm(pool);
   const prox = proximityWeights(list, centre, half, flatten);
   const weights = list.map((t, i) => {
     let w = prox[i] * rarityWeight(t, rarityPref, norm) * tierWeight(t, centre);
     if (aff > 0 && CURRENT_AFFINITY_VEC){
       const fit = polarityFit(t, CURRENT_AFFINITY_VEC); // -1..1, 0 if untagged
-      if (fit) w *= clamp(1 + aff*fit, 0.15, 3);
+      // Divergence inverted CATEGORY selection but left the trait-level polarity
+      // affinity untouched, so a diverged category still drew its most
+      // posture-agreeable member — half the mechanism, doing a quarter of the work.
+      // The same coin now flips the trait-level fit too.
+      if (fit) w *= clamp(1 + aff*fit*(_divergeThisDraw ? -1 : 1), 0.15, 3);
     }
-    w *= recentPenalty(t);
+    w *= recentPenalty(t) * slotRepeatPenalty(t);
     return w;
   });
   const total = weights.reduce((a,b)=>a+b,0);
@@ -745,7 +968,9 @@ const WEIGHT_MATRIX = {
   },
   honesty: {
     pos:{ vocab:{"Directness & Literalness":TIER_STRONG}, values:{"Rigid & Principled":TIER_STRONG} },
-    neg:{ vocab:{"Pragmatic Focus & Speech Functions":TIER_STRONG}, values:{"Self-Interested":TIER_STRONG,"Pragmatic & Flexible":TIER_WEAK} }
+    neg:{ vocab:{"Pragmatic Focus & Speech Functions":TIER_STRONG}, values:{"Self-Interested":TIER_STRONG,"Pragmatic & Flexible":TIER_WEAK},
+          // Deception lives in the face before it lives in the sentence.
+          manner:{"Eye & Facial Expressions":TIER_MODERATE} }
   },
   assertiveness: {
     pos:{ grammar:{"Turn-Taking Grammar":TIER_STRONG}, stress:{"Fight":TIER_STRONG}, role:{"Leader":TIER_STRONG,"Instigator":TIER_WEAK} },
@@ -781,24 +1006,37 @@ const WEIGHT_MATRIX = {
     neg:{ role:{"Caretaker":TIER_WEAK}, values:{"Loyalty-Bound":TIER_WEAK} }
   },
   emotionalcapacity: {
-    pos:{ vocab:{"Affective & Emotional Intensity":TIER_STRONG}, manner:{"Emotional Affectations":TIER_STRONG}, attachment:{"Anxious":TIER_MODERATE,"Disorganized":TIER_WEAK}, humor:{"Warm & Playful":TIER_WEAK} },
-    neg:{ vocab:{"Precision & Specificity Level":TIER_WEAK}, attachment:{"Avoidant":TIER_STRONG}, humor:{"Dry & Deadpan":TIER_MODERATE,"Humorless & Absent":TIER_MODERATE} }
+    // "Eye & Facial Expressions" is 75 traits and was the target of nothing at all.
+    // It belongs on both poles of emotional capacity, because the category holds both
+    // "the face shows everything" and "the face shows nothing" — which is exactly the
+    // axis, played out above the neck.
+    pos:{ vocab:{"Affective & Emotional Intensity":TIER_STRONG}, manner:{"Emotional Affectations":TIER_STRONG,"Eye & Facial Expressions":TIER_MODERATE}, attachment:{"Anxious":TIER_MODERATE,"Disorganized":TIER_WEAK}, humor:{"Warm & Playful":TIER_WEAK} },
+    neg:{ vocab:{"Precision & Specificity Level":TIER_WEAK}, manner:{"Eye & Facial Expressions":TIER_WEAK}, attachment:{"Avoidant":TIER_STRONG}, humor:{"Dry & Deadpan":TIER_MODERATE,"Humorless & Absent":TIER_MODERATE} }
   },
   intelligence: {
-    pos:{ vocab:{"Precision & Specificity Level":TIER_STRONG,"Morphological & Structural Lexicon":TIER_MODERATE}, role:{"Skeptic":TIER_STRONG}, humor:{"Dry & Deadpan":TIER_MODERATE} },
-    neg:{ vocab:{"Directness & Literalness":TIER_WEAK} }
+    // "Semantic Density & Modifiers" (72 traits) was reachable only through the
+    // verbLevel >= 1 hardcode inside boostedVocabCats, never through the matrix — so
+    // no personality signal could ask for it. Density of qualification is what an
+    // analytical mind does to a sentence.
+    pos:{ vocab:{"Precision & Specificity Level":TIER_STRONG,"Morphological & Structural Lexicon":TIER_MODERATE,"Semantic Density & Modifiers":TIER_MODERATE}, role:{"Skeptic":TIER_STRONG}, humor:{"Dry & Deadpan":TIER_MODERATE} },
+    neg:{ vocab:{"Directness & Literalness":TIER_WEAK,"Semantic Density & Modifiers":TIER_WEAK} }
   },
   positivity: {
     // Same gap on the Values side: "Idealistic & Visionary" had no inbound link at all.
     pos:{ humor:{"Warm & Playful":TIER_MODERATE}, values:{"Idealistic & Visionary":TIER_MODERATE} },
-    neg:{ humor:{"Humorless & Absent":TIER_MODERATE}, values:{"Pragmatic & Flexible":TIER_WEAK} }
+    // A pessimist lives in a spoiled past or a doomed future, rarely in the present.
+    neg:{ humor:{"Humorless & Absent":TIER_MODERATE}, values:{"Pragmatic & Flexible":TIER_WEAK},
+          vocab:{"Temporal Orientation & Tense Usage":TIER_MODERATE} }
   },
   activeness: {
     pos:{ manner:{"Postural & Spatial Dynamics":TIER_MODERATE,"Gestural & Kinetic Integration":TIER_MODERATE}, grammar:{"Spoken Compression":TIER_WEAK} },
     neg:{ manner:{"Tactile & Prop Handling":TIER_WEAK} }
   },
   curiosity: {
-    pos:{ vocab:{"Abstractness & Sensory Modality":TIER_MODERATE,"Conceptual Framework & Loanwords":TIER_MODERATE}, grammar:{"Anchors & Fillers":TIER_WEAK}, manner:{"Environmental Interaction Mannerisms":TIER_WEAK} },
+    // "Listening & Attention" was a full 24-trait mannerism category that nothing in
+    // the matrix ever pointed at — it could only arrive on an unguided draw. Curiosity
+    // is its most obvious upstream cause: wanting to know is what listening looks like.
+    pos:{ vocab:{"Abstractness & Sensory Modality":TIER_MODERATE,"Conceptual Framework & Loanwords":TIER_MODERATE}, grammar:{"Anchors & Fillers":TIER_WEAK}, manner:{"Environmental Interaction Mannerisms":TIER_WEAK,"Listening & Attention":TIER_MODERATE} },
     neg:{ vocab:{"Precision & Specificity Level":TIER_WEAK}, grammar:{"Structural Shifts":TIER_WEAK} }
   },
 
@@ -821,9 +1059,14 @@ const WEIGHT_MATRIX = {
           humor:{"Cruel & Barbed":TIER_WEAK}, vices:{"Risk & Escape":TIER_WEAK} }
   },
   composure: {
+    // "Repetition & Echo Patterns" (52 traits) had no inbound link, and "Repetitive &
+    // Circular" was reachable only through the one probabilistic circularOdds branch.
+    // Both are what speech does when a person is looping rather than progressing,
+    // which is precisely the erratic end of composure.
     pos:{ stress:{"Fight":TIER_MODERATE,"Freeze":TIER_WEAK}, attachment:{"Disorganized":TIER_STRONG},
           humor:{"Absurd & Chaotic":TIER_MODERATE}, vices:{"Substance & Consumption":TIER_WEAK,"Risk & Escape":TIER_WEAK},
-          manner:{"Emotional Affectations":TIER_WEAK} },
+          manner:{"Emotional Affectations":TIER_WEAK},
+          grammar:{"Repetition & Echo Patterns":TIER_MODERATE} },
     neg:{ attachment:{"Secure":TIER_STRONG}, role:{"Peacemaker":TIER_WEAK}, values:{"Rigid & Principled":TIER_WEAK},
           vices:{"Restraint & Discipline":TIER_WEAK}, humor:{"Dry & Deadpan":TIER_WEAK} }
   },
@@ -848,11 +1091,18 @@ const WEIGHT_MATRIX = {
 
   "values:Rigid & Principled": { vocab:{"Register & Formality Spectrum":TIER_WEAK}, grammar:{"Structural Shifts":TIER_WEAK} },
   "values:Self-Interested": { vocab:{"Pragmatic Focus & Speech Functions":TIER_MODERATE} },
-  "values:Loyalty-Bound": { role:{"Caretaker":TIER_WEAK} },
-
-  "attachment:Anxious": { manner:{"Emotional Affectations":TIER_WEAK} },
+  "attachment:Anxious": { manner:{"Emotional Affectations":TIER_WEAK}, vocab:{"Temporal Orientation & Tense Usage":TIER_WEAK} },
   "attachment:Avoidant": { manner:{"Postural & Spatial Dynamics":TIER_WEAK} },
-  "attachment:Disorganized": { grammar:{"Disfluencies & Flow":TIER_MODERATE} },
+  "attachment:Disorganized": { grammar:{"Disfluencies & Flow":TIER_MODERATE,"Repetition & Echo Patterns":TIER_WEAK} },
+
+  /* "Temporal Orientation & Tense Usage" (50 traits) was used by three archetypes'
+     vocabPref but no axis and no resolved category pointed at it — the matrix was the
+     outlier here, since AGE_RULES and CONTEXT_RULES already reference it. Grief, an
+     unhealed attachment and a loyalty debt are what make a person speak about the
+     present in the wrong tense; Motivation & Wound would be the most natural driver of
+     all, but it is a drawAll section and so never resolves to a single category for
+     the cross-link table to key on. These three do. */
+  "values:Loyalty-Bound": { role:{"Caretaker":TIER_WEAK}, vocab:{"Temporal Orientation & Tense Usage":TIER_WEAK} },
 
   // BUG FIX: the 4 newer sub-groups (Connector, Idealistic & Visionary, Intellectual
   // & Wordplay, Avoidance & Procrastination) got PROFILE_CATEGORY_POLARITY entries
@@ -918,7 +1168,7 @@ function AFFINITY(){ return floatVal('affinityBoost', 2.5); }
 
 function persLevel(id, overrides){
   const raw = (overrides && overrides[id] !== undefined) ? overrides[id] : (()=>{
-    const el = document.getElementById('pers_'+id); return el ? parseInt(el.value) : 0;
+    return intVal('pers_'+id, 0);
   })();
   return rawToLevel(raw);
 }
@@ -1045,7 +1295,7 @@ function _explainPickInner(slotId, s){
     const axisId = slotId.replace("pers_","").replace(/__2$/,"");
     const axis = PERSONALITY_AXES.find(a=>a.id===axisId);
     const el = document.getElementById('pers_'+axisId);
-    const raw = el ? parseInt(el.value) : 0;
+    const raw = intVal(el, 0);
     const side = raw >= 0 ? "positive" : "negative";
     const target = targetFromMag(Math.abs(raw));
     return pinNote + variantNote + `Driven directly by your <b>${axis?axis.label:axisId}</b> slider at <b>${raw}</b>, which selects the ${side} pool ("${cat}") and sets a continuous intensity target of <b>${target.toFixed(2)}</b>.${bandNote(s.trait, target)}${polNote}`;
@@ -1061,7 +1311,7 @@ function _explainPickInner(slotId, s){
   if (slotId === "verbosity" || slotId === "register"){
     const sliderId = slotId === "verbosity" ? 'verbositySlider' : 'registerSlider';
     const el = document.getElementById(sliderId);
-    const raw = el ? parseInt(el.value) : 0;
+    const raw = intVal(el, 0);
     return pinNote + `Set by your <b>${slotId === "verbosity" ? "Verbosity" : "Register"}</b> slider at <b>${raw}</b>, which chooses the "${cat}" pool.${bandNote(s.trait, s.target)}${polNote}`;
   }
 
@@ -1176,38 +1426,52 @@ function boostedMannerCats(compLevel, regLevel, profileCats, overrides){
 
 // ---------- Weighted random helpers ----------
 
-// The trait bank skews ~2:1 toward "signature" over "common" (4,742 vs 2,331). With a
-// flat per-trait weight of 1, "Balanced" silently inherited that skew — even a balanced
-// pick drew mostly signature material, and "Favor common" was pulling a 3x multiplier
-// against a pool where common was already the minority, so it under-delivered.
-//
 // Normalizing by each rarity class's size WITHIN THE POOL BEING DRAWN FROM makes
-// "Balanced" mean an even split between the two classes regardless of how a particular
+// "Balanced" mean an even split across the classes regardless of how a particular
 // category happens to be composed, and makes the two preferences symmetric around that
 // (3:1 either way). Per-pool rather than per-bank matters: individual categories differ
 // a lot from the global mix, so a single global divisor over- or under-corrects
 // depending on which category is being sampled.
-/* ================= THREE RARITY TIERS =================
-   The bank declares only two classes and 67% of it is "signature" (4,742 vs 2,331).
-   When two thirds of everything is billed as sharply defining, nothing is: the badge
-   stopped carrying information long before the pool got this big.
+/* ================= FOUR AUTHORED RARITY TIERS =================
+   This used to be three tiers DERIVED from (rarity, intensity):
 
-   Derive a third tier instead of re-tagging 7,073 entries by hand. The rule is a
-   single readable claim — a signature trait is one that is both distinctive AND loud
-   enough to actually define the voice — so:
+     rarityTier(t) = t.rarity !== "signature" ? "common"
+                   : t.intensity >= 4 ? "signature" : "distinctive"
 
-     signature   declared signature, intensity 4-5   (~16% of the bank)
-     distinctive declared signature, intensity 1-3   (~52%)
-     common      declared common                     (~32%)
+   which made rarity a pure function of loudness. Because the personality sliders set
+   the intensity target and the target gates eligibility, rarity tier was downstream of
+   slider position: measured over 150 characters per cell, pushing the rarity dial from
+   one end to the other at neutral sliders moved the signature share only from 0.7% to
+   4.6%, against a bank where signature was 16.5% of the entries. The dial's top third
+   was inert unless the personality sliders were also pushed hard, and nothing said so.
+   The case a writer reaches for most often — "an ordinary person with one startling
+   verbal habit" — was not expressible at all, because quiet sliders made the startling
+   habit unreachable.
 
-   Nothing about the underlying data changes; `rarity` still means what it meant, and
-   `rtier` is what the badge and the preference weight read. */
-function rarityTier(t){
-  if (t.rarity !== "signature") return "common";
-  return t.intensity >= 4 ? "signature" : "distinctive";
-}
+   Rarity is now an AUTHORED field on every trait, and the two questions are finally
+   orthogonal:
+
+     rarity    how many people are like this
+     intensity how loudly it shows
+
+     common       Ordinary human behaviour. Texture, not identity.
+     uncommon     Noticeable. Not everyone does this, but nobody would remark on it.
+     distinctive  Specific enough that a reader would remember it about this character.
+     signature    Defines the voice. Two of these is a caricature.
+
+   The data files were migrated once (see the migration note in the README): declared
+   "common" split by intensity into common/uncommon, and the 4,742-entry declared
+   "signature" class — which carried almost no information at 67% of the bank — split
+   into signature (i4+), distinctive (i3) and uncommon (i1-2). From here rarity is
+   plain data and can be corrected trait by trait without a code change. */
+const RTIER_ORDER = ["common","uncommon","distinctive","signature"];
+const RTIER_SET = new Set(RTIER_ORDER);
+function rarityTier(t){ return RTIER_SET.has(t.rarity) ? t.rarity : "common"; }
 (function tagRarityTiers(){ TRAITS.forEach(t=>{ t.rtier = rarityTier(t); }); })();
-const RTIER_SCORE = {common:-1, distinctive:0, signature:1};
+// Evenly spaced across the four tiers, so the preference dial moves the same distance
+// per step and the two middle tiers are genuinely intermediate rather than one of them
+// sitting neutrally at zero.
+const RTIER_SCORE = {common:-1, uncommon:-0.33, distinctive:0.33, signature:1};
 
 // Rarity preference is continuous now (-1 = only the ordinary, +1 = only the loud and
 // specific), matching how every other dial in the app works. The three legacy string
@@ -1215,8 +1479,9 @@ const RTIER_SCORE = {common:-1, distinctive:0, signature:1};
 // builder keep working without a migration.
 function rarityPrefValue(pref){
   if (typeof pref === 'number') return clamp(pref, -1, 1);
-  if (pref === 'common') return -1;
-  if (pref === 'signature') return 1;
+  // The four tier names double as preference values, so "give me uncommon material"
+  // is expressible by name as well as by dial position.
+  if (RTIER_SCORE[pref] !== undefined) return RTIER_SCORE[pref];
   if (pref === 'balanced' || pref === undefined || pref === null || pref === '') return 0;
   const n = parseFloat(pref);
   return Number.isNaN(n) ? 0 : clamp(n, -1, 1);
@@ -1226,15 +1491,30 @@ function rarityNorm(list){
   for (const t of list) counts[t.rtier || rarityTier(t)] = (counts[t.rtier || rarityTier(t)]||0) + 1;
   return counts;
 }
+/* How hard the per-pool class equalisation pulls. 1 = full equalisation (every rarity
+   class gets exactly the same total weight); 0 = none (flat per-trait weighting).
+
+   It used to be a hard 1, which is right on a large, evenly-composed pool and
+   pathological on a small lopsided one: "The Defence" holds 20 traits split 11
+   signature / 7 distinctive / 2 uncommon, and full equalisation hands each of those
+   two uncommon traits five and a half times an average signature trait's weight. One
+   of them, "Mild, unfailing agreeableness", was landing in 89 of 300 default
+   characters against a uniform expectation of 15.
+
+   sqrt damping keeps the correction that matters — a class is no longer drawn in
+   proportion to how much of it someone happened to author — without letting a
+   two-member class in a twenty-trait pool outweigh an eleven-member one. The thin
+   classes are still lifted, just not to the point of dominating. */
+const RARITY_NORM_EXP = 0.5;
 function rarityWeight(t, pref, norm){
   const tier = t.rtier || rarityTier(t);
-  // 1/size equalizes the classes; falls back to flat weighting if no pool context
-  const base = (norm && norm[tier]) ? 1 / norm[tier] : 1;
+  const base = (norm && norm[tier]) ? 1 / Math.pow(norm[tier], RARITY_NORM_EXP) : 1;
   const p = rarityPrefValue(pref);
   if (!p) return base;
-  // 3^(pref * tierScore): symmetric either way, and "distinctive" sits neutrally in
-  // the middle instead of being dragged along with whichever pole it was lumped into.
-  return base * Math.pow(3, p * (RTIER_SCORE[tier] || 0));
+  // 3^(pref * tierScore): symmetric either way, with the two middle tiers sitting
+  // proportionally between the poles rather than being dragged along with whichever
+  // end they were lumped into.
+  return base * Math.pow(3, p * (RTIER_SCORE[tier] !== undefined ? RTIER_SCORE[tier] : 0));
 }
 function pickWeighted(arr, pref){
   if (!arr.length) return null;
@@ -1257,6 +1537,12 @@ function pickWeighted(arr, pref){
    INVERTED for that one draw, so the strongly-indicated category becomes the
    unlikely one. Coherence stays reported, but it is now something you choose, not
    something you are graded on. */
+/* How often each category has been drawn this session. Feeds the neutral-slider arm
+   of divergence above, and nothing else — it is a tie-breaker, not a constraint. */
+const CATEGORY_USE = new Map();
+function noteCategoryUse(cat){ if (cat) CATEGORY_USE.set(cat, (CATEGORY_USE.get(cat) || 0) + 1); }
+function forgetCategoryUse(){ CATEGORY_USE.clear(); }
+
 function divergenceLevel(){
   const el = document.getElementById('divergence');
   return el ? clamp(parseFloat(el.value) || 0, 0, 1) : 0;
@@ -1272,18 +1558,40 @@ function pickCategoryWeighted(cats, boostMap){
   // truly-random picks are unaffected — this only sharpens picks that already have signal.
   const BASELINE = 0.4;
   const div = divergenceLevel();
-  const invert = div > 0 && boostMap && boostMap.size && Math.random() < div;
+  /* BUG FIX: divergence only fired when boostMap.size was non-zero — so at neutral
+     sliders, which is exactly where the boost map is empty and staleness is worst, the
+     dial did nothing whatsoever. A user who moved "Surprise me" to the top because
+     every character felt the same got no change at all, because they hadn't also
+     pushed a slider.
+
+     At neutral there is no pull to invert, so inverting is not the available move.
+     What IS available is refusing to keep landing in the same place: pick uniformly
+     among the categories this session has drawn LEAST from. Same dial, same coin, and
+     the same meaning — "some of the time, don't go where you'd normally go". */
+  const hasSignal = !!(boostMap && boostMap.size);
+  const roll = div > 0 && Math.random() < div;
+  const invert = roll && hasSignal;
+  const freshen = roll && !hasSignal;
   let peak = 0;
   if (invert) boostMap.forEach(v=>{ if (v > peak) peak = v; });
+  let leastUsed = null;
+  if (freshen){
+    let min = Infinity;
+    cats.forEach(c=>{ const n = CATEGORY_USE.get(c) || 0; if (n < min) min = n; });
+    leastUsed = new Set(cats.filter(c => (CATEGORY_USE.get(c) || 0) === min));
+  }
   const weightOf = c => {
+    if (freshen) return leastUsed.has(c) ? 1 : 0.05;
     const b = (boostMap && boostMap.get(c)) || 0;
     return BASELINE + boost * (invert ? Math.max(0, peak - b) : b);
   };
   const weights = cats.map(c => weightOf(c) * tierMultiplier(c) * contextMultiplier(c));
   const total = weights.reduce((a,b)=>a+b,0);
   let r = Math.random() * total;
-  for (let i=0;i<cats.length;i++){ r -= weights[i]; if (r <= 0) return cats[i]; }
-  return cats[cats.length-1];
+  for (let i=0;i<cats.length;i++){ r -= weights[i]; if (r <= 0){ noteCategoryUse(cats[i]); return cats[i]; } }
+  const last = cats[cats.length-1];
+  noteCategoryUse(last);
+  return last;
 }
 
 /* ================= CONTEXT & AGE CONDITIONING =================
@@ -1447,6 +1755,110 @@ function checkConflictsFor(stateObj){
 }
 
 
+/* ================= POLARITY COVERAGE NORMALISATION =================
+   Polarity tagging is badly asymmetric across the axes, and always has been. Measured
+   over the bank as tagged:
+
+     intel  analytical thinking  379 pos :  60 neg   (6.3 : 1 — the worst)
+     rebel  rebelliousness       284 pos :  58 neg
+     form   formality            141 pos :  60 neg
+     ego    self-confidence      188 pos : 342 neg
+     vol    volume/wordiness     134 pos : 262 neg
+     mood   current mood          32 pos : 206 neg   (still skewed after the mood pass)
+
+   axisProfile() sums raw pol values, so a character reads positive on intel and rebel
+   almost regardless of who they are, and negative on mood almost regardless. That is
+   the same distortion the mood-pass comment describes, on five more axes — and it is
+   silent: the radar comes out systematically the wrong shape, conflict detection
+   needs both signs to find a contradiction, archetypes that set intelligence negative
+   score badly for structural reasons, and the foil generator quietly under-opposes on
+   the skewed axes because it opposes by sign.
+
+   Balancing intel alone needs roughly 300 new negative-side traits — a content pass,
+   not a tagging pass, and not something to hold the honest radar hostage to. Dividing
+   by sqrt(tagged coverage) makes a raw sum stop being read as a posture immediately:
+   an axis with six times the material on one side stops contributing six times the
+   signal for the same character. It is a normalisation, not a correction — when the
+   content arrives, the divisors move on their own and the shapes stay right. */
+let POL_COUNTS = {};
+let POL_NORM = {};
+(function countPolarity(){
+  TRAITS.forEach(t=>{
+    if (!t.pol) return;
+    Object.entries(t.pol).forEach(([ax, v])=>{
+      if (!v) return;
+      if (!POL_COUNTS[ax]) POL_COUNTS[ax] = {pos:0, neg:0};
+      if (v > 0) POL_COUNTS[ax].pos++; else POL_COUNTS[ax].neg++;
+    });
+  });
+  Object.entries(POL_COUNTS).forEach(([ax, c])=>{
+    POL_NORM[ax] = Math.sqrt(c.pos + c.neg) || 1;
+  });
+})();
+// Normalised axis contribution. Sign is preserved exactly; only the magnitude is put
+// on a comparable footing across axes with very different amounts of tagged material.
+function polNormalise(ax, raw){
+  const d = POL_NORM[ax];
+  return d ? raw / d : raw;
+}
+
+/* ================= CONTRADICTION AS CONTENT =================
+   checkConflictsFor already finds every pair of seated traits that pull opposite ways
+   on an axis, and reports them as something to be aware of — a warning, softened by
+   the tier grading, but still framed as a problem the sheet has.
+
+   The far more useful move is to let a character OWN one. A person who is truthful and
+   evasive is not a broken character sheet; they are a character with a question
+   attached, and the question is the interesting part. The detection and the grading
+   already exist — this only asks the generative question about the strongest pair, per
+   axis, in the character's own terms.
+
+   Deliberately one contradiction, not a list: a sheet that names six of them is back to
+   being a warnings panel. The strongest pair is the one worth a scene. */
+const CONTRADICTION_QUESTIONS = {
+  hon:  "What are they lying about, and to whom?",
+  warm: "Who gets the warm one, and what did that person do to earn it?",
+  ego:  "Which of the two is the performance, and who is it for?",
+  asrt: "What has to be at stake before they take the room?",
+  emo:  "Who has seen the open version, and when did they last see it?",
+  disc: "What is the one area they refuse to be organised about, and why that one?",
+  agr:  "What is the thing they will not go along with, however much easier it would be?",
+  man:  "Whose rules do they observe, and whose do they treat as optional?",
+  intel:"Which kind of problem makes them go quiet, and which makes them show off?",
+  reb:  "What authority do they actually accept, and what did it do to deserve that?",
+  pos:  "Which future do they say out loud, and which one do they plan around?",
+  act:  "What are they saving the energy for?",
+  cur:  "What is the one subject they refuse to be curious about?",
+  vol:  "In whose company do they run out of words?",
+  form: "Which room makes them formal, and what are they defending in it?",
+  pace: "What makes them slow down?",
+  mood: "How long has this been the mood, and what were they like before it?",
+};
+function contradictionFor(stateObj){
+  const items = Object.values(stateObj || {}).filter(s=> s && s.trait && s.trait.pol);
+  let best = null;
+  for (let i = 0; i < items.length; i++){
+    for (let j = i + 1; j < items.length; j++){
+      const a = items[i].trait, b = items[j].trait;
+      for (const axis of Object.keys(AXIS_LABELS)){
+        const pa = a.pol[axis], pb = b.pol[axis];
+        if (!(pa === 1 && pb === -1 || pa === -1 && pb === 1)) continue;
+        const severity = (a.intensity||3) + (b.intensity||3);
+        if (!best || severity > best.severity){
+          // Whichever side is positive on the axis reads first, so the sentence keeps
+          // the same orientation as the axis label.
+          const hi = pa === 1 ? a : b, lo = pa === 1 ? b : a;
+          best = {severity, axis, axisLabel: AXIS_LABELS[axis], hi, lo,
+                  tier: conflictTier(severity).label,
+                  question: CONTRADICTION_QUESTIONS[axis] || "When does each of these come out, and what decides it?"};
+        }
+      }
+    }
+  }
+  // Two quiet traits nudging opposite ways is not a contradiction anyone would notice.
+  return best && best.severity >= 6 ? best : null;
+}
+
 const PERSONALITY_AXES = [
   {id:"friendliness", label:"Friendliness", pos:"Friendliness — Warm & Approachable", neg:"Friendliness — Cold & Distant", mid:"Friendliness — Situational"},
   {id:"honesty", label:"Honesty", pos:"Honesty — Truthful & Transparent", neg:"Honesty — Deceptive & Evasive", mid:"Honesty — Situational"},
@@ -1486,7 +1898,7 @@ function axisLevel(axisId, overrides){
   if (overrides && overrides[axisId] !== undefined) return rawToLevel(overrides[axisId]);
   const voice = VOICE_AXES.find(v=>v.id===axisId);
   const el = document.getElementById(voice ? voice.sliderId : 'pers_'+axisId);
-  return el ? rawToLevel(parseInt(el.value)) : 0;
+  return rawToLevel(intVal(el, 0));
 }
 
 // Maps each personality axis onto the short polarity code its traits already use in
@@ -1685,15 +2097,20 @@ function pickPersonalitySlot(axis, level, rarityPref){
     // 40+ and run to 5, where "conditionality so pronounced it IS the defining fact
     // about them" lives. Capping at 2.8 would have left that entire new tail
     // permanently unreachable at exactly the slider positions it was written for.
-    const nTarget = 1.5 + clamp(mag / NEUTRAL_NONE, 0, 1) * 2.1;   // 1.5 .. 3.6
+    // The 1.5 floor was chosen when these pools were twelve entries deep; the v3
+    // situational pass took them to 40+, and 1.5 is now exactly where those pools
+    // START — so at slider 0 the target sits on the floor and the draw collapses onto
+    // the two or three lowest entries (15 distinct out of 41, top trait 35%). Lift it
+    // into the pool the same way every other neutral target now is.
+    const nTarget = poolFloorTarget(neutralPool, 1.5 + clamp(mag / NEUTRAL_NONE, 0, 1) * 2.1);
     // minCount 7 forces the window to widen until there's real choice; variety
     // matters more than precision here, since nothing in this pool is loud.
     return {slotId:"pers_"+axis.id, locked:false, label:axis.label,
             target: nTarget, neutral:true,
-            trait: pickInRange(neutralPool, rarityPref, nTarget, 10, true)};
+            trait: withSlotMemory("pers_"+axis.id, ()=>pickInRange(neutralPool, rarityPref, nTarget, 10, true))};
   }
   return {slotId:"pers_"+axis.id, locked:false, label:axis.label,
-          target, trait: pickInRange(byFilter("Personality Traits", sideCat), rarityPref, target)};
+          target, trait: withSlotMemory("pers_"+axis.id, ()=>pickInRange(byFilter("Personality Traits", sideCat), rarityPref, target))};
 }
 
 function pickPersonalitySlots(rarityPref, overrides){
@@ -2313,10 +2730,25 @@ function coherenceScore(st){
    exact settings — the same "compare against a chance baseline" technique coherenceScore
    already uses. Then the warning means "louder than you asked for", which is a fact
    about the character, at any slider position. */
+/* PERF: this re-runs rangeSelect for every slot on the sheet, on every render that
+   evaluates the caricature guard — a second full pass over the same pools immediately
+   after the build has just walked them. The answer for a given (section, category,
+   target) is a pure function of the pool and the current band width, so it is cached
+   for the lifetime of one evaluation pass and invalidated whenever the slider cache is.
+   A default sheet drops from ~38 rangeSelect calls per render to roughly the number of
+   distinct pools it actually draws from. */
+const _loudPCache = new Map();
+function _invalidateLoudCache(){ _loudPCache.clear(); }
 function expectedLoudCount(st){
   let expected = 0, variance = 0, measurable = 0;
   Object.values(st || {}).forEach(s=>{
     if (!s || !s.trait || s.target === undefined || s.target === null) return;
+    const key = s.trait.section + "||" + s.trait.category + "@" + s.target.toFixed(3);
+    const hit = _loudPCache.get(key);
+    if (hit !== undefined){
+      expected += hit; variance += hit * (1 - hit); measurable++;
+      return;
+    }
     const pool = byFilter(s.trait.section, s.trait.category);
     if (pool.length < 2) return;
     const sel = rangeSelect(pool, s.target, 4);
@@ -2334,6 +2766,7 @@ function expectedLoudCount(st){
     let loudW = 0;
     list.forEach((t,i)=>{ if (traitPos(t) >= 3.5) loudW += w[i]; });
     const p = loudW / total;
+    _loudPCache.set(key, p);
     expected += p;
     /* Each slot is one Bernoulli draw, so the count's variance is the sum of p(1-p) —
        NOT sqrt(mean). The difference matters at the ends of the sliders: there most
@@ -2430,6 +2863,9 @@ function explainWhyNot(trait){
   if (bannedCategories.has(cat)) out.push(`Its whole category, "${cat}", is <b>banned</b> in your constraints.`);
   if (typeof bannedSections !== 'undefined' && bannedSections.has(trait.section)) out.push(`Its whole section, "${trait.section}", is <b>banned</b> in your constraints.`);
   const spec = PRESENTATION_VARIANTS[cat];
+  if (rarityCaps[rarityTier(trait)] === 0){
+    out.push(`You have capped <b>${rarityTier(trait)}</b> traits at zero for this sheet, and this is one — see Budgets.`);
+  }
   if (spec && trait.variant && charVariants[cat] && charVariants[cat] !== trait.variant){
     out.push(`This character is locked to the <b>${spec[charVariants[cat]].label}</b> presentation of "${cat}", and this trait belongs to the other one. Regenerate to reroll the presentation lock.`);
   }
@@ -2520,7 +2956,7 @@ function personalityFromDepth(chosen){
       // map doesn't cover (Manners, Activeness, Curiosity). Preserve their value
       // instead — depth-first should derive what it can and leave the rest alone.
       const el = document.getElementById('pers_'+a.id);
-      out[a.id] = el ? parseInt(el.value) : 0;
+      out[a.id] = intVal(el, 0);
       out['__untouched_'+a.id] = true;
     }
   });
@@ -2646,6 +3082,11 @@ let history = [];
 let lastGeneratedSliders = null;
 let charMetaSeed = null;
 let diffLog = {}; // slotId -> {from, to}
+/* Free-text notes attached to a card. Round-trips in the JSON export and in a saved
+   character, and is deliberately keyed on the SLOT rather than the trait: the note is
+   about this character's version of the trait ("this is the one the whole first act
+   turns on"), not about the trait in the abstract. */
+let traitNotes = {};   // slotId -> string
 let whyOpen = {};          // slotId -> bool, is the "why?" panel expanded
 let rerollExclusions = {}; // slotId -> Set of trait ids already rejected here
 let rerollHistory = {};    // slotId -> array of previous slot objects, oldest first
@@ -2703,7 +3144,25 @@ function expandSlots(st){
   return out;
 }
 
+/* Redo. The snapshot mechanism already stores everything needed to move in either
+   direction; all that was missing was a second stack and the discipline of clearing it
+   when a NEW action forks the timeline. Undo depth is 15, so redo matches it. */
+let redoStack = [];
+function _snapshotNow(){
+  return {
+    state: compressSlots(state),
+    charMeta: {...charMeta},
+    pressureState: compressSlots(pressureState),
+    sliders: lastGeneratedSliders || captureSliders()
+  };
+}
+function updateUndoButtons(){
+  const u = document.getElementById('undoBtn'); if (u) u.disabled = history.length === 0;
+  const r = document.getElementById('redoBtn'); if (r) r.disabled = redoStack.length === 0;
+}
 function snapshotHistory(){
+  // A fresh action invalidates anything that was ahead of us on the timeline.
+  redoStack = [];
   history.push({
     state: compressSlots(state),
     charMeta: {...charMeta},
@@ -2713,11 +3172,11 @@ function snapshotHistory(){
     sliders: lastGeneratedSliders || captureSliders()
   });
   if (history.length > 15) history.shift();
-  const btn = document.getElementById('undoBtn'); if (btn) btn.disabled = false;
+  updateUndoButtons();
 }
-function undoLast(){
-  if (!history.length) return;
-  const prev = history.pop();
+// Shared by undo and redo: the restore half is identical, only which stack the current
+// position is pushed onto differs.
+function _restoreSnapshot(prev){
   state = expandSlots(prev.state); charMeta = prev.charMeta;
   pressureState = expandSlots(prev.pressureState) || null;
   restoreSliders(prev.sliders);
@@ -2730,7 +3189,19 @@ function undoLast(){
   diffLog = {}; rerollExclusions = {}; rerollHistory = {}; whyOpen = {};
   onSliderChange();
   renderSheet(); checkConflicts();
-  document.getElementById('undoBtn').disabled = history.length === 0;
+  updateUndoButtons();
+}
+function undoLast(){
+  if (!history.length) return;
+  redoStack.push(_snapshotNow());
+  if (redoStack.length > 15) redoStack.shift();
+  _restoreSnapshot(history.pop());
+}
+function redoLast(){
+  if (!redoStack.length) return;
+  history.push(_snapshotNow());
+  if (history.length > 15) history.shift();
+  _restoreSnapshot(redoStack.pop());
 }
 
 function pickVerbositySlot(verbLevel, rarityPref){
@@ -2760,8 +3231,9 @@ function pickVerbositySlot(verbLevel, rarityPref){
     // Dead centre now means "situational pacing at low intensity" rather than an
     // unfiltered free-for-all — the neutral band respects the range engine too.
     const pool = byFilter(AXES.pacing.section, AXES.pacing.category);
-    const t = targetFromMag(18);
-    return {slotId:"verbosity", locked:false, label:"Verbosity (pacing-driven)", target:t, trait: pickInRange(pool, rarityPref, t)};
+    const t = poolFloorTarget(pool, targetFromMag(18));
+    return {slotId:"verbosity", locked:false, label:"Verbosity (pacing-driven)", target:t,
+            trait: withSlotMemory("verbosity", ()=>pickInRange(pool, rarityPref, t, 8, true))};
   }
 }
 function pickRegisterSlot(regLevel, rarityPref){
@@ -2776,8 +3248,12 @@ function pickRegisterSlot(regLevel, rarityPref){
     return {slotId:"register", locked:false, label:"Register (plain-leaning)", target, trait: pickInRange(pool, rarityPref, target)};
   } else {
     const pool = byFilter("Vocabulary Traits","Register & Formality Spectrum");
-    const t = targetFromMag(18);
-    return {slotId:"register", locked:false, label:"Register (neutral)", target:t, trait: pickInRange(pool, rarityPref, t)};
+    // 83 traits returning 15, one of them ("Hushed-deliberate") in 28% of all
+    // characters, because targetFromMag(18) sits below the pool's floor. See the
+    // POOL-FLOOR TARGETS note above.
+    const t = poolFloorTarget(pool, targetFromMag(18));
+    return {slotId:"register", locked:false, label:"Register (neutral)", target:t,
+            trait: withSlotMemory("register", ()=>pickInRange(pool, rarityPref, t, 10, true))};
   }
 }
 // Shared by pickVocabSlots/pickGrammarSlot/pickMannerSlots: when a category was actually
@@ -2887,7 +3363,7 @@ function pickAppearanceSlots(rarityPref, overrides, resolvedCats, sourceState){
   const derivedUpkeep = resolvedCats ? UPKEEP_FROM_VICE[resolvedCats.vices] : 0;
   APPEARANCE_AXES.forEach((axis,i)=>{
     const el = document.getElementById('app_'+axis.id);
-    const raw = el ? parseInt(el.value) : 0;
+    const raw = intVal(el, 0);
     let cat, target, derived = false;
     if (Math.abs(raw) < 8){
       // centred slider = no deliberate statement
@@ -2908,11 +3384,12 @@ function pickAppearanceSlots(rarityPref, overrides, resolvedCats, sourceState){
   // intensity a magnitude of 25 asks for (target 1.35), so a neutral Activeness
   // slider aimed the picker below the pool entirely — 7 distinct traits in 400
   // characters. 40 lands inside the pool's real content.
-  const mvTarget = targetFromMag(Math.max(40, Math.abs(actLevel)*50));
-  const mv = pickInRange(byFilter("Appearance","Movement & Bearing"), rarityPref, mvTarget);
+  const mvPool = byFilter("Appearance","Movement & Bearing");
+  const mvTarget = poolFloorTarget(mvPool, targetFromMag(Math.max(40, Math.abs(actLevel)*50)));
+  const mv = withSlotMemory("app_move", ()=>pickInRange(mvPool, rarityPref, mvTarget, 8, true));
   if (mv) out['app_move'] = {slotId:'app_move', locked:false, label:"Appearance \u2014 Movement & Bearing", target:mvTarget, trait:mv};
   const pEl = document.getElementById('app_presence');
-  const pMag = pEl ? Math.abs(parseInt(pEl.value)) : 0;
+  const pMag = Math.abs(intVal(pEl, 0));
   // Wound intensity, read off whichever Motivation slots this build has already seated.
   let woundMag = 0;
   const st = sourceState || null;
@@ -2921,8 +3398,11 @@ function pickAppearanceSlots(rarityPref, overrides, resolvedCats, sourceState){
     const t = st[k] && st[k].trait;
     if (t && /Wound/i.test(t.category)) woundMag = Math.max(woundMag, (t.intensity||3) * 18);
   });
-  const mkTarget = targetFromMag(Math.max(15, pMag, woundMag));
-  const mk = pickInRange(byFilter("Appearance","Distinguishing Marks"), rarityPref, mkTarget);
+  const mkPool = byFilter("Appearance","Distinguishing Marks");
+  // targetFromMag(15) = 1.09 against a pool whose floor is well above it — 38 traits
+  // were returning 9, and two of them were showing up in a quarter of all characters.
+  const mkTarget = poolFloorTarget(mkPool, targetFromMag(Math.max(15, pMag, woundMag)));
+  const mk = withSlotMemory("app_mark", ()=>pickInRange(mkPool, rarityPref, mkTarget, 8, true));
   if (mk) out['app_mark'] = {slotId:'app_mark', locked:false, label:"Appearance \u2014 Distinguishing Marks", target:mkTarget, trait:mk};
   return out;
 }
@@ -2956,8 +3436,21 @@ function _drawUnique(fn, tries){
    So: one slot, drawn from the far tail of a category chosen at random, with the
    slider posture and the affinity vector deliberately switched off for that single
    draw. It is labelled as what it is, so nobody mistakes it for a system failure. */
-const WILDCARD_SECTIONS = ["Personality Traits","Mannerisms","Vocabulary Traits","Habits & Vices","Humor Style","Verbosity Traits","Dialogue Grammar Traits"];
-function pickWildcardSlot(rarityPref){
+/* The Profile sections were excluded, which meant the one slot in the app whose job is
+   to be out of character could never be an out-of-character FACT — only an
+   out-of-character verbal habit. "The devoted caretaker whose actual vice is gambling"
+   is a far better outlier than "the terse person who sometimes rambles", and it was
+   unreachable. Motivation & Wound stays out: those seven categories are the character's
+   own explanation of themselves, and an outlier there reads as an error rather than a
+   contradiction. */
+const WILDCARD_SECTIONS = ["Personality Traits","Mannerisms","Vocabulary Traits","Habits & Vices","Humor Style","Verbosity Traits","Dialogue Grammar Traits",
+  "Conflict & Stress Response","Social Role in a Group","Values & Moral Line","Attachment & Intimacy Style"];
+function wildcardCount(){
+  if (!wildcardEnabled()) return 0;
+  const el = document.getElementById('wildcardCount');
+  return el ? clamp(parseInt(el.value, 10) || 0, 0, 3) : 1;
+}
+function pickWildcardSlot(rarityPref, index){
   /* Picking a uniform SECTION and then a uniform CATEGORY within it weighted the draw
      by how finely a section happens to be subdivided, not by how much content it holds:
      a Mannerism category came up at 1/84 while a Verbosity one came up at 1/35, for no
@@ -2976,7 +3469,8 @@ function pickWildcardSlot(rarityPref){
   finally { CURRENT_AFFINITY_VEC = prior; }
   if (!trait) return null;
   _markUsed(trait);
-  return {slotId:"wild_0", locked:false, wildcard:true, target,
+  const slotId = "wild_" + (index || 0);
+  return {slotId, locked:false, wildcard:true, target,
           label:"Doesn't fit the rest — " + cat, trait};
 }
 function wildcardEnabled(){
@@ -3051,8 +3545,8 @@ function buildCharacterState(opts){
   // Appearance draws last on purpose: it now reads the Motivation slots this build
   // just seated (see the wound → distinguishing-marks link) and the resolved vice.
   if (on('genAppearance')) Object.assign(obj, pickAppearanceSlots(rarityPref, fullOverrides, resolvedCats, obj));
-  if (wildcardEnabled()){
-    const wild = pickWildcardSlot(rarityPref);
+  for (let w = 0; w < wildcardCount(); w++){
+    const wild = pickWildcardSlot(rarityPref, w);
     if (wild) obj[wild.slotId] = wild;
   }
   return obj;
@@ -3065,10 +3559,62 @@ function buildCharacterState(opts){
 // grammar shifts (a vice under stress is a scene, not a different vice).
 const PRESSURE_SHIFT_SECTIONS = ["role", "values", "attachment"];
 
+/* How much pressure. The sheet used to be binary — calm, or maximum stress — which
+   is the least interesting question you can ask about someone under load, and the
+   existing machinery already takes a continuous level everywhere. 0-100, where the
+   old behaviour is 100 and stays the default. */
+function pressureLevel(){
+  const el = document.getElementById('pressureLevel');
+  return el ? clamp(intVal(el, 100), 0, 100) / 100 : 1;
+}
+
+/* The sheet said how they degrade and never what degrades them, with Core Fear sitting
+   right there in the build. A trigger turns the pressure sheet from a description into
+   a scene: this is the thing that does this to them. */
+function pressureTrigger(st){
+  const find = re => {
+    const id = Object.keys(st || {}).find(k => k.startsWith("prof_motivation_")
+      && st[k] && st[k].trait && re.test(st[k].trait.category));
+    return id ? st[id].trait : null;
+  };
+  const fear = find(/Core Fear/i), wound = find(/Core Wound/i), lie = find(/The Lie/i);
+  if (!fear && !wound) return null;
+  let out = fear
+    ? `Anything that looks like <b>${escHTML(fear.trait)}</b>${wound ? ` — especially when it rhymes with <b>${escHTML(wound.trait)}</b>` : ``}.`
+    : `Anything that reopens <b>${escHTML(wound.trait)}</b>.`;
+  if (lie) out += ` Underneath it, they are still working from <b>${escHTML(lie.trait)}</b>.`;
+  return out;
+}
+
+/* What they are like once it passes, which is at least as characterful as the break
+   itself — and is the part a writer actually has to stage next. Derived from the
+   stress response and the attachment style, both already resolved. */
+const RECOVERY_BY_STRESS = {
+  "Fight (attack the threat)": "Comes down slowly and does not apologise first. Expect the next hour to be businesslike and a little too polite.",
+  "Flight (remove yourself)": "Reappears as if nothing happened, and is genuinely puzzled that anyone is still on it.",
+  "Freeze (shut down)": "Comes back online in stages, and is exhausted for far longer than the incident lasted.",
+  "Fawn (appease the threat)": "Over-corrects afterwards — does something generous and slightly disproportionate, and resents having done it.",
+};
+const RECOVERY_BY_ATTACHMENT = {
+  "Secure": "Will raise it themselves, once, when it's over.",
+  "Anxious": "Needs to be told explicitly that it's fine, and will not fully believe the first telling.",
+  "Avoidant": "Treats any attempt to discuss it as a second incident.",
+  "Disorganized": "May be warm or cold about it afterwards, and which one is not predictable from what happened.",
+};
+function pressureRecovery(st){
+  const catOf = id => { const s2 = (st||{})["prof_"+id+"_0"]; return s2 && s2.trait ? s2.trait.category : null; };
+  const bits = [RECOVERY_BY_STRESS[catOf('stress')], RECOVERY_BY_ATTACHMENT[catOf('attachment')]].filter(Boolean);
+  return bits.length ? bits.join(" ") : null;
+}
+
 function buildStressVariant(baseVerbLevel, baseRegLevel, mannerCount, rarityPref, sourceState){
-  // stress pushes composure to extreme volatile, verbosity toward its more urgent extreme
-  const stressCompLevel = 2;
-  const stressVerbLevel = baseVerbLevel >= 0 ? Math.max(baseVerbLevel, 1.5) : Math.min(baseVerbLevel, -1.5);
+  /* Scaled by the pressure dial rather than pinned to the extreme. At 1.0 these are
+     exactly the values this function has always used, so the default is unchanged; at
+     0.4 you get someone having a difficult afternoon rather than a crisis. */
+  const p = pressureLevel();
+  const stressCompLevel = 2 * p;
+  const push = 1.5 * p;
+  const stressVerbLevel = baseVerbLevel >= 0 ? Math.max(baseVerbLevel, push) : Math.min(baseVerbLevel, -push);
   const st = sourceState || state;
 
   // Under-pressure picks should reflect the EXAGGERATED stress levels, not the calm
@@ -3137,7 +3683,7 @@ function buildStressVariant(baseVerbLevel, baseRegLevel, mannerCount, rarityPref
     const cats = catsOf(ps.section);
     const boostMap = resolveBoostMapForCats(cats, accumulateBoost(id, seed, stressOverrides));
     const cat = pickCategoryWeighted(cats, boostMap);
-    const tgt = clamp(profileTarget(id) + 0.6, 1, 5);   // pressure reads louder than baseline
+    const tgt = clamp(profileTarget(id) + 0.6 * p, 1, 5);   // pressure reads louder than baseline
     const trait = pickInRange(byFilter(ps.section, cat), rarityPref, tgt, 4);
     if (!trait) return;
     obj['p_prof_'+id] = {
@@ -3146,6 +3692,10 @@ function buildStressVariant(baseVerbLevel, baseRegLevel, mannerCount, rarityPref
       shifted: cat !== baseCat, fromCat: baseCat, toCat: cat
     };
   });
+  /* Carried on the returned object under a key no slot path can produce, so the sheet
+     renderers (which all filter for `.trait`) skip it and the pressure panel can read
+     it back. */
+  obj.__pressure = {level: p, trigger: pressureTrigger(st), recovery: pressureRecovery(st)};
   return obj;
   } finally {
     CURRENT_AFFINITY_VEC = _priorAffinityVec;
@@ -3165,10 +3715,16 @@ const escAttr = (v) => escHTML(String(v==null?"":v).replace(/\\/g, "\\\\").repla
 function refreshConstraintChips(){
   const box = document.getElementById('constraintChips');
   if (!box) return;
-  const byId = new Map(TRAITS.map(t=>[t.id,t]));
+  const byId = TRAITS_BY_ID;   // PERF: was rebuilding the whole 7,073-entry map per call
   let h = "";
-  bannedSections.forEach(sec=> h += `<span class="chip chip-ban">never (section): ${escHTML(sec)} <b onclick="removeBan('section','${escAttr(sec)}')" title="Remove">&times;</b></span>`);
-  bannedCategories.forEach(c=> h += `<span class="chip chip-ban">never: ${escHTML(c)} <b onclick="removeBan('cat','${escAttr(c)}')" title="Remove">&times;</b></span>`);
+  /* A ban chip said what was excluded but never how much — "never: Cruel & Barbed" is a
+     very different decision at 8 traits than at 54, and the number was one lookup away
+     the whole time. */
+  const catSize = c => (TRAITS_BY_KEY.get((SECTION_OF_CATEGORY.get(c) || "") + "||" + c) || []).length;
+  const secSize = sec => (catsOf(sec) || []).reduce((n,c)=> n + catSize(c), 0);
+  const cost = n => n ? ` <span class="chipCost">(${n} trait${n===1?'':'s'})</span>` : ``;
+  bannedSections.forEach(sec=> h += `<span class="chip chip-ban">never (section): ${escHTML(sec)}${cost(secSize(sec))} <b onclick="removeBan('section','${escAttr(sec)}')" title="Remove">&times;</b></span>`);
+  bannedCategories.forEach(c=> h += `<span class="chip chip-ban">never: ${escHTML(c)}${cost(catSize(c))} <b onclick="removeBan('cat','${escAttr(c)}')" title="Remove">&times;</b></span>`);
   categoryTiers.forEach((tier,c)=> h += `<span class="chip ${tierMultiplier(c)>1?'chip-req':'chip-tier'}">${escHTML(tierLabel(tier))}: ${escHTML(c)} <b onclick="removeTier('${escAttr(c)}')" title="Remove">&times;</b></span>`);
   requiredCategories.forEach(c=> h += `<span class="chip chip-req">at least one: ${escHTML(c)} <b onclick="removeRequiredCategory('${escAttr(c)}')" title="Remove">&times;</b></span>`);
   bannedTraitIds.forEach(id=>{ const t=byId.get(id); if(t) h += `<span class="chip chip-ban">never: ${escHTML(t.trait)} <b onclick="removeBan('trait','${id}')" title="Remove">&times;</b></span>`; });
@@ -3278,9 +3834,10 @@ function populateBanCategorySelect(){
 // beats banned if the user sets both on the same trait — an explicit "always"
 // is the stronger, more deliberate statement.
 function applyRequiredTraits(obj){
-  const byId = new Map(TRAITS.map(t=>[t.id,t]));
+  // PERF: this rebuilt a 7,073-entry Map on every single generation, and TRAITS_BY_ID
+  // has existed the whole time. Same for the linear TRAITS.find below.
   requiredTraitIds.forEach((id,i)=>{
-    const t = byId.get(id); if (!t) return;
+    const t = TRAITS_BY_ID.get(id); if (!t) return;
     obj['req_'+i] = {slotId:'req_'+i, locked:true, required:true, label:'Required — '+t.category, trait:t};
   });
   // "At least one from this category": satisfied silently when the build already
@@ -3290,14 +3847,195 @@ function applyRequiredTraits(obj){
   Object.values(obj).forEach(s2=>{ if (s2 && s2.trait) present.add(s2.trait.category); });
   requiredCategories.forEach((cat,i)=>{
     if (present.has(cat)) return;
-    const t = TRAITS.find(x=>x.category===cat);
-    if (!t) return;
-    const pool = byFilter(t.section, cat);
+    const section = SECTION_OF_CATEGORY.get(cat);
+    if (!section) return;
+    const pool = byFilter(section, cat);
     const pick = pool.length ? pickInRange(pool, 0, profileTarget(), 4) : null;
     if (pick) obj['reqcat_'+i] = {slotId:'reqcat_'+i, locked:true, required:true,
       label:'Required (at least one) — '+cat, trait:pick};
   });
   return obj;
+}
+
+/* ================= RARITY CAPS & INTENSITY BUDGETS =================
+   Two related controls, and both are deliberately POST-DRAW budget enforcement rather
+   than another set of weights. The weighting system is already the thing the "why?"
+   panel explains; folding a cap into it would make every explanation conditional on a
+   quantity the user cannot see. A budget instead lets the draw happen exactly as it
+   would have, then constrains the RESULT — so the reasoning stays legible and the
+   adjustment is a separate, nameable act.
+
+   Rarity caps answer "at most this many cards of each kind on one sheet".
+   Intensity budgets answer "this group of slots gets at most this much total loudness".
+
+   The case neither the sliders nor the rarity dial could express, and the one most
+   writers actually want: an ordinary person with ONE startling thing about them.
+   That is signature-cap 1 plus a tight intensity budget everywhere else. */
+const rarityCaps  = {common:null, uncommon:null, distinctive:null, signature:null};
+const intensityCaps = {};      // budget group id -> max total intensity, or null
+let budgetMode    = 'redraw';  // 'redraw' | 'drop' | 'warn'
+let lastBudgetReport = null;
+
+/* Which slots count against which budget. Mirrors the sheet's own grouping rather
+   than the engine's internals, so the control means what the user can see. */
+const BUDGET_GROUPS = [
+  {id:'personality', label:'Personality',          match: id => id.startsWith('pers_')},
+  {id:'motivation',  label:'Motivation & Wound',   match: id => id.startsWith('prof_motivation_')},
+  {id:'profile',     label:'Deep profile',         match: id => id.startsWith('prof_') && !id.startsWith('prof_motivation_')},
+  {id:'voice',       label:'Speech & Vocabulary',  match: id => ['verbosity','register','grammar'].includes(id) || id.startsWith('vocab')},
+  {id:'manner',      label:'Mannerisms',           match: id => id.startsWith('manner')},
+  {id:'appearance',  label:'Appearance',           match: id => id.startsWith('app_')},
+  {id:'sheet',       label:'Whole sheet',          match: () => true},
+];
+
+/* Mutated in place rather than reassigned, so anything holding a reference to these
+   objects — the tests, and any future module that captures them — keeps seeing the
+   live values instead of a snapshot from load time. */
+function clearBudgets(){
+  RTIER_ORDER.forEach(t=>{ rarityCaps[t] = null; });
+  Object.keys(intensityCaps).forEach(k=>{ delete intensityCaps[k]; });
+  budgetMode = 'redraw';
+  lastBudgetReport = null;
+}
+// Accessors for the two values that genuinely have to be reassigned (a primitive and
+// a whole-object result), so callers outside this file never read a stale binding.
+function getBudgetMode(){ return budgetMode; }
+function setBudgetMode(m){ budgetMode = m; }
+function getBudgetReport(){ return lastBudgetReport; }
+// Same reason: rollCharacterVariants and the import path both reassign charVariants.
+function getCharVariants(){ return charVariants; }
+function budgetsActive(){
+  return RTIER_ORDER.some(t => rarityCaps[t] != null)
+      || BUDGET_GROUPS.some(g => intensityCaps[g.id] != null);
+}
+
+/* Runs after applyPinnedTargets and BEFORE applyRequiredTraits, so an explicit
+   "always include this trait" can never be evicted by a budget: a constraint the user
+   stated by name outranks a quantity they stated in the abstract. */
+function applyBudgets(obj, rarityPref){
+  const report = {rarity:{}, intensity:{}, actions:[], active: budgetsActive()};
+  lastBudgetReport = report;
+  if (!report.active) return obj;
+
+  /* Locked, required and pinned slots are user intent: never touched, but they DO
+     count against the budget. If someone locks four intensity-5 traits and then sets a
+     budget of 12, the budget is already spent and everything else goes quiet — which
+     is exactly right, and the report says so rather than looking broken. */
+  const mutable = id => obj[id] && obj[id].trait && !obj[id].locked
+                     && !obj[id].required && pinnedTargets[id] === undefined;
+  const withTrait = () => Object.keys(obj).filter(id => obj[id] && obj[id].trait);
+
+  // ---- Rarity caps -------------------------------------------------------
+  RTIER_ORDER.forEach(tier=>{
+    const cap = rarityCaps[tier];
+    if (cap == null) return;
+    /* Loudest first. If a cap has to bite, spend what remains of it on the QUIETEST
+       examples of that tier and demote the ones that were dominating the sheet — a
+       quiet signature trait is the interesting kind, and the shouting one is what the
+       cap was set to stop. */
+    const held = withTrait()
+      .filter(id => rarityTier(obj[id].trait) === tier)
+      .sort((a,b)=> obj[b].trait.intensity - obj[a].trait.intensity);
+    report.rarity[tier] = {count: held.length, cap};
+    let over = held.length - cap;
+    if (over <= 0) return;
+    for (const id of held){
+      if (over <= 0) break;
+      if (!mutable(id)) continue;
+      const slot = obj[id];
+      if (budgetMode === 'warn') break;
+      // Redraw within the same category at the same target, excluding the capped tier.
+      const pool = byFilter(slot.trait.section, slot.trait.category).filter(t => rarityTier(t) !== tier);
+      const repl = pool.length ? pickInRange(pool, rarityPref, slot.target, 3) : null;
+      if (repl){
+        obj[id] = Object.assign({}, slot, {trait: repl, budgeted: 'rarity',
+          budgetWhy: `redrawn out of the ${tier} tier — ${tier} capped at ${cap}`});
+        report.actions.push({id, why:`${tier} cap`, from: slot.trait.trait, to: repl.trait});
+        over--;
+      } else if (budgetMode === 'drop'){
+        report.actions.push({id, why:`${tier} cap`, from: slot.trait.trait, to: null});
+        delete obj[id];
+        over--;
+      }
+    }
+    // Never silently unmet: a cap that could not be satisfied is reported as such.
+    if (over > 0) report.rarity[tier].unmet = over;
+  });
+
+  // ---- Intensity budgets -------------------------------------------------
+  BUDGET_GROUPS.forEach(g=>{
+    const cap = intensityCaps[g.id];
+    if (cap == null) return;
+    const ids = () => withTrait().filter(g.match);
+    const total = () => ids().reduce((sum,id)=> sum + (obj[id].trait.intensity || 0), 0);
+    report.intensity[g.id] = {label: g.label, total: total(), cap};
+    /* The guard counter is load-bearing, not defensive padding. A tight budget against
+       a category with no quiet content cannot be satisfied at all, and saying so is the
+       honest answer — it doubles as a data-gap finder, surfacing exactly the thin pools
+       that have no low tail to redraw into. */
+    let guard = 0;
+    while (total() > cap && guard++ < 60){
+      if (budgetMode === 'warn') break;
+      // Always redraw the loudest mutable slot: the one spending the most budget.
+      const id = ids().filter(mutable)
+        .sort((a,b)=> obj[b].trait.intensity - obj[a].trait.intensity)[0];
+      if (!id) break;                                   // everything left is user-locked
+      const slot = obj[id];
+      const want = Math.max(1, slot.trait.intensity - 1);
+      const pool = byFilter(slot.trait.section, slot.trait.category)
+        .filter(t => t.intensity < slot.trait.intensity);
+      const repl = pool.length ? pickInRange(pool, rarityPref, want, 3) : null;
+      if (!repl){
+        if (budgetMode === 'drop'){
+          report.actions.push({id, why:`${g.label} budget`, from: slot.trait.trait, to: null});
+          delete obj[id];
+          continue;
+        }
+        break;   // nothing quieter exists in this category — a real content gap
+      }
+      obj[id] = Object.assign({}, slot, {trait: repl, target: want, budgeted: 'intensity',
+        budgetWhy: `redrawn quieter — ${g.label} intensity budget`});
+      report.actions.push({id, why:`${g.label} budget`, from: slot.trait.trait, to: repl.trait});
+    }
+    report.intensity[g.id].total = total();
+    if (report.intensity[g.id].total > cap) report.intensity[g.id].unmet = true;
+  });
+
+  return obj;
+}
+
+/* The "of N possible" figures beside each budget control, so a number the user types
+   has a scale attached. Read off the CURRENT sheet's slot counts x 5. */
+function budgetCapacity(obj){
+  const out = {};
+  const ids = Object.keys(obj || {}).filter(id => obj[id] && obj[id].trait);
+  BUDGET_GROUPS.forEach(g=>{
+    const n = ids.filter(g.match).length;
+    out[g.id] = {slots: n, max: n * 5,
+      typical: ids.filter(g.match).reduce((s,id)=> s + (obj[id].trait.intensity||0), 0)};
+  });
+  return out;
+}
+
+/* §9.6 — the four presets. "One loud thing" is the case the tool could not express at
+   all before budgets existed, and it is the one most writers reach for. */
+const BUDGET_PRESETS = {
+  background: {label:"Background character",
+    rarity:{signature:0, distinctive:2}, intensity:{sheet:45}},
+  supporting: {label:"Supporting",
+    rarity:{signature:1, distinctive:5}, intensity:{sheet:65}},
+  protagonist:{label:"Protagonist",
+    rarity:{signature:3}, intensity:{sheet:90}},
+  oneLoud:    {label:"One loud thing",
+    rarity:{signature:1}, intensity:{personality:18, manner:6, voice:8}},
+};
+function applyBudgetPreset(key){
+  const p = BUDGET_PRESETS[key];
+  if (!p) return false;
+  clearBudgets();
+  Object.entries(p.rarity || {}).forEach(([tier,v])=>{ rarityCaps[tier] = v; });
+  Object.entries(p.intensity || {}).forEach(([g,v])=>{ intensityCaps[g] = v; });
+  return true;
 }
 
 // Mutually exclusive pairs, enforced after the build rather than inside byFilter: the

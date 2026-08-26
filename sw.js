@@ -3,11 +3,21 @@
    stamp so a deploy invalidates it. The app works fine without this — registration
    is best-effort and every handler falls back to the network.
 
-   The version stamp below is rewritten to the commit SHA by the deploy workflow. It
-   was previously the literal "v1" and nothing bumped it, which made the activate-time
+   BUILD_ID below is rewritten to the commit SHA by the deploy workflow. It was
+   previously the literal "v1" and nothing bumped it, which made the activate-time
    purge below dead code and left returning users on stale JS; the stale-while-revalidate
-   path covered for it, one load late, every time. */
-const CACHE = 'character-voice-v1';
+   path covered for it, one load late, every time.
+
+   The stamp is a named constant rather than being spliced into the cache name in
+   place, for two reasons. The workflow's `sed` had to match the whole literal
+   `character-voice-v1`, so a harmless rename of the cache prefix would silently stop
+   the substitution from applying (the `grep -q` guard catches it, but only in CI).
+   And a local file:// open or a self-hosted deploy never runs the workflow at all, so
+   BUILD_ID stays 'dev' there — which is now a visible, self-describing state ("this
+   build was never stamped") rather than a stamp that looks real and isn't. Bump it by
+   hand when testing the purge path locally. */
+const BUILD_ID = 'dev';   // ← rewritten to the commit SHA by .github/workflows/deploy.yml
+const CACHE = 'character-voice-' + BUILD_ID;
 const ASSETS = [
   './',
   './index.html',

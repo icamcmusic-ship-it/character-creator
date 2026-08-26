@@ -31,6 +31,12 @@ const ctx = loadEngine([
   'PROFILE_SECTIONS','WEIGHT_MATRIX','traitPos','magFromPos','targetFromMag','targetFromLevel',
   'buildCharacterState','pickInRange','byFilter','catsOf','mulberry32','hashSeedString',
   'rollCharacterVariants','coherenceScore','checkConflictsFor','PRESENTATION_VARIANTS',
+  'RTIER_ORDER','RTIER_SCORE','rarityTier','withCharacterVariants','withSavedVariants',
+  'charVariants','VARIANT_ODDS','POL_COUNTS','polNormalise','poolFloorTarget','rangeSelect',
+  'rarityNorm','proximityWeights','profileTarget','applyBudgets','budgetCapacity',
+  'BUDGET_GROUPS','BUDGET_PRESETS','applyBudgetPreset','clearBudgets','rarityCaps',
+  'intensityCaps','getBudgetMode','setBudgetMode','getBudgetReport','getCharVariants',
+  'SECTION_OF_CATEGORY','forgetSlotDraws',
   'rarityTier','rarityWeight','rarityPrefValue','polarityFit','buildContextBias','parseAgeHint',
   'traitBand','CURVE_EXP','clamp','SECTION_COLORS','loudnessCheck','recentPenalty',
   'rememberGeneration','forgetRecentTraits','_drawUnique','_buildUsedIds','explainWhyNot',
@@ -61,8 +67,9 @@ check('intensities are integers 1-5', ()=>{
   const bad = T.filter(t => !Number.isInteger(t.intensity) || t.intensity < 1 || t.intensity > 5);
   assert(!bad.length, bad.length + ' out of range');
 });
-check('rarity is one of the two declared classes', ()=>{
-  const bad = T.filter(t => t.rarity !== 'common' && t.rarity !== 'signature');
+check('rarity is one of the four authored tiers', ()=>{
+  const valid = new Set(A.RTIER_ORDER);
+  const bad = T.filter(t => !valid.has(t.rarity));
   assert(!bad.length, bad.length + ' unknown rarities');
 });
 check('every pol key is a known axis', ()=>{
@@ -170,25 +177,75 @@ check('the eased curve keeps intensity 4+ in the top of the dial', ()=>{
 });
 
 group('Rarity tiers');
-check('every trait resolves to one of three tiers', ()=>{
+check('every trait resolves to one of four tiers', ()=>{
   const counts = {};
   T.forEach(t=>{ counts[t.rtier] = (counts[t.rtier]||0)+1; });
-  assert(Object.keys(counts).sort().join(',') === 'common,distinctive,signature', JSON.stringify(counts));
-  return Object.entries(counts).map(([k,v])=>`${k} ${Math.round(100*v/T.length)}%`).join(', ');
+  assert(Object.keys(counts).sort().join(',') === 'common,distinctive,signature,uncommon', JSON.stringify(counts));
+  return A.RTIER_ORDER.map(k=>`${k} ${Math.round(100*counts[k]/T.length)}%`).join(', ');
 });
-check('signature is now genuinely the minority tier', ()=>{
+/* The four-way split is now AUTHORED data, so it can drift with every content pass —
+   which is the point, but it means it needs a guard. The bounds are deliberately wide:
+   this is here to catch a migration that went wrong or a content pass that quietly
+   turned the bank into one tier again, not to freeze the distribution. The target
+   shares the tier definitions imply are roughly 35/33/22/10; the derivational
+   migration landed at 22/28/33/16, and closing that gap is a hand pass, trait by
+   trait, which this test is designed to permit rather than block. */
+check('the four-way rarity distribution stays within tolerance', ()=>{
+  const share = tier => T.filter(t=>t.rtier===tier).length / T.length;
+  const bounds = {common:[0.15,0.45], uncommon:[0.20,0.45], distinctive:[0.15,0.40], signature:[0.05,0.25]};
+  Object.entries(bounds).forEach(([tier,[lo,hi]])=>{
+    const v = share(tier);
+    assert(v >= lo && v <= hi, `${tier} at ${Math.round(100*v)}% is outside ${Math.round(100*lo)}-${Math.round(100*hi)}%`);
+  });
+  return A.RTIER_ORDER.map(t=>`${t} ${Math.round(100*share(t))}%`).join(', ');
+});
+check('rarity is no longer a function of intensity', ()=>{
+  /* The whole point of the migration. Under the old derived scheme rtier was
+     determined by (rarity, intensity), so a quiet signature trait could not exist and
+     "an ordinary person with one startling verbal habit" was inexpressible. Every tier
+     must now be reachable at every intensity. */
+  const grid = {};
+  T.forEach(t=>{ grid[t.rtier + '@' + t.intensity] = (grid[t.rtier + '@' + t.intensity]||0)+1; });
+  const missing = [];
+  A.RTIER_ORDER.forEach(tier=>{
+    for (let i = 1; i <= 5; i++) if (!grid[tier + '@' + i]) missing.push(tier + '@i' + i);
+  });
+  assert(!missing.length, 'unreachable combinations: ' + missing.join(', '));
+  return Object.keys(grid).length + ' of 20 tier/intensity combinations populated';
+});
+check('signature is genuinely the minority tier', ()=>{
   const sig = T.filter(t=>t.rtier === 'signature').length;
   assert(sig / T.length < 0.25, Math.round(100*sig/T.length) + '% is still signature');
 });
 check('rarity preference is symmetric around balanced', ()=>{
   const common = T.find(t=>t.rtier==='common'), sig = T.find(t=>t.rtier==='signature');
-  const norm = {common:10, distinctive:10, signature:10};
+  const norm = {common:10, uncommon:10, distinctive:10, signature:10};
   const a = A.rarityWeight(common, -1, norm) / A.rarityWeight(sig, -1, norm);
   const b = A.rarityWeight(sig, 1, norm) / A.rarityWeight(common, 1, norm);
   assert(Math.abs(a - b) < 1e-9, a + ' vs ' + b);
 });
-check('legacy string preferences still resolve', ()=>{
-  assert(A.rarityPrefValue('balanced') === 0 && A.rarityPrefValue('common') === -1 && A.rarityPrefValue('signature') === 1);
+check('the two middle tiers sit between the poles, in order', ()=>{
+  const norm = {common:10, uncommon:10, distinctive:10, signature:10};
+  const w = tier => A.rarityWeight({rtier:tier, rarity:tier}, 1, norm);
+  assert(w('common') < w('uncommon') && w('uncommon') < w('distinctive') && w('distinctive') < w('signature'),
+    A.RTIER_ORDER.map(t=>`${t} ${w(t).toFixed(3)}`).join(' '));
+});
+check('per-pool normalisation lifts thin classes without letting them dominate', ()=>{
+  /* Full 1/size equalisation handed a two-member class in a twenty-trait pool five and
+     a half times an average trait's weight, which is what put one Motivation trait in
+     89 of 300 default characters. Damped normalisation must still lift the thin class
+     (otherwise it does nothing) but must not invert the ordering by a wide margin. */
+  const norm = {signature:11, distinctive:7, uncommon:2};
+  const per = tier => A.rarityWeight({rtier:tier, rarity:tier}, 0, norm);
+  assert(per('uncommon') > per('signature'), 'thin class is not lifted at all');
+  assert(per('uncommon') / per('signature') < 3, 'thin class still dominates: ' + (per('uncommon')/per('signature')).toFixed(2) + 'x');
+  return (per('uncommon')/per('signature')).toFixed(2) + 'x lift for a 2-member class over an 11-member one';
+});
+check('tier names and legacy strings both resolve as preferences', ()=>{
+  assert(A.rarityPrefValue('balanced') === 0, 'balanced');
+  assert(A.rarityPrefValue('common') === -1 && A.rarityPrefValue('signature') === 1, 'poles');
+  assert(Math.abs(A.rarityPrefValue('uncommon') - (-0.33)) < 1e-9, 'uncommon');
+  assert(Math.abs(A.rarityPrefValue('distinctive') - 0.33) < 1e-9, 'distinctive');
 });
 
 group('Polarity');
@@ -304,6 +361,123 @@ check('the caricature guard stays quiet on a quiet sheet', ()=>{
   const st = {};
   T.filter(t=>t.intensity <= 2).slice(0,6).forEach((t,i)=> st['x'+i] = {trait:t});
   assert(A.loudnessCheck(st) === null);
+});
+
+group('Presentation variant isolation');
+check('a borrowed generator restores the caller\'s presentation locks', ()=>{
+  /* charVariants was a module global and generateCast/foil/gap-filler all rolled it
+     and walked away, so after generating a cast the single-character sheet was
+     filtering its rerolls against a stranger's lock. */
+  A.rollCharacterVariants();
+  const mine = JSON.stringify(A.getCharVariants());
+  let innerDiffered = false;
+  for (let i = 0; i < 40 && !innerDiffered; i++){
+    A.withCharacterVariants(()=>{ if (JSON.stringify(A.getCharVariants()) !== mine) innerDiffered = true; });
+  }
+  assert(JSON.stringify(A.getCharVariants()) === mine, 'caller locks were clobbered');
+  assert(innerDiffered, 'the wrapper never rolled a different set — the test proves nothing');
+  // withSavedVariants restores without rolling, for the per-item cast loop.
+  A.withSavedVariants(()=>{ A.rollCharacterVariants(); });
+  assert(JSON.stringify(A.getCharVariants()) === mine, 'withSavedVariants did not restore');
+});
+check('the a/b coin is weighted by how much material each side has', ()=>{
+  /* A flat 50/50 over a 3.5:1 tagging split meant half of every affected character
+     drew from a third of the pool, invisibly. */
+  Object.entries(A.VARIANT_ODDS).forEach(([cat, p])=>{
+    assert(p > 0.2 && p < 0.8, `${cat} coin at ${p.toFixed(2)} — a floor should stop either side vanishing`);
+  });
+  const cat = Object.keys(A.PRESENTATION_VARIANTS)[0];
+  const pool = v => T.filter(t=>t.category===cat && (!t.variant || t.variant===v)).length;
+  const bigger = pool('a') >= pool('b') ? 'a' : 'b';
+  const odds = A.VARIANT_ODDS[cat];
+  assert((bigger === 'a') === (odds >= 0.5), `${cat}: pools a=${pool('a')} b=${pool('b')} but coin favours the smaller side`);
+  return Object.entries(A.VARIANT_ODDS).map(([c,p])=>`${p.toFixed(2)}`).join(' / ');
+});
+
+group('Budgets');
+function budgetSheet(){
+  // A hand-built sheet with a known rarity/intensity shape, so the assertions are
+  // about the enforcement and not about whatever a random draw happened to produce.
+  const pick = (tier, inten) => T.find(t => t.rtier === tier && t.intensity === inten
+    && A.byFilter(t.section, t.category).length > 6);
+  const st = {};
+  [5,5,4,4].forEach((i,n)=>{ const t = pick('signature', i); if (t) st['manner'+n] = {slotId:'manner'+n, target:i, trait:t}; });
+  [3,3].forEach((i,n)=>{ const t = pick('distinctive', i); if (t) st['pers_x'+n] = {slotId:'pers_x'+n, target:i, trait:t}; });
+  return st;
+}
+check('a rarity cap evicts down to the cap and reports what it did', ()=>{
+  A.clearBudgets();
+  A.rarityCaps.signature = 1;
+  const st = A.applyBudgets(budgetSheet(), 0);
+  const sig = Object.values(st).filter(s=>s.trait && s.trait.rtier === 'signature').length;
+  assert(sig <= 1, sig + ' signature traits survived a cap of 1');
+  assert(A.getBudgetReport().actions.length > 0, 'nothing was reported');
+  A.getBudgetReport().actions.forEach(a=> assert(a.from && a.why, 'an action was reported without saying what or why'));
+  A.clearBudgets();
+  return A.getBudgetReport() ? 'reported' : '';
+});
+check('locked, pinned and required slots are never modified but still spend the budget', ()=>{
+  A.clearBudgets();
+  A.rarityCaps.signature = 0;
+  const st = budgetSheet();
+  Object.keys(st).forEach(k=>{ st[k].locked = true; });
+  const before = JSON.stringify(Object.keys(st).map(k=>st[k].trait.id));
+  const after = A.applyBudgets(st, 0);
+  assert(JSON.stringify(Object.keys(after).map(k=>after[k].trait.id)) === before, 'a locked slot was rewritten');
+  // ...and the shortfall is stated rather than swallowed.
+  assert(A.getBudgetReport().rarity.signature.unmet > 0, 'an unsatisfiable cap was reported as satisfied');
+  A.clearBudgets();
+});
+check('an intensity budget lowers the loudest slots first', ()=>{
+  A.clearBudgets();
+  const st = budgetSheet();
+  const total = o => Object.values(o).reduce((s,x)=> s + (x.trait ? x.trait.intensity : 0), 0);
+  const cap = Math.max(6, total(st) - 6);
+  A.intensityCaps.sheet = cap;
+  const after = A.applyBudgets(st, 0);
+  assert(total(after) <= cap || A.getBudgetReport().intensity.sheet.unmet,
+    `total ${total(after)} exceeds cap ${cap} with no unmet flag`);
+  A.clearBudgets();
+});
+check('warn-only changes nothing', ()=>{
+  A.clearBudgets();
+  A.rarityCaps.signature = 0;
+  A.setBudgetMode('warn');
+  const st = budgetSheet();
+  const before = JSON.stringify(Object.keys(st).map(k=>st[k].trait.id));
+  const after = A.applyBudgets(st, 0);
+  assert(JSON.stringify(Object.keys(after).map(k=>after[k].trait.id)) === before, 'warn-only mutated the sheet');
+  assert(!A.getBudgetReport().actions.length, 'warn-only reported adjustments');
+  A.clearBudgets();
+});
+check('with no budgets set applyBudgets is a no-op', ()=>{
+  A.clearBudgets();
+  const st = budgetSheet();
+  const before = JSON.stringify(st);
+  A.applyBudgets(st, 0);
+  assert(JSON.stringify(st) === before, 'an unconfigured budget still touched the sheet');
+  assert(A.getBudgetReport() && !A.getBudgetReport().active, 'reported itself active with nothing set');
+});
+check('every budget group matches at least one slot on a real sheet', ()=>{
+  const st = buildOnce(4242);
+  const ids = Object.keys(st).filter(id => st[id] && st[id].trait);
+  const empty = A.BUDGET_GROUPS.filter(g => !ids.some(g.match)).map(g=>g.id);
+  // Appearance depends on DOM sliders the harness leaves centred, so it is allowed to
+  // be empty here; everything else must be reachable or the control is a dead end.
+  assert(!empty.filter(id => id !== 'appearance').length, 'groups matching nothing: ' + empty.join(', '));
+  return A.BUDGET_GROUPS.length - empty.length + ' of ' + A.BUDGET_GROUPS.length + ' groups populated';
+});
+check('every preset resolves to caps the engine recognises', ()=>{
+  Object.keys(A.BUDGET_PRESETS).forEach(k=>{
+    A.clearBudgets();
+    assert(A.applyBudgetPreset(k), k + ' did not apply');
+    Object.keys(A.BUDGET_PRESETS[k].rarity || {}).forEach(t=>
+      assert(A.RTIER_ORDER.includes(t), `${k} names an unknown tier "${t}"`));
+    Object.keys(A.BUDGET_PRESETS[k].intensity || {}).forEach(g=>
+      assert(A.BUDGET_GROUPS.some(x=>x.id===g), `${k} names an unknown budget group "${g}"`));
+  });
+  A.clearBudgets();
+  return Object.keys(A.BUDGET_PRESETS).length + ' presets';
 });
 
 group('Context conditioning');
@@ -482,9 +656,19 @@ check('at neutral sliders no profile category dominates its section', ()=>{
      unscaled cascade; the floor catches the sharper half of the bug, a category nothing
      links into, which is how Secure and Skeptic ended up structurally starved rather
      than merely unlucky. Bounds are loose enough to absorb sampling noise at this N and
-     tight enough that the measured pre-fix numbers fail them. */
-  const N = 300;
+     tight enough that the measured pre-fix numbers fail them.
+
+     Seeded, and N raised. A seven-way split at N=300 puts about 43 characters in each
+     bucket, whose sampling spread alone is wide enough to cross the 0.55 floor every
+     few runs on a category that is perfectly healthy — so the check was failing
+     intermittently on noise and telling nobody anything when it did. Measured over
+     1,500 characters the real shares sit at 10-18% against a 14% uniform, comfortably
+     inside the band; the seed makes that reproducible rather than probable. */
+  const N = 1200;
   const counts = {};
+  const _rnd = Math.random;
+  Math.random = A.mulberry32(0x5eed1);
+  try {
   for (let i=0;i<N;i++){
     const o = {}; A.PERSONALITY_AXES.forEach(a=> o[a.id] = 0);
     A.rollCharacterVariants();
@@ -496,6 +680,7 @@ check('at neutral sliders no profile category dominates its section', ()=>{
       if (c) ((counts[ps.id] = counts[ps.id] || {}))[c] = (counts[ps.id][c]||0) + 1;
     });
   }
+  } finally { Math.random = _rnd; }
   const bad = [];
   Object.entries(counts).forEach(([id, c])=>{
     const ps = A.PROFILE_SECTIONS.find(p=>p.id===id);

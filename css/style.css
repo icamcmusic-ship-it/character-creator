@@ -557,10 +557,110 @@
   body.compact-sheet .traitCard { padding:7px 11px; margin-bottom:4px; }
   body.compact-sheet .traitName { font-size:.92rem; }
 
-  /* ---------- Rarity tiers + outlier badge ---------- */
+  /* ---------- Rarity tiers + outlier badge ----------
+     Four authored tiers now, ordered common -> uncommon -> distinctive -> signature,
+     with the visual weight rising alongside. The tier name is always spelled out on
+     the badge, so the colour is reinforcement rather than the only carrier. */
   .rarityBadge.rarity-signature { color:#fff; background:var(--golden-deep); border-color:var(--golden-deep); }
   .rarityBadge.rarity-distinctive { color:var(--dusk-blue); background:var(--dusk-blue-light); border-color:var(--dusk-blue-mid); }
+  .rarityBadge.rarity-uncommon { color:var(--emerald-deep); background:var(--emerald-light); border-color:var(--emerald); }
   .rarityBadge.rarity-common { color:var(--muted); }
+  /* Visible only once focused, which is the whole pattern: it costs a sighted mouse
+     user nothing and saves a keyboard user 900 words of help text. */
+  .skipLink {
+    position:absolute; left:-9999px; top:8px; z-index:200;
+    background:var(--card); color:var(--text); border:1px solid var(--border-strong);
+    border-radius:8px; padding:8px 14px; font-size:.85rem; text-decoration:none;
+  }
+  .skipLink:focus { left:12px; }
+  .searchHit.searchHitActive { background:var(--dusk-blue-light); outline:2px solid var(--dusk-blue-mid); outline-offset:-2px; }
+
+  /* ---------- Character brief + section actions + hand strip ---------- */
+  .summaryBrief {
+    margin:8px 0 10px; font-size:.98rem; line-height:1.6; color:var(--text);
+  }
+  .summaryBrief b { font-weight:600; }
+  .axisHead { display:flex; align-items:center; gap:8px; }
+  .axisHead .axisTitle { flex:1 1 auto; }
+  .axisActions { display:flex; gap:4px; flex-shrink:0; }
+  .axisAction {
+    font-family:var(--font-mono); font-size:.6rem; text-transform:uppercase; letter-spacing:.05em;
+    padding:3px 8px; border-radius:999px; border:1px solid var(--border);
+    background:transparent; color:var(--muted); cursor:pointer;
+  }
+  .axisAction:hover { color:var(--text); border-color:var(--section-accent, var(--line)); }
+  .handKept {
+    font-family:var(--font-mono); font-size:.7rem; color:var(--muted); margin-left:auto;
+  }
+  .handDensity select {
+    font-family:var(--font-mono); font-size:.68rem; padding:2px 6px; max-width:130px;
+  }
+  /* The control strip is 5-7 buttons per card, and at 40 cards on a 460px viewport that
+     wraps into two or three rows each. Collapse it behind a disclosure instead. */
+  @media (max-width: 560px){
+    .axisActions { display:none; }
+    .traitCard .slotBtns { max-height:0; overflow:hidden; padding:0; transition:max-height .18s ease; }
+    .traitCard.controlsOpen .slotBtns { max-height:220px; padding-top:6px; }
+    .traitCard .slotToggle { display:inline-flex; }
+    .searchResults { position:static; max-height:240px; }
+  }
+  .slotToggle {
+    display:none; align-self:flex-start; border:1px solid var(--border); background:transparent;
+    color:var(--muted); border-radius:999px; padding:2px 10px; cursor:pointer; font-size:.8rem;
+  }
+
+  .axisGroup.emptyGroup { opacity:.7; }
+  .emptyGroupNote { font-size:.85rem; color:var(--muted); padding:8px 2px 2px; line-height:1.55; }
+
+  .pressureBlock {
+    margin:0 0 8px; padding:8px 11px; border-left:3px solid var(--bubblegum);
+    font-size:.88rem; line-height:1.6;
+  }
+  .pressureBlock b { color:var(--text); }
+
+  /* ---------- Per-card marks and notes ---------- */
+  .markBtn {
+    border:1px solid var(--border); background:transparent; border-radius:999px;
+    padding:2px 8px; cursor:pointer; font-size:.78rem; line-height:1.4; opacity:.55;
+  }
+  .markBtn:hover { opacity:1; }
+  .markBtn.on { opacity:1; border-color:var(--golden-deep); background:var(--golden-light, transparent); }
+  .traitNote {
+    margin:6px 0 0; padding:6px 9px; border-left:3px solid var(--golden);
+    background:var(--surface, transparent); font-size:.85rem; line-height:1.5;
+  }
+  .traitNote button {
+    border:none; background:none; color:var(--muted); cursor:pointer;
+    font-size:.72rem; text-decoration:underline; padding:0 0 0 4px;
+  }
+  .chipCost { opacity:.65; font-weight:400; }
+
+  /* ---------- Budgets panel ---------- */
+  .budgetGrid { display:flex; flex-direction:column; gap:6px; margin-top:4px; }
+  .budgetRow { display:flex; align-items:center; gap:8px; }
+  .budgetRow.budgetRowTotal { border-top:1px solid var(--line); padding-top:8px; margin-top:2px; font-weight:600; }
+  .budgetRow .budgetLabel { flex:1 1 auto; margin:0; font-size:.78rem; text-transform:none; letter-spacing:0; }
+  .budgetRow input[type=number] { flex:0 0 96px; max-width:96px; text-align:center; }
+  .budgetMeter {
+    flex:0 0 96px; display:flex; align-items:center; gap:6px;
+    font-family:var(--font-mono); font-size:.62rem; color:var(--muted);
+  }
+  /* display:flex above wins over the [hidden] attribute's display:none, so an empty
+     meter rendered as a stray sliver instead of disappearing. */
+  .budgetMeter[hidden] { display:none; }
+  .budgetMeter i {
+    display:block; height:4px; border-radius:999px; background:var(--golden);
+    flex:0 0 auto; min-width:2px; max-width:40px;
+  }
+  .budgetMeter b { font-weight:600; white-space:nowrap; }
+  .wildBadge.budgetBadge { background:var(--golden-deep); border-color:var(--golden-deep); }
+
+  /* Stands in for the Toss button on a slot the user required by name, where a reroll
+     has nothing to draw. Same footprint as the button so the strip doesn't reflow. */
+  .slotNote {
+    font-family:var(--font-mono); font-size:.62rem; text-transform:uppercase; letter-spacing:.05em;
+    color:var(--muted); align-self:center; padding:0 4px; cursor:help;
+  }
   .wildBadge {
     font-family:var(--font-mono); font-size:.58rem; text-transform:uppercase; letter-spacing:.06em;
     padding:2px 8px; border-radius:999px; margin-left:8px; vertical-align:middle; font-weight:700;
@@ -652,6 +752,21 @@
   @media print { .traitCard.justChanged { animation:none; } }
 
   @media print { .stickyBar, .toastHost, .emptyState, .headerRow { display:none !important; } }
+  /* "Print the summary" — a one-page character card is what people actually keep at the
+     desk, and the existing print stylesheet could only produce the whole forty-card
+     sheet. The class is set for the duration of one print and removed after. */
+  @media print {
+    body.print-summary-only .axisGroup,
+    body.print-summary-only #insightPanel,
+    body.print-summary-only #pressureSheet,
+    body.print-summary-only #changeList,
+    body.print-summary-only #noveltyReadout,
+    body.print-summary-only .controls,
+    body.print-summary-only .tabs,
+    body.print-summary-only .legendBox,
+    body.print-summary-only .handHead { display:none !important; }
+    body.print-summary-only .summaryCard { page-break-inside:avoid; }
+  }
 
   /* ---------- Mobile ---------- */
   @media (max-width: 720px) {
