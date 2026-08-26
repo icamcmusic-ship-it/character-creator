@@ -626,7 +626,21 @@
             <option value="2">2</option>
             <option value="3" selected>3</option>
             <option value="4">4</option>
+            <option value="5">5</option>
+            <option value="6">6</option>
           </select>
+        </div>
+        <!-- The cast previously ignored your sliders completely — a uniform roll per
+             axis per member — so "a cast around the person I just built" was not
+             expressible, which is the commonest reason to want one. -->
+        <div class="field" style="max-width:280px;">
+          <label for="castAnchor">Build around your character</label>
+          <label class="inlineCheck"><input type="checkbox" id="castAnchor" onchange="onCastAnchorChange()"> Use your current sliders as the centre</label>
+          <div id="castSpreadRow" style="display:none;margin-top:8px;">
+            <label for="castSpread">How far they wander</label>
+            <input type="range" id="castSpread" min="0.15" max="1" step="0.05" value="0.55" oninput="updateCastSpreadReadout()">
+            <div class="sub" style="margin:2px 0 0;" id="castSpreadReadout">Related, but their own people</div>
+          </div>
         </div>
         <div class="field">
           <label>&nbsp;</label>

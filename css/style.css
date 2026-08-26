@@ -902,6 +902,13 @@
     .searchResults { position:static; max-height:240px; }
   }
 
+  /* The repeated inline style on every checkbox label, named once. */
+  label.inlineCheck {
+    margin:0; text-transform:none; font-size:.85rem; color:var(--text);
+    display:flex; align-items:center; gap:5px; font-family:var(--font-body);
+    letter-spacing:normal; font-weight:500;
+  }
+
   .emptyPresets .surpriseBtn {
     border-color:var(--bubblegum); color:var(--bubblegum); font-weight:700;
   }

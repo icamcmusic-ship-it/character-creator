@@ -770,25 +770,86 @@ function snapshotSheetTraits(st){
   Object.entries(st || {}).forEach(([k,v])=>{ if (v && v.trait) m[k] = v.trait.trait; });
   return m;
 }
-function renderChangeList(){
-  const box = document.getElementById('changeList');
-  if (!box) return;
-  if (!lastSheetTraits){ box.style.display = 'none'; return; }
+/* A version the user has deliberately kept to compare against, as opposed to
+   lastSheetTraits, which is just "whatever the previous roll happened to be". The diff
+   machinery below already did all the work — snapshotSheetTraits produced the map and
+   renderChangeList rendered the comparison — and there was no way to point it at
+   anything except the immediately preceding generation. So "I liked the one three rolls
+   ago, what did I lose?" was unanswerable, which is the question the diff is for. */
+let pinnedSnapshot = null;      // {traits, label, at}
+function pinCurrentVersion(){
+  if (!Object.keys(state).length){ toast("Generate a character first.", "warn"); return; }
+  pinnedSnapshot = {
+    traits: snapshotSheetTraits(state),
+    label: (charMeta && charMeta.name) || (typeof emergentArchetypeName === 'function'
+              && (emergentArchetypeName(state)||{}).name) || "pinned version",
+    at: Date.now(),
+  };
+  renderChangeList();
+  toast(`Pinned "${pinnedSnapshot.label}". Every generation from now on shows what changed against it.`);
+}
+function clearPinnedVersion(){ pinnedSnapshot = null; renderChangeList(); toast("Stopped comparing against the pinned version."); }
+
+// Compares the sheet against one baseline map. Shared by both modes so they cannot
+// drift, and so "what changed" means the same thing whichever you are looking at.
+function diffAgainst(baseline){
   const now = snapshotSheetTraits(state);
   const changed = [], added = [], gone = [];
   Object.keys(now).forEach(k=>{
-    if (!(k in lastSheetTraits)) added.push(now[k]);
-    else if (lastSheetTraits[k] !== now[k]) changed.push({from:lastSheetTraits[k], to:now[k], slot:k});
+    if (!(k in baseline)) added.push(now[k]);
+    else if (baseline[k] !== now[k]) changed.push({from:baseline[k], to:now[k], slot:k});
   });
-  Object.keys(lastSheetTraits).forEach(k=>{ if (!(k in now)) gone.push(lastSheetTraits[k]); });
-  if (!changed.length && !added.length && !gone.length){ box.style.display='none'; return; }
-  let h = `<details><summary>What changed from your last generation (${changed.length} replaced, ${added.length} new, ${gone.length} dropped)</summary><div class="changeBody">`;
-  changed.slice(0, 40).forEach(c=>{
+  Object.keys(baseline).forEach(k=>{ if (!(k in now)) gone.push(baseline[k]); });
+  return {changed, added, gone};
+}
+function diffBodyHTML(d){
+  let h = '<div class="changeBody">';
+  d.changed.slice(0, 40).forEach(c=>{
     h += `<div><span class="changeSlot">${escHTML(titleForSlotId(c.slot))}</span> ${escHTML(c.from)} &rarr; <b>${escHTML(c.to)}</b></div>`;
   });
-  if (added.length) h += `<div style="margin-top:6px;"><b>New:</b> ${added.slice(0,20).map(escHTML).join(", ")}</div>`;
-  if (gone.length) h += `<div style="margin-top:6px;"><b>Dropped:</b> ${gone.slice(0,20).map(escHTML).join(", ")}</div>`;
-  h += `</div></details>`;
+  if (d.changed.length > 40) h += `<div class="sub" style="margin-top:4px;">…and ${d.changed.length - 40} more.</div>`;
+  if (d.added.length) h += `<div style="margin-top:6px;"><b>New:</b> ${d.added.slice(0,20).map(escHTML).join(", ")}</div>`;
+  if (d.gone.length) h += `<div style="margin-top:6px;"><b>Dropped:</b> ${d.gone.slice(0,20).map(escHTML).join(", ")}</div>`;
+  return h + '</div>';
+}
+function renderChangeList(){
+  const box = document.getElementById('changeList');
+  if (!box) return;
+  const hasSheet = Object.keys(state).length > 0;
+  if (!hasSheet || (!lastSheetTraits && !pinnedSnapshot)){ box.style.display = 'none'; return; }
+
+  let h = '';
+  if (lastSheetTraits){
+    const d = diffAgainst(lastSheetTraits);
+    if (d.changed.length || d.added.length || d.gone.length){
+      h += `<details><summary>What changed from your last generation (${d.changed.length} replaced, ${d.added.length} new, ${d.gone.length} dropped)</summary>${diffBodyHTML(d)}</details>`;
+    }
+  }
+  if (pinnedSnapshot){
+    const d = diffAgainst(pinnedSnapshot.traits);
+    const same = !d.changed.length && !d.added.length && !d.gone.length;
+    h += `<details${same ? '' : ' open'}><summary>Against the pinned "${escHTML(pinnedSnapshot.label)}" — ` +
+         (same ? 'identical so far' : `${d.changed.length} replaced, ${d.added.length} new, ${d.gone.length} dropped`) +
+         `</summary>${same ? '<div class="changeBody sub">Nothing has moved since you pinned it.</div>' : diffBodyHTML(d)}` +
+         `<div style="margin-top:8px;"><button class="btn-secondary" onclick="clearPinnedVersion()">Stop comparing</button></div></details>`;
+  } else if (hasSheet){
+    h += `<div style="margin-top:6px;"><button class="btn-secondary" onclick="pinCurrentVersion()" title="Keep this version as a fixed point and show what changes against it from now on">📌 Pin this version to compare against</button></div>`;
+  }
+
+  const recurring = (typeof recurringTraits === 'function') ? recurringTraits(3) : [];
+  if (recurring.length){
+    /* recentTraitIds has held this the whole time and nothing ever showed it to
+       anyone — the engine comment says so out loud. It is the direct answer to
+       "why does everything I generate feel the same", and it names the specific
+       traits rather than leaving it as an impression. */
+    h += `<details><summary>Traits you keep getting (${recurring.length} across your last ${recurring[0].window} characters)</summary><div class="changeBody">` +
+      recurring.map(r=>
+        `<div><b>${escHTML(r.trait.trait)}</b> <span class="sub">— ${r.count} of the last ${r.window}, ${escHTML(r.trait.category)}</span> ` +
+        `<button class="markBtn" onclick="banTrait(${r.trait.id})" title="Never draw this trait again">🚫 never again</button></div>`).join('') +
+      `<div class="sub" style="margin-top:6px;">These are the pools your settings keep landing in. Banning one, or moving the slider that feeds it, is usually faster than rerolling.</div></div></details>`;
+  }
+
+  if (!h){ box.style.display = 'none'; return; }
   box.innerHTML = h;
   box.style.display = 'block';
 }

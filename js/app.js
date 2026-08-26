@@ -317,24 +317,70 @@ function generateCast(){
   // withSavedVariants: each cast member rolls its own presentation locks, and the
   // single-character sheet's locks are restored once the whole batch is done — see
   // the note on withCharacterVariants in engine.js.
+  /* AROUND THIS CHARACTER. The cast ignored your sliders completely — randomAxisLevel()
+     uniform over the whole range, per axis, per member — so there was no way to ask for
+     "a cast around the person I just built", which is the commonest reason to want one.
+     Anchored mode keeps your settings as the centre of gravity and scatters each member
+     around them by a controllable spread; unanchored keeps the old behaviour, because a
+     cast of six strangers is also a real thing to want. */
+  const anchored = boolVal('castAnchor', false) && Object.keys(state).length > 0;
+  const spread = clamp(floatVal('castSpread', 0.55), 0.15, 1);
+  const baseVerb = rawToLevel(intVal('verbositySlider', 0));
+  const baseReg  = rawToLevel(intVal('registerSlider', 0));
+  const baseComp = rawToLevel(intVal('composureSlider', 0));
+  const around = (base, s) => clamp(base + (Math.random()*2 - 1) * 2 * s, -2, 2);
+
+  /* ANTI-SIMILARITY. Each member was an independent roll with nothing stopping two of
+     six landing on the same Role AND Values AND Attachment — which is the one thing an
+     ensemble must not do, and the thing a person notices immediately. Track what has
+     already been taken and re-roll a member that collides too heavily with one already
+     placed. Bounded attempts: with six members and seven roles a perfect spread is not
+     always reachable, and a slightly repetitive cast beats an infinite loop. */
+  const placed = [];
+  const KEY_SECTIONS = ['role', 'values', 'attachment', 'stress'];
+  const overlapWith = (st) => {
+    let worst = 0;
+    placed.forEach(prev=>{
+      const n = KEY_SECTIONS.filter(id=> slotCat(st['prof_'+id+'_0']) &&
+        slotCat(st['prof_'+id+'_0']) === slotCat(prev['prof_'+id+'_0'])).length;
+      if (n > worst) worst = n;
+    });
+    return worst;
+  };
+
+  let rerolled = 0;
   try { withoutContextBias(()=> withSavedVariants(()=>{
     Math.random = mulberry32(seedNum);
     for (let i=0;i<count;i++){
-      const verbLevel = randomAxisLevel();
-      const regLevel = randomAxisLevel();
-      const compLevel = randomAxisLevel();
-      const personalityOverrides = {};
-      PERSONALITY_AXES.forEach(axis=>{ personalityOverrides[axis.id] = Math.round(randomAxisLevel()*50); });
-      rollCharacterVariants();
-      const st = buildCharacterState({verbLevel, regLevel, compLevel, mannerCount, vocabCount,
-        rarityPref, vocabPref:null, personalityOverrides});
+      let st = null, variants = null;
+      // Accept immediately at <=1 shared key section; try a few times to beat 2+.
+      for (let attempt = 0; attempt < 6; attempt++){
+        const verbLevel = anchored ? around(baseVerb, spread) : randomAxisLevel();
+        const regLevel  = anchored ? around(baseReg,  spread) : randomAxisLevel();
+        const compLevel = anchored ? around(baseComp, spread) : randomAxisLevel();
+        const personalityOverrides = {};
+        PERSONALITY_AXES.forEach(axis=>{
+          personalityOverrides[axis.id] = anchored
+            ? Math.round(clamp(intVal('pers_'+axis.id, 0) + (Math.random()*2 - 1) * 100 * spread, -100, 100))
+            : Math.round(randomAxisLevel()*50);
+        });
+        rollCharacterVariants();
+        const cand = buildCharacterState({verbLevel, regLevel, compLevel, mannerCount, vocabCount,
+          rarityPref, vocabPref:null, personalityOverrides});
+        st = cand; variants = Object.assign({}, charVariants);
+        if (overlapWith(cand) <= 1) break;
+        rerolled++;
+      }
+      placed.push(st);
       // Carried on the cast entry rather than left in the global, so a cast member's
       // own locks travel with it (relationship analysis, cast export) instead of
       // whichever member happened to be generated last.
-      castStates.push({state: st, variants: Object.assign({}, charVariants),
-        meta: {name:"Character " + (i+1), age:"", context:"", archetypeLabel:"Cast member"}});
+      castStates.push({state: st, variants,
+        meta: {name:"Character " + (i+1), age:"", context:"",
+               archetypeLabel: anchored ? "Cast member (around your character)" : "Cast member"}});
     }
   })); } finally { Math.random = _origRandom; }
+  if (rerolled) console.info(`[cast] re-rolled ${rerolled} time(s) to keep members distinct`);
   const out = document.getElementById('castSeedReadout');
   if (out) out.textContent = "Cast seed: " + lastCastSeed;
   renderCast();
@@ -346,6 +392,19 @@ function generateCast(){
    CSS custom properties just as a stylesheet would, so the cast overlay follows the
    palette instead of being the one element that ignores it. */
 const CAST_COLORS = ["var(--cast-1)","var(--cast-2)","var(--cast-3)","var(--cast-4)","var(--cast-5)","var(--cast-6)"];
+function onCastAnchorChange(){
+  const row = document.getElementById('castSpreadRow');
+  if (row) row.style.display = boolVal('castAnchor', false) ? 'block' : 'none';
+  updateCastSpreadReadout();
+}
+function updateCastSpreadReadout(){
+  const v = floatVal('castSpread', 0.55);
+  setText('castSpreadReadout',
+    v < 0.3 ? "Close variations on the same person — siblings, a unit, a household"
+    : v < 0.6 ? "Related, but their own people"
+    : v < 0.85 ? "Same world, quite different people"
+    : "Barely anchored — near enough to a free roll");
+}
 function renderCast(){
   const grid = document.getElementById('castGrid');
   if (!grid) return;   // container absent (embedded build, or a trimmed page)
