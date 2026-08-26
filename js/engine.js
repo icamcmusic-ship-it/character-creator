@@ -2245,6 +2245,9 @@ function setAffinityVec(overrides){ CURRENT_AFFINITY_VEC = liveAxisVector(overri
 const NEUTRAL_FULL = 14;   // below this: purely situational
 const NEUTRAL_NONE = 42;   // above this: purely the leaning side
 
+// How loud a pole trait may be and still read as a neutral-slider reading. 2.4 keeps
+// it to the i1/i2 material plus the quietest of i3 — "mildly one way", never a posture.
+const NEUTRAL_POLE_CEILING = 2.4;
 function pickPersonalitySlot(axis, level, rarityPref){
   const mag = Math.abs(level) * 50;                 // 0..100
   const sideCat = level >= 0 ? axis.pos : axis.neg;
@@ -2281,12 +2284,34 @@ function pickPersonalitySlot(axis, level, rarityPref){
     // START — so at slider 0 the target sits on the floor and the draw collapses onto
     // the two or three lowest entries (15 distinct out of 41, top trait 35%). Lift it
     // into the pool the same way every other neutral target now is.
-    const nTarget = poolFloorTarget(neutralPool, 1.5 + clamp(mag / NEUTRAL_NONE, 0, 1) * 2.1);
-    // minCount 7 forces the window to widen until there's real choice; variety
+    /* THE COLLAPSED-SLOT FIX. Every other healthy slot in the app picks a CATEGORY
+       first and then a trait inside it, so its variety is (categories x their spread).
+       These thirteen picked from exactly one pool per axis, and there variety is capped
+       by how many traits that single category holds near the target — which is why the
+       pers_* family returned 11-18 distinct traits over 400 characters while vocab and
+       manner returned 210+ from pools of comparable total size. Widening the window and
+       lifting the target help, and they cannot change the shape of the problem: a
+       40-trait pool is a 40-trait pool.
+
+       So give the slot a real choice. A centred slider does not only mean "situational
+       on this axis" — it equally means "mildly one way or the other", and a QUIET trait
+       from either pole is an honest reading of a neutral setting. Those are already
+       authored; they were simply unreachable from the middle of the slider, where most
+       of the traffic is. Pool the Situational category with the quiet end of both poles
+       and draw from all three.
+
+       Still flagged neutral:true, because it is still a neutral reading — that is what
+       keeps checkEnsembleBalance from counting it as posture, which would be the wrong
+       answer for a character whose slider was never moved. */
+    const quiet = cat => byFilter("Personality Traits", cat).filter(t => traitPos(t) <= NEUTRAL_POLE_CEILING);
+    const widened = neutralPool.concat(quiet(axis.pos), quiet(axis.neg));
+    const pool = widened.length > neutralPool.length ? widened : neutralPool;
+    const nTarget = poolFloorTarget(pool, 1.5 + clamp(mag / NEUTRAL_NONE, 0, 1) * 2.1);
+    // minCount 10 forces the window to widen until there's real choice; variety
     // matters more than precision here, since nothing in this pool is loud.
     return {slotId:"pers_"+axis.id, locked:false, label:axis.label,
             target: nTarget, neutral:true,
-            trait: withSlotMemory("pers_"+axis.id, ()=>pickInRange(neutralPool, rarityPref, nTarget, 10, true))};
+            trait: withSlotMemory("pers_"+axis.id, ()=>pickInRange(pool, rarityPref, nTarget, 10, true))};
   }
   return {slotId:"pers_"+axis.id, locked:false, label:axis.label,
           target, trait: withSlotMemory("pers_"+axis.id, ()=>pickInRange(byFilter("Personality Traits", sideCat), rarityPref, target))};
@@ -3420,6 +3445,11 @@ function pickVerbositySlot(verbLevel, rarityPref){
                   withSlotMemory("verbosity", ()=>pickInRange(pool, rarityPref, t, 8, true)));
   }
 }
+/* What "no deliberate statement about register" can draw from. All three are ways of
+   saying nothing in particular about formality, and pooling them takes this slot from
+   one 83-trait category to about 235. */
+const NEUTRAL_REGISTER_CATS = ["Register & Formality Spectrum", "Directness & Literalness",
+                               "Phonetic & Auditory Qualities"];
 function pickRegisterSlot(regLevel, rarityPref){
   const target = targetFromLevel(regLevel);
   if (regLevel >= 0.12){
@@ -3431,7 +3461,15 @@ function pickRegisterSlot(regLevel, rarityPref){
     const pool = plainPool.length ? plainPool : byFilter("Vocabulary Traits","Register & Formality Spectrum");
     return mkSlot("register", "Register (plain-leaning)", target, pickInRange(pool, rarityPref, target));
   } else {
-    const pool = byFilter("Vocabulary Traits","Register & Formality Spectrum");
+    /* Same collapsed-slot shape as the neutral personality draw: one fixed category,
+       so variety was capped by that category's depth near the target rather than by
+       anything the user could influence. A centred Register slider does not mean
+       "Register & Formality Spectrum specifically" — it means the character has made no
+       deliberate statement about how formally they speak, and how PLAINLY they put
+       things and how they SOUND are equally good answers to that. Draw from all three,
+       weighted by depth so the widest category still leads. */
+    const pool = NEUTRAL_REGISTER_CATS
+      .flatMap(c => byFilter("Vocabulary Traits", c));
     // 83 traits returning 15, one of them ("Hushed-deliberate") in 28% of all
     // characters, because targetFromMag(18) sits below the pool's floor. See the
     // POOL-FLOOR TARGETS note above.

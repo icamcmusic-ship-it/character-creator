@@ -1063,6 +1063,76 @@ check('the readout word helpers cover their whole input range', ()=>{
   return 'no gaps';
 });
 
+group('Slot variety at default settings');
+/* The measurement that would have caught poolFloorTarget being inert. Its lift was a
+   no-op on every pool it was written for — max(target, 0.55 + 0.35) never beat a target
+   of 1.20 — and the engine comments claimed the fix had worked, because the top-trait
+   share DID improve (that was the separate rarityNorm change) while the distinct count
+   did not move at all. Nothing measured the distinct count, so nothing noticed.
+
+   These are the fixed-category slots: the ones whose variety is capped by how much
+   material one category holds near the target, rather than by picking a category first
+   the way vocab/manner/grammar/role do. Measured over 400 builds at defaults, they ran
+   9-19 distinct traits with a single trait taking 11-19% of every character generated. */
+check('the fixed-category slots draw from a real range', ()=>{
+  A.forgetRecentTraits(); A.forgetSlotDraws();
+  const N = 200;
+  const seen = new Map();
+  for (let i = 0; i < N; i++){
+    const st = A.buildCharacterState({verbLevel:0, regLevel:0, compLevel:0,
+      mannerCount:3, vocabCount:2, rarityPref:'balanced', vocabPref:null});
+    A.rememberGeneration(st);
+    Object.entries(st).forEach(([k, s])=>{
+      if (!s || !s.trait) return;
+      if (!seen.has(k)) seen.set(k, new Map());
+      const m = seen.get(k);
+      m.set(s.trait.id, (m.get(s.trait.id) || 0) + 1);
+    });
+  }
+  A.forgetRecentTraits();
+  // slot id -> the floor it must clear over N builds. Set below what the engine
+  // currently achieves, so ordinary content churn doesn't trip it and a structural
+  // regression does.
+  const FLOORS = {register: 40, verbosity: 30, pers_honesty: 20, pers_confidence: 20,
+                  pers_curiosity: 20, pers_manners: 20, pers_activeness: 20};
+  const thin = [];
+  Object.entries(FLOORS).forEach(([slot, floor])=>{
+    const m = seen.get(slot);
+    if (!m) return thin.push(slot + ' never drew');
+    const total = [...m.values()].reduce((a,b)=>a+b, 0);
+    const topShare = Math.max(...m.values()) / total;
+    if (m.size < floor) thin.push(`${slot}: ${m.size} distinct in ${N} (want >= ${floor})`);
+    if (topShare > 0.14) thin.push(`${slot}: one trait in ${(100*topShare).toFixed(0)}% of characters`);
+  });
+  assert(!thin.length, thin.join('\n       '));
+  const sizes = Object.keys(FLOORS).map(k=> (seen.get(k) || new Map()).size);
+  return `${Math.min(...sizes)}-${Math.max(...sizes)} distinct across ${Object.keys(FLOORS).length} fixed-category slots`;
+});
+check('poolFloorTarget actually lifts a target off the pool floor', ()=>{
+  /* Directly asserts the thing that was broken: on a pool with one low outlier, the
+     returned target must sit inside the body of the material, not on its bottom edge.
+     The old min()+0.35 form returns the caller's target unchanged here. */
+  const pool = A.byFilter('Vocabulary Traits', 'Register & Formality Spectrum');
+  assert(pool.length > 40, 'test pool went missing');
+  const positions = pool.map(A.traitPos).sort((a,b)=>a-b);
+  const lo = positions[0];
+  const lifted = A.poolFloorTarget(pool, A.targetFromMag(18));
+  assert(lifted > lo + 0.5, `target ${lifted.toFixed(2)} is still sitting on the pool floor ${lo.toFixed(2)}`);
+  const inWindow = positions.filter(p => Math.abs(p - lifted) <= 0.75).length;
+  assert(inWindow >= 8, `only ${inWindow} traits within a default band of the lifted target`);
+  return `floor ${lo.toFixed(2)} -> target ${lifted.toFixed(2)}, ${inWindow} traits in band`;
+});
+check('rangeSelect scales its window to the pool, not just the precision slider', ()=>{
+  const small = A.byFilter('Appearance', 'Movement & Bearing');
+  const large = A.byFilter('Vocabulary Traits', 'Register & Formality Spectrum');
+  const rs = (pool) => A.rangeSelect(pool, A.poolFloorTarget(pool, A.targetFromMag(40)));
+  const a = rs(small), b = rs(large);
+  assert(a.list.length >= Math.min(10, small.length * 0.3),
+    `thin pool offered only ${a.list.length} of ${small.length} candidates`);
+  assert(b.list.length >= 20, `wide pool offered only ${b.list.length} of ${large.length}`);
+  return `${a.list.length}/${small.length} and ${b.list.length}/${large.length} eligible`;
+});
+
 group('Explanations');
 check('why-not produces an answer for any trait', ()=>{
   const sample = T.filter((_,i)=> i % 811 === 0);
