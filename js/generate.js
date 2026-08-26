@@ -253,7 +253,7 @@ function _runGeneration(){
   const depthFirst = document.getElementById('depthFirstToggle');
   if (depthFirst && depthFirst.checked) applyDepthFirst();
 
-  const archKey = document.getElementById('archetypeSelect').value;
+  const archKey = strVal('archetypeSelect', '');
   const arch = ARCHETYPES[archKey] || CUSTOM_ARCHETYPES[archKey];
   // BUG FIX: this used to WRITE the blended value back into the slider elements.
   // Because the blend reads the slider it just wrote, pressing Generate repeatedly
@@ -291,7 +291,7 @@ function _runGeneration(){
   }
   const mannerCount = intVal('mannerCount', 3);
   const vocabCount = intVal('vocabCount', 2);
-  const rarityPref = document.getElementById('rarityPref').value;
+  const rarityPref = rarityPrefVal();
 
   // Age and the one-line context stop being decoration here: they resolve to category
   // weights and small slider nudges before anything is drawn (see buildContextBias).
@@ -365,16 +365,16 @@ function _runGeneration(){
   lastGeneratedSliders = captureSliders();
 
   charMeta = {
-    name: document.getElementById('charName').value || "Unnamed Character",
-    age: document.getElementById('charAge').value,
-    context: document.getElementById('charContext').value,
+    name: strVal('charName', '') || "Unnamed Character",
+    age: strVal('charAge', ''),
+    context: strVal('charContext', ''),
     archetypeLabel: archKey ? document.getElementById('archetypeSelect').selectedOptions[0].textContent : "Custom random",
     seed: charMetaSeed
   };
   charMeta.archFidelity = arch ? archetypeFidelity(state, arch) : null;
   const emergent = emergentArchetypeName(state);
   if (emergent && !archKey) charMeta.archetypeLabel = emergent.name + (emergent.exact ? "" : " *");
-  document.getElementById('archetypeTag').textContent = charMeta.archetypeLabel;
+  setText('archetypeTag', charMeta.archetypeLabel);
 
   pressureState = newPressure;
   document.getElementById('pressureSheet').style.display = pressureState ? "block" : "none";
@@ -425,8 +425,7 @@ function seatedTraitIds(exceptSlotId){
    card in a required category left the constraint quietly unsatisfied. Re-running both
    after a mutation costs one pass over the sheet and keeps the chips honest. */
 function reapplyConstraintsAfterMutation(){
-  const rarityPref = document.getElementById('rarityPref')
-    ? document.getElementById('rarityPref').value : 0;
+  const rarityPref = rarityPrefVal();
   try {
     state = applyExclusivePairs(applyRequiredTraits(state), rarityPref);
   } catch(e){ console.error(e); }
@@ -445,7 +444,7 @@ function rerollSlot(slotId){
     toast("This trait is here because you required it by name — remove the constraint to change it.", "warn");
     return;
   }
-  const rarityPref = document.getElementById('rarityPref').value;
+  const rarityPref = rarityPrefVal();
   // Reroll always operates on the single main-character UI, so the live DOM sliders
   // ARE the correct source for trait-level polarity affinity here (no per-call
   // overrides needed, unlike cast/foil generation).
@@ -710,7 +709,7 @@ function adjustPin(slotId, delta){
     // order of how much they matter: never seat a duplicate, but a rejected trait is
     // better than a pin control that does nothing.
     const pool = clean.length ? clean : full.filter(t => !seated.has(t.id));
-    const rarityPref = document.getElementById('rarityPref').value;
+    const rarityPref = rarityPrefVal();
     const picked = pool.length ? pickInRange(pool, rarityPref, pinnedTargets[slotId], 3) : null;
     if (picked && picked.id !== s.trait.id){ diffLog[slotId] = {from:s.trait.trait, to:picked.trait}; }
     if (picked){ state[slotId] = {...s, target: pinnedTargets[slotId], pinned:true, trait: picked}; }

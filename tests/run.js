@@ -19,7 +19,7 @@ function check(name, fn){
     console.log('  \x1b[32mok\x1b[0m   ' + name + (typeof detail === 'string' ? '  \x1b[2m(' + detail + ')\x1b[0m' : ''));
   } catch (e){
     failed++;
-    failures.push(name + ': ' + e.message);
+    failures.push(name + ': ' + e.message + (process.env.STACK ? '\n' + e.stack : ''));
     console.log('  \x1b[31mFAIL\x1b[0m ' + name + '\n       ' + e.message);
   }
 }
@@ -42,9 +42,18 @@ const ctx = loadEngine([
   'rememberGeneration','forgetRecentTraits','_drawUnique','_buildUsedIds','explainWhyNot',
   'MOOD_TAG_STATS','TIER_TAG_STATS','divergenceLevel','AXES','CROSSLINK_STRENGTH','slotCat','rangeSelect','captureSettings','restoreSettings',
   'bannedCategories','requiredTraitIds','exclusivePairs','SETTING_FIELDS','SETTING_TOGGLES','validateSheetPayload','compressSlots','expandSlots','TRAITS_BY_ID','emergentArchetypeName',
+  // js/app.js — previously not loaded at all, so none of this had coverage.
+  'axisProfile','analyseRelationship','checkEnsembleBalance','randomAxisLevel','secondOrderTensions',
+  'suggestVoiceFromPersonality','intensityWord','axisPoleWord','voiceSliderWord','assertAxisTables',
+  'strVal','boolVal','rarityPrefVal','ARCHETYPES','sheetToText','sheetToHTML','quantile','emptySlot',
 ]);
 const A = ctx.api;
 const T = A.TRAITS;
+
+/* Ratchet, not a target. Set to the value the bank actually achieves today; lowering it
+   is the content pass's job and raising it should require saying so out loud. It started
+   at 0.729, where rarity was very nearly a restatement of intensity. */
+const RARITY_V_CEILING = 0.66;
 
 group('Trait bank integrity');
 check('every trait has the required fields', ()=>{
@@ -199,11 +208,27 @@ check('the four-way rarity distribution stays within tolerance', ()=>{
   });
   return A.RTIER_ORDER.map(t=>`${t} ${Math.round(100*share(t))}%`).join(', ');
 });
-check('rarity is no longer a function of intensity', ()=>{
-  /* The whole point of the migration. Under the old derived scheme rtier was
-     determined by (rarity, intensity), so a quiet signature trait could not exist and
-     "an ordinary person with one startling verbal habit" was inexpressible. Every tier
-     must now be reachable at every intensity. */
+/* Cramer's V over the intensity x tier contingency table: 0 = the two axes are
+   independent, 1 = knowing one tells you the other exactly. This is the measurement the
+   README's "genuinely independent" claim is about. */
+function rarityIntensityV(){
+  const tiers = A.RTIER_ORDER, N = T.length, R = 5, C = tiers.length;
+  const obs = Array.from({length:R}, ()=> new Array(C).fill(0));
+  const rowT = new Array(R).fill(0), colT = new Array(C).fill(0);
+  T.forEach(t=>{
+    const r = t.intensity - 1, c = tiers.indexOf(t.rtier || A.rarityTier(t));
+    if (r < 0 || r >= R || c < 0) return;
+    obs[r][c]++; rowT[r]++; colT[c]++;
+  });
+  let chi = 0;
+  for (let i = 0; i < R; i++) for (let j = 0; j < C; j++){
+    const e = rowT[i] * colT[j] / N;
+    if (e > 0) chi += Math.pow(obs[i][j] - e, 2) / e;
+  }
+  return {v: Math.sqrt(chi / (N * Math.min(R - 1, C - 1))), obs, tiers};
+}
+
+check('every tier is reachable at every intensity', ()=>{
   const grid = {};
   T.forEach(t=>{ grid[t.rtier + '@' + t.intensity] = (grid[t.rtier + '@' + t.intensity]||0)+1; });
   const missing = [];
@@ -212,6 +237,25 @@ check('rarity is no longer a function of intensity', ()=>{
   });
   assert(!missing.length, 'unreachable combinations: ' + missing.join(', '));
   return Object.keys(grid).length + ' of 20 tier/intensity combinations populated';
+});
+
+check('rarity is not a restatement of intensity', ()=>{
+  /* This is what the test above was standing in for and could not do. "Every cell is
+     non-empty" is satisfied by ONE trait per cell, and it was: the bank had 10 quiet
+     signature traits and 12 loud commons out of 7,133, and Cramer's V measured 0.729 —
+     rarity was ~73% determined by intensity, so "an ordinary person with one startling
+     verbal habit" was still effectively inexpressible even though the cell was
+     technically occupied. Assert the actual statistical property, and assert the two
+     corner populations the oneLoud budget preset depends on directly, since those are
+     what the preset draws from and a low V could in principle be reached without
+     them. */
+  const {v} = rarityIntensityV();
+  const quietSig = T.filter(t=> t.intensity <= 2 && (t.rtier||A.rarityTier(t)) === 'signature').length;
+  const loudCommon = T.filter(t=> t.intensity >= 4 && (t.rtier||A.rarityTier(t)) === 'common').length;
+  assert(v <= RARITY_V_CEILING, `Cramer's V is ${v.toFixed(3)}, above the ${RARITY_V_CEILING} ceiling`);
+  assert(quietSig >= 90, `only ${quietSig} quiet signature traits (i<=2) — oneLoud has nothing to draw`);
+  assert(loudCommon >= 70, `only ${loudCommon} loud common traits (i>=4)`);
+  return `V=${v.toFixed(3)} · ${quietSig} quiet signature · ${loudCommon} loud common`;
 });
 check('signature is genuinely the minority tier', ()=>{
   const sig = T.filter(t=>t.rtier === 'signature').length;
@@ -900,6 +944,123 @@ check('a remembered trait is penalised, an unseen one is not', ()=>{
   A.forgetRecentTraits();
   ctx.document._set('avoidRecentToggle', {checked:false});
   return 'both directions';
+});
+
+group('Whole-sheet consumers survive an empty slot');
+/* Every one of these threw on a sheet holding a slot with trait:null — reachable by
+   banning a section and generating, and by loading a save written by an older build.
+   Two of them (coherenceScore via checkConflicts) threw outside any try/catch. The
+   pickers now emit an explicit empty slot rather than three inconsistent answers, so
+   this asserts the whole consumer surface tolerates one. */
+function sheetWithEmptySlots(){
+  const st = A.buildCharacterState({verbLevel:0, regLevel:0, compLevel:0,
+    mannerCount:2, vocabCount:2, rarityPref:'balanced', vocabPref:null});
+  const keys = Object.keys(st);
+  // Blank a profile slot, a fixed-spine slot, and a personality slot.
+  ['prof_role_0','register','verbosity','grammar','app_move','app_mark']
+    .forEach(k=>{ if (st[k]) st[k] = A.emptySlot(k, st[k].label); });
+  const pers = keys.find(k=>k.startsWith('pers_'));
+  if (pers) st[pers] = A.emptySlot(pers, st[pers].label);
+  return st;
+}
+check('a sheet with empty slots exports, scores and analyses without throwing', ()=>{
+  const st = sheetWithEmptySlots();
+  const meta = {name:'Test', age:'40', context:'', seed:'abc'};
+  const consumers = [
+    ['sheetToText',        ()=> A.sheetToText(st, meta, {})],
+    ['sheetToHTML',        ()=> A.sheetToHTML(st, meta, {})],
+    ['coherenceScore',     ()=> A.coherenceScore(st)],
+    ['checkConflictsFor',  ()=> A.checkConflictsFor(st)],
+    ['axisProfile',        ()=> A.axisProfile(st)],
+    ['secondOrderTensions',()=> A.secondOrderTensions(st)],
+    ['emergentArchetypeName', ()=> A.emergentArchetypeName(st)],
+    ['compressSlots/expandSlots', ()=> A.expandSlots(A.compressSlots(st))],
+    ['budgetCapacity',     ()=> A.budgetCapacity(st)],
+  ];
+  const broke = [];
+  consumers.forEach(([name, fn])=>{ try { fn(); } catch(e){ broke.push(name + ': ' + e.message); } });
+  assert(!broke.length, broke.join('\n       '));
+  return consumers.length + ' consumers';
+});
+check('an all-empty sheet is still exportable', ()=>{
+  const st = {};
+  ['verbosity','register','grammar','app_move','prof_role_0']
+    .forEach(k=> st[k] = A.emptySlot(k, k));
+  const out = A.sheetToText(st, {name:'Nobody'}, {});
+  assert(typeof out === 'string' && out.includes('Nobody'), 'no usable export');
+  return 'exported ' + out.split('\n').length + ' lines';
+});
+
+group('Axis-keyed table drift');
+check('every axis-keyed table agrees with AXIS_LABELS', ()=>{
+  /* CONTRADICTION_QUESTIONS keyed rebelliousness as `reb` while AXIS_LABELS spells it
+     `rebel`, so the entry had never been read once and every rebelliousness
+     contradiction — 302 tagged traits, one of the two most-tagged axes in the bank —
+     fell through to the generic fallback question. Nothing checked that these tables
+     agree with the vocabulary they are keyed on. */
+  const problems = A.assertAxisTables();
+  assert(!problems.length, problems.join('\n       '));
+  return Object.keys(A.AXIS_LABELS).length + ' axes';
+});
+
+group('js/app.js');
+check('axisProfile reads polarity off a real sheet and tolerates an empty slot', ()=>{
+  const st = A.buildCharacterState({verbLevel:1, regLevel:0, compLevel:0,
+    mannerCount:2, vocabCount:2, rarityPref:'balanced', vocabPref:null});
+  const full = A.axisProfile(st);
+  assert(full && typeof full === 'object', 'no profile');
+  const nonZero = Object.values(full).filter(v=>v !== 0).length;
+  assert(nonZero > 0, 'every axis read as zero on a full sheet');
+  const blanked = Object.assign({}, st);
+  Object.keys(blanked).slice(0, 5).forEach(k=> blanked[k] = A.emptySlot(k, 'x'));
+  A.axisProfile(blanked);   // must not throw
+  return nonZero + ' axes carry signal';
+});
+check('randomAxisLevel spans the whole axis range', ()=>{
+  let lo = Infinity, hi = -Infinity;
+  for (let i = 0; i < 5000; i++){ const v = A.randomAxisLevel(); lo = Math.min(lo,v); hi = Math.max(hi,v); }
+  assert(lo >= -2 && hi <= 2, `produced ${lo.toFixed(2)}..${hi.toFixed(2)} — outside the -2..2 axis range`);
+  assert(hi - lo > 3.5, 'barely varies: ' + (hi - lo).toFixed(2));
+  return `${lo.toFixed(2)}..${hi.toFixed(2)}`;
+});
+/* These two are UI entry points that read module globals rather than taking arguments,
+   so drive them the way the page does. Both crashed on a null trait before slotCat was
+   applied, and neither had ever been executed outside a browser. */
+const mkChar = (name, v) => ({meta:{name}, state: A.buildCharacterState({verbLevel:v, regLevel:-v,
+  compLevel:0, mannerCount:2, vocabCount:2, rarityPref:'balanced', vocabPref:null})});
+check('checkEnsembleBalance survives a cast holding empty slots', ()=>{
+  ctx.evalIn('castStates = []');
+  [mkChar('A',0), mkChar('B',1), mkChar('C',-1), mkChar('D',1.5)].forEach(c=>{
+    ctx.__push = c; ctx.evalIn('castStates.push(globalThis.__push)');
+  });
+  ctx.evalIn("castStates[1].state['prof_role_0'] = emptySlot('prof_role_0','Role');" +
+             "castStates[2].state['pers_honesty'] = emptySlot('pers_honesty','Honesty');" +
+             "if (castStates.length < 3) throw new Error('cast did not populate');" +
+             "checkEnsembleBalance();");
+  ctx.evalIn('castStates = []');
+  return 'ok on a 4-member cast';
+});
+check('analyseRelationship compares two sheets, one of them holding empty slots', ()=>{
+  ctx.evalIn('castStates = []');
+  [mkChar('Left', 1.5), mkChar('Right', -1.5)].forEach(c=>{
+    ctx.__push = c; ctx.evalIn('castStates.push(globalThis.__push)');
+  });
+  ctx.evalIn("castStates[0].state['prof_values_0'] = emptySlot('prof_values_0','Values')");
+  ctx.document._set('relA', {value:'cast_0'});
+  ctx.document._set('relB', {value:'cast_1'});
+  ctx.evalIn("if (!getCharByKey('cast_0') || !getCharByKey('cast_1')) throw new Error('cast lookup failed');" +
+             "analyseRelationship();");
+  ctx.evalIn('castStates = []');
+  return 'ok';
+});
+check('the readout word helpers cover their whole input range', ()=>{
+  const gaps = [];
+  for (let i = 1; i <= 5; i++) if (!A.intensityWord(i)) gaps.push('intensity ' + i);
+  for (let raw = -100; raw <= 100; raw += 5){
+    if (!A.voiceSliderWord('verbosity', raw)) gaps.push('verbosity ' + raw);
+  }
+  assert(!gaps.length, gaps.slice(0,5).join(', '));
+  return 'no gaps';
 });
 
 group('Explanations');

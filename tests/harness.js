@@ -12,8 +12,11 @@ function makeEl(id, props){
   const el = Object.assign({
     id, value: '', checked: true, textContent: '', innerHTML: '', style: {},
     tagName: 'INPUT', options: [], classList: {add(){}, remove(){}, toggle(){}, contains(){return false;}},
-    appendChild(){}, addEventListener(){}, querySelectorAll(){ return []; },
-    closest(){ return null; }, setAttribute(){}, removeAttribute(){},
+    appendChild(){}, removeChild(){}, addEventListener(){}, removeEventListener(){},
+    querySelectorAll(){ return []; }, querySelector(){ return null; },
+    closest(){ return null; }, setAttribute(){}, removeAttribute(){}, getAttribute(){ return null; },
+    focus(){}, blur(){}, click(){}, remove(){}, showModal(){}, close(){}, scrollIntoView(){},
+    insertAdjacentHTML(){}, dataset: {}, children: [], returnValue: '',
   }, props || {});
   el.style.setProperty = () => {};
   return el;
@@ -27,7 +30,12 @@ function makeDocument(){
     getElementById(id){ return els.has(id) ? els.get(id) : null; },
     createElement(tag){ return makeEl(null, {tagName: String(tag).toUpperCase()}); },
     body: makeEl('body', {classList:{add(){},remove(){},toggle(){},contains(){return false;}}}),
-    addEventListener(){},
+    documentElement: makeEl('html'),
+    addEventListener(){}, removeEventListener(){},
+    // js/app.js reaches for elements by selector during load (the tab strip, the range
+    // inputs). Return an element rather than null so the module-level wiring runs to
+    // completion instead of throwing partway and leaving half its functions undefined.
+    querySelector(){ return makeEl(null); },
     querySelectorAll(){ return []; },
   };
 }
@@ -40,9 +48,16 @@ const ENGINE_FILES = [
   'js/data/traits-situational.js',
   'js/data/traits-tails.js',
   'js/data/traits-depth.js',
+  'js/data/traits-balance.js',
   'js/engine.js',
   'js/generate.js',
   'js/render.js',
+  /* js/app.js was omitted from this list, so roughly two thousand lines — storage,
+     save/load, cast generation, relationship analysis, the foil finder, ensemble
+     balance, preferences, tab switching and the keyboard map — had no invariant
+     coverage at all. axisProfile lives there, and secondOrderTensions in engine.js
+     depends on it, so the untested file was underneath a tested one. */
+  'js/app.js',
 ];
 
 // vm.runInContext gives each script its own lexical scope, so `const` bindings
@@ -53,6 +68,9 @@ function loadEngine(exportNames){
   const sandbox = {
     console, document, setTimeout, clearTimeout, Math, JSON, Date,
     navigator: {}, URL: {createObjectURL(){return '';}, revokeObjectURL(){}},
+    requestAnimationFrame(fn){ return setTimeout(fn, 0); }, cancelAnimationFrame: clearTimeout,
+    matchMedia: () => ({matches:false, addEventListener(){}, removeEventListener(){}, addListener(){}}),
+    indexedDB: undefined,
     Blob: function(){}, FileReader: function(){}, alert(){}, confirm(){return true;},
     localStorage: null,
   };
@@ -64,6 +82,11 @@ function loadEngine(exportNames){
   const epilogue = '\n;globalThis.__api = {' + names.map(n=>`${n}: typeof ${n} !== 'undefined' ? ${n} : undefined`).join(', ') + '};\n';
   vm.runInContext(code + epilogue, ctx, {filename: 'bundle.js'});
   ctx.api = ctx.__api;
+  /* `let`/`const` at the top level of the bundle are lexical bindings in the vm's own
+     scope, not properties of globalThis, so a test cannot reach module state such as
+     castStates or charMeta by assigning to ctx. Evaluate in the same scope instead —
+     the same seam the browser console gives you on the real page. */
+  ctx.evalIn = (code) => vm.runInContext(code, ctx, {filename: 'test-eval.js'});
   return ctx;
 }
 

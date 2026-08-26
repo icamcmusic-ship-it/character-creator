@@ -267,17 +267,32 @@ if (typeof location !== 'undefined' && /[?&]dev=1\b/.test(location.search || '')
 // Motivation & Wound is intentionally left untagged — its four sub-categories
 // (Want/Fear/Wound/Lie) aren't a pos/neg spectrum the way the other six are.
 const PROFILE_CATEGORY_POLARITY = {
-  "Fight (attack the threat)": {asrt:1, agr:-1}, "Flight (remove yourself)": {asrt:-1},
-  "Freeze (shut down)": {ego:-1, mood:-1}, "Fawn (appease the threat)": {agr:1, asrt:-1},
-  "Leader": {asrt:1, ego:1}, "Peacemaker": {agr:1, warm:1}, "Instigator": {rebel:1, agr:-1},
+  /* The rebel and intel entries below were one-directional: Instigator, Outsider,
+     Absurd & Chaotic and Risk & Escape all granted rebel:+1 and NOTHING in the whole
+     profile taxonomy granted rebel:-1; Skeptic, Pragmatic, Dry & Deadpan and
+     Intellectual & Wordplay all granted intel:+1 and nothing granted intel:-1. Measured
+     across the bank that produced 290:60 on rebelliousness and 436:93 on analytical
+     thinking, which polNormalise correctly stops reading as posture on the radar but
+     cannot fix in the draw — polarityFit had almost nothing to select on when either
+     slider went negative. Categories that genuinely read as deferring to the group, or
+     as acting rather than analysing, now say so. */
+  "Fight (attack the threat)": {asrt:1, agr:-1, intel:-1}, "Flight (remove yourself)": {asrt:-1},
+  "Freeze (shut down)": {ego:-1, mood:-1}, "Fawn (appease the threat)": {agr:1, asrt:-1, rebel:-1},
+  "Leader": {asrt:1, ego:1}, "Peacemaker": {agr:1, warm:1, rebel:-1, mood:1}, "Instigator": {rebel:1, agr:-1},
   "Outsider": {warm:-1, rebel:1}, "Caretaker": {warm:1, emo:1}, "Skeptic": {intel:1, pos:-1},
-  "Rigid & Principled": {disc:1, hon:1}, "Pragmatic & Flexible": {hon:-1, intel:1},
-  "Loyalty-Bound": {warm:1, agr:1}, "Self-Interested": {warm:-1, hon:-1},
-  "Secure": {ego:1, emo:1}, "Anxious": {ego:-1, emo:1}, "Avoidant": {emo:-1, warm:-1}, "Disorganized": {mood:-1, disc:-1},
+  "Rigid & Principled": {disc:1, hon:1, rebel:-1}, "Pragmatic & Flexible": {hon:-1, intel:1},
+  "Loyalty-Bound": {warm:1, agr:1, rebel:-1, intel:-1}, "Self-Interested": {warm:-1, hon:-1},
+  /* mood was the last one-directional code left in this table: Freeze, Disorganized,
+     Substance and Avoidance all pushed it down and nothing anywhere pushed it up, which
+     is most of why 93% of the bank's mood tags are negative and why generated
+     characters trend anxious. These four categories are the ones that genuinely assert
+     equanimity rather than a performance of it — the same distinction the MOOD_POSITIVE
+     id list is drawn on. */
+  "Secure": {ego:1, emo:1, mood:1}, "Anxious": {ego:-1, emo:1}, "Avoidant": {emo:-1, warm:-1}, "Disorganized": {mood:-1, disc:-1},
   "Dry & Deadpan": {intel:1, emo:-1}, "Self-Deprecating": {ego:-1}, "Cruel & Barbed": {warm:-1, agr:-1},
-  "Warm & Playful": {warm:1, pos:1}, "Absurd & Chaotic": {disc:-1, rebel:1}, "Humorless & Absent": {pos:-1, disc:1},
+  "Warm & Playful": {warm:1, pos:1, mood:1}, "Absurd & Chaotic": {disc:-1, rebel:1}, "Humorless & Absent": {pos:-1, disc:1},
   "Substance & Consumption": {disc:-1, mood:-1}, "Compulsion & Ritual": {disc:1, ego:-1},
-  "Risk & Escape": {disc:-1, rebel:1}, "Restraint & Discipline": {disc:1},
+  "Risk & Escape": {disc:-1, rebel:1}, "Restraint & Discipline": {disc:1, rebel:-1, mood:1},
   // Added for the 4 new sub-groups (Connector, Idealistic & Visionary, Intellectual &
   // Wordplay, Avoidance & Procrastination) — without these, traits in those categories
   // carry empty pol and are invisible to conflict detection and the Relationship/Ensemble
@@ -285,11 +300,24 @@ const PROFILE_CATEGORY_POLARITY = {
   "Connector": {warm:1, act:1}, "Idealistic & Visionary": {hon:1, pos:1},
   "Intellectual & Wordplay": {intel:1}, "Avoidance & Procrastination": {disc:-1, mood:-1},
 };
+let PROFILE_POLARITY_STATS = null;
 (function applyProfilePolarity(){
+  /* Same guard bug as applyPersonalityPolePolarity below: this only fired on a trait
+     whose pol was COMPLETELY empty, so an entry declaring a single orthogonal axis —
+     a Caretaker trait tagged {disc:1}, say — never received the warm/emo its category
+     determines. Merge per axis instead, leaving any axis the trait speaks to itself
+     alone, which is the rule the guard was reaching for. */
+  let tagged = 0, keptExplicit = 0;
   TRAITS.forEach(t=>{
     const tags = PROFILE_CATEGORY_POLARITY[t.category];
-    if (tags && t.pol && Object.keys(t.pol).length === 0) Object.assign(t.pol, tags);
+    if (!tags) return;
+    if (!t.pol) t.pol = {};
+    Object.entries(tags).forEach(([code, sign])=>{
+      if (t.pol[code]){ keptExplicit++; return; }
+      t.pol[code] = sign; tagged++;
+    });
   });
+  PROFILE_POLARITY_STATS = {tagged, keptExplicit};
 })();
 
 // ================= MOTIVATION & WOUND POLARITY TAGGING =================
@@ -336,6 +364,32 @@ const MOTIVATION_POLARITY_RULES = [
   [/\bcomfort\b|end to struggle|quiet ending|simple.normalcy/i, {act:-1}],
   [/protection of another|kept safe above|justice for another/i, {warm:1, agr:1}],
   [/all-consuming|swallowed every other priority|eaten the person/i, {disc:1}],
+  /* A second pass over the 128 entries the rules above still missed. The originals were
+     written against the four founding categories and never revisited when The Need, The
+     Ghost and The Defence were added, and several of the commonest Fear/Wound/Lie shapes
+     (humiliation, insignificance, powerlessness, survivor guilt, hurt by a protector)
+     had no rule at all — so the section's most archetypal entries were exactly the ones
+     falling through. Same additive contract: anything still matching nothing stays
+     untagged, and a rule never overwrites a tag a trait sets itself. */
+  [/humiliat|brought low|named.unworthy|declared unfit|shamed|took the fall|left.holding.the.blame/i, {ego:-1, emo:1}],
+  [/insignifican|amounting to nothing|leaving no trace|being ordinary|forgotten|fear.of.silence/i, {ego:-1, pos:-1}],
+  [/powerless|unable to act|losing control|spiraling beyond/i, {disc:1, ego:-1}],
+  [/failed to save|couldn't stop it|survived what others|alive by accident|survivor/i, {emo:1, ego:-1}],
+  [/harmed by a protector|meant to keep them safe|hurt by the person/i, {emo:1, warm:-1, hon:-1}],
+  [/exiled|cast out|removed from the place|home destroyed|taken or ruined/i, {warm:-1, pos:-1}],
+  [/lost faith|belief system collapsed|left nothing|being wrong|core belief is a mistake/i, {pos:-1, intel:1}],
+  [/ruin what I touch|inherently destructive|don't deserve|happiness is for other people/i, {ego:-1, pos:-1}],
+  [/unlovable|affection shown to them is a mistake/i, {ego:-1, warm:-1}],
+  [/world is rigged|effort is pointless|against the system/i, {pos:-1, rebel:1}],
+  [/restoration|put back something|undoing.a.mistake|fix one past error|broke a vow/i, {hon:1, emo:1}],
+  [/proving.capability|demonstrate they can|everyone doubts/i, {ego:1, disc:1}],
+  [/disappointing.a.mentor|letting down the one person|whose opinion matter/i, {agr:1, ego:-1}],
+  [/becoming a burden|needing more care than they can offer/i, {ego:-1, agr:1}],
+  [/fear of loss|losing what they've built/i, {disc:1, emo:1}],
+  [/repetition|becoming their parent/i, {disc:1, ego:-1}],
+  /* The four intensity-scale entries in each category ("A small doubt", "A defining,
+     unhealed wound") describe HOW MUCH rather than what, so they carry no direction and
+     are correctly left alone by every rule above. */
 ];
 (function applyMotivationPolarity(){
   TRAITS.forEach(t=>{
@@ -1223,6 +1277,28 @@ function floatVal(idOrEl, fallback){
   const n = parseFloat(el.value);
   return Number.isFinite(n) ? n : fallback;
 }
+/* The string and boolean siblings of intVal/floatVal, plus the three write helpers.
+   Reading `document.getElementById('rarityPref').value` straight through is scattered
+   across all four files, and about half the sites already guard it — reapplyConstraints-
+   AfterMutation guards the exact read that adjustPin, rerollSlot and generateCharacter
+   do bare, three lines away. In a browser with the full index.html these never fire,
+   which is why they survived; the moment the app is embedded in a trimmed page, or a
+   panel is removed, or the file is loaded under test, they throw. togglePersonalityPanel
+   did exactly that as soon as js/app.js was brought under test coverage. */
+function strVal(idOrEl, fallback){
+  const el = typeof idOrEl === 'string' ? document.getElementById(idOrEl) : idOrEl;
+  return el && el.value != null ? el.value : fallback;
+}
+function boolVal(idOrEl, fallback){
+  const el = typeof idOrEl === 'string' ? document.getElementById(idOrEl) : idOrEl;
+  return el ? !!el.checked : fallback;
+}
+function setVal(id, v){ const el = document.getElementById(id); if (el) el.value = v; return el; }
+function setText(id, v){ const el = document.getElementById(id); if (el) el.textContent = v; return el; }
+function setHTML(id, v){ const el = document.getElementById(id); if (el) el.innerHTML = v; return el; }
+// The rarity preference is read on nearly every draw path; one name for it.
+function rarityPrefVal(){ return strVal('rarityPref', 'balanced'); }
+
 function AFFINITY(){ return floatVal('affinityBoost', 2.5); }
 
 function persLevel(id, overrides){
@@ -2069,17 +2145,34 @@ let PERSONALITY_POLE_STATS = null;
     byCat.set(a.pos, {code, sign: 1});
     byCat.set(a.neg, {code, sign: -1});
   });
-  let tagged = 0;
+  /* BUG FIX. The guard here was `already says something on ANY axis`, so a trait sitting
+     in "Intelligence — Instinctive & Unanalytical" that happened to declare {warm:1} was
+     skipped entirely and never received its intel:-1. The category IS the statement
+     about its own axis; a tag on a different axis is orthogonal information and says
+     nothing about this one.
+
+     That left 519 Personality traits carrying no polarity at all despite a pass whose
+     whole job is to derive it from the category, and it fell hardest on exactly the two
+     axes measured as most lopsided: intel ran 289 positive to 37 negative and rebel
+     266 to 36, because the positive poles happened to carry fewer competing tags. Since
+     polarityFit can only select on what is tagged, pushing Intelligence or
+     Rebelliousness negative gave materially less trait-level steering than pushing
+     either positive — a slider that did less work in one direction than the other.
+
+     Skip only when the trait already declares THIS axis, which is the case the guard
+     was actually written for: a hand-authored tag that disagrees with its category
+     (a defiant trait in the compliant pool, say) must still win. */
+  let tagged = 0, keptExplicit = 0;
   TRAITS.forEach(t=>{
     if (t.section !== "Personality Traits") return;
-    if (t.pol && Object.keys(t.pol).some(k=>t.pol[k])) return;   // already says something
     const spec = byCat.get(t.category);
     if (!spec) return;                                            // Situational: correctly silent
     if (!t.pol) t.pol = {};
+    if (t.pol[spec.code]){ keptExplicit++; return; }              // explicit tag on THIS axis wins
     t.pol[spec.code] = spec.sign;
     tagged++;
   });
-  PERSONALITY_POLE_STATS = {tagged};
+  PERSONALITY_POLE_STATS = {tagged, keptExplicit};
 })();
 
 function liveAxisVector(overrides){
@@ -3093,7 +3186,7 @@ function renderSeedOptions(list){
   if ([...sel.options].some(o=>o.value===prevValue)) sel.value = prevValue;
 }
 function filterSeedPicker(){
-  const q = document.getElementById('seedTraitFilter').value.trim().toLowerCase();
+  const q = strVal('seedTraitFilter', '').trim().toLowerCase();
   if (!q){ renderSeedOptions(SEEDABLE_TRAITS); return; }
   const filtered = SEEDABLE_TRAITS.filter(t =>
     t.trait.toLowerCase().includes(q) || t.desc.toLowerCase().includes(q) || t.category.toLowerCase().includes(q));
@@ -3267,10 +3360,10 @@ function _restoreSnapshot(prev){
   pressureState = expandSlots(prev.pressureState) || null;
   restoreSliders(prev.sliders);
   lastGeneratedSliders = prev.sliders; // the restored state now corresponds to these again
-  document.getElementById('charName').value = charMeta.name || "";
-  document.getElementById('charAge').value = charMeta.age || "";
-  document.getElementById('charContext').value = charMeta.context || "";
-  document.getElementById('archetypeTag').textContent = charMeta.archetypeLabel || "";
+  setVal('charName', charMeta.name || "");
+  setVal('charAge', charMeta.age || "");
+  setVal('charContext', charMeta.context || "");
+  setText('archetypeTag', charMeta.archetypeLabel || "");
   document.getElementById('pressureSheet').style.display = pressureState ? "block" : "none";
   diffLog = {}; rerollExclusions = {}; rerollHistory = {}; whyOpen = {};
   onSliderChange();
@@ -3917,8 +4010,8 @@ function addExclusivePair(){
   if (!exclusivePairs.some(p=> (p[0]===a.id&&p[1]===b.id) || (p[0]===b.id&&p[1]===a.id))){
     exclusivePairs.push([a.id, b.id]);
   }
-  document.getElementById('exclusiveA').value = "";
-  document.getElementById('exclusiveB').value = "";
+  setVal('exclusiveA', "");
+  setVal('exclusiveB', "");
   refreshConstraintChips();
 }
 function removeExclusivePair(i){ exclusivePairs.splice(i,1); refreshConstraintChips(); }

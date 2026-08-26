@@ -181,10 +181,10 @@ async function loadSavedCharacter(name){
     traitNotes = parsed.traitNotes || {};
     diffLog = {}; rerollExclusions = {}; rerollHistory = {}; whyOpen = {};
     if (parsed.settings) restoreSettings(parsed.settings);
-    document.getElementById('charName').value = charMeta.name || "";
-    document.getElementById('charAge').value = charMeta.age || "";
-    document.getElementById('charContext').value = charMeta.context || "";
-    document.getElementById('archetypeTag').textContent = "Loaded: "+name;
+    setVal('charName', charMeta.name || "");
+    setVal('charAge', charMeta.age || "");
+    setVal('charContext', charMeta.context || "");
+    setText('archetypeTag', "Loaded: "+name);
     document.getElementById('pressureSheet').style.display = pressureState ? "block" : "none";
     lastSheetTraits = null;
     onSliderChange(); renderSheet(); checkConflicts();
@@ -282,7 +282,7 @@ function generateCast(){
   // BUG FIX: the cast read your Generate-group checkboxes and per-section profile
   // toggles (via buildCharacterState) but hardcoded three mannerisms and a balanced
   // rarity, so it inherited some of your settings and silently ignored the rest.
-  const rarityPref = document.getElementById('rarityPref') ? document.getElementById('rarityPref').value : 0;
+  const rarityPref = rarityPrefVal();
   const mannerCount = intVal('mannerCount', 3);
   const vocabCount = intVal('vocabCount', 2);
   // The cast was the one generator with no reproducibility at all: pure Math.random,
@@ -327,6 +327,7 @@ function generateCast(){
 const CAST_COLORS = ["#4a6b8a","#c2578a","#5a9a6f","#b8860b","#8a6bbf","#c96f4a"];
 function renderCast(){
   const grid = document.getElementById('castGrid');
+  if (!grid) return;   // container absent (embedded build, or a trimmed page)
   grid.innerHTML = "";
   // Cast overlay radar: every member's axis profile on one chart, so ensemble
   // gaps (an axis nobody covers) and pile-ups (everyone leaning the same way)
@@ -649,8 +650,8 @@ function updateHeavyPreview(){
     });
     if (parts.length) profLine = `<div style="margin-top:6px; padding-top:6px; border-top:1px dashed var(--border);"><b>Character Profile (predicted):</b><br>${parts.join("<br>")}<div class="sub" style="margin:6px 0 0;">Deterministic prediction, not a draw — generation still rolls against these odds.</div></div>`;
   } catch(e){}
-  document.getElementById('affinityPreview').innerHTML =
-    fmt(gBoost,"Grammar") + fmt(vBoost,"Vocabulary") + fmt(mBoost,"Mannerisms") + profLine;
+  setHTML('affinityPreview',
+    fmt(gBoost,"Grammar") + fmt(vBoost,"Vocabulary") + fmt(mBoost,"Mannerisms") + profLine);
   updateRangeReadout();
 }
 
@@ -736,6 +737,7 @@ function axisReadout(axis, raw){
 
 function buildPersonalitySliders(){
   const grid = document.getElementById('personalitySlidersGrid');
+  if (!grid) return;   // container absent (embedded build, or a trimmed page)
   grid.innerHTML = "";
   const placed = new Set();
   const groups = PERSONALITY_GROUPS.map(g=>({...g}));
@@ -774,12 +776,13 @@ function buildPersonalitySliders(){
   });
 }
 function togglePersonalityPanel(){
-  const enabled = document.getElementById('personalityToggle').checked;
-  document.getElementById('personalitySlidersGrid').classList.toggle('disabled', !enabled);
+  const enabled = boolVal('personalityToggle', true);
+  const grid = document.getElementById('personalitySlidersGrid');
+  if (grid) grid.classList.toggle('disabled', !enabled);
 }
 
 function toggleExamples(){
-  const show = document.getElementById('examplesToggle').checked;
+  const show = boolVal('examplesToggle', true);
   document.body.classList.toggle('hide-examples', !show);
 }
 
@@ -936,9 +939,9 @@ function randomRawSlider(){
 
 function randomizeSliders(scope){
   if (scope === 'voice' || scope === 'all'){
-    document.getElementById('verbositySlider').value = randomRawSlider();
-    document.getElementById('registerSlider').value = randomRawSlider();
-    document.getElementById('composureSlider').value = randomRawSlider();
+    setVal('verbositySlider', randomRawSlider());
+    setVal('registerSlider', randomRawSlider());
+    setVal('composureSlider', randomRawSlider());
   }
   if (scope === 'personality' || scope === 'all'){
     PERSONALITY_AXES.forEach(axis=>{
@@ -952,7 +955,7 @@ function randomizeSliders(scope){
 
 // ================= CUSTOM ARCHETYPES =================
 async function saveCustomArchetype(btnEl){
-  const name = document.getElementById('customArchName').value.trim();
+  const name = strVal('customArchName', '').trim();
   if(!name){ toast("Give the archetype a name first.", "warn"); return; }
   const btn = btnEl || null;
   const oldLabel = btn ? btn.textContent : null;
@@ -979,7 +982,7 @@ async function saveCustomArchetype(btnEl){
     await storage.set('archetype:'+name, JSON.stringify(arch));
     CUSTOM_ARCHETYPES['custom_'+name] = arch;
     await loadCustomArchetypes();
-    document.getElementById('customArchName').value = "";
+    setVal('customArchName', "");
   } catch(e){ console.error(e); toast("Could not save archetype.", "warn"); }
   finally { if (btn){ btn.textContent = oldLabel; btn.disabled = false; } }
 }
@@ -1027,6 +1030,7 @@ async function loadCustomArchetypes(){
   } catch(e){}
   // rebuild dropdown
   const sel = document.getElementById('archetypeSelect');
+  if (!sel) return;   // no dropdown on this page — the archetypes are still loaded
   const current = sel.value;
   [...sel.querySelectorAll('option')].forEach(o=>{ if(o.value.startsWith('custom_')) o.remove(); });
   Object.entries(CUSTOM_ARCHETYPES).forEach(([key,arch])=>{
@@ -1155,7 +1159,7 @@ function categoryPairNotesFor(stA, stB){
   return [...new Set(notes)];
 }
 function analyseRelationship(){
-  const ka = document.getElementById('relA').value, kb = document.getElementById('relB').value;
+  const ka = strVal('relA', ''), kb = strVal('relB', '');
   const A = getCharByKey(ka), B = getCharByKey(kb);
   if (!A || !B){ toast("Generate a character or cast first.", "warn"); return; }
   if (ka === kb){ toast("Pick two different characters.", "warn"); return; }
@@ -1209,8 +1213,9 @@ function analyseRelationship(){
   else verdict = "Mixed — real common ground with real fault lines. The most dramatically useful kind.";
 
   const sheet = document.getElementById('relSheet');
+  if (!sheet) return;   // container absent (embedded build, or a trimmed page)
   sheet.classList.add('show');
-  document.getElementById('relTitle').textContent = (A.meta.name||"A") + "  ×  " + (B.meta.name||"B");
+  setText('relTitle', (A.meta.name||"A") + "  ×  " + (B.meta.name||"B"));
   let h = `<div class="charMeta">${verdict}</div>`;
   if (clashes.length){
     h += `<div class="axisGroup"><div class="axisTitle">Friction points</div>`;
@@ -1242,10 +1247,11 @@ function analyseRelationship(){
   if (!clashes.length && !alignments.length && !notes.length){
     h += `<div class="charMeta">Not enough personality signal to compare — generate both characters with the personality profile enabled.</div>`;
   }
-  document.getElementById('relBody').innerHTML = h;
+  setHTML('relBody', h);
 }
 function copyRelationship(btnEl){
-  const t = document.getElementById('relTitle').textContent + "\n\n" + document.getElementById('relBody').innerText;
+  const titleEl = document.getElementById('relTitle'), bodyEl = document.getElementById('relBody');
+  const t = (titleEl ? titleEl.textContent : "") + "\n\n" + (bodyEl ? bodyEl.innerText : "");
   /* BUG FIX: this used navigator.clipboard directly, bypassing copyText() — which was
      hardened for non-secure contexts (file://, plain http) precisely because
      navigator.clipboard is undefined there. On file:// this threw an unhandled
@@ -1419,7 +1425,7 @@ function _generateFoilInner(seedLabel){
     }
   });
 
-  const rarityPref = document.getElementById('rarityPref').value;
+  const rarityPref = rarityPrefVal();
   const mannerCount = intVal('mannerCount', 3);
   const vocabCount = intVal('vocabCount', 2);
   // Verbosity and register invert by default — a foil that talks and phrases things
@@ -1591,6 +1597,7 @@ function checkEnsembleBalance(){
   } else lastBalanceGaps = null;
 
   const box = document.getElementById('balanceResult');
+  if (!box) return;   // container absent (embedded build, or a trimmed page)
   box.classList.add('show');
   box.innerHTML = h;
 }
@@ -1612,7 +1619,7 @@ function generateGapFiller(){
     const others = catsOf(ps.section).filter(c=>c !== pc.cat);
     if (others.length) forcedProfileCats[ps.id] = others[Math.floor(Math.random()*others.length)];
   });
-  const rarityPref = document.getElementById('rarityPref') ? document.getElementById('rarityPref').value : 0;
+  const rarityPref = rarityPrefVal();
   // The gap-filler exists to break clustering; inheriting the last character's context
   // bias reinforced exactly what it was called in to counteract. Its presentation
   // locks are its own and are restored afterwards for the same reason.
@@ -1637,6 +1644,7 @@ function generateGapFiller(){
 // ================= PROFILE SECTION UI =================
 function buildProfileSectionUI(){
   const grid = document.getElementById('profileSectionsGrid');
+  if (!grid) return;   // container absent (embedded build, or a trimmed page)
   grid.innerHTML = "";
   PROFILE_SECTIONS.forEach(ps=>{
     const cats = catsOf(ps.section);

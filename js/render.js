@@ -485,12 +485,12 @@ function renderSheet(){
   sheet.classList.add('show');
   const empty = document.getElementById('emptyState');
   if (empty) empty.style.display = 'none';
-  document.getElementById('sheetTitle').textContent = charMeta.name || "Character Voice";
+  setText('sheetTitle', charMeta.name || "Character Voice");
   const metaBits = [];
   if (charMeta.age) metaBits.push("Age " + charMeta.age);
   if (charMeta.context) metaBits.push(charMeta.context);
   if (charMeta.contextNotes && charMeta.contextNotes.length) metaBits.push("context bias: " + charMeta.contextNotes.join(", "));
-  document.getElementById('charMetaLine').textContent = metaBits.join(" · ");
+  setText('charMetaLine', metaBits.join(" · "));
 
   const body = document.getElementById('sheetBody');
   body.innerHTML = "";
@@ -807,7 +807,7 @@ function checkConflicts(){
 }
 
 function sheetToText(st, meta, pState){
-  const showEx = document.getElementById('examplesToggle') ? document.getElementById('examplesToggle').checked : true;
+  const showEx = boolVal('examplesToggle', true);
   const L = [];
 
   // ---- Title & meta ----
@@ -1276,10 +1276,10 @@ function importCharacterJSON(fileInput){
       if (p.settings) restoreSettings(p.settings);
       else if (p.sliders) restoreSliders(p.sliders);   // version 1 files
       lastGeneratedSliders = (p.settings && p.settings.sliders) || p.sliders || null;
-      document.getElementById('charName').value = charMeta.name || "";
-      document.getElementById('charAge').value = charMeta.age || "";
-      document.getElementById('charContext').value = charMeta.context || "";
-      document.getElementById('archetypeTag').textContent = charMeta.archetypeLabel || "Imported";
+      setVal('charName', charMeta.name || "");
+      setVal('charAge', charMeta.age || "");
+      setVal('charContext', charMeta.context || "");
+      setText('archetypeTag', charMeta.archetypeLabel || "Imported");
       document.getElementById('pressureSheet').style.display = pressureState ? "block" : "none";
       onSliderChange(); renderSheet(); checkConflicts();
       if (!p.settings) toast("Imported. This file predates full-settings export, so constraints and counts were left as they are.", "warn", 6000);
