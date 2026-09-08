@@ -337,6 +337,14 @@ function chooseBatch(i){
      belongs — on the one character the user kept, not on all five. The batch itself is
      isolated (see withSpeculativeGeneration); this is the deliberate commit. */
   if (pick.variants) charVariants = pick.variants;
+  /* The seed readout was left showing the LAST candidate's seed, so "Seed: …" next to a
+     kept character named a different one — and pasting it back reproduced the candidate
+     you discarded. Each candidate carries its own seed in its meta; put that on screen. */
+  if (pick.meta && pick.meta.seed){
+    lastSeedUsed = charMetaSeed = pick.meta.seed;
+    setText('lastSeedReadout', "Seed: " + pick.meta.seed);
+    if (typeof updateStickyBar === 'function') updateStickyBar();
+  }
   renderNovelty(lastGenerationSignature, pick.signature);
   lastGenerationSignature = pick.signature;
   rememberGeneration(state);

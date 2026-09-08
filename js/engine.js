@@ -2986,14 +2986,12 @@ function resolveTypeForSection(ps, chosenSoFar, overrides){
 // the live preview and for the affinity readout, where a fresh random draw every
 // keystroke was actively misleading. Also reports how decisive the lead is.
 function predictProfileCategories(withConfidence){
-  const chosen = {}, conf = {};
   // The preview has to see the same signals the build will, archetype hints included,
-  // or selecting an archetype silently changes the result without changing the preview.
+  // or selecting an archetype changes the result without changing the preview.
   const archKey = (document.getElementById('archetypeSelect')||{}).value || '';
   const arch = ARCHETYPES[archKey] || CUSTOM_ARCHETYPES[archKey];
-  return withArchetypeProfile(arch && arch.profile, ()=> _predictProfileCategories(withConfidence, chosen, conf));
-}
-function _predictProfileCategories(withConfidence, chosen, conf){
+  return withArchetypeProfile(arch && arch.profile, ()=>{
+  const chosen = {}, conf = {};
   PROFILE_SECTIONS.forEach(ps=>{
     if (ps.drawAll) return;
     const tog = document.getElementById('sec_'+ps.id);
@@ -3013,6 +3011,7 @@ function _predictProfileCategories(withConfidence, chosen, conf){
     conf[ps.id] = scored[0].w / total;
   });
   return withConfidence ? {chosen, conf} : chosen;
+  });
 }
 
 function resolveProfileCategories(rarityPref, overrides, forcedCats){

@@ -119,6 +119,94 @@ await step('export survives a null-trait slot', async ()=>{
     coherenceScore(state);
   });
 });
+/* Focus and card state across a re-render. renderSheet used to empty #sheetBody and
+   rebuild all ~37 cards for any change at all, which destroyed the button the user had
+   just pressed (dropping keyboard focus to <body>), closed every open control strip,
+   and reset the strip's aria-expanded to a hard-coded "false". None of that is visible
+   to a DOM stub — it needs a real activeElement and a real re-render. */
+await step('focus survives a Toss', async ()=>{
+  const btn = page.locator('.traitCard .rerollBtn[data-act="rerollSlot"]').first();
+  await btn.focus();
+  const before = await page.evaluate(()=> document.activeElement.closest('.traitCard').dataset.slot);
+  await btn.click();
+  const after = await page.evaluate(()=> ({
+    tag: document.activeElement.tagName,
+    slot: document.activeElement.closest('.traitCard') ? document.activeElement.closest('.traitCard').dataset.slot : null,
+  }));
+  if (after.tag === 'BODY') throw new Error('focus fell back to <body>');
+  if (after.slot !== before) throw new Error('focus moved to card ' + after.slot + ', expected ' + before);
+});
+await step('a reroll replaces one card, not the sheet', async ()=>{
+  await page.evaluate(()=> document.querySelectorAll('.traitCard').forEach((c,i)=> c.dataset.probe = 'p'+i));
+  const slot = await page.evaluate(()=> document.querySelector('.traitCard[data-slot]').dataset.slot);
+  await page.evaluate(s=> rerollSlot(s), slot);
+  const [kept, total] = await page.evaluate(()=> [
+    Array.from(document.querySelectorAll('.traitCard')).filter(c=>c.dataset.probe).length,
+    document.querySelectorAll('.traitCard').length]);
+  if (kept < total - 1) throw new Error((total - kept) + ' cards were rebuilt, expected 1');
+});
+await step('a lock updates its section header without a rebuild', async ()=>{
+  /* The "N · M kept" count and the keep/release-section button live OUTSIDE the card,
+     and were only ever written by a full renderSheet — so replacing one card had to
+     update them too or the header would quietly disagree with the cards under it.
+     Asserted against the live lock count rather than a "was it empty before" guess:
+     earlier steps in this file leave locks behind on purpose. */
+  const kept = ()=> page.evaluate(()=> {
+    const el = document.querySelector('#sec-anchor-personality .axisCount');
+    const m = el && /(\d+) kept/.exec(el.textContent);
+    return m ? parseInt(m[1], 10) : 0;
+  });
+  const slot = await page.evaluate(()=> Object.keys(state).find(k=>k.startsWith('pers_') && !state[k].locked));
+  if (!slot) throw new Error('every personality slot is already locked');
+  const before = await kept();
+  await page.evaluate(s=> toggleLock(s), slot);
+  const afterLock = await kept();
+  if (afterLock !== before + 1) throw new Error(`kept count went ${before} -> ${afterLock} on a lock`);
+  await page.evaluate(s=> toggleLock(s), slot);
+  const afterUnlock = await kept();
+  if (afterUnlock !== before) throw new Error(`kept count went ${afterLock} -> ${afterUnlock} on an unlock`);
+});
+await step('an open card control strip survives an unrelated re-render', async ()=>{
+  // The ⋯ disclosure is a narrow-viewport affordance, so this one has to be measured
+  // at a narrow viewport — which is also the only place the bug was reachable.
+  const desktop = page.viewportSize();
+  await page.setViewportSize({width: 420, height: 900});
+  try {
+    const slots = await page.evaluate(()=> Array.from(document.querySelectorAll('.traitCard[data-slot]')).map(c=>c.dataset.slot));
+    await page.locator(`.traitCard[data-slot="${slots[0]}"] .slotToggle`).click({timeout:8000});
+    await page.evaluate(s=> toggleLock(s), slots[1]);
+    const st = await page.evaluate(s=>{
+      const c = document.querySelector(`.traitCard[data-slot="${s}"]`);
+      return {open: c.classList.contains('controlsOpen'), aria: c.querySelector('.slotToggle').getAttribute('aria-expanded')};
+    }, slots[0]);
+    if (!st.open) throw new Error('the strip closed when another card re-rendered');
+    if (st.aria !== 'true') throw new Error('aria-expanded is "' + st.aria + '" on an open strip');
+    await page.evaluate(()=> runGeneration());
+    const stillOpen = await page.evaluate(()=> document.querySelectorAll('.traitCard.controlsOpen').length);
+    if (stillOpen) throw new Error(stillOpen + ' strips stayed open across a full regenerate');
+  } finally { if (desktop) await page.setViewportSize(desktop); }
+});
+await step('a saved character round-trips through browser storage', async ()=>{
+  /* The whole Save/Load feature was dead: saves are stored by trait id and both readers
+     validated the compressed payload before expanding it. File export/import writes
+     uncompressed state, so only this path was broken and only a real storage round trip
+     shows it. */
+  await page.evaluate(()=> runGeneration());
+  const n = await page.evaluate(async ()=>{
+    await storage.set('character:__browsertest__', JSON.stringify({
+      format: SAVE_FORMAT, state: compressSlots(state), charMeta,
+      pressureState: compressSlots(pressureState), pinnedTargets, charVariants, traitNotes,
+      settings: captureSettings(), savedAt: new Date().toISOString(),
+    }));
+    state = {}; charMeta = {};
+    await loadSavedCharacter('__browsertest__');
+    await storage.delete('character:__browsertest__');
+    const all = Object.values(state).filter(s=>s && s.trait);
+    return {seated: all.length, linked: all.filter(s=> TRAITS_BY_ID.get(s.trait.id) === s.trait).length};
+  });
+  if (n.seated < 10) throw new Error('only ' + n.seated + ' slots came back');
+  if (n.linked !== n.seated) throw new Error(`${n.seated - n.linked} slots came back unlinked from the live pool`);
+});
 await step('dark theme resolves real colours', async ()=>{
   await page.emulateMedia({colorScheme:'dark'});
   const c = await page.evaluate(()=>{
