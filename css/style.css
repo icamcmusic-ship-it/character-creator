@@ -265,6 +265,7 @@
   .traitCard:last-child { margin-bottom:0; }
   .traitMain { flex:1; min-width:0; }
   .traitName { font-family:var(--font-display); font-weight:600; font-size:1.05rem; color:var(--text); }
+  .rarityGlyph { margin-right:4px; opacity:.85; font-family:var(--font-mono); }
   .rarityBadge {
     font-family:var(--font-mono); font-size:.6rem; text-transform:uppercase; letter-spacing:.05em;
     padding:2px 8px; border-radius:999px; margin-left:8px; border:1px solid var(--border-strong);
@@ -947,6 +948,7 @@
   .batchCard:hover { border-color:var(--bubblegum); transform:translateY(-1px); box-shadow:var(--shadow-sm); }
   .batchCard b { font-family:var(--font-display); font-size:.98rem; color:var(--dusk-blue); }
   .batchCard .sub { margin:0; font-size:.78rem; line-height:1.35; }
+  .batchArch { display:block; font-size:.74rem; color:var(--golden-deep); font-style:italic; margin:1px 0 3px; }
   @media (max-width: 600px) { .batchGrid { grid-template-columns:1fr; } }
 
   label.inlineCheck {

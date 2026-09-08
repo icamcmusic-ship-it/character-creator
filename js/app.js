@@ -192,6 +192,10 @@ async function renameSavedCharacter(name){
 async function loadSavedCharacter(name){
   try {
     const r = await storage.get('character:'+name);
+    // storage.get resolves to null for a key that is not there — a stale list, a save
+    // deleted in another tab — and dereferencing it threw a raw TypeError that reached
+    // the user as "Cannot read properties of null (reading 'value')".
+    if (!r || !r.value) throw new Error(`there is no saved character called "${name}" any more.`);
     const parsed = JSON.parse(r.value);
     /* BUG FIX: validateSheetPayload() exists because a malformed payload once got past
        the format check, ran snapshotHistory(), overwrote the globals and THEN threw in
@@ -338,6 +342,7 @@ async function loadSavedList(){
 async function addSavedToCast(name){
   try {
     const r = await storage.get('character:'+name);
+    if (!r || !r.value) throw new Error(`there is no saved character called "${name}" any more.`);
     const parsed = JSON.parse(r.value);
     /* Broken twice over before this: it validated the compressed payload (which always
        threw, see loadSavedCharacter) and it never called expandSlots at all, so even
@@ -718,8 +723,24 @@ function updateSliderReadouts(){
   const dv = document.getElementById('divergence');
   if (dv){
     const v = parseFloat(dv.value) || 0;
-    setValueText('divergence', v < 0.08 ? "never" : v < 0.3 ? "sometimes" : v < 0.6 ? "often" : "very often");
+    const word = v < 0.08 ? "never" : v < 0.3 ? "occasionally" : v < 0.6 ? "often" : "very often";
+    setValueText('divergence', word);
+    setText('divergenceVal', word);
   }
+  /* The two anti-staleness defaults were invisible: divergence sits at 0.15 and "avoid
+     recent traits" is on, both change every draw, and the second lives inside Tinker
+     Mode where most users never look. State what is actually in force. */
+  (function(){
+    const note = document.getElementById('defaultsNote');
+    if (!note) return;
+    const bits = [];
+    const d = parseFloat((document.getElementById('divergence')||{}).value);
+    if (!Number.isNaN(d) && d > 0) bits.push(`about ${Math.round(d*100)}% of picks go against the grain`);
+    const ar = document.getElementById('avoidRecentToggle');
+    if (ar && ar.checked) bits.push("traits from your last few characters are penalised");
+    note.textContent = bits.length ? "In force: " + bits.join("; ") + "." : "";
+    note.title = "Both are adjustable — the first on the Surprise me dial above, the second under Tinker Mode.";
+  })();
   /* The three Appearance sliders were the last controls in the app announced as a bare
      number: "minus thirty-five", with no <label for> either, so a screen reader had
      neither the control's name nor what its value meant. Same treatment as the
@@ -735,7 +756,9 @@ function updateSliderReadouts(){
   const rf = document.getElementById('rangeFocus');
   if (rf){
     const v = parseFloat(rf.value);
-    setValueText('rangeFocus', v >= 0.75 ? "sliders decide strictly" : v >= 0.45 ? "sliders decide fairly strictly" : "sliders decide loosely");
+    const word = v >= 0.75 ? "strictly" : v >= 0.45 ? "fairly strictly" : "loosely";
+    setValueText('rangeFocus', "sliders decide " + word);
+    setText('rangeFocusVal', word);
   }
   /* The three counts and Boost strength were the only controls in the app that weren't
      sliders-with-a-resolved-word — two <select>s and a bare number box in a page made

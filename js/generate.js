@@ -292,19 +292,38 @@ function renderBatchTray(){
   const host = document.getElementById('batchTray');
   if (!host) return;
   if (!batchCandidates.length){ host.style.display = 'none'; host.innerHTML = ''; return; }
-  const loudest = (st) => Object.values(st)
-    .filter(x=> x && x.trait)
-    .sort((a,b)=> b.trait.intensity - a.trait.intensity)
-    .slice(0, 3).map(x=> x.trait.trait);
+  /* The preview was the three LOUDEST traits, and loudest is not most identifying:
+     five candidates built from the same settings tend to share their loud traits (that
+     is what the settings asked for), so the tray showed five near-identical strips and
+     the choice came down to guessing. What discriminates between candidates is what
+     each one IS — its emergent archetype, which composes from values/role/stress/
+     attachment/humor/vices — plus the single most defining trait on the sheet, which is
+     the rarest one, not the loudest. */
+  const signature = (st) => {
+    const all = Object.values(st).filter(x=> x && x.trait);
+    if (!all.length) return [];
+    const score = t => (RTIER_SCORE[t.rtier || rarityTier(t)] || 0) * 10 + (t.intensity || 0);
+    const best = all.slice().sort((a,b)=> score(b.trait) - score(a.trait))[0];
+    // ...and one profile fact, so two candidates that happen to share a signature trait
+    // are still told apart by what the sheet says about them.
+    const facts = ['values','role','stress','attachment']
+      .map(id => slotCat(st['prof_'+id+'_0'])).filter(Boolean);
+    return [best.trait.trait].concat(facts.length ? [facts[0]] : []);
+  };
   host.innerHTML = `<div class="batchHead"><b>Pick one of ${batchCandidates.length}</b>` +
     `<button class="btn-secondary" ${actAttr('click', 'dismissBatch')}>Discard all</button></div>` +
     `<div class="batchGrid">` + batchCandidates.map((c, i)=>{
       const em = (typeof emergentArchetypeName === 'function') ? emergentArchetypeName(c.state) : null;
-      const title = (c.meta && c.meta.name && c.meta.name !== "Unnamed Character") ? c.meta.name
-                  : (em && em.name) || ("Candidate " + (i + 1));
+      /* The emergent archetype name is the most discriminating single string available
+         and it was only used when the user had not typed a name — so naming your
+         character (the common case) replaced five distinct titles with five identical
+         ones. The typed name still leads; the archetype rides alongside it. */
+      const named = c.meta && c.meta.name && c.meta.name !== "Unnamed Character";
+      const title = named ? c.meta.name : ((em && em.name) || ("Candidate " + (i + 1)));
+      const sub = named && em && em.name ? `<span class="batchArch">${escHTML(em.name)}</span>` : ``;
       return `<button type="button" class="batchCard" ${actAttr('click', 'chooseBatch', i)} title="Keep this one">` +
-        `<b>${escHTML(title)}</b>` +
-        `<span class="sub">${loudest(c.state).map(escHTML).join(" · ")}</span></button>`;
+        `<b>${escHTML(title)}</b>${sub}` +
+        `<span class="sub">${signature(c.state).map(escHTML).join(" · ")}</span></button>`;
     }).join('') + `</div>`;
   host.style.display = 'block';
 }

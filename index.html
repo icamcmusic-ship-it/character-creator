@@ -110,16 +110,26 @@
           <label for="divergence">Surprise me</label>
           <input type="range" id="divergence" min="0" max="1" value="0.15" step="0.05" data-on="input" data-act="onSliderChange" data-args="[]">
           <div class="scaleLabels"><span>Never</span><span>Sometimes</span><span>Often</span></div>
+          <!-- These two sliders meaningfully change every character and shipped with no
+               visible readout at all: the position of the thumb was the only clue, and
+               "0.15" is not a thing anyone can read off a track. Same word readout the
+               three voice dials get. -->
+          <div class="sliderVal" id="divergenceVal">occasionally</div>
           <div class="sub" style="margin:2px 0 0;">How often a trait is drawn against the character's grain.</div>
         </div>
         <div class="field" style="max-width:230px;">
           <label for="rangeFocus">How strictly sliders decide</label>
           <input type="range" id="rangeFocus" min="0" max="1" value="0.62" step="0.01" data-on="input" data-act="onSliderChange" data-args="[]">
           <div class="scaleLabels"><span>Loosely</span><span>Strictly</span></div>
+          <div class="sliderVal" id="rangeFocusVal">fairly strictly</div>
           <div class="sub" style="margin:2px 0 0;">Loose gives more variety; strict makes the sliders dictate.</div>
         </div>
       </div>
       <div class="sub" id="suggestNote" style="display:none; color:var(--accent2); margin:-4px 0 12px;"></div>
+      <!-- "Avoid recent traits" is on by default and lives inside Tinker Mode, so for
+           anyone who never turns Tinker Mode on it is an invisible default that changes
+           every draw. Say what is actually in force, where the controls are. -->
+      <div class="sub" id="defaultsNote" style="margin:-4px 0 12px;"></div>
 
       <details class="advanced advOnly" style="margin:0 0 14px;">
         <summary><h3>Appearance crafter</h3></summary>
@@ -356,7 +366,7 @@
       </div>
 
       <div class="stressToggleRow checkboxRow advOnly" style="margin-top:8px;">
-        <input type="checkbox" id="avoidRecentToggle" checked>
+        <input type="checkbox" id="avoidRecentToggle" checked data-on="change" data-act="onSliderChange" data-args="[]">
         <label style="margin:0; text-transform:none; font-size:.85rem; color:var(--text);" for="avoidRecentToggle">Avoid recent traits — softly penalise anything drawn in your last few characters</label>
       </div>
       <div class="stressToggleRow checkboxRow advOnly" style="margin-top:8px;">

@@ -142,6 +142,13 @@ function bandHTML(t, slot){
 }
 
 const RTIER_LABEL = {common:"common", uncommon:"uncommon", distinctive:"distinctive", signature:"signature"};
+/* A NON-COLOUR CUE FOR THE TIER, the way SECTION_GLYPHS already provides one for
+   sections. The rarity badge carried its tier in a colour and a word, and the word is
+   easy to skim past on a forty-card sheet — so at a glance the tier system was
+   colour-only, which is exactly the failure the section glyphs exist to avoid. A rising
+   run of marks reads as an ordered scale without any colour at all, and degrades to
+   plain text in print and in a high-contrast theme. */
+const RTIER_GLYPH = {common:"·", uncommon:"∶", distinctive:"⁘", signature:"✦"};
 
 /* HOW MUCH IS LEFT IN THIS SLOT. rerollExclusions grows silently on every toss, and the
    only feedback the user ever got was the moment there was nothing left to draw — at
@@ -323,7 +330,7 @@ function traitCardHTML(id, s, includeControls, showDiff, accent, tagLabel){
       ${tag}
       <div class="traitMain">
         <div class="traitName">${escHTML(t.trait)}
-          <span class="rarityBadge rarity-${tier}" title="${escHTML(RARITY_TIER_HINT[tier]||'')}">${escHTML(RTIER_LABEL[tier]||tier)}</span>
+          <span class="rarityBadge rarity-${tier}" title="${escHTML(RARITY_TIER_HINT[tier]||'')}"><span class="rarityGlyph" aria-hidden="true">${RTIER_GLYPH[tier]||"·"}</span>${escHTML(RTIER_LABEL[tier]||tier)}</span>
           <span class="intensityDots" title="Intensity ${t.intensity}/5 (continuous position ${traitPos(t).toFixed(2)})"><span aria-hidden="true">${intensityDots(t.intensity)}</span><span class="srOnly">intensity ${t.intensity} of 5</span></span>
           ${s.wildcard ? `<span class="wildBadge" title="Deliberately drawn against the grain — see 'the one thing that doesn't fit'">outlier</span>` : ``}
           ${s.derived ? `<span class="wildBadge" style="background:var(--emerald-deep);border-color:var(--emerald-deep);" title="Derived from this character's psychology rather than a slider">derived</span>` : ``}
@@ -690,14 +697,22 @@ function renderSheet(){
     title: ps.label,
     ids: Object.keys(state).filter(k=>k.startsWith("prof_"+ps.id+"_"))
   }));
+  /* ORDER. The three headline sliders on the controls — Verbosity, Register, Composure —
+     drive Speech Pattern, Vocabulary and Mannerisms, and those three groups used to sit
+     at the very BOTTOM of the sheet, below Personality and all seven profile sections:
+     roughly thirty cards (fifty at profile depth 2) between moving a slider and seeing
+     what it did. Motivation & Wound alone contributes seven of those, or fourteen at
+     depth 2. The voice groups move up directly under Personality, so what the loudest
+     controls in the app change is visible without scrolling past the psychology. The
+     profile sections keep their own relative order and simply follow. */
   const groups = [
     {title:"Required (constraints)", ids:Object.keys(state).filter(k=>k.startsWith("req_")||k.startsWith("reqcat_"))},
     {title:"Personality", ids:Object.keys(state).filter(k=>k.startsWith("pers_"))},
-    ...profGroups,
-    {title:"Appearance", ids:Object.keys(state).filter(k=>k.startsWith("app_"))},
     {title:"Speech Pattern", ids:["verbosity","register","grammar"]},
     {title:"Vocabulary", ids:Object.keys(state).filter(k=>k.startsWith("vocab"))},
     {title:"Mannerisms", ids:Object.keys(state).filter(k=>k.startsWith("manner"))},
+    ...profGroups,
+    {title:"Appearance", ids:Object.keys(state).filter(k=>k.startsWith("app_"))},
     {title:"The one thing that doesn't fit", ids:Object.keys(state).filter(k=>k.startsWith("wild_"))},
   ];
   SHEET_GROUP_TITLES = groups.map(g=>g.title);
@@ -1312,7 +1327,7 @@ function buildBudgetUI(){
   if (rg){
     rg.innerHTML = RTIER_ORDER.map(tier=>`
       <div class="budgetRow">
-        <label for="cap_${tier}" class="budgetLabel"><span class="rarityBadge rarity-${tier}">${escHTML(RTIER_LABEL[tier])}</span></label>
+        <label for="cap_${tier}" class="budgetLabel"><span class="rarityBadge rarity-${tier}"><span class="rarityGlyph" aria-hidden="true">${RTIER_GLYPH[tier]||"·"}</span>${escHTML(RTIER_LABEL[tier])}</span></label>
         <input type="number" id="cap_${tier}" min="0" max="60" step="1" placeholder="no cap"
                aria-label="Maximum ${escHTML(RTIER_LABEL[tier])} cards on one sheet"
                ${actAttr('input', 'onRarityCapChange', "${tier}")}>
