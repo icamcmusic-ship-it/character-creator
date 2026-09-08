@@ -55,6 +55,16 @@ const T = A.TRAITS;
 /* Ratchet, not a target. Set to the value the bank actually achieves today; lowering it
    is the content pass's job and raising it should require saying so out loud. It started
    at 0.729, where rarity was very nearly a restatement of intensity. */
+/* Rarity vs intensity, as Cramer's V. The README claims the two axes are "genuinely
+   independent"; measured, V is 0.651 against this 0.66 ceiling — passing by 0.009, which
+   means rarity is still about 65% a restatement of intensity. The contingency table says
+   why: distinctive is 92% intensity-3, signature 88% intensity 4-5, common 91% intensity
+   1-2. Every cell is populated, which is what the older test asserted, but the
+   off-diagonal mass is tiny.
+   Closing this is a content pass, not a code fix — roughly 400 more quiet-signature
+   (i1-i2) entries and 300 more loud-common (i4-i5) ones — after which this ceiling
+   should come down to 0.55 and then 0.45. Left where it is deliberately: lowering the
+   number without writing the traits would only make the suite red. */
 const RARITY_V_CEILING = 0.66;
 
 group('Trait bank integrity');
@@ -1527,6 +1537,100 @@ check('the mood pass tagged what it listed', ()=>{
 check('the secondary-tier pass tagged what it listed', ()=>{
   assert(A.TIER_TAG_STATS && A.TIER_TAG_STATS.matched > 0, JSON.stringify(A.TIER_TAG_STATS));
   return A.TIER_TAG_STATS.matched + '/' + A.TIER_TAG_STATS.listed;
+});
+
+group('Content debt');
+/* These are RATCHETS, not targets. Each figure is the bank's measured state at the time
+   the 2025 balance audit ran, and the assertion is only that it does not get WORSE. The
+   gaps themselves are real and named here so they are visible on every test run rather
+   than rediscovered by a future distribution study — and so that a content pass that
+   closes one of them fails this file and gets to move the number down, which is the
+   point of writing it as a ratchet. ?dev=1 reports the same set in the browser, per
+   category, for whoever is actually editing the data files. */
+check('polarity coverage per section does not regress', ()=>{
+  /* polarityFit is the mechanism that lets a slider combination reach an individual
+     TRAIT rather than just a category. It needs a pol tag to select on, and four
+     sections are mostly untagged — so across Vocabulary, Grammar, Mannerisms and all of
+     Appearance (roughly seven of 37 slots on a default sheet, plus every Appearance
+     card) the sliders can currently only choose the category. Those sections are also
+     invisible to axisProfile, the radar, conflict detection and the ensemble analysers
+     for the same reason. Closing this is a content pass — tagging ~1,950 traits — not a
+     code change. */
+  const FLOORS = {   // measured share of traits carrying a polarity tag
+    'Conflict & Stress Response': 1, 'Social Role in a Group': 1, 'Values & Moral Line': 1,
+    'Attachment & Intimacy Style': 1, 'Humor Style': 1, 'Habits & Vices': 1,
+    'Motivation & Wound': 0.80, 'Verbosity Traits': 0.74, 'Personality Traits': 0.73,
+    'Vocabulary Traits': 0.32, 'Dialogue Grammar Traits': 0.31,
+    'Mannerisms': 0.20, 'Appearance': 0.17,
+  };
+  const by = new Map();
+  T.forEach(t=>{
+    const e = by.get(t.section) || {total:0, tagged:0};
+    e.total++;
+    if (t.pol && Object.keys(t.pol).length) e.tagged++;
+    by.set(t.section, e);
+  });
+  const bad = [], shares = [];
+  Object.entries(FLOORS).forEach(([section, floor])=>{
+    const e = by.get(section);
+    if (!e) return bad.push(`no section "${section}"`);
+    const share = e.tagged / e.total;
+    shares.push([section, share]);
+    if (share < floor) bad.push(`${section} fell to ${(share*100).toFixed(0)}% tagged (floor ${(floor*100).toFixed(0)}%)`);
+  });
+  assert(!bad.length, bad.join('; '));
+  const worst = shares.sort((a,b)=>a[1]-b[1])[0];
+  return `thinnest: ${worst[0]} at ${(worst[1]*100).toFixed(0)}% tagged`;
+});
+check('the (rarity x intensity) grid does not get thinner', ()=>{
+  /* Each category is a diagonal stripe rather than a grid: on average a category
+     populates 10.7 of the 20 (rarity x intensity) cells it could, and the thinnest fill
+     8 despite holding 52-59 traits each. This is the per-category expression of the
+     Cramer's V finding above — within one category you cannot ask for "a quiet,
+     defining Loyalty-Bound trait", because that cell is empty even though both the
+     rarity and the intensity exist elsewhere in the section. */
+  const cells = [];
+  A.TRAITS_BY_KEY.forEach((pool, key)=>{
+    if (pool.length < 20) return;                 // tiny categories can't fill a grid
+    const set = new Set();
+    pool.forEach(t=> set.add((t.rtier || A.rarityTier(t)) + '|' + t.intensity));
+    cells.push([key.replace('||', ' > '), set.size]);
+  });
+  const mean = cells.reduce((a,b)=>a+b[1], 0) / cells.length;
+  const min = Math.min(...cells.map(c=>c[1]));
+  assert(mean >= 10.5, `mean cells per category fell to ${mean.toFixed(1)} of 20 (was 10.7)`);
+  assert(min >= 8, `a category fell to ${min} of 20 cells`);
+  const worst = cells.filter(c=>c[1] === min).map(c=>c[0]).slice(0, 2);
+  return `mean ${mean.toFixed(1)}/20, thinnest ${min}/20 (${worst.join(', ')})`;
+});
+check('no polarity axis becomes more one-sided', ()=>{
+  /* The mood fix added a positive pole to one axis by hand. Five more have the same
+     shape, and polNormalise can only stop them reading as posture on the radar — it
+     cannot give polarityFit material to select on when the slider points the thin way. */
+  const FLOORS = {   // measured positive share; the band is 40-60% and these sit outside it
+    ego: [0.36, 0.44], vol: [0.36, 0.44], intel: [0.64, 0.72], form: [0.68, 0.76], act: [0.60, 0.68],
+  };
+  const poles = {};
+  T.forEach(t=> Object.entries(t.pol || {}).forEach(([ax, v])=>{
+    const e = poles[ax] = poles[ax] || {pos:0, neg:0};
+    if (v > 0) e.pos++; else if (v < 0) e.neg++;
+  }));
+  const bad = [];
+  Object.entries(poles).forEach(([ax, e])=>{
+    const total = e.pos + e.neg;
+    if (!total) return;
+    const share = e.pos / total;
+    const known = FLOORS[ax];
+    if (known){
+      // A known-lopsided axis may improve freely; it must not get worse.
+      if (share < known[0] || share > known[1])
+        bad.push(`${A.AXIS_LABELS[ax]||ax} moved to ${(share*100).toFixed(0)}% positive, outside its recorded ${(known[0]*100).toFixed(0)}-${(known[1]*100).toFixed(0)}% band — if this is an improvement, tighten the band`);
+    } else if (share < 0.4 || share > 0.6){
+      bad.push(`${A.AXIS_LABELS[ax]||ax} has become one-sided at ${(share*100).toFixed(0)}% positive (${e.pos} vs ${e.neg})`);
+    }
+  });
+  assert(!bad.length, bad.join('; '));
+  return Object.keys(FLOORS).length + ' known one-sided axes, ' + (Object.keys(poles).length - Object.keys(FLOORS).length) + ' balanced';
 });
 
 group('Ship shape');

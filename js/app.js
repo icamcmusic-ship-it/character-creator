@@ -1372,6 +1372,67 @@ async function loadCustomArchetypes(){
   list.textContent = names.length ? "Saved archetypes: " + names.join(", ") : "";
 }
 
+/* ================= WORKSPACE EXPORT =================
+   Everything that was NOT a character and NOT a cast — the constraint sets, the
+   budgets, the category tiers, the section toggles and weights, and the custom
+   archetypes — lived only in this browser's storage. It is the highest-effort state in
+   the app (a constraint set is built one banned trait at a time over an afternoon) and
+   there was no way to move it to another machine, share it with a co-writer, or keep a
+   copy before experimenting. Characters and casts both round-trip as files; this is the
+   third thing worth round-tripping, and it is the one that took the longest to build.
+
+   Custom archetypes travel WITH their saved setups, so importing a workspace brings a
+   collaborator's presets over whole rather than as sliders. */
+const WORKSPACE_FORMAT_VERSION = 1;
+function exportWorkspaceJSON(){
+  downloadText(JSON.stringify({
+    format: "character-voice-workspace", version: WORKSPACE_FORMAT_VERSION,
+    exported: new Date().toISOString(),
+    // captureSettings already carries fields, toggles, sections, sliders, constraints
+    // and budgets — the same block a character export and an archetype setup use, so
+    // there is one definition of "the workspace" rather than a third list to maintain.
+    settings: captureSettings(),
+    archetypes: Object.values(CUSTOM_ARCHETYPES),
+  }, null, 2), "character_workspace.json");
+  const n = Object.keys(CUSTOM_ARCHETYPES).length;
+  toast(`Exported your workspace${n ? ` and ${n} custom archetype${n===1?'':'s'}` : ''}.`);
+}
+async function importWorkspaceJSON(fileInput){
+  const file = fileInput.files && fileInput.files[0];
+  if (!file) return;
+  const text = await file.text().catch(()=>null);
+  fileInput.value = "";
+  if (text === null){ toast("Could not read that file.", "warn"); return; }
+  try {
+    const p = JSON.parse(text);
+    if (p.format !== "character-voice-workspace") throw new Error("Not a workspace file.");
+    if (p.settings != null && (typeof p.settings !== 'object' || Array.isArray(p.settings)))
+      throw new Error("The `settings` block is not an object.");
+    if (p.archetypes != null && !Array.isArray(p.archetypes))
+      throw new Error("The `archetypes` block is not a list.");
+    const archetypes = (p.archetypes || []).filter(a=> a && typeof a === 'object' && typeof a.label === 'string' && a.label.trim());
+    /* Replacing a workspace is destructive in a way importing a character is not — it
+       overwrites constraint sets that took real work — so it is confirmed, and the
+       count is named so the confirmation says what will actually happen. */
+    const bits = [];
+    if (p.settings) bits.push("your constraints, budgets, tiers and section settings");
+    if (archetypes.length) bits.push(`${archetypes.length} custom archetype${archetypes.length===1?'':'s'}`);
+    if (!bits.length) throw new Error("That workspace file is empty.");
+    if (!await askForConfirm(`Replace ${bits.join(" and ")} with the contents of this file?`, "Replace")) return;
+    if (p.settings) restoreSettings(p.settings);
+    let saved = 0;
+    for (const arch of archetypes){
+      try { await storage.set('archetype:'+arch.label, JSON.stringify(arch)); saved++; }
+      catch(e){ console.error(e); }
+    }
+    await loadCustomArchetypes();
+    refreshConstraintChips();
+    onSliderChange();
+    if (typeof savePrefs === 'function') savePrefs();
+    toast(`Imported ${bits.join(" and ")}${saved < archetypes.length ? ` (${archetypes.length - saved} archetype(s) would not fit in storage)` : ''}.`);
+  } catch(e){ console.error(e); toast("Could not import workspace: " + e.message, "warn", 6000); }
+}
+
 // ================= RELATIONSHIP GENERATOR =================
 function refreshRelSelectors(){
   const a = document.getElementById('relA'), b = document.getElementById('relB');

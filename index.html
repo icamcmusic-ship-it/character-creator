@@ -519,6 +519,14 @@
             <button class="btn-secondary" data-on="click" data-act="printSheet" data-args="[false]">Print</button>
             <button class="btn-secondary" data-on="click" data-act="printSheet" data-args="[true]" title="One page: the name, the brief, the headline traits and the voice fingerprint — the card you keep at the desk">Print summary</button>
           </div>
+          <!-- Characters and casts both round-trip as files. The workspace — the
+               constraint sets, budgets, category tiers, section settings and custom
+               archetypes — did not, and it is the state that takes the longest to
+               build. -->
+          <div class="actionRow" style="margin-top:6px;">
+            <button class="btn-secondary" data-on="click" data-act="exportWorkspaceJSON" data-args="[]" title="Your whole setup in one file: constraints, budgets, category tiers, section settings and every custom archetype with the setup it was saved with">Export workspace</button>
+            <label class="btn-secondary" style="cursor:pointer;" title="Replace your constraints, budgets, tiers, section settings and custom archetypes with the contents of a workspace file">Import workspace<input type="file" accept=".json,application/json" style="display:none;" data-on="change" data-act="importWorkspaceJSON" data-args="[&quot;$el&quot;]"></label>
+          </div>
         </div>
         <div class="actionGroup advOnly">
           <span class="actionGroupLabel">Derive</span>

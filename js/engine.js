@@ -318,7 +318,127 @@ function assertTraitShape(){
   });
   return problems;
 }
+/* ================= CONTENT COVERAGE ASSERTIONS =================
+   assertTraitShape catches a malformed entry. It cannot catch the far commoner failure
+   in a bank this size, which is content that is well-formed and MISSING — a category
+   with nothing near the target the engine will ask for, or a section whose traits carry
+   no polarity, which silently switches off polarityFit for that whole section.
+
+   These are the invariants the 2025 balance audit measured by hand, stated so a content
+   author sees the gap on the next reload instead of six months later in a distribution
+   study. Reported, never thrown: every one of these is a "this section is thin", not a
+   "this build is broken", and the app works fine either way. */
+const COVERAGE_LIMITS = {
+  // A category below this can't fill a draw window without reaching the pool edges.
+  minCategorySize: 20,
+  /* Every section drawn against slider posture wants most of its traits polarity-tagged;
+     below that, polarityFit has nothing to select on and the sliders reach the CATEGORY
+     but not the trait within it. Measured: the seven profile sections are at 100%,
+     Personality 75%, Verbosity 76% — and then Vocabulary 34%, Dialogue Grammar 33%,
+     Mannerisms 21%, Appearance 18%. That is roughly seven of 37 slots on a default
+     sheet, plus all of Appearance, where the sliders can only choose a category.
+     One target for all of them, deliberately: these numbers report a standing content
+     debt, and setting the bar under where the thin sections already sit would report
+     nothing, which is the state that let this go unnoticed. */
+  minPolarityShare: 0.6,
+  // Of the 20 (rarity x intensity) cells a category could populate, how many must be.
+  // Mean across the bank is 10.7 and the thinnest categories fill 8: within one of
+  // those you cannot ask for "a quiet, defining Loyalty-Bound trait", because the
+  // category is a diagonal stripe rather than a grid.
+  minRarityIntensityCells: 12,
+  // A polarity axis this one-sided leaves a slider pointed the minority way with thin
+  // material — the fault the mood pass corrected once, by hand, for one axis.
+  /* [0.4, 0.6] is set to catch exactly the five axes measured one-sided — formality
+     (72% positive), analytical thinking (69%), physical energy (64%), self-confidence
+     (38%) and volume/wordiness (38%) — while leaving the eleven that sit at 47-60%
+     alone. polNormalise stops these reading as posture on the radar, but as the notes
+     on the rebel/intel axes already say, it cannot fix the DRAW: polarityFit still has
+     thin material when those sliders go the minority direction. */
+  polarityBalanceBand: [0.4, 0.6],
+};
+function assertContentCoverage(){
+  const problems = [];
+  const push = m => { if (problems.length < 250) problems.push(m); };
+  /* Section-level findings first, category-level second: the (rarity x intensity) cell
+     check alone produces one line per thin category and would otherwise bury the four
+     section-wide gaps, which are the ones that change what the engine can do. */
+  // --- Polarity coverage, per section ------------------------------------------------
+  const bySection = new Map();
+  TRAITS.forEach(t=>{
+    const e = bySection.get(t.section) || {total:0, tagged:0};
+    e.total++;
+    if (t.pol && Object.keys(t.pol).length) e.tagged++;
+    bySection.set(t.section, e);
+  });
+  bySection.forEach((e, section)=>{
+    const share = e.tagged / e.total;
+    if (share < COVERAGE_LIMITS.minPolarityShare)
+      push(`${section}: ${(share*100).toFixed(0)}% of ${e.total} traits carry a polarity tag (want ${(COVERAGE_LIMITS.minPolarityShare*100).toFixed(0)}%+) — polarityFit is inert here, so the sliders reach the category but not the trait`);
+  });
+  // --- Every axis needs BOTH poles, or a slider pointing the minority way has no
+  //     material to select on (the fault the mood fix corrected once, by hand) --------
+  const poles = {};
+  TRAITS.forEach(t=> Object.entries(t.pol || {}).forEach(([ax, v])=>{
+    const e = poles[ax] = poles[ax] || {pos:0, neg:0};
+    if (v > 0) e.pos++; else if (v < 0) e.neg++;
+  }));
+  Object.entries(poles).forEach(([ax, e])=>{
+    const total = e.pos + e.neg;
+    if (!total) return;
+    const share = e.pos / total;
+    const [lo, hi] = COVERAGE_LIMITS.polarityBalanceBand;
+    if (share < lo || share > hi)
+      push(`axis "${AXIS_LABELS[ax] || ax}" is ${(share*100).toFixed(0)}% positive (${e.pos} vs ${e.neg}) — a slider pointed the minority way has thin material to select on`);
+  });
+  // --- Category size, and the (rarity x intensity) cells it actually populates -------
+  TRAITS_BY_KEY.forEach((pool, key)=>{
+    const [section, category] = key.split('||');
+    if (pool.length < COVERAGE_LIMITS.minCategorySize)
+      push(`${section} > ${category}: only ${pool.length} traits (want ${COVERAGE_LIMITS.minCategorySize}+)`);
+    const cells = new Set();
+    pool.forEach(t=> cells.add(t.rarity + '|' + t.intensity));
+    if (cells.size < COVERAGE_LIMITS.minRarityIntensityCells)
+      push(`${section} > ${category}: fills only ${cells.size} of 20 rarity x intensity cells — within this category you cannot ask for a quiet defining trait`);
+  });
+  return problems;
+}
+/* Windows the engine will actually ask for at DEFAULT settings, measured against the
+   pools that will have to answer. A window that resolves to a handful of traits is the
+   mechanism behind every "everything feels the same" report, and it is invisible in
+   the data files. */
+function assertDrawWindows(){
+  const problems = [];
+  const check = (section, category, target, label) => {
+    const pool = TRAITS_BY_KEY.get(section+'||'+category) || [];
+    if (!pool.length) return;
+    const sel = rangeSelect(pool, target);
+    const eligible = sel && sel.list ? sel.list.length : 0;
+    const share = eligible / pool.length;
+    if (share < 0.35)
+      problems.push(`${label}: only ${eligible} of ${pool.length} traits are eligible at target ${target.toFixed(2)} (${(share*100).toFixed(0)}% of the pool is unreachable at default settings)`);
+  };
+  const motivTarget = targetFromMag(55);
+  catsOf("Motivation & Wound").forEach(cat=> check("Motivation & Wound", cat, motivTarget, `Motivation > ${cat}`));
+  check("Appearance", "Movement & Bearing", targetFromMag(40), "Appearance > Movement & Bearing");
+  check("Appearance", "Distinguishing Marks", targetFromMag(15), "Appearance > Distinguishing Marks");
+  return problems;
+}
 if (typeof location !== 'undefined' && /[?&]dev=1\b/.test(location.search || '')){
+  setTimeout(()=>{
+    const problems = assertContentCoverage();
+    if (!problems.length){ console.info('[dev] content coverage OK'); return; }
+    /* A standing debt, not a breakage — grouped so the shape of it is legible rather
+       than sixty lines of the same complaint. console.group collapses by default in
+       every devtools that has it. */
+    console.groupCollapsed(`[dev] ${problems.length} content coverage gap(s) — click to expand`);
+    problems.forEach(m=>console.warn(m));
+    console.groupEnd();
+  }, 0);
+  setTimeout(()=>{
+    const problems = assertDrawWindows();
+    if (!problems.length){ console.info('[dev] draw windows OK'); return; }
+    console.warn(`[dev] ${problems.length} narrow draw window(s) at default settings:\n` + problems.join('\n'));
+  }, 0);
   setTimeout(()=>{
     const problems = assertTraitShape();
     if (!problems.length){ console.info(`[dev] trait shape OK — ${TRAITS.length} entries`); return; }
