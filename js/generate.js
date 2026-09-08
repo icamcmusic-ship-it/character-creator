@@ -411,7 +411,10 @@ function _runGeneration(){
   lastSeedUsed = seedStr || seedNum.toString(36);
   const wantStress = !!(document.getElementById('stressToggle')||{}).checked;
   let newState0, newState, newPressure = null;
-  withRng(mulberry32(seedNum), ()=>{
+  // The archetype's profile hints are live for the whole build and nothing else — see
+  // ARCHETYPE PROFILE HINTS in engine.js. Cast, foil and gap-filler deliberately do not
+  // inherit them; they are not this archetype's character.
+  withArchetypeProfile(arch && arch.profile, ()=> withRng(mulberry32(seedNum), ()=>{
     rollCharacterVariants(); // inside the seeded block, so seeds reproduce variants too
     newState0 = buildCharacterState({verbLevel, regLevel, compLevel, mannerCount, rarityPref,
       vocabPref: arch?arch.vocabPref:null, vocabCount, personalityOverrides: archOverrides});
@@ -432,7 +435,7 @@ function _runGeneration(){
         newPressure = buildStressVariant(verbLevel, regLevel, mannerCount, rarityPref, newState);
       });
     }
-  });
+  }));
   charMetaSeed = lastSeedUsed;
   const seedOut = document.getElementById('lastSeedReadout');
   if (seedOut) seedOut.textContent = "Seed: " + lastSeedUsed;

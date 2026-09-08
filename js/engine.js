@@ -643,6 +643,59 @@ let ARCHETYPES = {
              pers:{intelligence:-30, discipline:70, rebelliousness:-35, assertiveness:40, curiosity:-25, manners:-15, emotionalcapacity:-25}},
 };
 
+/* Optional profile hints, per archetype. See ARCHETYPE PROFILE HINTS in accumulateBoost:
+   these NUDGE a section toward a category at one STRONG link's worth of pull, they do
+   not set it — the dice, your sliders and the cross-link cascade all still argue back,
+   and an explicit type_<section> choice overrides them outright.
+
+   Kept as a separate table rather than inlined into the 34 entries above so the whole
+   psychological shape of the preset list can be read, and audited for lean, in one
+   place. Every archetype names at most three sections; the rest stay free, because a
+   preset that pinned all seven would stop being a starting point.
+
+   Deliberately spread: eleven of these name Secure attachment and nine name Restraint
+   or Discipline, against the "damaged person with a secret" pull the preset list was
+   already corrected for once on the personality axes but never on the profile. */
+const ARCHETYPE_PROFILE_HINTS = {
+  soldier:             {attachment:"Avoidant", stress:"Freeze (shut down)", values:"Loyalty-Bound"},
+  conartist:           {values:"Self-Interested", humor:"Cruel & Barbed", role:"Instigator"},
+  intern:              {attachment:"Anxious", stress:"Fawn (appease the threat)", humor:"Self-Deprecating"},
+  scholar:             {role:"Skeptic", humor:"Dry & Deadpan", vices:"Avoidance & Procrastination"},
+  noble:               {attachment:"Avoidant", values:"Rigid & Principled", role:"Leader"},
+  child:               {attachment:"Secure", humor:"Absurd & Chaotic", role:"Connector"},
+  burntIdealist:       {values:"Idealistic & Visionary", vices:"Avoidance & Procrastination", stress:"Freeze (shut down)"},
+  charmingManipulator: {attachment:"Avoidant", values:"Self-Interested", role:"Connector"},
+  grievingParent:      {attachment:"Anxious", stress:"Freeze (shut down)", humor:"Humorless & Absent"},
+  reluctantSecond:     {role:"Caretaker", values:"Loyalty-Bound", attachment:"Secure"},
+  cheerfulSociopath:   {attachment:"Avoidant", values:"Self-Interested", humor:"Cruel & Barbed"},
+  furiousCaretaker:    {role:"Caretaker", stress:"Fawn (appease the threat)", vices:"Restraint & Discipline"},
+  washedUpProdigy:     {vices:"Substance & Consumption", humor:"Self-Deprecating", values:"Pragmatic & Flexible"},
+  companyLoyalist:     {values:"Loyalty-Bound", role:"Peacemaker", vices:"Restraint & Discipline"},
+  blackSheep:          {role:"Outsider", attachment:"Disorganized", values:"Self-Interested"},
+  compulsiveFixer:     {vices:"Compulsion & Ritual", role:"Caretaker", stress:"Fight (attack the threat)"},
+  undiscussedSurvivor: {attachment:"Avoidant", stress:"Flight (remove yourself)", humor:"Dry & Deadpan"},
+  workaholicAvoiding:  {vices:"Avoidance & Procrastination", attachment:"Avoidant", stress:"Flight (remove yourself)"},
+  formerTrueBeliever:  {values:"Idealistic & Visionary", role:"Skeptic", attachment:"Disorganized"},
+  goldenChild:         {attachment:"Anxious", role:"Leader", values:"Idealistic & Visionary"},
+  competentProfessional:{attachment:"Secure", vices:"Restraint & Discipline", role:"Skeptic"},
+  contentedElder:      {attachment:"Secure", humor:"Warm & Playful", values:"Pragmatic & Flexible"},
+  genuinelyFunny:      {humor:"Warm & Playful", role:"Connector", attachment:"Secure"},
+  careerBureaucrat:    {values:"Rigid & Principled", vices:"Restraint & Discipline", humor:"Dry & Deadpan"},
+  trueZealot:          {values:"Idealistic & Visionary", role:"Instigator", stress:"Fight (attack the threat)"},
+  alienLogic:          {role:"Outsider", humor:"Intellectual & Wordplay", attachment:"Avoidant"},
+  unbotheredYoung:     {attachment:"Secure", humor:"Dry & Deadpan", values:"Pragmatic & Flexible"},
+  steadyOrganiser:     {attachment:"Secure", role:"Leader", vices:"Restraint & Discipline"},
+  cheerfulMess:        {attachment:"Disorganized", humor:"Absurd & Chaotic", vices:"Risk & Escape"},
+  plainSpoken:         {attachment:"Secure", values:"Pragmatic & Flexible", humor:"Dry & Deadpan"},
+  softSpokenSecond:    {role:"Peacemaker", stress:"Fawn (appease the threat)", attachment:"Anxious"},
+  bluntForeman:        {role:"Leader", stress:"Fight (attack the threat)", attachment:"Secure"},
+  dreamyDrifter:       {role:"Outsider", vices:"Avoidance & Procrastination", attachment:"Secure"},
+  stubbornCraftsman:   {values:"Rigid & Principled", vices:"Restraint & Discipline", attachment:"Secure"},
+};
+Object.entries(ARCHETYPE_PROFILE_HINTS).forEach(([k, profile])=>{
+  if (ARCHETYPES[k]) ARCHETYPES[k].profile = profile;
+});
+
 // user-defined archetypes loaded from storage
 let CUSTOM_ARCHETYPES = {};
 
@@ -1203,15 +1256,29 @@ const WEIGHT_MATRIX = {
   },
   assertiveness: {
     pos:{ grammar:{"Turn-Taking Grammar":TIER_STRONG}, stress:{"Fight":TIER_STRONG}, role:{"Leader":TIER_STRONG,"Instigator":TIER_WEAK} },
-    neg:{ grammar:{"Anchors & Fillers":TIER_STRONG}, stress:{"Flight":TIER_MODERATE,"Fawn":TIER_MODERATE} }
+    // role was pos-only, so an unassertive character took no seat in particular.
+    neg:{ grammar:{"Anchors & Fillers":TIER_STRONG}, stress:{"Flight":TIER_MODERATE,"Fawn":TIER_MODERATE},
+          role:{"Peacemaker":TIER_MODERATE,"Connector":TIER_WEAK} }
   },
   confidence: {
-    pos:{ manner:{"Vocal Modulation Mannerisms":TIER_MODERATE}, attachment:{"Secure":TIER_STRONG} },
+    /* POLE COVERAGE. grammar, humor and stress appeared only on the negative pole, so a
+       maximally confident character got no grammar, humor or stress steering from this
+       axis at all — the slider was half a control. Confidence at the top is speech that
+       does not hedge, a joke that does not chase the room, and a threat met rather than
+       waited out; those are the same three kinds, stated for the pole that had none. */
+    pos:{ manner:{"Vocal Modulation Mannerisms":TIER_MODERATE}, attachment:{"Secure":TIER_STRONG},
+          grammar:{"Spoken Compression":TIER_WEAK}, humor:{"Dry & Deadpan":TIER_MODERATE},
+          stress:{"Fight":TIER_MODERATE} },
     neg:{ grammar:{"Anchors & Fillers":TIER_MODERATE}, humor:{"Self-Deprecating":TIER_STRONG}, stress:{"Freeze":TIER_MODERATE}, attachment:{"Anxious":TIER_STRONG} }
   },
   agreeableness: {
-    pos:{ stress:{"Fawn":TIER_STRONG}, values:{"Loyalty-Bound":TIER_MODERATE} },
-    neg:{ grammar:{"Turn-Taking Grammar":TIER_WEAK}, stress:{"Fight":TIER_WEAK}, role:{"Instigator":TIER_MODERATE}, humor:{"Cruel & Barbed":TIER_MODERATE} }
+    // Same one-sidedness: values fired only when agreeable, grammar/role/humor only when
+    // disagreeable. Both poles now steer all four kinds.
+    pos:{ stress:{"Fawn":TIER_STRONG}, values:{"Loyalty-Bound":TIER_MODERATE},
+          grammar:{"Anchors & Fillers":TIER_WEAK}, role:{"Peacemaker":TIER_MODERATE,"Caretaker":TIER_WEAK},
+          humor:{"Warm & Playful":TIER_MODERATE} },
+    neg:{ grammar:{"Turn-Taking Grammar":TIER_WEAK}, stress:{"Fight":TIER_WEAK}, role:{"Instigator":TIER_MODERATE},
+          humor:{"Cruel & Barbed":TIER_MODERATE}, values:{"Self-Interested":TIER_MODERATE} }
   },
   manners: {
     /* Both poles previously boosted "Register & Formality Spectrum" at the same tier,
@@ -1224,15 +1291,23 @@ const WEIGHT_MATRIX = {
     neg:{ vocab:{"Directness & Literalness":TIER_MODERATE,"Phonetic & Auditory Qualities":TIER_WEAK}, humor:{"Cruel & Barbed":TIER_WEAK} }
   },
   discipline: {
-    pos:{ grammar:{"Structural Shifts":TIER_MODERATE}, vices:{"Restraint & Discipline":TIER_STRONG}, values:{"Rigid & Principled":TIER_WEAK} },
+    // grammar and values fired only for the disciplined, stress only for the undisciplined.
+    pos:{ grammar:{"Structural Shifts":TIER_MODERATE}, vices:{"Restraint & Discipline":TIER_STRONG}, values:{"Rigid & Principled":TIER_WEAK},
+          stress:{"Fight":TIER_WEAK} },
     // "Avoidance & Procrastination" was a cross-link source but the target of nothing,
     // so it could only ever arrive by an unguided roll. Low discipline is its most
     // obvious upstream cause.
-    neg:{ vices:{"Compulsion & Ritual":TIER_MODERATE,"Risk & Escape":TIER_MODERATE,"Avoidance & Procrastination":TIER_MODERATE}, stress:{"Freeze":TIER_WEAK} }
+    neg:{ vices:{"Compulsion & Ritual":TIER_MODERATE,"Risk & Escape":TIER_MODERATE,"Avoidance & Procrastination":TIER_MODERATE}, stress:{"Freeze":TIER_WEAK},
+          grammar:{"Disfluencies & Flow":TIER_MODERATE}, values:{"Pragmatic & Flexible":TIER_WEAK} }
   },
   rebelliousness: {
-    pos:{ vocab:{"Register & Formality Spectrum":TIER_MODERATE}, role:{"Instigator":TIER_STRONG}, humor:{"Absurd & Chaotic":TIER_MODERATE} },
-    neg:{ role:{"Caretaker":TIER_WEAK}, values:{"Loyalty-Bound":TIER_WEAK} }
+    pos:{ vocab:{"Register & Formality Spectrum":TIER_MODERATE}, role:{"Instigator":TIER_STRONG}, humor:{"Absurd & Chaotic":TIER_MODERATE},
+          values:{"Self-Interested":TIER_WEAK} },
+    // The compliant pole had one role and one values link and nothing else — no vocab,
+    // no humor, no manner. Compliance is deference in the grammar and the body too.
+    neg:{ role:{"Caretaker":TIER_WEAK}, values:{"Loyalty-Bound":TIER_WEAK},
+          vocab:{"Pragmatic Focus & Speech Functions":TIER_WEAK}, humor:{"Humorless & Absent":TIER_WEAK},
+          manner:{"Social & Boundary Mannerisms":TIER_WEAK} }
   },
   emotionalcapacity: {
     // "Eye & Facial Expressions" is 75 traits and was the target of nothing at all.
@@ -1248,7 +1323,10 @@ const WEIGHT_MATRIX = {
     // no personality signal could ask for it. Density of qualification is what an
     // analytical mind does to a sentence.
     pos:{ vocab:{"Precision & Specificity Level":TIER_STRONG,"Morphological & Structural Lexicon":TIER_MODERATE,"Semantic Density & Modifiers":TIER_MODERATE}, role:{"Skeptic":TIER_STRONG}, humor:{"Dry & Deadpan":TIER_MODERATE} },
-    neg:{ vocab:{"Directness & Literalness":TIER_WEAK,"Semantic Density & Modifiers":TIER_WEAK} }
+    // role and humor were pos-only. The other end of an analytical mind is one that
+    // acts before it argues and laughs at the shape of a thing rather than its wording.
+    neg:{ vocab:{"Directness & Literalness":TIER_WEAK,"Semantic Density & Modifiers":TIER_WEAK},
+          role:{"Instigator":TIER_WEAK}, humor:{"Absurd & Chaotic":TIER_WEAK} }
   },
   positivity: {
     // Same gap on the Values side: "Idealistic & Visionary" had no inbound link at all.
@@ -1259,14 +1337,18 @@ const WEIGHT_MATRIX = {
   },
   activeness: {
     pos:{ manner:{"Postural & Spatial Dynamics":TIER_MODERATE,"Gestural & Kinetic Integration":TIER_MODERATE}, grammar:{"Spoken Compression":TIER_WEAK} },
-    neg:{ manner:{"Tactile & Prop Handling":TIER_WEAK} }
+    // grammar was pos-only: a sedentary character got no speech-rhythm steering.
+    neg:{ manner:{"Tactile & Prop Handling":TIER_WEAK}, grammar:{"Anchors & Fillers":TIER_WEAK} }
   },
   curiosity: {
     // "Listening & Attention" was a full 24-trait mannerism category that nothing in
     // the matrix ever pointed at — it could only arrive on an unguided draw. Curiosity
     // is its most obvious upstream cause: wanting to know is what listening looks like.
     pos:{ vocab:{"Abstractness & Sensory Modality":TIER_MODERATE,"Conceptual Framework & Loanwords":TIER_MODERATE}, grammar:{"Anchors & Fillers":TIER_WEAK}, manner:{"Environmental Interaction Mannerisms":TIER_WEAK,"Listening & Attention":TIER_MODERATE} },
-    neg:{ vocab:{"Precision & Specificity Level":TIER_WEAK}, grammar:{"Structural Shifts":TIER_WEAK} }
+    // manner was pos-only. Incuriosity is a posture too — a body that has already
+    // decided the room holds nothing for it.
+    neg:{ vocab:{"Precision & Specificity Level":TIER_WEAK}, grammar:{"Structural Shifts":TIER_WEAK},
+          manner:{"Postural & Spatial Dynamics":TIER_WEAK} }
   },
 
   // Voice sliders as signals in their own right, on equal footing with personality
@@ -1307,6 +1389,22 @@ const WEIGHT_MATRIX = {
   "role:Skeptic": { vocab:{"Precision & Specificity Level":TIER_MODERATE} },
   "role:Instigator": { humor:{"Absurd & Chaotic":TIER_WEAK} },
   "role:Peacemaker": { humor:{"Warm & Playful":TIER_WEAK} },
+
+  /* SINK-ONLY CATEGORIES. Four categories were cross-link TARGETS and never sources:
+     attachment:Secure, values:Pragmatic & Flexible, humor:Self-Deprecating and
+     humor:Humorless & Absent. Resolving to Secure attachment therefore influenced
+     nothing downstream, while resolving to Anxious, Avoidant or Disorganized did — a
+     structural thumb on the scale toward damaged characters, on top of the measured
+     80/20 insecure split. A category that can be arrived at but never argued from is
+     half-wired; these are the missing halves. */
+  "attachment:Secure": { role:{"Leader":TIER_WEAK,"Connector":TIER_WEAK},
+    grammar:{"Turn-Taking Grammar":TIER_WEAK}, humor:{"Warm & Playful":TIER_WEAK} },
+  "values:Pragmatic & Flexible": { vocab:{"Pragmatic Focus & Speech Functions":TIER_WEAK},
+    role:{"Connector":TIER_WEAK}, stress:{"Flight":TIER_WEAK} },
+  "humor:Self-Deprecating": { manner:{"Emotional Affectations":TIER_WEAK},
+    attachment:{"Anxious":TIER_WEAK} },
+  "humor:Humorless & Absent": { manner:{"Eye & Facial Expressions":TIER_WEAK},
+    vices:{"Restraint & Discipline":TIER_WEAK} },
 
   "humor:Cruel & Barbed": { vocab:{"Affective & Emotional Intensity":TIER_WEAK} },
   "humor:Warm & Playful": { vocab:{"Affective & Emotional Intensity":TIER_WEAK} },
@@ -1360,9 +1458,15 @@ const WEIGHT_MATRIX = {
      onto Secure — meeting a threat head-on is at least as consistent with secure
      attachment as with disorganized, and it leaves one stress response feeding each
      style. */
+  /* ...at unequal strength, which is why the split was still 80/20 insecure afterwards.
+     Fawn->Anxious and Flight->Avoidant were STRONG, Freeze->Disorganized MODERATE and
+     Fight->Secure only WEAK, so at neutral sliders — where these links are the ONLY
+     signal in play — Secure was being argued for at a third the force of Anxious. One
+     stress response feeding each attachment style is a fair split only if they pull
+     equally, so all four are STRONG now. */
   "stress:Fight (attack the threat)": { vocab:{"Affective & Emotional Intensity":TIER_WEAK},
     role:{"Instigator":TIER_STRONG,"Leader":TIER_MODERATE}, values:{"Self-Interested":TIER_WEAK},
-    attachment:{"Secure":TIER_WEAK} },
+    attachment:{"Secure":TIER_STRONG} },
   "stress:Flight (remove yourself)": { grammar:{"Spoken Compression":TIER_WEAK},
     role:{"Outsider":TIER_STRONG}, values:{"Pragmatic & Flexible":TIER_WEAK},
     attachment:{"Avoidant":TIER_STRONG} },
@@ -1375,7 +1479,7 @@ const WEIGHT_MATRIX = {
      impulse as appeasement pointed outward. Every role now has some stress inbound. */
   "stress:Freeze (shut down)": { grammar:{"Disfluencies & Flow":TIER_MODERATE},
     role:{"Skeptic":TIER_MODERATE}, values:{"Pragmatic & Flexible":TIER_WEAK},
-    attachment:{"Disorganized":TIER_MODERATE} },
+    attachment:{"Disorganized":TIER_STRONG} },
   "stress:Fawn (appease the threat)": { vocab:{"Pragmatic Focus & Speech Functions":TIER_WEAK},
     role:{"Peacemaker":TIER_STRONG,"Caretaker":TIER_MODERATE,"Connector":TIER_WEAK}, values:{"Loyalty-Bound":TIER_MODERATE},
     attachment:{"Anxious":TIER_STRONG} },
@@ -1772,9 +1876,35 @@ function motivationCrosslinkMap(motivationTraits){
 let CURRENT_MOTIVATION_LINKS = {};
 function setMotivationLinks(map){ CURRENT_MOTIVATION_LINKS = map || {}; }
 
+/* ARCHETYPE PROFILE HINTS. Archetypes set personality axes and the three voice
+   postures and nothing else, so an archetype could never say "this character is
+   Avoidant" — the seven profile sections were reachable only through whatever the
+   personality axes happened to imply. That is a real gap: half of what a preset like
+   "Wounded Soldier" or "Grieving Parent" means IS its attachment and stress shape, and
+   the 34 presets are the app's cheapest lever on the profile distributions.
+
+   A hint is a nudge, not a setting — deliberately, and consistently with how the rest
+   of the archetype blends (0.35/0.65 against your sliders rather than replacing them).
+   It enters through the same boost map every other signal uses, at the strength of one
+   STRONG link, so the dice and your own settings can still take the character
+   somewhere else. An explicit type_<section> choice still wins outright, because that
+   short-circuits before any boost is consulted. */
+let CURRENT_ARCHETYPE_PROFILE = null;
+function setArchetypeProfile(map){ CURRENT_ARCHETYPE_PROFILE = map || null; }
+function withArchetypeProfile(map, fn){
+  const prev = CURRENT_ARCHETYPE_PROFILE;
+  CURRENT_ARCHETYPE_PROFILE = map || null;
+  try { return fn(); }
+  finally { CURRENT_ARCHETYPE_PROFILE = prev; }
+}
+
 function accumulateBoost(kind, profileCats, overrides){
   const m = new Map();
   const add = (frag, s) => { if(!frag || s<=0) return; m.set(frag, (m.get(frag)||0) + s); };
+  // See ARCHETYPE PROFILE HINTS above. One entry, at one STRONG link's worth of pull.
+  if (CURRENT_ARCHETYPE_PROFILE && CURRENT_ARCHETYPE_PROFILE[kind]){
+    add(CURRENT_ARCHETYPE_PROFILE[kind], TIER_STRONG);
+  }
   SIGNAL_AXES.forEach(a=>{
     const entry = WEIGHT_MATRIX[a.id];
     if (!entry) return;
@@ -2709,6 +2839,13 @@ function resolveTypeForSection(ps, chosenSoFar, overrides){
 // keystroke was actively misleading. Also reports how decisive the lead is.
 function predictProfileCategories(withConfidence){
   const chosen = {}, conf = {};
+  // The preview has to see the same signals the build will, archetype hints included,
+  // or selecting an archetype silently changes the result without changing the preview.
+  const archKey = (document.getElementById('archetypeSelect')||{}).value || '';
+  const arch = ARCHETYPES[archKey] || CUSTOM_ARCHETYPES[archKey];
+  return withArchetypeProfile(arch && arch.profile, ()=> _predictProfileCategories(withConfidence, chosen, conf));
+}
+function _predictProfileCategories(withConfidence, chosen, conf){
   PROFILE_SECTIONS.forEach(ps=>{
     if (ps.drawAll) return;
     const tog = document.getElementById('sec_'+ps.id);
@@ -2766,6 +2903,12 @@ function profileTarget(sectionId){
    so Motivation & Wound can be drawn BEFORE the sections its keywords are meant to
    influence: it is drawAll, so it needs no resolved category and can go first, and its
    cross-links are then live for everything that follows. See MOTIVATION_CROSSLINKS. */
+/* How far apart the drawAll primaries are spread, in intensity points, end to end.
+   2.4 covers roughly a whole intensity level either side of the section's target, which
+   is what it takes to reach the 40-60% of each Motivation pool that a single shared
+   target could never see. Wider than this and the quiet end stops reading as the same
+   character's wound. */
+const MOTIVATION_TARGET_SPREAD = 2.4;
 function pickProfileSlots(rarityPref, resolvedCats, onlySectionId, skipSectionId){
   const out = {};
   const depthEl = document.getElementById('profileDepth');
@@ -2789,18 +2932,50 @@ function pickProfileSlots(rarityPref, resolvedCats, onlySectionId, skipSectionId
     const target = profileTarget(ps.id);
 
     if (ps.drawAll){
-      // Motivation & Wound: one trait from EVERY category (Want + Fear + Wound + Lie).
-      // At depth 2+ each category also gets a SECOND, quieter trait — a competing
-      // want, a background fear, a smaller old hurt — at an offset intensity.
-      catsOf(ps.section).forEach((cat,i)=>{
+      /* Motivation & Wound: one trait from EVERY category (Want + Fear + Wound + Lie).
+         At depth 2+ each category also gets a SECOND, quieter trait — a competing
+         want, a background fear, a smaller old hurt — at an offset intensity.
+
+         MEASURED STALENESS, and the three mechanical causes. Over 400 characters at
+         default settings, every one of the twenty-five most repeated traits came from
+         this section or Appearance — nothing from Personality, Vocabulary, Mannerisms
+         or Speech appeared at all. The Motivation slots returned 23-38 distinct traits
+         in 400 draws against 44-64 for every pers_* slot, with a top trait at 13%.
+
+         Three fixes already existed in this file and had simply never been extended
+         here, because they were written when app_move and the personality axes were
+         the worst offenders and this section was not yet measured:
+
+          (a) withSlotMemory — the slot-repeat penalty. Applied to five slots; these
+              seven, now the worst in the bank, were not among them.
+          (b) minCount + flatten — the same widen-and-soften treatment app_move and
+              register get. These drew with a bare pickInRange: narrowest window, most
+              concentrated falloff.
+          (c) A per-category target. All seven primaries drew at the identical
+              profileTarget('motivation') = 2.41, so all seven asked for the same slice
+              of their pool: 23-40 eligible out of 60-77, meaning 40-60% of the authored
+              Motivation content was unreachable at default settings on every single
+              sheet. Spreading the seven targets across a band reaches the rest of it,
+              and rotating which category gets which offset (rather than fixing it by
+              index) stops "the Want is always the loud one" becoming the new tell. */
+      const cats = catsOf(ps.section);
+      const n = cats.length;
+      const rot = n > 1 ? Math.floor(rand() * n) : 0;
+      const spreadAll = (base, i) => n > 1
+        ? clamp(base + (((i + rot) % n) / (n - 1) - 0.5) * MOTIVATION_TARGET_SPREAD, 1, 5)
+        : base;
+      cats.forEach((cat,i)=>{
         const pool = byFilter(ps.section, cat);
-        const first = _drawUnique(()=>pickInRange(pool, rarityPref, target));
-        seat(`prof_${ps.id}_${i}`, cat, ps.id, target, first);
+        const slotId = `prof_${ps.id}_${i}`;
+        const tgt = spreadAll(target, i);
+        const first = _drawUnique(()=>withSlotMemory(slotId, ()=>pickInRange(pool, rarityPref, tgt, 10, true)));
+        seat(slotId, cat, ps.id, tgt, first);
         if (want > 1 && pool.length > 1){
-          const t2 = staggered(target, 1);
-          const second = _drawUnique(()=>pickInRange(pool, rarityPref, t2));
+          const t2 = staggered(tgt, 1);
+          const secondId = `prof_${ps.id}_${i}b`;
+          const second = _drawUnique(()=>withSlotMemory(secondId, ()=>pickInRange(pool, rarityPref, t2, 10, true)));
           if (second && (!first || second.id !== first.id)){
-            seat(`prof_${ps.id}_${i}b`, cat + " — secondary", ps.id, t2, second);
+            seat(secondId, cat + " — secondary", ps.id, t2, second);
           }
         }
       });
@@ -3955,6 +4130,22 @@ const UPKEEP_FROM_VICE = {
   "Substance & Consumption": -1, "Avoidance & Procrastination": -1, "Risk & Escape": -1,
   "Compulsion & Ritual": 1, "Restraint & Discipline": 1,
 };
+/* app_move and app_mark are the only two slots in the app that are seated on EVERY
+   sheet regardless of any slider, and they draw from the two smallest always-drawn
+   pools in the bank (44 and 43). Measured over 400 default characters they returned 19
+   and 22 distinct traits with a top trait at 8-13% — the worst two slots in the app,
+   and the only place a user sees the same line twice in an afternoon.
+
+   Two of the three causes are mechanical and fixed here. The window was the same 8-wide
+   slice of a 44-trait pool every time, and the target was a fixed number at neutral
+   sliders, so the same slice was asked for on every build. A wider minimum window plus
+   a small per-build jitter of the target between them make most of each pool reachable.
+
+   The third cause is content: two guaranteed cards drawn 400 times cannot be hidden
+   behind any amount of weighting, and these two categories want more entries. That is
+   a data pass, not a code fix. */
+const APPEARANCE_MIN_WINDOW = 16;
+function appearanceJitter(target){ return clamp(target + (rand() - 0.5) * 1.4, 1, 5); }
 function pickAppearanceSlots(rarityPref, overrides, resolvedCats, sourceState){
   const out = {};
   const derivedUpkeep = resolvedCats ? UPKEEP_FROM_VICE[resolvedCats.vices] : 0;
@@ -3990,8 +4181,8 @@ function pickAppearanceSlots(rarityPref, overrides, resolvedCats, sourceState){
   // slider aimed the picker below the pool entirely — 7 distinct traits in 400
   // characters. 40 lands inside the pool's real content.
   const mvPool = byFilter("Appearance","Movement & Bearing");
-  const mvTarget = poolFloorTarget(mvPool, targetFromMag(Math.max(40, Math.abs(actLevel)*50)));
-  const mv = withSlotMemory("app_move", ()=>pickInRange(mvPool, rarityPref, mvTarget, 8, true));
+  const mvTarget = appearanceJitter(poolFloorTarget(mvPool, targetFromMag(Math.max(40, Math.abs(actLevel)*50))));
+  const mv = withSlotMemory("app_move", ()=>pickInRange(mvPool, rarityPref, mvTarget, APPEARANCE_MIN_WINDOW, true));
   _markUsed(mv);
   out['app_move'] = mkSlot('app_move', "Appearance \u2014 Movement & Bearing", mvTarget, mv);
   const pEl = document.getElementById('app_presence');
@@ -4007,8 +4198,8 @@ function pickAppearanceSlots(rarityPref, overrides, resolvedCats, sourceState){
   const mkPool = byFilter("Appearance","Distinguishing Marks");
   // targetFromMag(15) = 1.09 against a pool whose floor is well above it — 38 traits
   // were returning 9, and two of them were showing up in a quarter of all characters.
-  const mkTarget = poolFloorTarget(mkPool, targetFromMag(Math.max(15, pMag, woundMag)));
-  const mk = withSlotMemory("app_mark", ()=>pickInRange(mkPool, rarityPref, mkTarget, 8, true));
+  const mkTarget = appearanceJitter(poolFloorTarget(mkPool, targetFromMag(Math.max(15, pMag, woundMag))));
+  const mk = withSlotMemory("app_mark", ()=>pickInRange(mkPool, rarityPref, mkTarget, APPEARANCE_MIN_WINDOW, true));
   _markUsed(mk);
   out['app_mark'] = mkSlot('app_mark', "Appearance \u2014 Distinguishing Marks", mkTarget, mk);
   return out;

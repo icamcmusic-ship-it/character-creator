@@ -36,7 +36,7 @@ const ctx = loadEngine([
   'rarityNorm','proximityWeights','profileTarget','applyBudgets','budgetCapacity',
   'BUDGET_GROUPS','BUDGET_PRESETS','applyBudgetPreset','clearBudgets','rarityCaps',
   'intensityCaps','getBudgetMode','setBudgetMode','getBudgetReport','getCharVariants',
-  'SECTION_OF_CATEGORY','forgetSlotDraws','withRng','rand','entropySeed','withSpeculativeGeneration',
+  'SECTION_OF_CATEGORY','forgetSlotDraws','withRng','ARCHETYPE_PROFILE_HINTS','withArchetypeProfile','predictProfileCategories','rand','entropySeed','withSpeculativeGeneration',
   'rarityTier','rarityWeight','rarityPrefValue','polarityFit','buildContextBias','parseAgeHint',
   'traitBand','CURVE_EXP','clamp','SECTION_COLORS','loudnessCheck','recentPenalty',
   'rememberGeneration','forgetRecentTraits','_drawUnique','_buildUsedIds','explainWhyNot',
@@ -752,6 +752,12 @@ check('at neutral sliders no profile category dominates its section', ()=>{
     });
   }
   });
+  /* The ceiling was uniform * 1.9 — 47% of a four-way split — which is why Attachment
+     sitting at 31% Anxious against 21% Secure passed this check for as long as it did.
+     A band that wide only catches a category that has taken over the section outright,
+     not a section quietly leaning. Tightened to what the engine now actually measures
+     (worst case 1.35x uniform, best 0.70x) with headroom for sampling noise. */
+  const DOMINANCE_CEILING = 1.55, DOMINANCE_FLOOR = 0.62;
   const bad = [];
   Object.entries(counts).forEach(([id, c])=>{
     const ps = A.PROFILE_SECTIONS.find(p=>p.id===id);
@@ -761,14 +767,76 @@ check('at neutral sliders no profile category dominates its section', ()=>{
     const uniform = 1 / nCats;
     A.catsOf(ps.section).forEach(cat=>{
       const share = (c[cat] || 0) / total;
-      if (share > uniform * 1.9)
+      if (share > uniform * DOMINANCE_CEILING)
         bad.push(`${id}:${cat} took ${(share*100).toFixed(0)}% of a ${nCats}-way split (uniform ${(uniform*100).toFixed(0)}%)`);
-      if (share < uniform * 0.55)
+      if (share < uniform * DOMINANCE_FLOOR)
         bad.push(`${id}:${cat} starved at ${(share*100).toFixed(0)}% of a ${nCats}-way split (uniform ${(uniform*100).toFixed(0)}%)`);
     });
   });
   assert(!bad.length, bad.join('; '));
-  return Object.keys(counts).length + ' sections checked';
+
+  /* A per-category band cannot see a section leaning as a GROUP, and Attachment was
+     doing exactly that: three insecure styles against one secure one, so the three
+     could each sit inside the band while together taking 80% of a split whose uniform
+     share is 75%, with Secure ten points below Anxious. It happened for a structural
+     reason — Secure was the target of one WEAK stress link where the others had STRONG,
+     and (until this pass) the source of no cross-link at all — and the character it
+     produced was systematically more damaged than the settings asked for. */
+  const at = counts.attachment || {};
+  const atTotal = Object.values(at).reduce((a,b)=>a+b,0) || 1;
+  const secure = (at['Secure'] || 0) / atTotal;
+  assert(secure > 0.20, `Secure attachment at ${(secure*100).toFixed(0)}% of a four-way split — the bank leans damaged`);
+  const topAt = Math.max(...Object.values(at)) / atTotal;
+  assert(topAt - secure < 0.09,
+    `Attachment spread is ${((topAt-secure)*100).toFixed(0)} points between Secure and the leader; a four-way split should be flatter than that`);
+
+  return Object.keys(counts).length + ' sections checked, Secure at ' + (secure*100).toFixed(0) + '%';
+});
+
+check('archetype profile hints are valid and actually nudge', ()=>{
+  /* Archetypes set thirteen personality axes and three voice postures and nothing else,
+     so a preset could never say "this character is Avoidant" — the seven profile
+     sections were reachable only through whatever the axes happened to imply. Two
+     things have to hold: every hint must name a category that exists (a typo here is
+     silent, because an unmatched fragment simply contributes nothing), and a hint must
+     move the draw without deciding it. */
+  const valid = {};
+  A.PROFILE_SECTIONS.forEach(ps=> valid[ps.id] = new Set(A.catsOf(ps.section)));
+  const bad = [];
+  Object.entries(A.ARCHETYPE_PROFILE_HINTS).forEach(([k, profile])=>{
+    if (!A.ARCHETYPES[k]) bad.push(k + ' hints an archetype that does not exist');
+    Object.entries(profile).forEach(([sec, cat])=>{
+      if (!valid[sec]) bad.push(`${k}: no profile section "${sec}"`);
+      else if (!valid[sec].has(cat)) bad.push(`${k}.${sec}: no category "${cat}"`);
+    });
+  });
+  assert(!bad.length, bad.join('; '));
+  const unhinted = Object.keys(A.ARCHETYPES).filter(k=>!A.ARCHETYPE_PROFILE_HINTS[k]);
+  assert(!unhinted.length, 'archetypes with no profile hint: ' + unhinted.join(', '));
+
+  const measure = (profile)=>{
+    const c = {};
+    A.withRng(A.mulberry32(0xA11CE), ()=> A.withArchetypeProfile(profile, ()=>{
+      for (let i=0;i<250;i++){
+        A.rollCharacterVariants();
+        const o = {}; A.PERSONALITY_AXES.forEach(a=> o[a.id] = 0);
+        const st = A.buildCharacterState({verbLevel:0, regLevel:0, compLevel:0, mannerCount:2,
+          vocabCount:2, rarityPref:'balanced', vocabPref:null, personalityOverrides:o});
+        const a = A.slotCat(st['prof_attachment_0']);
+        if (a) c[a] = (c[a]||0) + 1;
+      }
+    }));
+    return c;
+  };
+  const base = measure(null), hinted = measure({attachment:'Secure'});
+  const share = c => (c['Secure']||0) / Object.values(c).reduce((a,b)=>a+b,0);
+  const b = share(base), h = share(hinted);
+  assert(h > b + 0.15, `hint moved Secure only ${(100*b).toFixed(0)}% -> ${(100*h).toFixed(0)}%`);
+  // A nudge, not a setting: the other three styles must still be reachable, or the hint
+  // has quietly become a forcedProfileCats and archetypes stop being a starting point.
+  assert(h < 0.8, `hint pinned Secure at ${(100*h).toFixed(0)}% — that is forcing, not nudging`);
+  A.forgetRecentTraits(); A.forgetSlotDraws();
+  return `Secure ${(100*b).toFixed(0)}% -> ${(100*h).toFixed(0)}% across ${Object.keys(A.ARCHETYPE_PROFILE_HINTS).length} hinted archetypes`;
 });
 
 group('Workspace persistence');
@@ -1314,8 +1382,24 @@ check('the fixed-category slots draw from a real range', ()=>{
   // slot id -> the floor it must clear over N builds. Set below what the engine
   // currently achieves, so ordinary content churn doesn't trip it and a structural
   // regression does.
+  /* Motivation and Appearance were added to this list after a 400-character audit found
+     every one of the twenty-five most-repeated traits in the app came from those two
+     sections — 23-38 distinct per Motivation slot with a top trait at 13%, and 19/22 for
+     the two Appearance slots seated on every sheet. The floors here are set below what
+     the engine now achieves (44-68 for Motivation, 28/33 for Appearance over 200
+     builds), so content churn doesn't trip them and a structural regression does.
+
+     app_move and app_mark keep a looser top-share allowance than everything else,
+     stated rather than hidden: they draw from the two smallest always-drawn pools in
+     the bank (44 and 43 traits) and are seated on every sheet regardless of any slider,
+     so their ceiling is a content limit, not a weighting one. */
   const FLOORS = {register: 40, verbosity: 30, pers_honesty: 20, pers_confidence: 20,
-                  pers_curiosity: 20, pers_manners: 20, pers_activeness: 20};
+                  pers_curiosity: 20, pers_manners: 20, pers_activeness: 20,
+                  prof_motivation_0: 40, prof_motivation_1: 35, prof_motivation_2: 32,
+                  prof_motivation_3: 35, prof_motivation_4: 32, prof_motivation_5: 30,
+                  prof_motivation_6: 32,
+                  app_move: 20, app_mark: 24};
+  const TOP_SHARE_LIMIT = {app_move: 0.11, app_mark: 0.12};
   const thin = [];
   Object.entries(FLOORS).forEach(([slot, floor])=>{
     const m = seen.get(slot);
@@ -1323,7 +1407,8 @@ check('the fixed-category slots draw from a real range', ()=>{
     const total = [...m.values()].reduce((a,b)=>a+b, 0);
     const topShare = Math.max(...m.values()) / total;
     if (m.size < floor) thin.push(`${slot}: ${m.size} distinct in ${N} (want >= ${floor})`);
-    if (topShare > 0.14) thin.push(`${slot}: one trait in ${(100*topShare).toFixed(0)}% of characters`);
+    const limit = TOP_SHARE_LIMIT[slot] !== undefined ? TOP_SHARE_LIMIT[slot] : 0.14;
+    if (topShare > limit) thin.push(`${slot}: one trait in ${(100*topShare).toFixed(0)}% of characters (limit ${(100*limit).toFixed(0)}%)`);
   });
   assert(!thin.length, thin.join('\n       '));
   const sizes = Object.keys(FLOORS).map(k=> (seen.get(k) || new Map()).size);
