@@ -202,18 +202,29 @@ function renderNovelty(prevSig, curSig){
 function archetypeFidelity(st, arch){
   if (!arch || !arch.pers) return null;
   const prof = axisProfile(st);
-  let total = 0, score = 0;
+  let total = 0, score = 0, silent = 0;
   Object.entries(arch.pers).forEach(([axisId, target])=>{
     const code = AXIS_TO_POLCODE[axisId];
     if (!code || Math.abs(target) < 10) return;
     const want = Math.sign(target);
     const got = prof[code] || 0;
     total++;
+    if (got === 0){ silent++; return; }   // see below
     if (Math.sign(got) === want) score += Math.min(1, Math.abs(got)/2); // direction right, credit scales with strength
-    else if (got === 0) score += 0.35; // silent on this axis: partial credit
   });
   if (!total) return null;
-  return Math.round(100 * score / total);
+  /* THE METER'S FLOOR WAS A LIE. A silent axis — one the sheet expresses nothing on —
+     used to score 0.35, "partial credit". Nine axes of silence therefore read as 35%
+     fidelity, so a sheet that ignored the archetype completely still showed a third of
+     the bar filled and the number could never mean what it said. Silence is not partial
+     agreement; it is the absence of evidence, and it now scores nothing.
+
+     But "0%" alone is also the wrong reading, because a sheet can be silent on an axis
+     for reasons that have nothing to do with the archetype (that section switched off,
+     a thin pool, traits with no polarity tag on that axis). So the silent count travels
+     with the number and the meter says which it is, instead of splitting the difference
+     inside a single figure and telling the user neither. */
+  return {pct: Math.round(100 * score / total), total, silent, expressed: total - silent};
 }
 
 /* Generation is synchronous over a 7,073-trait bank with per-trait position maths, and

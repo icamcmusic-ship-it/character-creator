@@ -1384,9 +1384,16 @@ const WEIGHT_MATRIX = {
 
   // Resolved profile-section categories feed forward into voice AND other profile sections.
   "role:Leader": { grammar:{"Turn-Taking Grammar":TIER_MODERATE} },
-  "role:Outsider": { vocab:{"Directness & Literalness":TIER_WEAK} },
+  "role:Outsider": { vocab:{"Directness & Literalness":TIER_WEAK}, humor:{"Absurd & Chaotic":TIER_WEAK} },
   "role:Caretaker": { manner:{"Social & Boundary Mannerisms":TIER_MODERATE} },
-  "role:Skeptic": { vocab:{"Precision & Specificity Level":TIER_MODERATE} },
+  /* Adding stress->humor links (see below) gave four of the seven humor categories a
+     cascade inbound at neutral sliders and left three without one, which starved
+     Intellectual & Wordplay to 9% of a seven-way split. The three that were missing get
+     one here, from sections that resolve before Humor does: a skeptic's humour is
+     precision, an outsider's is the wrong shape on purpose, and an idealist's is warm
+     even when nothing else is. Every humor category now has somewhere to arrive from. */
+  "role:Skeptic": { vocab:{"Precision & Specificity Level":TIER_MODERATE},
+    humor:{"Intellectual & Wordplay":TIER_MODERATE} },
   "role:Instigator": { humor:{"Absurd & Chaotic":TIER_WEAK} },
   "role:Peacemaker": { humor:{"Warm & Playful":TIER_WEAK} },
 
@@ -1437,7 +1444,7 @@ const WEIGHT_MATRIX = {
   // character actually resolved to one of them, that fact fed nothing forward into
   // vocab/grammar/manner or any other profile section, unlike every original category.
   "role:Connector": { vocab:{"Pragmatic Focus & Speech Functions":TIER_WEAK}, humor:{"Warm & Playful":TIER_WEAK} },
-  "values:Idealistic & Visionary": { vocab:{"Directness & Literalness":TIER_WEAK}, grammar:{"Structural Shifts":TIER_WEAK} },
+  "values:Idealistic & Visionary": { vocab:{"Directness & Literalness":TIER_WEAK}, grammar:{"Structural Shifts":TIER_WEAK}, humor:{"Warm & Playful":TIER_WEAK} },
   "humor:Intellectual & Wordplay": { vocab:{"Morphological & Structural Lexicon":TIER_WEAK,"Precision & Specificity Level":TIER_WEAK} },
   "vices:Avoidance & Procrastination": { grammar:{"Disfluencies & Flow":TIER_WEAK}, stress:{"Flight":TIER_WEAK} },
 
@@ -1464,12 +1471,18 @@ const WEIGHT_MATRIX = {
      signal in play — Secure was being argued for at a third the force of Anxious. One
      stress response feeding each attachment style is a fair split only if they pull
      equally, so all four are STRONG now. */
+  /* The humor targets here are what makes Humor's inclusion in PRESSURE_SHIFT_SECTIONS
+     mean anything: the pressure pass resolves each section against the stress response
+     alone, so without a stress->humor link the shift had no signal to move on. Each
+     stress response points somewhere different, because that is the observation — the
+     warm one goes barbed, the one who leaves goes quiet, the one who freezes gets very
+     dry, the one who appeases turns it on themselves. */
   "stress:Fight (attack the threat)": { vocab:{"Affective & Emotional Intensity":TIER_WEAK},
     role:{"Instigator":TIER_STRONG,"Leader":TIER_MODERATE}, values:{"Self-Interested":TIER_WEAK},
-    attachment:{"Secure":TIER_STRONG} },
+    attachment:{"Secure":TIER_STRONG}, humor:{"Cruel & Barbed":TIER_MODERATE} },
   "stress:Flight (remove yourself)": { grammar:{"Spoken Compression":TIER_WEAK},
     role:{"Outsider":TIER_STRONG}, values:{"Pragmatic & Flexible":TIER_WEAK},
-    attachment:{"Avoidant":TIER_STRONG} },
+    attachment:{"Avoidant":TIER_STRONG}, humor:{"Humorless & Absent":TIER_MODERATE} },
   /* Same asymmetry as attachment above, in Social Role. Flight and Freeze BOTH fed
      Outsider while Skeptic and Connector were the target of no stress link at all, so at
      neutral sliders — where stress is the only signal actually firing — Outsider took
@@ -1479,10 +1492,10 @@ const WEIGHT_MATRIX = {
      impulse as appeasement pointed outward. Every role now has some stress inbound. */
   "stress:Freeze (shut down)": { grammar:{"Disfluencies & Flow":TIER_MODERATE},
     role:{"Skeptic":TIER_MODERATE}, values:{"Pragmatic & Flexible":TIER_WEAK},
-    attachment:{"Disorganized":TIER_STRONG} },
+    attachment:{"Disorganized":TIER_STRONG}, humor:{"Dry & Deadpan":TIER_MODERATE} },
   "stress:Fawn (appease the threat)": { vocab:{"Pragmatic Focus & Speech Functions":TIER_WEAK},
     role:{"Peacemaker":TIER_STRONG,"Caretaker":TIER_MODERATE,"Connector":TIER_WEAK}, values:{"Loyalty-Bound":TIER_MODERATE},
-    attachment:{"Anxious":TIER_STRONG} },
+    attachment:{"Anxious":TIER_STRONG}, humor:{"Self-Deprecating":TIER_MODERATE} },
 };
 
 // Guarded: this is called from pickCategoryWeighted, which runs on every category
@@ -2113,6 +2126,19 @@ function divergenceLevel(){
   const el = document.getElementById('divergence');
   return el ? clamp(parseFloat(el.value) || 0, 0, 1) : 0;
 }
+/* THE ONE DEFINITION OF A CATEGORY'S WEIGHT.
+   predictProfileCategories used to carry its own copy of this arithmetic — a hand-rolled
+   `BASELINE + boost * w` that had drifted from the real picker in two ways: it applied
+   neither the user's prefer/rarely category tiers nor the age/context multipliers. So
+   the live preview could confidently name a category the build would rarely pick, and
+   the divergence would only widen as either side was edited. Two implementations of the
+   same formula will drift; there is one now, and the preview and the draw share it. */
+const CATEGORY_BASELINE = 0.4;
+function categoryWeights(cats, boostMap){
+  const boost = AFFINITY();
+  return cats.map(c => (CATEGORY_BASELINE + boost * ((boostMap && boostMap.get(c)) || 0))
+                       * tierMultiplier(c) * contextMultiplier(c));
+}
 function pickCategoryWeighted(cats, boostMap){
   // categoryTiers: user prefer/rarely multipliers fold in here — the single point
   // where category selection happens — see WEIGHTED CONSTRAINT TIER above.
@@ -2122,7 +2148,7 @@ function pickCategoryWeighted(cats, boostMap){
   // that category should clearly dominate rather than be one voice among many equals.
   // A fully neutral boostMap (all zeros) still yields uniform weights, so unboosted /
   // truly-random picks are unaffected — this only sharpens picks that already have signal.
-  const BASELINE = 0.4;
+  const BASELINE = CATEGORY_BASELINE;
   const div = divergenceLevel();
   /* BUG FIX: divergence only fired when boostMap.size was non-zero — so at neutral
      sliders, which is exactly where the boost map is empty and staleness is worst, the
@@ -2152,6 +2178,8 @@ function pickCategoryWeighted(cats, boostMap){
     return BASELINE + boost * (invert ? Math.max(0, peak - b) : b);
   };
   const weights = cats.map(c => weightOf(c) * tierMultiplier(c) * contextMultiplier(c));
+  // (Deliberately not categoryWeights() below: this path also has to express the two
+  // divergence branches, which are a per-draw coin and have no meaning in a prediction.)
   const total = weights.reduce((a,b)=>a+b,0);
   let r = rand() * total;
   for (let i=0;i<cats.length;i++){ r -= weights[i]; if (r <= 0){ noteCategoryUse(cats[i]); return cats[i]; } }
@@ -2855,9 +2883,11 @@ function _predictProfileCategories(withConfidence, chosen, conf){
     const cats = catsOf(ps.section);
     if (!cats.length) return;
     const boostMap = resolveBoostMapForCats(cats, accumulateBoost(ps.id, chosen));
-    const boost = AFFINITY(), BASELINE = 0.4;
-    const scored = cats.map(c=>({c, w: BASELINE + boost * ((boostMap.get(c))||0)}))
-                       .sort((a,b)=>b.w-a.w);
+    // categoryWeights is the picker's own formula — see the note on it. This used to be
+    // a second copy that ignored category tiers and the context multiplier, so the
+    // preview could name a category the build would rarely reach.
+    const w = categoryWeights(cats, boostMap);
+    const scored = cats.map((c,i)=>({c, w: w[i]})).sort((a,b)=>b.w-a.w);
     const total = scored.reduce((s,x)=>s+x.w, 0) || 1;
     chosen[ps.id] = scored[0].c;
     conf[ps.id] = scored[0].w / total;
@@ -4411,15 +4441,20 @@ function buildCharacterState(opts){
   return obj;
 }
 
-// Sections whose resolved type can legitimately CHANGE under pressure. Motivation &
-// Wound is excluded on purpose: a want or a wound doesn't swap out because the day
-// went badly — it's the fixed thing the rest is reacting to. Humor and Vices are
+// Sections whose resolved type can legitimately CHANGE under pressure. Vices stay
 // excluded because their pressure behaviour is already covered by the mannerism and
-// grammar shifts (a vice under stress is a scene, not a different vice).
+// grammar shifts — a vice under stress is a scene, not a different vice.
 /* Motivation & Wound was excluded from the pressure pass, which is odd on its face:
    it supplies the pressure trigger. Under load a wound does not change, but which of
    its facets is in the foreground very much does. */
-const PRESSURE_SHIFT_SECTIONS = ["role", "values", "attachment", "motivation"];
+/* Humor was excluded on the same "already covered by the mannerism shifts" reasoning
+   as Vices, and that reasoning is much weaker here. How someone's humour changes when
+   things go wrong — the warm one going barbed, the funny one going silent, the deadpan
+   one becoming the only person still joking — is arguably the most observable thing a
+   character does under pressure, and it is not a mannerism. It is the same claim the
+   section itself makes ("what they find funny, and how it lands"): what lands changes
+   with the room. Included. */
+const PRESSURE_SHIFT_SECTIONS = ["role", "values", "attachment", "motivation", "humor"];
 
 /* How much pressure. The sheet used to be binary — calm, or maximum stress — which
    is the least interesting question you can ask about someone under load, and the

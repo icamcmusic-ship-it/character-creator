@@ -824,12 +824,22 @@ function renderSheet(){
     }
     // Archetype fidelity meter — only meaningful when an archetype seeded the build.
     if (charMeta.archFidelity !== null && charMeta.archFidelity !== undefined){
-      const f = charMeta.archFidelity;
+      // archetypeFidelity returns {pct, total, silent, expressed} now; older saved and
+      // imported characters carry the bare number this used to be.
+      const af = (typeof charMeta.archFidelity === 'number')
+        ? {pct: charMeta.archFidelity, total: null, silent: 0, expressed: null}
+        : charMeta.archFidelity;
+      const f = af.pct;
       const col = f>=70?"var(--emerald)":f>=45?"var(--golden)":"var(--bubblegum)";
+      // The silence is reported next to the number rather than folded into it — see the
+      // note in archetypeFidelity. "38% of 9 axes, 4 of them unexpressed" is a reading a
+      // user can act on; "38%" on its own was not.
+      const coverage = (af.total && af.silent)
+        ? ` <span style="opacity:.7;font-weight:400;">(${af.expressed} of ${af.total} axes expressed)</span>` : ``;
       h += `<div class="coherenceRow" style="margin-top:10px;">
-        <div class="coherenceLabel">Archetype fidelity <b>${f}%</b></div>
+        <div class="coherenceLabel">Archetype fidelity <b>${f}%</b>${coverage}</div>
         <div class="coherenceBar"><span style="width:${f}%; background:${col};"></span></div>
-      </div><div class="coherenceNote">How much of the archetype's intended shape survived your slider blend, the dice, and any rerolls. Drift is legitimate — this is a compass reading, not a grade.</div>`;
+      </div><div class="coherenceNote">How much of the archetype's intended shape survived your slider blend, the dice, and any rerolls. Drift is legitimate — this is a compass reading, not a grade.${(af.total && af.silent) ? ` The sheet says nothing either way on ${af.silent} of the ${af.total} axes this archetype takes a position on, which scores nothing rather than half — a silent sheet is not a partly-matching one. Those axes are usually silent because their section is switched off, or because the traits drawn there carry no polarity on that axis.` : ``}</div>`;
     }
     // Voice fingerprint — assembled from the character's own example lines.
     const fp = voiceFingerprint(state, charMeta);

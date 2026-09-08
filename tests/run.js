@@ -36,7 +36,7 @@ const ctx = loadEngine([
   'rarityNorm','proximityWeights','profileTarget','applyBudgets','budgetCapacity',
   'BUDGET_GROUPS','BUDGET_PRESETS','applyBudgetPreset','clearBudgets','rarityCaps',
   'intensityCaps','getBudgetMode','setBudgetMode','getBudgetReport','getCharVariants',
-  'SECTION_OF_CATEGORY','forgetSlotDraws','withRng','ARCHETYPE_PROFILE_HINTS','withArchetypeProfile','predictProfileCategories','rand','entropySeed','withSpeculativeGeneration',
+  'SECTION_OF_CATEGORY','forgetSlotDraws','withRng','buildStressVariant','categoryWeights','tierMultiplier','ARCHETYPE_PROFILE_HINTS','withArchetypeProfile','predictProfileCategories','rand','entropySeed','withSpeculativeGeneration',
   'rarityTier','rarityWeight','rarityPrefValue','polarityFit','buildContextBias','parseAgeHint',
   'traitBand','CURVE_EXP','clamp','SECTION_COLORS','loudnessCheck','recentPenalty',
   'rememberGeneration','forgetRecentTraits','_drawUnique','_buildUsedIds','explainWhyNot',
@@ -786,11 +786,81 @@ check('at neutral sliders no profile category dominates its section', ()=>{
   const atTotal = Object.values(at).reduce((a,b)=>a+b,0) || 1;
   const secure = (at['Secure'] || 0) / atTotal;
   assert(secure > 0.20, `Secure attachment at ${(secure*100).toFixed(0)}% of a four-way split — the bank leans damaged`);
-  const topAt = Math.max(...Object.values(at)) / atTotal;
-  assert(topAt - secure < 0.09,
-    `Attachment spread is ${((topAt-secure)*100).toFixed(0)} points between Secure and the leader; a four-way split should be flatter than that`);
+  /* Spread, not "Secure versus the leader": measuring the gap to one named category
+     passes trivially the moment that category IS the leader, which is the same class of
+     hole the 1.9x ceiling had. A four-way split with equal cross-link support should be
+     flat in whichever direction it leans. */
+  const shares = A.catsOf('Attachment & Intimacy Style').map(c=> (at[c]||0)/atTotal);
+  const spread = Math.max(...shares) - Math.min(...shares);
+  assert(spread < 0.10,
+    `Attachment spans ${(spread*100).toFixed(0)} points between its most and least common style; a four-way split with equal support should be flatter than that`);
 
   return Object.keys(counts).length + ' sections checked, Secure at ' + (secure*100).toFixed(0) + '%';
+});
+
+check('humour moves under pressure, and every stress response points it somewhere', ()=>{
+  /* Humor was excluded from the pressure sheet on the same "already covered by the
+     mannerism shifts" reasoning as Vices, which is much weaker for humour: the warm one
+     going barbed, or the funny one going silent, is arguably the most observable thing
+     a character does under pressure, and it is not a mannerism.
+
+     Including it in PRESSURE_SHIFT_SECTIONS is only half of it — the pressure pass
+     resolves each section against the stress response alone, so without a stress->humor
+     cross-link there was no signal for it to move on and the section would have
+     "held" every time. Assert both halves. */
+  assert(A.PRESSURE_SHIFT_SECTIONS.includes('humor'), 'humor is not in PRESSURE_SHIFT_SECTIONS');
+  const stressKeys = Object.keys(A.WEIGHT_MATRIX).filter(k=>k.startsWith('stress:'));
+  assert(stressKeys.length === 4, 'expected four stress cross-link entries, found ' + stressKeys.length);
+  const noHumor = stressKeys.filter(k=>!A.WEIGHT_MATRIX[k].humor);
+  assert(!noHumor.length, 'stress responses with no humour link: ' + noHumor.join(', '));
+  // ...and they must not all point at the same category, or the shift is one-note.
+  const targets = new Set();
+  stressKeys.forEach(k=> Object.keys(A.WEIGHT_MATRIX[k].humor).forEach(c=>targets.add(c)));
+  assert(targets.size >= 3, 'the four stress responses point humour at only ' + targets.size + ' categor(y/ies)');
+
+  let moved = 0, sheets = 0;
+  A.withRng(A.mulberry32(7), ()=>{
+    for (let i=0;i<80;i++){
+      A.rollCharacterVariants();
+      const o = {}; A.PERSONALITY_AXES.forEach(a=> o[a.id] = 0);
+      const st = A.buildCharacterState({verbLevel:0, regLevel:0, compLevel:0, mannerCount:2,
+        vocabCount:2, rarityPref:'balanced', vocabPref:null, personalityOverrides:o});
+      const ps = A.buildStressVariant(0, 0, 2, 'balanced', st);
+      const slot = ps && ps['p_prof_humor'];
+      if (!slot) continue;
+      sheets++;
+      if (slot.shifted) moved++;
+    }
+  });
+  A.forgetRecentTraits(); A.forgetSlotDraws();
+  assert(sheets > 40, 'the pressure sheet produced a humour slot only ' + sheets + ' times');
+  assert(moved / sheets > 0.3, `humour held on ${(100*(1-moved/sheets)).toFixed(0)}% of pressure sheets — the section is in the list but nothing moves it`);
+  return `${(100*moved/sheets).toFixed(0)}% of ${sheets} pressure sheets change humour`;
+});
+
+check('the profile preview agrees with the picker it predicts', ()=>{
+  /* predictProfileCategories carried its own copy of pickCategoryWeighted's formula and
+     had drifted: it applied neither the user's prefer/rarely category tiers nor the
+     age/context multipliers. So the preview could name a category the build would
+     rarely reach, and would drift further with every edit to either side. Both read
+     categoryWeights() now — assert the property, by making a tier preference that only
+     the shared formula can see and checking the preview moves with it. */
+  ctx.evalIn("categoryTiers.clear(); clearContextBias();");
+  A.PROFILE_SECTIONS.forEach(ps=>{
+    ctx.document._set('sec_'+ps.id, {checked:true});
+    ctx.document._set('type_'+ps.id, {value:'', tagName:'SELECT', options:[{value:''}]});
+  });
+  const cats = A.catsOf('Attachment & Intimacy Style');
+  const before = A.predictProfileCategories();
+  // "rarely" the predicted attachment style. If the preview ignores category tiers —
+  // as it did — this changes nothing at all.
+  ctx.evalIn(`categoryTiers.set(${JSON.stringify(before.attachment)}, 'rarely')`);
+  const after = A.predictProfileCategories();
+  ctx.evalIn("categoryTiers.clear()");
+  assert(cats.length > 1, 'test section went missing');
+  assert(after.attachment !== before.attachment,
+    `preview still predicts "${before.attachment}" after it was set to rarely — it is not reading the picker's weights`);
+  return `${before.attachment} -> ${after.attachment} when set to rarely`;
 });
 
 check('archetype profile hints are valid and actually nudge', ()=>{
