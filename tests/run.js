@@ -36,7 +36,7 @@ const ctx = loadEngine([
   'rarityNorm','proximityWeights','profileTarget','applyBudgets','budgetCapacity',
   'BUDGET_GROUPS','BUDGET_PRESETS','applyBudgetPreset','clearBudgets','rarityCaps',
   'intensityCaps','getBudgetMode','setBudgetMode','getBudgetReport','getCharVariants',
-  'SECTION_OF_CATEGORY','forgetSlotDraws',
+  'SECTION_OF_CATEGORY','forgetSlotDraws','withRng','buildStressVariant','categoryWeights','tierMultiplier','ARCHETYPE_PROFILE_HINTS','withArchetypeProfile','predictProfileCategories','rand','entropySeed','withSpeculativeGeneration',
   'rarityTier','rarityWeight','rarityPrefValue','polarityFit','buildContextBias','parseAgeHint',
   'traitBand','CURVE_EXP','clamp','SECTION_COLORS','loudnessCheck','recentPenalty',
   'rememberGeneration','forgetRecentTraits','_drawUnique','_buildUsedIds','explainWhyNot',
@@ -55,6 +55,16 @@ const T = A.TRAITS;
 /* Ratchet, not a target. Set to the value the bank actually achieves today; lowering it
    is the content pass's job and raising it should require saying so out loud. It started
    at 0.729, where rarity was very nearly a restatement of intensity. */
+/* Rarity vs intensity, as Cramer's V. The README claims the two axes are "genuinely
+   independent"; measured, V is 0.651 against this 0.66 ceiling — passing by 0.009, which
+   means rarity is still about 65% a restatement of intensity. The contingency table says
+   why: distinctive is 92% intensity-3, signature 88% intensity 4-5, common 91% intensity
+   1-2. Every cell is populated, which is what the older test asserted, but the
+   off-diagonal mass is tiny.
+   Closing this is a content pass, not a code fix — roughly 400 more quiet-signature
+   (i1-i2) entries and 300 more loud-common (i4-i5) ones — after which this ceiling
+   should come down to 0.55 and then 0.45. Left where it is deliberately: lowering the
+   number without writing the traits would only make the suite red. */
 const RARITY_V_CEILING = 0.66;
 
 group('Trait bank integrity');
@@ -355,16 +365,16 @@ check('each variant category tags both presentations', ()=>{
 });
 
 group('Generation');
+// The engine draws through rand(), not Math.random — see THE RANDOM SOURCE in
+// engine.js. withRng is the only supported way to seed a build.
 function buildOnce(seed){
-  const orig = Math.random;
-  ctx.Math.random = A.mulberry32(seed);
-  try {
+  return A.withRng(A.mulberry32(seed), ()=>{
     A.rollCharacterVariants();
     return A.buildCharacterState({
       verbLevel: 0.8, regLevel: -0.4, compLevel: 0.2, mannerCount: 3, vocabCount: 2,
       rarityPref: 0, vocabPref: null, personalityOverrides: null,
     });
-  } finally { ctx.Math.random = orig; }
+  });
 }
 check('a build produces a populated sheet', ()=>{
   const st = buildOnce(12345);
@@ -739,9 +749,7 @@ check('at neutral sliders no profile category dominates its section', ()=>{
 
   const N = 1200;
   const counts = {};
-  const _rnd = Math.random;
-  Math.random = A.mulberry32(0x5eed1);
-  try {
+  A.withRng(A.mulberry32(0x5eed1), ()=>{
   for (let i=0;i<N;i++){
     const o = {}; A.PERSONALITY_AXES.forEach(a=> o[a.id] = 0);
     A.rollCharacterVariants();
@@ -753,7 +761,13 @@ check('at neutral sliders no profile category dominates its section', ()=>{
       if (c) ((counts[ps.id] = counts[ps.id] || {}))[c] = (counts[ps.id][c]||0) + 1;
     });
   }
-  } finally { Math.random = _rnd; }
+  });
+  /* The ceiling was uniform * 1.9 — 47% of a four-way split — which is why Attachment
+     sitting at 31% Anxious against 21% Secure passed this check for as long as it did.
+     A band that wide only catches a category that has taken over the section outright,
+     not a section quietly leaning. Tightened to what the engine now actually measures
+     (worst case 1.35x uniform, best 0.70x) with headroom for sampling noise. */
+  const DOMINANCE_CEILING = 1.55, DOMINANCE_FLOOR = 0.62;
   const bad = [];
   Object.entries(counts).forEach(([id, c])=>{
     const ps = A.PROFILE_SECTIONS.find(p=>p.id===id);
@@ -763,14 +777,146 @@ check('at neutral sliders no profile category dominates its section', ()=>{
     const uniform = 1 / nCats;
     A.catsOf(ps.section).forEach(cat=>{
       const share = (c[cat] || 0) / total;
-      if (share > uniform * 1.9)
+      if (share > uniform * DOMINANCE_CEILING)
         bad.push(`${id}:${cat} took ${(share*100).toFixed(0)}% of a ${nCats}-way split (uniform ${(uniform*100).toFixed(0)}%)`);
-      if (share < uniform * 0.55)
+      if (share < uniform * DOMINANCE_FLOOR)
         bad.push(`${id}:${cat} starved at ${(share*100).toFixed(0)}% of a ${nCats}-way split (uniform ${(uniform*100).toFixed(0)}%)`);
     });
   });
   assert(!bad.length, bad.join('; '));
-  return Object.keys(counts).length + ' sections checked';
+
+  /* A per-category band cannot see a section leaning as a GROUP, and Attachment was
+     doing exactly that: three insecure styles against one secure one, so the three
+     could each sit inside the band while together taking 80% of a split whose uniform
+     share is 75%, with Secure ten points below Anxious. It happened for a structural
+     reason — Secure was the target of one WEAK stress link where the others had STRONG,
+     and (until this pass) the source of no cross-link at all — and the character it
+     produced was systematically more damaged than the settings asked for. */
+  const at = counts.attachment || {};
+  const atTotal = Object.values(at).reduce((a,b)=>a+b,0) || 1;
+  const secure = (at['Secure'] || 0) / atTotal;
+  assert(secure > 0.20, `Secure attachment at ${(secure*100).toFixed(0)}% of a four-way split — the bank leans damaged`);
+  /* Spread, not "Secure versus the leader": measuring the gap to one named category
+     passes trivially the moment that category IS the leader, which is the same class of
+     hole the 1.9x ceiling had. A four-way split with equal cross-link support should be
+     flat in whichever direction it leans. */
+  const shares = A.catsOf('Attachment & Intimacy Style').map(c=> (at[c]||0)/atTotal);
+  const spread = Math.max(...shares) - Math.min(...shares);
+  assert(spread < 0.10,
+    `Attachment spans ${(spread*100).toFixed(0)} points between its most and least common style; a four-way split with equal support should be flatter than that`);
+
+  return Object.keys(counts).length + ' sections checked, Secure at ' + (secure*100).toFixed(0) + '%';
+});
+
+check('humour moves under pressure, and every stress response points it somewhere', ()=>{
+  /* Humor was excluded from the pressure sheet on the same "already covered by the
+     mannerism shifts" reasoning as Vices, which is much weaker for humour: the warm one
+     going barbed, or the funny one going silent, is arguably the most observable thing
+     a character does under pressure, and it is not a mannerism.
+
+     Including it in PRESSURE_SHIFT_SECTIONS is only half of it — the pressure pass
+     resolves each section against the stress response alone, so without a stress->humor
+     cross-link there was no signal for it to move on and the section would have
+     "held" every time. Assert both halves. */
+  assert(A.PRESSURE_SHIFT_SECTIONS.includes('humor'), 'humor is not in PRESSURE_SHIFT_SECTIONS');
+  const stressKeys = Object.keys(A.WEIGHT_MATRIX).filter(k=>k.startsWith('stress:'));
+  assert(stressKeys.length === 4, 'expected four stress cross-link entries, found ' + stressKeys.length);
+  const noHumor = stressKeys.filter(k=>!A.WEIGHT_MATRIX[k].humor);
+  assert(!noHumor.length, 'stress responses with no humour link: ' + noHumor.join(', '));
+  // ...and they must not all point at the same category, or the shift is one-note.
+  const targets = new Set();
+  stressKeys.forEach(k=> Object.keys(A.WEIGHT_MATRIX[k].humor).forEach(c=>targets.add(c)));
+  assert(targets.size >= 3, 'the four stress responses point humour at only ' + targets.size + ' categor(y/ies)');
+
+  let moved = 0, sheets = 0;
+  A.withRng(A.mulberry32(7), ()=>{
+    for (let i=0;i<80;i++){
+      A.rollCharacterVariants();
+      const o = {}; A.PERSONALITY_AXES.forEach(a=> o[a.id] = 0);
+      const st = A.buildCharacterState({verbLevel:0, regLevel:0, compLevel:0, mannerCount:2,
+        vocabCount:2, rarityPref:'balanced', vocabPref:null, personalityOverrides:o});
+      const ps = A.buildStressVariant(0, 0, 2, 'balanced', st);
+      const slot = ps && ps['p_prof_humor'];
+      if (!slot) continue;
+      sheets++;
+      if (slot.shifted) moved++;
+    }
+  });
+  A.forgetRecentTraits(); A.forgetSlotDraws();
+  assert(sheets > 40, 'the pressure sheet produced a humour slot only ' + sheets + ' times');
+  assert(moved / sheets > 0.3, `humour held on ${(100*(1-moved/sheets)).toFixed(0)}% of pressure sheets — the section is in the list but nothing moves it`);
+  return `${(100*moved/sheets).toFixed(0)}% of ${sheets} pressure sheets change humour`;
+});
+
+check('the profile preview agrees with the picker it predicts', ()=>{
+  /* predictProfileCategories carried its own copy of pickCategoryWeighted's formula and
+     had drifted: it applied neither the user's prefer/rarely category tiers nor the
+     age/context multipliers. So the preview could name a category the build would
+     rarely reach, and would drift further with every edit to either side. Both read
+     categoryWeights() now — assert the property, by making a tier preference that only
+     the shared formula can see and checking the preview moves with it. */
+  ctx.evalIn("categoryTiers.clear(); clearContextBias();");
+  A.PROFILE_SECTIONS.forEach(ps=>{
+    ctx.document._set('sec_'+ps.id, {checked:true});
+    ctx.document._set('type_'+ps.id, {value:'', tagName:'SELECT', options:[{value:''}]});
+  });
+  const cats = A.catsOf('Attachment & Intimacy Style');
+  const before = A.predictProfileCategories();
+  // "rarely" the predicted attachment style. If the preview ignores category tiers —
+  // as it did — this changes nothing at all.
+  ctx.evalIn(`categoryTiers.set(${JSON.stringify(before.attachment)}, 'rarely')`);
+  const after = A.predictProfileCategories();
+  ctx.evalIn("categoryTiers.clear()");
+  assert(cats.length > 1, 'test section went missing');
+  assert(after.attachment !== before.attachment,
+    `preview still predicts "${before.attachment}" after it was set to rarely — it is not reading the picker's weights`);
+  return `${before.attachment} -> ${after.attachment} when set to rarely`;
+});
+
+check('archetype profile hints are valid and actually nudge', ()=>{
+  /* Archetypes set thirteen personality axes and three voice postures and nothing else,
+     so a preset could never say "this character is Avoidant" — the seven profile
+     sections were reachable only through whatever the axes happened to imply. Two
+     things have to hold: every hint must name a category that exists (a typo here is
+     silent, because an unmatched fragment simply contributes nothing), and a hint must
+     move the draw without deciding it. */
+  const valid = {};
+  A.PROFILE_SECTIONS.forEach(ps=> valid[ps.id] = new Set(A.catsOf(ps.section)));
+  const bad = [];
+  Object.entries(A.ARCHETYPE_PROFILE_HINTS).forEach(([k, profile])=>{
+    if (!A.ARCHETYPES[k]) bad.push(k + ' hints an archetype that does not exist');
+    Object.entries(profile).forEach(([sec, cat])=>{
+      if (!valid[sec]) bad.push(`${k}: no profile section "${sec}"`);
+      else if (!valid[sec].has(cat)) bad.push(`${k}.${sec}: no category "${cat}"`);
+    });
+  });
+  assert(!bad.length, bad.join('; '));
+  const unhinted = Object.keys(A.ARCHETYPES).filter(k=>!A.ARCHETYPE_PROFILE_HINTS[k]);
+  assert(!unhinted.length, 'archetypes with no profile hint: ' + unhinted.join(', '));
+
+  const measure = (profile)=>{
+    const c = {};
+    A.withRng(A.mulberry32(0xA11CE), ()=> A.withArchetypeProfile(profile, ()=>{
+      for (let i=0;i<250;i++){
+        A.rollCharacterVariants();
+        const o = {}; A.PERSONALITY_AXES.forEach(a=> o[a.id] = 0);
+        const st = A.buildCharacterState({verbLevel:0, regLevel:0, compLevel:0, mannerCount:2,
+          vocabCount:2, rarityPref:'balanced', vocabPref:null, personalityOverrides:o});
+        const a = A.slotCat(st['prof_attachment_0']);
+        if (a) c[a] = (c[a]||0) + 1;
+      }
+    }));
+    return c;
+  };
+  const base = measure(null), hinted = measure({attachment:'Secure'});
+  const share = c => (c['Secure']||0) / Object.values(c).reduce((a,b)=>a+b,0);
+  const b = share(base), h = share(hinted);
+  assert(h > b + 0.15, `hint moved Secure only ${(100*b).toFixed(0)}% -> ${(100*h).toFixed(0)}%`);
+  // A nudge, not a setting: the other three styles must still be reachable, or the hint
+  // has quietly become a forcedProfileCats and archetypes stop being a starting point.
+  assert(h < 0.8, `hint pinned Secure at ${(100*h).toFixed(0)}% — that is forcing, not nudging`);
+  A.forgetRecentTraits(); A.forgetSlotDraws();
+  return `Secure ${(100*b).toFixed(0)}% -> ${(100*h).toFixed(0)}% across ${Object.keys(A.ARCHETYPE_PROFILE_HINTS).length} hinted archetypes`;
 });
 
 group('Workspace persistence');
@@ -826,6 +972,42 @@ check('every workspace control survives a capture/restore round-trip', ()=>{
 
   A.restoreSettings({constraints:{}});   // leave the workspace clean for later tests
   return 'sliders, sections, constraints';
+});
+
+check('a saved character survives the compress -> validate -> expand round trip', ()=>{
+  /* THE bug this file existed to catch and did not. saveCharacter writes
+     compressSlots(state) to browser storage — every trait replaced by a {__id} stub —
+     and both readers validated that payload before expanding it. The validator
+     requires slot.trait.id and three strings, so every save this build wrote threw on
+     load. The one validation test above builds `good` from a raw buildCharacterState,
+     which is the UNCOMPRESSED shape, and file export writes uncompressed too — so the
+     only path that compresses was the only path with no test. Exercise the real
+     sequence storage uses. */
+  const st = A.buildCharacterState({verbLevel:0.5, regLevel:-0.5, compLevel:0.5,
+    mannerCount:2, vocabCount:2, rarityPref:'balanced', vocabPref:null});
+  const seated = Object.keys(st).filter(k=>st[k] && st[k].trait);
+  assert(seated.length > 5, 'expected a populated sheet to round-trip');
+
+  // What saveCharacter actually puts in storage, through a real JSON hop.
+  const stored = JSON.parse(JSON.stringify({state: A.compressSlots(st), charMeta:{name:'x'}}));
+  assert(stored.state[seated[0]].trait.__id !== undefined, 'compressSlots did not produce a stub');
+
+  // ...and what loadSavedCharacter must now do with it, in this order.
+  stored.state = A.expandSlots(stored.state);
+  A.validateSheetPayload(stored);   // threw for every saved character before the fix
+
+  seated.forEach(k=>{
+    assert(stored.state[k].trait, 'slot ' + k + ' lost its trait in the round trip');
+    assert(stored.state[k].trait.id === st[k].trait.id, 'slot ' + k + ' expanded to the wrong trait');
+    assert(stored.state[k].target === st[k].target, 'slot ' + k + ' lost its target');
+  });
+  // Validating BEFORE expanding is the defect; prove the ordering is what matters and
+  // not something incidental about this particular sheet.
+  const compressedAgain = {state: A.compressSlots(st)};
+  let threw = false;
+  try { A.validateSheetPayload(compressedAgain); } catch(e){ threw = true; }
+  assert(threw, 'a compressed payload must not pass validation — the fix is the ordering, not the validator');
+  return seated.length + ' slots';
 });
 
 check('import validation accepts real sheets and rejects malformed ones', ()=>{
@@ -1192,14 +1374,15 @@ check('a wound actually moves the categories downstream of it', ()=>{
   const measure = (text) => {
     const counts = {attachment:{}, values:{}, role:{}};
     const fake = text ? [{trait:text, desc:text, intensity:4}] : [];
-    const _r = Math.random; Math.random = A.mulberry32(0x50117d);
     try {
-      for (let i = 0; i < 600; i++){
-        A.setMotivationLinks(A.motivationCrosslinkMap(fake));
-        const cats = A.resolveProfileCategories('balanced', {}, null);
-        Object.keys(counts).forEach(k=>{ if (cats[k]) counts[k][cats[k]] = (counts[k][cats[k]]||0)+1; });
-      }
-    } finally { Math.random = _r; A.setMotivationLinks(null); }
+      A.withRng(A.mulberry32(0x50117d), ()=>{
+        for (let i = 0; i < 600; i++){
+          A.setMotivationLinks(A.motivationCrosslinkMap(fake));
+          const cats = A.resolveProfileCategories('balanced', {}, null);
+          Object.keys(counts).forEach(k=>{ if (cats[k]) counts[k][cats[k]] = (counts[k][cats[k]]||0)+1; });
+        }
+      });
+    } finally { A.setMotivationLinks(null); }
     return counts;
   };
   const share = (c, sec, cat) => (c[sec][cat] || 0) / 600;
@@ -1279,8 +1462,24 @@ check('the fixed-category slots draw from a real range', ()=>{
   // slot id -> the floor it must clear over N builds. Set below what the engine
   // currently achieves, so ordinary content churn doesn't trip it and a structural
   // regression does.
+  /* Motivation and Appearance were added to this list after a 400-character audit found
+     every one of the twenty-five most-repeated traits in the app came from those two
+     sections — 23-38 distinct per Motivation slot with a top trait at 13%, and 19/22 for
+     the two Appearance slots seated on every sheet. The floors here are set below what
+     the engine now achieves (44-68 for Motivation, 28/33 for Appearance over 200
+     builds), so content churn doesn't trip them and a structural regression does.
+
+     app_move and app_mark keep a looser top-share allowance than everything else,
+     stated rather than hidden: they draw from the two smallest always-drawn pools in
+     the bank (44 and 43 traits) and are seated on every sheet regardless of any slider,
+     so their ceiling is a content limit, not a weighting one. */
   const FLOORS = {register: 40, verbosity: 30, pers_honesty: 20, pers_confidence: 20,
-                  pers_curiosity: 20, pers_manners: 20, pers_activeness: 20};
+                  pers_curiosity: 20, pers_manners: 20, pers_activeness: 20,
+                  prof_motivation_0: 40, prof_motivation_1: 35, prof_motivation_2: 32,
+                  prof_motivation_3: 35, prof_motivation_4: 32, prof_motivation_5: 30,
+                  prof_motivation_6: 32,
+                  app_move: 20, app_mark: 24};
+  const TOP_SHARE_LIMIT = {app_move: 0.11, app_mark: 0.12};
   const thin = [];
   Object.entries(FLOORS).forEach(([slot, floor])=>{
     const m = seen.get(slot);
@@ -1288,7 +1487,8 @@ check('the fixed-category slots draw from a real range', ()=>{
     const total = [...m.values()].reduce((a,b)=>a+b, 0);
     const topShare = Math.max(...m.values()) / total;
     if (m.size < floor) thin.push(`${slot}: ${m.size} distinct in ${N} (want >= ${floor})`);
-    if (topShare > 0.14) thin.push(`${slot}: one trait in ${(100*topShare).toFixed(0)}% of characters`);
+    const limit = TOP_SHARE_LIMIT[slot] !== undefined ? TOP_SHARE_LIMIT[slot] : 0.14;
+    if (topShare > limit) thin.push(`${slot}: one trait in ${(100*topShare).toFixed(0)}% of characters (limit ${(100*limit).toFixed(0)}%)`);
   });
   assert(!thin.length, thin.join('\n       '));
   const sizes = Object.keys(FLOORS).map(k=> (seen.get(k) || new Map()).size);
@@ -1337,6 +1537,130 @@ check('the mood pass tagged what it listed', ()=>{
 check('the secondary-tier pass tagged what it listed', ()=>{
   assert(A.TIER_TAG_STATS && A.TIER_TAG_STATS.matched > 0, JSON.stringify(A.TIER_TAG_STATS));
   return A.TIER_TAG_STATS.matched + '/' + A.TIER_TAG_STATS.listed;
+});
+
+group('Content debt');
+/* These are RATCHETS, not targets. Each figure is the bank's measured state at the time
+   the 2025 balance audit ran, and the assertion is only that it does not get WORSE. The
+   gaps themselves are real and named here so they are visible on every test run rather
+   than rediscovered by a future distribution study — and so that a content pass that
+   closes one of them fails this file and gets to move the number down, which is the
+   point of writing it as a ratchet. ?dev=1 reports the same set in the browser, per
+   category, for whoever is actually editing the data files. */
+check('polarity coverage per section does not regress', ()=>{
+  /* polarityFit is the mechanism that lets a slider combination reach an individual
+     TRAIT rather than just a category. It needs a pol tag to select on, and four
+     sections are mostly untagged — so across Vocabulary, Grammar, Mannerisms and all of
+     Appearance (roughly seven of 37 slots on a default sheet, plus every Appearance
+     card) the sliders can currently only choose the category. Those sections are also
+     invisible to axisProfile, the radar, conflict detection and the ensemble analysers
+     for the same reason. Closing this is a content pass — tagging ~1,950 traits — not a
+     code change. */
+  const FLOORS = {   // measured share of traits carrying a polarity tag
+    'Conflict & Stress Response': 1, 'Social Role in a Group': 1, 'Values & Moral Line': 1,
+    'Attachment & Intimacy Style': 1, 'Humor Style': 1, 'Habits & Vices': 1,
+    'Motivation & Wound': 0.80, 'Verbosity Traits': 0.74, 'Personality Traits': 0.73,
+    'Vocabulary Traits': 0.32, 'Dialogue Grammar Traits': 0.31,
+    'Mannerisms': 0.20, 'Appearance': 0.17,
+  };
+  const by = new Map();
+  T.forEach(t=>{
+    const e = by.get(t.section) || {total:0, tagged:0};
+    e.total++;
+    if (t.pol && Object.keys(t.pol).length) e.tagged++;
+    by.set(t.section, e);
+  });
+  const bad = [], shares = [];
+  Object.entries(FLOORS).forEach(([section, floor])=>{
+    const e = by.get(section);
+    if (!e) return bad.push(`no section "${section}"`);
+    const share = e.tagged / e.total;
+    shares.push([section, share]);
+    if (share < floor) bad.push(`${section} fell to ${(share*100).toFixed(0)}% tagged (floor ${(floor*100).toFixed(0)}%)`);
+  });
+  assert(!bad.length, bad.join('; '));
+  const worst = shares.sort((a,b)=>a[1]-b[1])[0];
+  return `thinnest: ${worst[0]} at ${(worst[1]*100).toFixed(0)}% tagged`;
+});
+check('the (rarity x intensity) grid does not get thinner', ()=>{
+  /* Each category is a diagonal stripe rather than a grid: on average a category
+     populates 10.7 of the 20 (rarity x intensity) cells it could, and the thinnest fill
+     8 despite holding 52-59 traits each. This is the per-category expression of the
+     Cramer's V finding above — within one category you cannot ask for "a quiet,
+     defining Loyalty-Bound trait", because that cell is empty even though both the
+     rarity and the intensity exist elsewhere in the section. */
+  const cells = [];
+  A.TRAITS_BY_KEY.forEach((pool, key)=>{
+    if (pool.length < 20) return;                 // tiny categories can't fill a grid
+    const set = new Set();
+    pool.forEach(t=> set.add((t.rtier || A.rarityTier(t)) + '|' + t.intensity));
+    cells.push([key.replace('||', ' > '), set.size]);
+  });
+  const mean = cells.reduce((a,b)=>a+b[1], 0) / cells.length;
+  const min = Math.min(...cells.map(c=>c[1]));
+  assert(mean >= 10.5, `mean cells per category fell to ${mean.toFixed(1)} of 20 (was 10.7)`);
+  assert(min >= 8, `a category fell to ${min} of 20 cells`);
+  const worst = cells.filter(c=>c[1] === min).map(c=>c[0]).slice(0, 2);
+  return `mean ${mean.toFixed(1)}/20, thinnest ${min}/20 (${worst.join(', ')})`;
+});
+check('no polarity axis becomes more one-sided', ()=>{
+  /* The mood fix added a positive pole to one axis by hand. Five more have the same
+     shape, and polNormalise can only stop them reading as posture on the radar — it
+     cannot give polarityFit material to select on when the slider points the thin way. */
+  const FLOORS = {   // measured positive share; the band is 40-60% and these sit outside it
+    ego: [0.36, 0.44], vol: [0.36, 0.44], intel: [0.64, 0.72], form: [0.68, 0.76], act: [0.60, 0.68],
+  };
+  const poles = {};
+  T.forEach(t=> Object.entries(t.pol || {}).forEach(([ax, v])=>{
+    const e = poles[ax] = poles[ax] || {pos:0, neg:0};
+    if (v > 0) e.pos++; else if (v < 0) e.neg++;
+  }));
+  const bad = [];
+  Object.entries(poles).forEach(([ax, e])=>{
+    const total = e.pos + e.neg;
+    if (!total) return;
+    const share = e.pos / total;
+    const known = FLOORS[ax];
+    if (known){
+      // A known-lopsided axis may improve freely; it must not get worse.
+      if (share < known[0] || share > known[1])
+        bad.push(`${A.AXIS_LABELS[ax]||ax} moved to ${(share*100).toFixed(0)}% positive, outside its recorded ${(known[0]*100).toFixed(0)}-${(known[1]*100).toFixed(0)}% band — if this is an improvement, tighten the band`);
+    } else if (share < 0.4 || share > 0.6){
+      bad.push(`${A.AXIS_LABELS[ax]||ax} has become one-sided at ${(share*100).toFixed(0)}% positive (${e.pos} vs ${e.neg})`);
+    }
+  });
+  assert(!bad.length, bad.join('; '));
+  return Object.keys(FLOORS).length + ' known one-sided axes, ' + (Object.keys(poles).length - Object.keys(FLOORS).length) + ' balanced';
+});
+
+group('Ship shape');
+check('the service worker precaches exactly what index.html loads', ()=>{
+  /* sw.js ASSETS listed five data files; index.html loaded seven. The lazy
+     runtime-cache path hid it on a warm load, so the only symptom was a cold offline
+     install with an incomplete trait bank — and the two missing files were the two
+     most likely to be added to. A hand-maintained duplicate of a list that grows is a
+     list that drifts, so assert it rather than re-checking it by eye. */
+  const fs = require('fs'), path = require('path');
+  const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+  const sw = fs.readFileSync(path.join(ROOT, 'sw.js'), 'utf8');
+  const wanted = [];
+  const rx = /<(?:script[^>]*\ssrc|link[^>]*\shref)=["']([^"']+)["']/g;
+  let m;
+  while ((m = rx.exec(html))){
+    const href = m[1];
+    if (/^https?:|^data:|^\/\//.test(href)) continue;   // fonts, the inline favicon
+    if (!/\.(js|css)$/.test(href)) continue;
+    wanted.push('./' + href.replace(/^\.\//, ''));
+  }
+  const body = sw.match(/const ASSETS = \[([\s\S]*?)\];/);
+  assert(body, 'could not find the ASSETS array in sw.js');
+  const listed = [...body[1].matchAll(/['"]([^'"]+)['"]/g)].map(x=>x[1]);
+  const missing = wanted.filter(w=>!listed.includes(w));
+  // './' and './index.html' are the shell itself and have no tag to match.
+  const extra = listed.filter(l=> l !== './' && l !== './index.html' && !wanted.includes(l));
+  assert(!missing.length, 'sw.js does not precache: ' + missing.join(', '));
+  assert(!extra.length, 'sw.js precaches files index.html does not load: ' + extra.join(', '));
+  return wanted.length + ' scripts/styles precached';
 });
 
 /* Bank figures, printed every run. Comments across the codebase cited the bank size as

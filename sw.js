@@ -18,6 +18,13 @@
    hand when testing the purge path locally. */
 const BUILD_ID = 'dev';   // ← rewritten to the commit SHA by .github/workflows/deploy.yml
 const CACHE = 'character-voice-' + BUILD_ID;
+/* Must list EVERY same-origin script and stylesheet index.html loads, in load order.
+   traits-balance.js and traits-tails2.js were missing: the lazy runtime-cache path in
+   the fetch handler covered for them on a warm load, so nothing ever looked wrong, but
+   a cold offline install shipped a trait bank two data files short. These are also the
+   two files most likely to grow, so the list drifts by default — tests/run.js now
+   asserts this array against index.html's own tags, and CI fails on a mismatch rather
+   than a user discovering it offline. */
 const ASSETS = [
   './',
   './index.html',
@@ -27,6 +34,8 @@ const ASSETS = [
   './js/data/traits-situational.js',
   './js/data/traits-tails.js',
   './js/data/traits-depth.js',
+  './js/data/traits-balance.js',
+  './js/data/traits-tails2.js',
   './js/engine.js',
   './js/generate.js',
   './js/render.js',

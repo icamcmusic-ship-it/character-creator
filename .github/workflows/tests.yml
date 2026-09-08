@@ -21,3 +21,27 @@ jobs:
         with:
           node-version: '20'
       - run: node tests/run.js
+
+  # tests/browser.mjs held the only checks for the things a DOM stub cannot answer —
+  # that the declarative dispatcher actually dispatches, that no inline handler has crept
+  # back in, that the dark palette resolves, and that the app still works under a CSP
+  # with no 'unsafe-inline' in script-src, which is the policy that once made every
+  # button in this app dead. Nothing ran it, in either workflow, so all of that gated
+  # precisely nothing. It runs in both modes here, and in deploy.yml before publishing.
+  browser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install --no-save playwright
+      - run: npx playwright install --with-deps chromium
+      - name: Serve the site
+        run: python3 -m http.server 8111 &
+      - name: Wait for the server
+        run: for i in $(seq 1 30); do curl -sf http://localhost:8111/index.html >/dev/null && exit 0; sleep 1; done; exit 1
+      - name: Behaviour
+        run: node tests/browser.mjs http://localhost:8111
+      - name: Under a strict Content-Security-Policy
+        run: CSP=1 node tests/browser.mjs http://localhost:8111

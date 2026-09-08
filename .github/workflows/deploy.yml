@@ -29,6 +29,17 @@ jobs:
       # nothing: a deploy went out regardless of whether the bank still held together.
       - name: Run invariant tests
         run: node tests/run.js
+      # ...and the browser suite, which gated nothing until now: the CSP and dark-palette
+      # assertions only exist in tests/browser.mjs, and neither workflow ran it. A deploy
+      # could therefore ship a page whose buttons are dead under the site's own policy.
+      - name: Install a browser
+        run: npm install --no-save playwright && npx playwright install --with-deps chromium
+      - name: Run browser tests
+        run: |
+          python3 -m http.server 8111 &
+          for i in $(seq 1 30); do curl -sf http://localhost:8111/index.html >/dev/null && break; sleep 1; done
+          node tests/browser.mjs http://localhost:8111
+          CSP=1 node tests/browser.mjs http://localhost:8111
       # The service worker's comment promised "a version stamp so a deploy invalidates
       # it", but the stamp was the literal string v1 and nothing ever bumped it, so the
       # activate-purge loop was a permanent no-op and returning users could hold stale
