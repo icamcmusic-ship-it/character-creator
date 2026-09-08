@@ -62,23 +62,87 @@ still return a real range of traits at default settings; that Motivation & Wound
 actually moves the categories downstream of it and does not decide them; and that the
 archetype presets push every axis in both directions.
 
+More recent additions, each of which is a bug that shipped:
+
+* A saved character survives the **compress → validate → expand** round trip. Saves are
+  stored by trait id, and both readers validated the compressed payload *before*
+  expanding it — so every character this app saved threw on load, while file
+  export/import (which writes uncompressed state) worked fine and the one validation
+  test, built from a raw `buildCharacterState`, could not see it.
+* The service worker's precache list matches the scripts and stylesheets `index.html`
+  actually loads. It was two data files short.
+* The live profile preview and the picker it predicts agree, by making a category
+  preference that only the shared weight formula can see and asserting the preview
+  moves. They had drifted: the preview applied neither category tiers nor context bias.
+* Archetype profile hints name categories that exist, and nudge the draw without
+  deciding it.
+* Humour actually changes on the pressure sheet, and each of the four stress responses
+  points it somewhere different.
+* No profile category dominates *or* starves its section — with a band tight enough to
+  see it, and a separate check for a section leaning as a group, which a per-category
+  band cannot.
+
 ### Authoring content
 
-There is a load-time shape check for anyone editing the trait data: open the page with
+There is a load-time check for anyone editing the trait data: open the page with
 **`?dev=1`** and every trait is validated for a well-formed id, section, category, name,
 description, example, intensity, rarity tier and polarity vector, and every axis-keyed
 table is checked against `AXIS_LABELS` in both directions, with any problems named in
-the console. It costs a normal load nothing. The app links to it from its own footer.
+the console.
+
+Shape is the easy half. The commoner failure in a bank this size is content that is
+well-formed and *missing*, so the same flag also reports coverage: polarity tagging per
+section, per-axis pole balance, category size, how many of its 20 (rarity × intensity)
+cells each category populates, and how much of each Motivation and Appearance pool is
+actually reachable at default settings. Those are grouped and warned, never thrown —
+they say "this section is thin", not "this build is broken". It costs a normal load
+nothing. The app links to it from its own footer.
 
 The trait bank lives in `js/data/`. Each file is a flat array pushed onto `TRAITS`, so
 adding content means adding a file, appending its `TRAITS.push(...)`, and listing it in
 `index.html` and in `ENGINE_FILES` in `tests/harness.js`. Ids are allocated in blocks
 per file (see the header comment in each) so two files can never collide.
 
-When adding traits, the two axes are independent and should be kept that way: a
-`signature` trait at intensity 1 is a rare, quiet habit and is exactly the kind of
-entry the bank is short of. `node tests/run.js` prints the live bank composition on
-every run and will fail if rarity starts collapsing back onto intensity.
+When adding traits, the two axes should be independent — and are not yet. Measured,
+rarity's dependence on intensity is Cramér's V = 0.651 against a 0.66 test ceiling, so
+rarity is still about two thirds a restatement of intensity: `distinctive` is 92%
+intensity-3, `signature` is 88% intensity 4–5, `common` is 91% intensity 1–2. Every cell
+is occupied, which is what the test asserts, but the off-diagonal mass is small. A
+`signature` trait at intensity 1 is a rare, quiet habit and is exactly the kind of entry
+the bank is short of: roughly 400 more quiet-signature (i1–i2) and 300 more loud-common
+(i4–i5) entries would let the ceiling come down to 0.55 and then 0.45.
+`node tests/run.js` prints the live bank composition on every run and will fail if
+rarity starts collapsing further back onto intensity.
+
+### The content debt, measured
+
+Three gaps in the data are tracked as ratchets in `tests/run.js` — the suite fails if
+any of them gets worse, and closing one means moving its number down. `?dev=1` reports
+the same set in the browser, per category, for whoever is editing the files.
+
+* **Polarity coverage.** `polarityFit` is what lets a slider *combination* reach an
+  individual trait rather than only a category. It needs a `pol` tag to select on, and
+  four sections mostly do not have one: Vocabulary 34% tagged, Dialogue Grammar 33%,
+  Mannerisms 21%, Appearance 18% — against 100% for the seven profile sections and 75%
+  for Personality. Across those sections (about seven of 37 slots on a default sheet,
+  plus every Appearance card) the sliders currently choose the category and the dice
+  choose the trait. Those traits are also invisible to `axisProfile`, the radar,
+  conflict detection and the Relationship/Ensemble analysers, for the same reason.
+* **The (rarity × intensity) grid, per category.** On average a category populates 10.7
+  of the 20 cells it could; the thinnest fill 8 while holding 52–59 traits. This is the
+  per-category form of the Cramér's V figure above: within one category you cannot ask
+  for "a quiet, defining Loyalty-Bound trait", because that cell is empty even though
+  both the rarity and the intensity exist elsewhere in the section.
+* **One-sided axes.** Five polarity axes lean hard: formality 72% positive, analytical
+  thinking 69%, physical energy 64%, self-confidence 38%, volume/wordiness 38%.
+  `polNormalise` stops these reading as posture on the radar, but it cannot fix the
+  draw — `polarityFit` still has thin material when those sliders point the minority way.
+
+`tierWeight`'s core/secondary distinction is in the same category: it is driven by a
+hand-reviewed list of 55 names out of 2,257 Personality entries, so at 2.4% coverage the
+mechanism is real but barely exercised. Broadening it is a data pass; the distinction is
+semantic and a regex was tried and removed for consistently mislabelling dispositions
+as symptoms.
 
 ## Rarity
 
@@ -98,9 +162,10 @@ They used to be the same number wearing two hats — the badge tier was derived 
 slider position and left a quiet signature trait impossible to express. The data was
 migrated once (declared `common` split by intensity; the 4,742-entry declared
 `signature` class split into signature / distinctive / uncommon), then a
-hand-reviewed pass populated every tier-and-intensity combination so the two are
-genuinely independent. From here rarity is plain data: correct it trait by trait in
-the data files, no code change required.
+hand-reviewed pass populated every tier-and-intensity combination. That made the two
+*expressible* independently; it has not yet made them independent (see the measurement
+under "Authoring content" above). From here rarity is plain data: correct it trait by
+trait in the data files, no code change required.
 
 ## Budgets
 
