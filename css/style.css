@@ -383,6 +383,14 @@
     text-transform:uppercase; letter-spacing:.07em; font-weight:700; list-style:revert;
   }
   details.advanced summary::marker { color:var(--emerald); }
+  /* The ten collapsible panels are the page's third level of structure and carried no
+     heading role, so a screen reader saw one h1, three h2 and then nothing. The h3 is
+     for the outline only — it must not change how the summary looks or where the
+     disclosure marker sits, so it renders inline and inherits everything. */
+  summary > h3 {
+    display:inline; margin:0; padding:0;
+    font:inherit; color:inherit; letter-spacing:inherit; text-transform:inherit;
+  }
   .affinityList { font-size:.8rem; color:var(--muted); margin-top:12px; line-height:1.8; }
   .affinityList b { color:var(--dusk-blue); }
   .stressToggleRow { margin-top:12px; }
@@ -787,6 +795,7 @@
   }
   .savedAct:hover { border-color:var(--dusk-blue); color:var(--dusk-blue); }
   .savedDel:hover { border-color:var(--bubblegum); color:var(--bubblegum); }
+  .savedFoot { margin-top:8px; font-size:.75rem; color:var(--muted); font-family:var(--font-mono); }
   .savedList span { cursor:default; background:none; padding:0; margin:0; color:inherit; }
   .castCard h3 { display:flex; align-items:center; justify-content:space-between; gap:10px; }
 

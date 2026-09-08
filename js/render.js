@@ -172,6 +172,124 @@ function slotDepthHTML(id, t){
     : `${h.left} of ${h.total} still available in ${t.category} at these settings — you have tossed ${h.tossed}.`;
   return `<span class="slotDepth ${cls}" title="${escAttr(msg)}">${h.left === 0 ? 'pool empty' : h.left + ' left'}</span>`;
 }
+/* "8 kept, 29 will reroll" — the single most decision-relevant fact about a sheet you
+   have been curating for ten minutes. Lifted out of renderSheet so a one-card lock
+   toggle can update it without rebuilding the sheet to do so. */
+function refreshHandStrip(){
+  const el = document.getElementById('handKept');
+  if (!el) return;
+  const all = Object.values(state).filter(s=> s && s.trait);
+  const kept = all.filter(s=> s.locked).length;
+  if (!all.length){ el.hidden = true; return; }
+  el.hidden = false;
+  el.textContent = kept
+    ? `${kept} kept · ${all.length - kept} will reroll`
+    : `${all.length} cards · none kept`;
+  el.title = kept
+    ? `Pressing Generate redraws ${all.length - kept} of ${all.length} cards; the ${kept} you kept stay exactly as they are.`
+    : `Pressing Generate redraws all ${all.length} cards. Use Keep on a card to hold it.`;
+}
+
+/* ================= CARD STATE, FOCUS, AND SURGICAL UPDATES =================
+   renderSheet() emptied #sheetBody and rebuilt all ~37 cards for any change at all —
+   a lock toggle (a CSS class flip), a pin nudge, a single slot's reroll. Three things
+   went with it every time: the button the user had just pressed was destroyed, so
+   keyboard focus fell back to <body> and a Toss-repeatedly workflow was impossible
+   without a mouse; every open ⋯ control strip closed; and on a phone the whole sheet
+   visibly reflowed.
+
+   Two mechanisms fix all three. OPEN_CARD_CONTROLS moves the strip's open/closed state
+   out of the DOM so a rebuild cannot lose it. refreshCard() replaces exactly the one
+   card that changed and puts focus back on the equivalent control, so nothing else on
+   the page moves at all. */
+const OPEN_CARD_CONTROLS = new Set();   // slot ids whose ⋯ strip is open
+
+/* Where the caret is, in terms a rebuilt DOM can be matched against: which card, and
+   which control within it. Falls back to the card itself when the pressed button is
+   gone (Toss on a slot whose new trait is required-by-name renders a <span>, not a
+   button). */
+function captureCardFocus(){
+  const el = (typeof document !== 'undefined') ? document.activeElement : null;
+  if (!el || !el.closest) return null;
+  const card = el.closest('.traitCard');
+  if (!card || !card.dataset || !card.dataset.slot) return null;
+  const btns = Array.from(card.querySelectorAll('button'));
+  const idx = btns.indexOf(el);
+  return {slot: card.dataset.slot, cls: el.className || '', idx};
+}
+function restoreCardFocus(mark){
+  if (!mark || typeof document === 'undefined') return;
+  const card = document.querySelector('.traitCard[data-slot="' + (typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(mark.slot) : mark.slot) + '"]');
+  if (!card || !card.querySelectorAll) return;
+  const btns = Array.from(card.querySelectorAll('button'));
+  if (!btns.length) return;
+  // Match on class first — "the Toss button" survives the card's contents changing —
+  // and fall back to position, then to the card's first control.
+  const byClass = mark.cls ? btns.find(b => b.className === mark.cls) : null;
+  const target = byClass || btns[mark.idx] || btns[0];
+  if (target && target.focus) target.focus();
+}
+/* Run a re-render and put the caret back where it was. Used by every full-sheet
+   rebuild that is a response to pressing something ON a card. */
+function withPreservedFocus(fn){
+  const mark = captureCardFocus();
+  const out = fn();
+  restoreCardFocus(mark);
+  return out;
+}
+/* Replace ONE card in place. The whole reason renderSheet was being called for a
+   single-slot change; now it is only called when the set of slots itself changes. */
+function refreshCard(slotId){
+  if (typeof document === 'undefined') return false;
+  const host = document.querySelector('.traitCard[data-slot="' + (typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(slotId) : slotId) + '"]');
+  if (!host || !state[slotId] || !state[slotId].trait) return false;
+  const mark = captureCardFocus();
+  const holder = document.createElement('div');
+  holder.innerHTML = traitCardHTML(slotId, state[slotId], true, true, null, titleForSlotId(slotId));
+  const next = holder.firstElementChild;
+  if (!next || !host.replaceWith) return false;
+  host.replaceWith(next);
+  refreshGroupHead(titleForSlotId(slotId));
+  refreshHandStrip();
+  restoreCardFocus(mark);
+  return true;
+}
+/* Has the sheet's SLOT SET changed since the last full render? A reroll can trigger
+   reapplyConstraintsAfterMutation, which may seat or drop a required slot — and then
+   replacing one card would leave the sheet showing a slot list that no longer matches
+   state. Cheap to check, and it keeps refreshCard honest. */
+function sheetSlotSetChanged(){
+  if (typeof SHEET_GROUPS === 'undefined' || !SHEET_GROUPS) return true;
+  const rendered = new Set();
+  SHEET_GROUPS.forEach(g=>g.ids.forEach(id=>rendered.add(id)));
+  const live = Object.keys(state);
+  return live.length !== rendered.size || live.some(k=>!rendered.has(k));
+}
+/* The entry point every per-card action uses: replace the one card if that is all that
+   moved, otherwise rebuild — but never lose the caret either way. */
+function renderSlotChange(slotId){
+  if (sheetSlotSetChanged() || !refreshCard(slotId)) withPreservedFocus(()=>{ renderSheet(); });
+}
+
+/* A card change can move two numbers outside the card: its section's "N · M kept"
+   count and the "Your hand" strip. Both were only ever written by renderSheet. */
+function refreshGroupHead(title){
+  const wrap = document.getElementById(sectionAnchorId(title));
+  if (!wrap || !wrap.querySelector) return;
+  const g = (typeof SHEET_GROUPS !== 'undefined' ? SHEET_GROUPS : []).find(x=>x.title === title);
+  if (!g) return;
+  const validIds = g.ids.filter(id=>state[id]);
+  const kept = validIds.filter(id => state[id] && state[id].locked).length;
+  const count = wrap.querySelector('.axisCount');
+  if (count) count.textContent = `${validIds.length}${kept ? ` · ${kept} kept` : ``}`;
+  const lockBtn = wrap.querySelector('.axisActions .axisAction:nth-child(2)');
+  if (lockBtn){
+    const more = kept < validIds.length;
+    lockBtn.textContent = more ? 'keep section' : 'release section';
+    lockBtn.title = more ? 'Keep every card in this section through rerolls and regeneration' : 'Release every card in this section';
+  }
+}
+
 function traitCardHTML(id, s, includeControls, showDiff, accent, tagLabel){
   // BUG FIX: several code paths could produce a slot with a null trait (an empty
   // pool after filtering, a failed reroll), and this function dereferenced it
@@ -194,8 +312,14 @@ function traitCardHTML(id, s, includeControls, showDiff, accent, tagLabel){
   // The section name rides on the card as a tag, so a card still says what it is once
   // it is out of its group (compact view, cast cards, a screenshot of one card).
   const tag = tagLabel ? `<span class="traitTag">${escHTML(tagLabel)}</span>` : ``;
+  /* The ⋯ control strip was a pure DOM class, so every renderSheet closed every open
+     strip, and the aria-expanded below was hard-coded "false" — announcing a collapsed
+     strip even when it had just been visually reopened. Card state lives in JS now and
+     is rendered from there, so it survives a rebuild and the ARIA state is true.
+     data-slot is what makes a single card replaceable without rebuilding all 37. */
+  const openNow = includeControls && OPEN_CARD_CONTROLS.has(id);
   return `
-    <div class="traitCard${s.wildcard ? ' wildcardCard' : ''}${changedClass}${tag ? ' tagged' : ''}"${style}>
+    <div class="traitCard${s.wildcard ? ' wildcardCard' : ''}${changedClass}${tag ? ' tagged' : ''}${openNow ? ' controlsOpen' : ''}"${style} data-slot="${escAttr(id)}">
       ${tag}
       <div class="traitMain">
         <div class="traitName">${escHTML(t.trait)}
@@ -216,7 +340,7 @@ function traitCardHTML(id, s, includeControls, showDiff, accent, tagLabel){
       </div>
       ${includeControls ? `
       <button class="slotToggle" ${actAttr('click', 'toggleCardControls', "$el")}
-              aria-expanded="false" aria-label="Show the controls for this card" title="Show the controls for this card">&ctdot;</button>
+              aria-expanded="${openNow ? 'true' : 'false'}" aria-label="${openNow ? 'Hide' : 'Show'} the controls for this card" title="${openNow ? 'Hide' : 'Show'} the controls for this card">&ctdot;</button>
       <div class="slotBtns">
         ${s.required && id.startsWith("req_")
           /* "Always include this exact trait" is the user's own instruction — there is
@@ -639,22 +763,7 @@ function renderSheet(){
   })();
 
   // Coherence score + soft tension notes
-  /* "8 kept, 29 will reroll" — invisible until now, and it is the single most
-     decision-relevant fact about a sheet you have been curating for ten minutes. */
-  (function(){
-    const el = document.getElementById('handKept');
-    if (!el) return;
-    const all = Object.values(state).filter(s=> s && s.trait);
-    const kept = all.filter(s=> s.locked).length;
-    if (!all.length){ el.hidden = true; return; }
-    el.hidden = false;
-    el.textContent = kept
-      ? `${kept} kept · ${all.length - kept} will reroll`
-      : `${all.length} cards · none kept`;
-    el.title = kept
-      ? `Pressing Generate redraws ${all.length - kept} of ${all.length} cards; the ${kept} you kept stay exactly as they are.`
-      : `Pressing Generate redraws all ${all.length} cards. Use Keep on a card to hold it.`;
-  })();
+  refreshHandStrip();
 
   const co = coherenceScore(state);
   const tensions = softTensionsFor(state);
@@ -1435,7 +1544,7 @@ function importCharacterJSON(fileInput){
       pinnedTargets = p.pinnedTargets || {};
       charVariants = p.charVariants || {};
       traitNotes = p.traitNotes || {};
-      diffLog = {}; rerollExclusions = {}; rerollHistory = {}; whyOpen = {};
+      diffLog = {}; rerollExclusions = {}; rerollHistory = {}; whyOpen = {}; OPEN_CARD_CONTROLS.clear();
       if (p.settings) restoreSettings(p.settings);
       else if (p.sliders) restoreSliders(p.sliders);   // version 1 files
       lastGeneratedSliders = (p.settings && p.settings.sliders) || p.sliders || null;

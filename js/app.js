@@ -104,10 +104,28 @@ function askForName(message, initial){
   });
 }
 
+/* Does a save already exist under this name? Used by save and rename alike, because
+   both wrote straight through and destroyed whatever was already there. */
+async function savedCharacterExists(name){
+  try { const r = await storage.get('character:'+name); return !!(r && r.value); }
+  catch(e){ return false; }
+}
 async function saveCharacter(btnEl){
   if(!Object.keys(state).length){ toast("Generate a character first.", "warn"); return; }
-  const name = charMeta.name || await askForName("Name this character voice:", "");
+  /* BUG FIX: this was `charMeta.name || await askForName(...)`, and _runGeneration sets
+     charMeta.name to "Unnamed Character" when the name box is empty — so charMeta.name
+     is never falsy after a generation and the prompt never fired. Every unnamed save
+     went to the key `character:Unnamed Character` and silently destroyed the previous
+     one. Always ask, pre-filled with the name we have, and never overwrite an existing
+     save without saying so. */
+  const suggested = (charMeta.name && charMeta.name !== "Unnamed Character") ? charMeta.name : "";
+  const name = await askForName("Name this character voice:", suggested);
   if(!name) return;
+  if (await savedCharacterExists(name)){
+    if (!await askForConfirm(`"${name}" is already saved. Replace it? The saved version will be gone.`, "Replace")) return;
+  }
+  charMeta.name = name;
+  setVal('charName', name);
   const btn = btnEl || null;
   const oldLabel = btn ? btn.textContent : null;
   if (btn){ btn.textContent = "Saving…"; btn.disabled = true; }
@@ -154,6 +172,12 @@ async function deleteSavedCharacter(name){
 async function renameSavedCharacter(name){
   const next = await askForName('Rename "'+name+'" to:', name);
   if (!next || next === name) return;
+  // Same clobber as saveCharacter had: storage.set to the new key overwrote whatever
+  // was already under it, and then deleted the source, so renaming onto an existing
+  // name destroyed a save with no warning and no way back.
+  if (await savedCharacterExists(next)){
+    if (!await askForConfirm(`"${next}" is already saved. Replace it? The saved version will be gone.`, "Replace")) return;
+  }
   try {
     const r = await storage.get('character:'+name);
     if (!r || !r.value) return;
@@ -175,6 +199,16 @@ async function loadSavedCharacter(name){
        identical sequence with no validation at all, and storage can hold a payload
        written by an older build, or one that was only partially written. Validate while
        nothing has been touched yet. */
+    /* ORDER MATTERS, and getting it wrong broke Save/Load outright. A compressed save
+       stores every trait as a {__id: 102} stub — no id, no trait/category/section
+       strings — and validateSheetPayload is (correctly) strict about exactly those
+       fields, because they are what the render path dereferences. Validating the
+       payload as it comes off disk therefore threw on EVERY character this build had
+       ever saved: `state slot "verbosity" has a trait with no id`. Expand first, so the
+       validator sees the same shape the file-import path shows it — which is why file
+       export/import never had this bug and the one validation test never caught it. */
+    parsed.state = expandSlots(parsed.state);
+    parsed.pressureState = expandSlots(parsed.pressureState);
     validateSheetPayload(parsed);
     /* Also missing here: relink(). Without it a loaded character keeps the stale trait
        objects embedded at save time, so why?/reroll/pin operate on detached copies —
@@ -186,18 +220,17 @@ async function loadSavedCharacter(name){
         if (s2 && s2.trait){ const live = TRAITS_BY_ID.get(s2.trait.id); if (live) s2.trait = live; else orphans++; }
       }); return st; };
     snapshotHistory();
-    /* expandSlots first, then relink. Compressed saves carry {__id} stubs that expand
-       straight back to the live trait; older saves carry full embedded copies that
-       expandSlots leaves alone and relink then reconnects. Both arrive here the same
-       way, so a save written by any build still loads. */
-    parsed.state = relink(expandSlots(parsed.state));
-    parsed.pressureState = relink(expandSlots(parsed.pressureState));
+    /* Already expanded above; relink now reconnects anything expandSlots left alone —
+       an older save carrying full embedded trait copies rather than {__id} stubs. Both
+       shapes arrive here the same way, so a save written by any build still loads. */
+    parsed.state = relink(parsed.state);
+    parsed.pressureState = relink(parsed.pressureState);
     state = parsed.state; charMeta = parsed.charMeta || {name, age:"", context:"", archetypeLabel:"Loaded"};
     pressureState = parsed.pressureState || null;
     pinnedTargets = parsed.pinnedTargets || {};
     charVariants = parsed.charVariants || {};
     traitNotes = parsed.traitNotes || {};
-    diffLog = {}; rerollExclusions = {}; rerollHistory = {}; whyOpen = {};
+    diffLog = {}; rerollExclusions = {}; rerollHistory = {}; whyOpen = {}; OPEN_CARD_CONTROLS.clear();
     if (parsed.settings) restoreSettings(parsed.settings);
     setVal('charName', charMeta.name || "");
     setVal('charAge', charMeta.age || "");
@@ -224,19 +257,34 @@ async function loadSavedList(){
     head.className = 'savedHead';
     head.textContent = 'Saved characters';
     listEl.appendChild(head);
-    for (const k of res.keys){
-      const name = k.replace('character:','');
-      let summary = "";
+    /* PERF: this awaited one storage.get per saved character strictly in sequence, so
+       thirty saves meant thirty round trips one after another. They are independent
+       reads; fetch them together. */
+    const rows = await Promise.all(res.keys.map(async k=>{
       try {
         const r = await storage.get(k);
         const parsed = JSON.parse(r.value);
+        return {k, parsed, bytes: (r.value || "").length};
+      } catch(e){ return {k, parsed: null, bytes: 0, err: e}; }
+    }));
+    let bytesUsed = 0;
+    rows.forEach(x=>{ bytesUsed += x.bytes; });
+    for (const {k, parsed, bytes} of rows){
+      const name = k.replace('character:','');
+      let summary = "";
+      if (parsed){
         const n = Object.values(parsed.state||{}).filter(x=>x&&x.trait).length;
         const bits = [];
         if (parsed.charMeta && parsed.charMeta.archetypeLabel) bits.push(parsed.charMeta.archetypeLabel);
         bits.push(n + " traits");
         if (parsed.savedAt) bits.push(new Date(parsed.savedAt).toLocaleDateString());
+        bits.push(Math.max(1, Math.round(bytes/1024)) + " KB");
         summary = bits.join(" · ");
-      } catch(e){ summary = "saved character"; }
+      } else {
+        // Was indistinguishable from a normal entry. A save that will not parse is a
+        // save that will not load, and the user should be told that here, not on click.
+        summary = "unreadable — this save is damaged and will not load";
+      }
       const row = document.createElement('div');
       row.className = 'savedRow';
       const open = document.createElement('button');
@@ -264,13 +312,38 @@ async function loadSavedList(){
       row.appendChild(open); row.appendChild(cmp); row.appendChild(ren); row.appendChild(del);
       listEl.appendChild(row);
     }
-  } catch(e){ /* none saved yet */ }
+    /* The code already knows what a save costs (~3.7 KB compressed) and the user never
+       saw it — the first sign of a full quota was Save failing. Say what is in use. */
+    const foot = document.createElement('div');
+    foot.className = 'savedFoot sub';
+    const kb = bytesUsed / 1024;
+    foot.textContent = `${rows.length} saved · ${kb < 1024 ? kb.toFixed(0) + " KB" : (kb/1024).toFixed(1) + " MB"} used`;
+    foot.title = "Browsers typically allow about 5 MB of local storage in total, shared with your preferences. Export characters to files to keep them beyond that.";
+    listEl.appendChild(foot);
+  } catch(e){
+    /* This swallowed EVERY error under "none saved yet", so a genuine storage fault —
+       a disabled or full backend, a rejected read — looked exactly like a new user with
+       no saves. An empty list is the `!res.keys.length` case above and returns early;
+       reaching here means something actually went wrong. */
+    console.error(e);
+    listEl.innerHTML = "";
+    const err = document.createElement('div');
+    err.className = 'savedHead';
+    err.textContent = "Saved characters could not be read from this browser's storage.";
+    err.title = String(e && e.message || e);
+    listEl.appendChild(err);
+  }
 }
 
 async function addSavedToCast(name){
   try {
     const r = await storage.get('character:'+name);
     const parsed = JSON.parse(r.value);
+    /* Broken twice over before this: it validated the compressed payload (which always
+       threw, see loadSavedCharacter) and it never called expandSlots at all, so even
+       past the validator every cast member would have been a sheet of {__id} stubs.
+       Same order as the load path — expand, validate, relink. */
+    parsed.state = expandSlots(parsed.state);
     validateSheetPayload(parsed);
     const st = parsed.state || {};
     Object.values(st).forEach(s2=>{
@@ -293,7 +366,7 @@ async function addSavedToCast(name){
 // ================= CAST COMPARISON =================
 let castStates = [];
 let lastCastSeed = null;
-function randomAxisLevel(){ return (Math.random()*4) - 2; }
+function randomAxisLevel(){ return (rand()*4) - 2; }
 
 function generateCast(){
   const count = intVal('castCount', 3);
@@ -303,14 +376,13 @@ function generateCast(){
   const rarityPref = rarityPrefVal();
   const mannerCount = intVal('mannerCount', 3);
   const vocabCount = intVal('vocabCount', 2);
-  // The cast was the one generator with no reproducibility at all: pure Math.random,
+  // The cast was the one generator with no reproducibility at all: unseeded draws,
   // so an ensemble you liked could never be recovered or shared. Same seeded-block
   // pattern as the single character, on its own stream.
   const seedInput = document.getElementById('castSeed');
   const seedStr = seedInput ? seedInput.value.trim() : "";
-  const seedNum = seedStr ? hashSeedString(seedStr) : ((Date.now() ^ (Math.random()*0x7fffffff)) >>> 0);
+  const seedNum = seedStr ? hashSeedString(seedStr) : entropySeed();
   lastCastSeed = seedStr || seedNum.toString(36);
-  const _origRandom = Math.random;
   castStates = [];
   // withoutContextBias: the cast is not "six more of the character you just made" —
   // see the note on the helper in engine.js.
@@ -328,7 +400,7 @@ function generateCast(){
   const baseVerb = rawToLevel(intVal('verbositySlider', 0));
   const baseReg  = rawToLevel(intVal('registerSlider', 0));
   const baseComp = rawToLevel(intVal('composureSlider', 0));
-  const around = (base, s) => clamp(base + (Math.random()*2 - 1) * 2 * s, -2, 2);
+  const around = (base, s) => clamp(base + (rand()*2 - 1) * 2 * s, -2, 2);
 
   /* ANTI-SIMILARITY. Each member was an independent roll with nothing stopping two of
      six landing on the same Role AND Values AND Attachment — which is the one thing an
@@ -349,8 +421,7 @@ function generateCast(){
   };
 
   let rerolled = 0;
-  try { withoutContextBias(()=> withSavedVariants(()=>{
-    Math.random = mulberry32(seedNum);
+  withoutContextBias(()=> withSpeculativeGeneration(()=> withRng(mulberry32(seedNum), ()=>{
     for (let i=0;i<count;i++){
       let st = null, variants = null;
       // Accept immediately at <=1 shared key section; try a few times to beat 2+.
@@ -361,7 +432,7 @@ function generateCast(){
         const personalityOverrides = {};
         PERSONALITY_AXES.forEach(axis=>{
           personalityOverrides[axis.id] = anchored
-            ? Math.round(clamp(intVal('pers_'+axis.id, 0) + (Math.random()*2 - 1) * 100 * spread, -100, 100))
+            ? Math.round(clamp(intVal('pers_'+axis.id, 0) + (rand()*2 - 1) * 100 * spread, -100, 100))
             : Math.round(randomAxisLevel()*50);
         });
         rollCharacterVariants();
@@ -379,7 +450,7 @@ function generateCast(){
         meta: {name:"Character " + (i+1), age:"", context:"",
                archetypeLabel: anchored ? "Cast member (around your character)" : "Cast member"}});
     }
-  })); } finally { Math.random = _origRandom; }
+  })));
   if (rerolled) console.info(`[cast] re-rolled ${rerolled} time(s) to keep members distinct`);
   const out = document.getElementById('castSeedReadout');
   if (out) out.textContent = "Cast seed: " + lastCastSeed;
@@ -427,7 +498,14 @@ function renderCast(){
     card.className = "castCard";
     // Cast names are editable (rename below), so this is interpolated user text:
     // escape it rather than waiting for the day someone types a "<".
-    let inner = `<h3><span>${escHTML(c.meta.name)}</span><button class="savedAct" ${actAttr('click', 'renameCastMember', idx)}>rename</button></h3>`;
+    /* A cast was add-only: nothing anywhere removed a member, so a mis-generated or
+       no-longer-wanted character stayed in the ensemble (and in the balance check, the
+       overlay radar and both Relationship selectors) until the whole cast was
+       regenerated from scratch. */
+    let inner = `<h3><span>${escHTML(c.meta.name)}</span>` +
+      `<button class="savedAct" ${actAttr('click', 'renameCastMember', idx)}>rename</button>` +
+      `<button class="savedAct savedDel" ${actAttr('click', 'removeCastMember', idx)} ` +
+      `aria-label="Remove ${escAttr(c.meta.name)} from the cast" title="Remove this character from the cast">remove</button></h3>`;
     const addAll = (ids)=>{ ids.forEach(id=>{ inner += traitCardHTML(id, c.state[id], false, false, sectionColor(titleForSlotId(id))); }); };
     addAll(Object.keys(c.state).filter(k=>k.startsWith("pers_")));
     addAll(Object.keys(c.state).filter(k=>k.startsWith("prof_")));
@@ -447,10 +525,28 @@ async function renameCastMember(i){
   const c = castStates[i];
   if (!c) return;
   const next = await askForName("Name this cast member:", c.meta.name);
-  if (!next) return;
+  if (!next || next === c.meta.name) return;
+  /* Names are the cast's identity everywhere it is read from the outside — the
+     Relationship dropdowns, addSavedToCast's "already on the Cast tab" check, the
+     markdown and JSON exports — and duplicates were allowed, producing two
+     indistinguishable options and a dedupe check that refused the wrong character. */
+  if (castStates.some((o,j)=> j !== i && o.meta.name === next)){
+    toast(`Another cast member is already called "${next}".`, "warn");
+    return;
+  }
   c.meta.name = next;
   renderCast();
   refreshRelSelectors();
+}
+async function removeCastMember(i){
+  const c = castStates[i];
+  if (!c) return;
+  if (!await askForConfirm(`Remove "${c.meta.name}" from the cast?`, "Remove")) return;
+  const name = c.meta.name;
+  castStates.splice(i, 1);
+  renderCast();
+  refreshRelSelectors();
+  toast(`Removed "${name}" from the cast.`);
 }
 function castToMarkdown(){
   const head = `# Character Cast\n\n_${castStates.length} characters_\n`;
@@ -624,6 +720,18 @@ function updateSliderReadouts(){
     const v = parseFloat(dv.value) || 0;
     setValueText('divergence', v < 0.08 ? "never" : v < 0.3 ? "sometimes" : v < 0.6 ? "often" : "very often");
   }
+  /* The three Appearance sliders were the last controls in the app announced as a bare
+     number: "minus thirty-five", with no <label for> either, so a screen reader had
+     neither the control's name nor what its value meant. Same treatment as the
+     personality axes, off the same axis tables. */
+  APPEARANCE_AXES.forEach(axis=>{
+    const el = document.getElementById('app_'+axis.id);
+    if (!el) return;
+    const raw = intVal(el, 0);
+    setValueText('app_'+axis.id, Math.abs(raw) < 14
+      ? `${raw} — no deliberate statement`
+      : `${raw} — ${axisReadout(axis, raw)}`);
+  });
   const rf = document.getElementById('rangeFocus');
   if (rf){
     const v = parseFloat(rf.value);
@@ -1010,10 +1118,10 @@ async function resetAllToDefaults(){
 
 function randomRawSlider(){
   // biased toward the extremes a bit so randomized characters read as distinctive, not muddy-neutral
-  const r = Math.random();
+  const r = rand();
   let v;
-  if (r < 0.6) { v = (Math.random()*2-1) * 100; }           // 60%: anywhere in range
-  else { v = (Math.random() < 0.5 ? -1 : 1) * (60 + Math.random()*40); } // 40%: pushed toward an extreme
+  if (r < 0.6) { v = (rand()*2-1) * 100; }           // 60%: anywhere in range
+  else { v = (rand() < 0.5 ? -1 : 1) * (60 + rand()*40); } // 40%: pushed toward an extreme
   return Math.round(clamp(v, -100, 100));
 }
 
@@ -1089,18 +1197,26 @@ function jumpToSectionFromSelect(el){
 function toggleCardControls(el){
   const card = el && el.closest('.traitCard');
   if (!card) return;
-  card.classList.toggle('controlsOpen');
-  el.setAttribute('aria-expanded', String(card.classList.contains('controlsOpen')));
+  // The open/closed state is JS state (OPEN_CARD_CONTROLS, render.js), not a DOM class
+  // the next render throws away — see the note there. The class and the ARIA attribute
+  // are both written from it so a rebuilt card comes back open, and announced open.
+  const slot = card.dataset && card.dataset.slot;
+  const open = !card.classList.contains('controlsOpen');
+  card.classList.toggle('controlsOpen', open);
+  if (slot){ if (open) OPEN_CARD_CONTROLS.add(slot); else OPEN_CARD_CONTROLS.delete(slot); }
+  el.setAttribute('aria-expanded', String(open));
+  el.setAttribute('aria-label', (open ? 'Hide' : 'Show') + ' the controls for this card');
+  el.title = (open ? 'Hide' : 'Show') + ' the controls for this card';
 }
 function randomizeAndGenerate(){ randomizeSliders('all'); generateCharacter(); }
 function printSheet(){ if (typeof print === 'function') print(); }
 
 function surpriseMe(){
   const keys = Object.keys(ARCHETYPES);
-  const pick = keys[Math.floor(Math.random() * keys.length)];
+  const pick = keys[Math.floor(rand() * keys.length)];
   const sel = document.getElementById('archetypeSelect');
   // Half the time take a preset and pull it around; half the time go from nothing.
-  const useArchetype = sel && Math.random() < 0.5;
+  const useArchetype = sel && rand() < 0.5;
   if (sel) sel.value = useArchetype ? pick : "";
   if (useArchetype) applyArchetypeSetup(); else randomizeSliders('all');
   if (useArchetype){
@@ -1108,13 +1224,13 @@ function surpriseMe(){
     PERSONALITY_AXES.forEach(axis=>{
       const el = document.getElementById('pers_'+axis.id);
       if (!el) return;
-      el.value = String(clamp(intVal(el, 0) + Math.round((Math.random()*2-1) * 45), -100, 100));
+      el.value = String(clamp(intVal(el, 0) + Math.round((rand()*2-1) * 45), -100, 100));
     });
   }
   randomizeProfileTypes();
   // divergence is a 0..1 range in steps of 0.05, not a 0..100 slider.
   const div = document.getElementById('divergence');
-  if (div) div.value = (0.35 + Math.round(Math.random() * 8) * 0.05).toFixed(2);
+  if (div) div.value = (0.35 + Math.round(rand() * 8) * 0.05).toFixed(2);
   const wild = document.getElementById('wildcardToggle');
   if (wild) wild.checked = true;
   setVal('charName', "");
@@ -1558,13 +1674,10 @@ function generateFoil(){
   if (!Object.keys(state).length){ toast("Generate a character first — the foil is built against them.", "warn"); return; }
   const seedInput = document.getElementById('foilSeed');
   const seedStr = seedInput ? seedInput.value.trim() : "";
-  const seedNum = seedStr ? hashSeedString(seedStr) : ((Date.now() ^ (Math.random()*0x7fffffff)) >>> 0);
-  const _origRandom = Math.random;
-  // Foils were the other unreproducible generator: raw Math.random throughout, so a
+  const seedNum = seedStr ? hashSeedString(seedStr) : entropySeed();
+  // Foils were the other unreproducible generator: unseeded draws throughout, so a
   // foil you liked could not be recovered, shared, or regenerated after a tweak.
-  Math.random = mulberry32(seedNum);
-  try { _generateFoilInner(seedStr || seedNum.toString(36)); }
-  finally { Math.random = _origRandom; }
+  withRng(mulberry32(seedNum), ()=> _generateFoilInner(seedStr || seedNum.toString(36)));
 }
 function _generateFoilInner(seedLabel){
   const src = {};
@@ -1574,13 +1687,13 @@ function _generateFoilInner(seedLabel){
   const ranked = PERSONALITY_AXES.map(a=>({axis:a, mag:Math.abs(src[a.id])})).sort((x,y)=>y.mag-x.mag);
   const strong = ranked.filter(r=>r.mag>=25);
   const pool = strong.length>=3 ? strong : ranked;
-  const shuffle = arr => arr.map(a=>[Math.random(),a]).sort((x,y)=>x[0]-y[0]).map(x=>x[1]);
+  const shuffle = arr => arr.map(a=>[rand(),a]).sort((x,y)=>x[0]-y[0]).map(x=>x[1]);
 
-  const opposeCount = 2 + (Math.random()<0.5?1:0); // 2 or 3
+  const opposeCount = 2 + (rand()<0.5?1:0); // 2 or 3
   const opposed = shuffle(pool.slice(0, Math.max(opposeCount+2, 4))).slice(0, opposeCount);
   const opposedIds = new Set(opposed.map(o=>o.axis.id));
   const alignCandidates = shuffle(PERSONALITY_AXES.filter(a=>!opposedIds.has(a.id)));
-  const aligned = alignCandidates.slice(0, 1 + (Math.random()<0.5?1:0)); // 1 or 2
+  const aligned = alignCandidates.slice(0, 1 + (rand()<0.5?1:0)); // 1 or 2
 
   const overrides = {};
   PERSONALITY_AXES.forEach(a=>{
@@ -1588,9 +1701,9 @@ function _generateFoilInner(seedLabel){
       const v = src[a.id];
       overrides[a.id] = Math.round(clamp((Math.abs(v) < 25 ? 55 : Math.abs(v)) * (v >= 0 ? -1 : 1), -100, 100));
     } else if (aligned.some(x=>x.id===a.id)){
-      overrides[a.id] = Math.round(clamp(src[a.id] + (Math.random()*20-10), -100, 100));
+      overrides[a.id] = Math.round(clamp(src[a.id] + (rand()*20-10), -100, 100));
     } else {
-      overrides[a.id] = Math.round((Math.random()*2-1)*70);
+      overrides[a.id] = Math.round((rand()*2-1)*70);
     }
   });
 
@@ -1600,7 +1713,7 @@ function _generateFoilInner(seedLabel){
   // Attachment styles clash in ways that don't show up as a personality-axis mismatch.
   const profSectionsWithSrc = ["values","attachment","role","stress","humor","vices"]
     .filter(id => slotCat(state["prof_"+id+"_0"]) && OPPOSED_CATEGORIES[id]);
-  const profOpposeCount = Math.min(profSectionsWithSrc.length, 1 + (Math.random()<0.5?1:0)); // 1 or 2
+  const profOpposeCount = Math.min(profSectionsWithSrc.length, 1 + (rand()<0.5?1:0)); // 1 or 2
   const profOpposed = shuffle(profSectionsWithSrc).slice(0, profOpposeCount);
   const forcedProfileCats = {};
   const profOpposedNames = [];
@@ -1632,7 +1745,7 @@ function _generateFoilInner(seedLabel){
   // A foil is defined by contrast, so it must not inherit the source character's
   // context bias — that bias pulls toward the same categories the oppositions above
   // just spent effort pushing away from.
-  const foilState = withoutContextBias(()=> withCharacterVariants(()=> {
+  const foilState = withoutContextBias(()=> withSpeculativeGeneration(()=> withCharacterVariants(()=> {
     const built = buildCharacterState({
     verbLevel: -rawToLevel(intVal('verbositySlider', 0)),
     regLevel:  -rawToLevel(intVal('registerSlider', 0)),
@@ -1641,16 +1754,16 @@ function _generateFoilInner(seedLabel){
     });
     foilVariants = Object.assign({}, charVariants);
     return built;
-  }));
+  })));
   const premisePool = (()=>{
     const keyed = profOpposed.filter(id=>FOIL_PREMISES_BY_SECTION[id] && forcedProfileCats[id]);
     if (!keyed.length) return FOIL_PREMISES;
-    const id = keyed[Math.floor(Math.random()*keyed.length)];
+    const id = keyed[Math.floor(rand()*keyed.length)];
     // Keep a slice of the generic list in play so a section opposed twice in a session
     // doesn't return the same two lines.
     return FOIL_PREMISES_BY_SECTION[id].concat(FOIL_PREMISES.slice(0, 2));
   })();
-  const premise = premisePool[Math.floor(Math.random()*premisePool.length)];
+  const premise = premisePool[Math.floor(rand()*premisePool.length)];
 
   // The whole point of a foil is contrast — without the source character also on the
   // Cast tab, the "Opposed on... Shared ground on..." rationale below refers to a
@@ -1797,7 +1910,7 @@ let lastBalanceGaps = null;
 function generateGapFiller(){
   if (!lastBalanceGaps){ toast("Run the balance check first.", "warn"); return; }
   const overrides = {};
-  PERSONALITY_AXES.forEach(a=>{ overrides[a.id] = Math.round((Math.random()*2-1)*45); });
+  PERSONALITY_AXES.forEach(a=>{ overrides[a.id] = Math.round((rand()*2-1)*45); });
   lastBalanceGaps.clustered.forEach(c=>{
     overrides[c.id] = c.dir === 'high' ? -70 : 70;
   });
@@ -1806,22 +1919,22 @@ function generateGapFiller(){
     const ps = PROFILE_SECTIONS.find(p=>p.label === pc.section);
     if (!ps) return;
     const others = catsOf(ps.section).filter(c=>c !== pc.cat);
-    if (others.length) forcedProfileCats[ps.id] = others[Math.floor(Math.random()*others.length)];
+    if (others.length) forcedProfileCats[ps.id] = others[Math.floor(rand()*others.length)];
   });
   const rarityPref = rarityPrefVal();
   // The gap-filler exists to break clustering; inheriting the last character's context
   // bias reinforced exactly what it was called in to counteract. Its presentation
   // locks are its own and are restored afterwards for the same reason.
   let gapVariants = null;
-  const st = withoutContextBias(()=> withCharacterVariants(()=> {
+  const st = withoutContextBias(()=> withSpeculativeGeneration(()=> withCharacterVariants(()=> {
     const built = buildCharacterState({
-      verbLevel: (Math.random()*4)-2, regLevel: (Math.random()*4)-2, compLevel: (Math.random()*4)-2,
+      verbLevel: (rand()*4)-2, regLevel: (rand()*4)-2, compLevel: (rand()*4)-2,
       mannerCount: intVal('mannerCount', 3), vocabCount: intVal('vocabCount', 2),
       rarityPref, vocabPref:null, personalityOverrides: overrides, forcedProfileCats,
     });
     gapVariants = Object.assign({}, charVariants);
     return built;
-  }));
+  })));
   castStates.push({state: st, variants: gapVariants, meta:{name:"Character " + (castStates.length+1), age:"", context:"Built to fill the ensemble's gaps", archetypeLabel:"Gap-filler"}});
   renderCast();
   refreshRelSelectors();
@@ -1874,7 +1987,7 @@ function randomizeProfileTypes(){
     const sel = document.getElementById('type_'+ps.id);
     if (!sel) return;
     const opts = [...sel.options].filter(o=>o.value);
-    sel.value = Math.random() < 0.25 ? "" : opts[Math.floor(Math.random()*opts.length)].value;
+    sel.value = rand() < 0.25 ? "" : opts[Math.floor(rand()*opts.length)].value;
   });
 }
 

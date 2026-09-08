@@ -36,7 +36,7 @@ const ctx = loadEngine([
   'rarityNorm','proximityWeights','profileTarget','applyBudgets','budgetCapacity',
   'BUDGET_GROUPS','BUDGET_PRESETS','applyBudgetPreset','clearBudgets','rarityCaps',
   'intensityCaps','getBudgetMode','setBudgetMode','getBudgetReport','getCharVariants',
-  'SECTION_OF_CATEGORY','forgetSlotDraws',
+  'SECTION_OF_CATEGORY','forgetSlotDraws','withRng','rand','entropySeed','withSpeculativeGeneration',
   'rarityTier','rarityWeight','rarityPrefValue','polarityFit','buildContextBias','parseAgeHint',
   'traitBand','CURVE_EXP','clamp','SECTION_COLORS','loudnessCheck','recentPenalty',
   'rememberGeneration','forgetRecentTraits','_drawUnique','_buildUsedIds','explainWhyNot',
@@ -355,16 +355,16 @@ check('each variant category tags both presentations', ()=>{
 });
 
 group('Generation');
+// The engine draws through rand(), not Math.random — see THE RANDOM SOURCE in
+// engine.js. withRng is the only supported way to seed a build.
 function buildOnce(seed){
-  const orig = Math.random;
-  ctx.Math.random = A.mulberry32(seed);
-  try {
+  return A.withRng(A.mulberry32(seed), ()=>{
     A.rollCharacterVariants();
     return A.buildCharacterState({
       verbLevel: 0.8, regLevel: -0.4, compLevel: 0.2, mannerCount: 3, vocabCount: 2,
       rarityPref: 0, vocabPref: null, personalityOverrides: null,
     });
-  } finally { ctx.Math.random = orig; }
+  });
 }
 check('a build produces a populated sheet', ()=>{
   const st = buildOnce(12345);
@@ -739,9 +739,7 @@ check('at neutral sliders no profile category dominates its section', ()=>{
 
   const N = 1200;
   const counts = {};
-  const _rnd = Math.random;
-  Math.random = A.mulberry32(0x5eed1);
-  try {
+  A.withRng(A.mulberry32(0x5eed1), ()=>{
   for (let i=0;i<N;i++){
     const o = {}; A.PERSONALITY_AXES.forEach(a=> o[a.id] = 0);
     A.rollCharacterVariants();
@@ -753,7 +751,7 @@ check('at neutral sliders no profile category dominates its section', ()=>{
       if (c) ((counts[ps.id] = counts[ps.id] || {}))[c] = (counts[ps.id][c]||0) + 1;
     });
   }
-  } finally { Math.random = _rnd; }
+  });
   const bad = [];
   Object.entries(counts).forEach(([id, c])=>{
     const ps = A.PROFILE_SECTIONS.find(p=>p.id===id);
@@ -826,6 +824,42 @@ check('every workspace control survives a capture/restore round-trip', ()=>{
 
   A.restoreSettings({constraints:{}});   // leave the workspace clean for later tests
   return 'sliders, sections, constraints';
+});
+
+check('a saved character survives the compress -> validate -> expand round trip', ()=>{
+  /* THE bug this file existed to catch and did not. saveCharacter writes
+     compressSlots(state) to browser storage — every trait replaced by a {__id} stub —
+     and both readers validated that payload before expanding it. The validator
+     requires slot.trait.id and three strings, so every save this build wrote threw on
+     load. The one validation test above builds `good` from a raw buildCharacterState,
+     which is the UNCOMPRESSED shape, and file export writes uncompressed too — so the
+     only path that compresses was the only path with no test. Exercise the real
+     sequence storage uses. */
+  const st = A.buildCharacterState({verbLevel:0.5, regLevel:-0.5, compLevel:0.5,
+    mannerCount:2, vocabCount:2, rarityPref:'balanced', vocabPref:null});
+  const seated = Object.keys(st).filter(k=>st[k] && st[k].trait);
+  assert(seated.length > 5, 'expected a populated sheet to round-trip');
+
+  // What saveCharacter actually puts in storage, through a real JSON hop.
+  const stored = JSON.parse(JSON.stringify({state: A.compressSlots(st), charMeta:{name:'x'}}));
+  assert(stored.state[seated[0]].trait.__id !== undefined, 'compressSlots did not produce a stub');
+
+  // ...and what loadSavedCharacter must now do with it, in this order.
+  stored.state = A.expandSlots(stored.state);
+  A.validateSheetPayload(stored);   // threw for every saved character before the fix
+
+  seated.forEach(k=>{
+    assert(stored.state[k].trait, 'slot ' + k + ' lost its trait in the round trip');
+    assert(stored.state[k].trait.id === st[k].trait.id, 'slot ' + k + ' expanded to the wrong trait');
+    assert(stored.state[k].target === st[k].target, 'slot ' + k + ' lost its target');
+  });
+  // Validating BEFORE expanding is the defect; prove the ordering is what matters and
+  // not something incidental about this particular sheet.
+  const compressedAgain = {state: A.compressSlots(st)};
+  let threw = false;
+  try { A.validateSheetPayload(compressedAgain); } catch(e){ threw = true; }
+  assert(threw, 'a compressed payload must not pass validation — the fix is the ordering, not the validator');
+  return seated.length + ' slots';
 });
 
 check('import validation accepts real sheets and rejects malformed ones', ()=>{
@@ -1192,14 +1226,15 @@ check('a wound actually moves the categories downstream of it', ()=>{
   const measure = (text) => {
     const counts = {attachment:{}, values:{}, role:{}};
     const fake = text ? [{trait:text, desc:text, intensity:4}] : [];
-    const _r = Math.random; Math.random = A.mulberry32(0x50117d);
     try {
-      for (let i = 0; i < 600; i++){
-        A.setMotivationLinks(A.motivationCrosslinkMap(fake));
-        const cats = A.resolveProfileCategories('balanced', {}, null);
-        Object.keys(counts).forEach(k=>{ if (cats[k]) counts[k][cats[k]] = (counts[k][cats[k]]||0)+1; });
-      }
-    } finally { Math.random = _r; A.setMotivationLinks(null); }
+      A.withRng(A.mulberry32(0x50117d), ()=>{
+        for (let i = 0; i < 600; i++){
+          A.setMotivationLinks(A.motivationCrosslinkMap(fake));
+          const cats = A.resolveProfileCategories('balanced', {}, null);
+          Object.keys(counts).forEach(k=>{ if (cats[k]) counts[k][cats[k]] = (counts[k][cats[k]]||0)+1; });
+        }
+      });
+    } finally { A.setMotivationLinks(null); }
     return counts;
   };
   const share = (c, sec, cat) => (c[sec][cat] || 0) / 600;
@@ -1337,6 +1372,36 @@ check('the mood pass tagged what it listed', ()=>{
 check('the secondary-tier pass tagged what it listed', ()=>{
   assert(A.TIER_TAG_STATS && A.TIER_TAG_STATS.matched > 0, JSON.stringify(A.TIER_TAG_STATS));
   return A.TIER_TAG_STATS.matched + '/' + A.TIER_TAG_STATS.listed;
+});
+
+group('Ship shape');
+check('the service worker precaches exactly what index.html loads', ()=>{
+  /* sw.js ASSETS listed five data files; index.html loaded seven. The lazy
+     runtime-cache path hid it on a warm load, so the only symptom was a cold offline
+     install with an incomplete trait bank — and the two missing files were the two
+     most likely to be added to. A hand-maintained duplicate of a list that grows is a
+     list that drifts, so assert it rather than re-checking it by eye. */
+  const fs = require('fs'), path = require('path');
+  const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+  const sw = fs.readFileSync(path.join(ROOT, 'sw.js'), 'utf8');
+  const wanted = [];
+  const rx = /<(?:script[^>]*\ssrc|link[^>]*\shref)=["']([^"']+)["']/g;
+  let m;
+  while ((m = rx.exec(html))){
+    const href = m[1];
+    if (/^https?:|^data:|^\/\//.test(href)) continue;   // fonts, the inline favicon
+    if (!/\.(js|css)$/.test(href)) continue;
+    wanted.push('./' + href.replace(/^\.\//, ''));
+  }
+  const body = sw.match(/const ASSETS = \[([\s\S]*?)\];/);
+  assert(body, 'could not find the ASSETS array in sw.js');
+  const listed = [...body[1].matchAll(/['"]([^'"]+)['"]/g)].map(x=>x[1]);
+  const missing = wanted.filter(w=>!listed.includes(w));
+  // './' and './index.html' are the shell itself and have no tag to match.
+  const extra = listed.filter(l=> l !== './' && l !== './index.html' && !wanted.includes(l));
+  assert(!missing.length, 'sw.js does not precache: ' + missing.join(', '));
+  assert(!extra.length, 'sw.js precaches files index.html does not load: ' + extra.join(', '));
+  return wanted.length + ' scripts/styles precached';
 });
 
 /* Bank figures, printed every run. Comments across the codebase cited the bank size as

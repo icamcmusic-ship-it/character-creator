@@ -1,4 +1,33 @@
 
+/* ================= THE RANDOM SOURCE =================
+   Every draw in this app goes through rand(), and a seeded build swaps what rand()
+   reads rather than reassigning Math.random.
+
+   It used to reassign Math.random — globally, for the duration of a build, restored in
+   a finally. That works only because JavaScript is single-threaded and every build is
+   strictly synchronous: the moment anything inside a build awaits, yields to a timer,
+   or is moved to a worker, an unrelated piece of code calling Math.random gets the
+   seeded stream (repeating values, since it is not advanced by anyone else), and
+   nothing anywhere reports it. It also made every one of the seven try/finally blocks
+   around a build load-bearing: miss one and the whole page's randomness is quietly
+   deterministic for the rest of the session.
+
+   A module-level indirection removes the class. Nothing outside this file's own
+   swap points can be affected by a seeded build, because nothing outside this app
+   calls rand(). */
+let _rng = Math.random;
+function rand(){ return _rng(); }
+/* Swap the source for exactly the duration of fn, restoring the previous one — which
+   may itself be a seeded stream, as it is for the pressure sheet's sub-stream. */
+function withRng(next, fn){
+  const prev = _rng;
+  _rng = next;
+  try { return fn(); }
+  finally { _rng = prev; }
+}
+// Non-seeded entropy for "pick a seed number" — deliberately NOT rand(), so a seeded
+// block asking for a fresh seed does not get one out of its own stream.
+function entropySeed(){ return ((Date.now() ^ (Math.random()*0x7fffffff)) >>> 0); }
 
 // ---------- Static category maps ----------
 const AXES = {
@@ -158,7 +187,7 @@ function rollCharacterVariants(){
   charVariants = {};
   Object.keys(PRESENTATION_VARIANTS).forEach(cat=>{
     const pA = VARIANT_ODDS[cat] === undefined ? 0.5 : VARIANT_ODDS[cat];
-    charVariants[cat] = Math.random() < pA ? "a" : "b";
+    charVariants[cat] = rand() < pA ? "a" : "b";
   });
 }
 
@@ -186,6 +215,50 @@ function withSavedVariants(fn){
   const saved = charVariants;
   try { return fn(); }
   finally { charVariants = saved; }
+}
+/* ================= SPECULATIVE GENERATION =================
+   Every generator that builds a character the user has not accepted — the batch tray,
+   the cast, the foil, the gap-filler — runs the SAME full build as the real one, and
+   the full build writes to eight pieces of module-global session state. Each of those
+   generators hand-restored a different subset, and every time a new one was added it
+   re-introduced a variant of the same leak (three times so far, per the notes on
+   withCharacterVariants and withoutContextBias above). generateBatch was the most
+   recent and the worst: it restored {state, charMeta, pressureState, lastSheetTraits}
+   and nothing else, so after a five-candidate batch charVariants held candidate #5's
+   presentation locks. Picking candidate #2 then filtered every subsequent reroll
+   through a different character's lock, the why? panel named the wrong one, and export
+   wrote them. It also pushed five snapshots onto a 15-deep undo stack (evicting the
+   user's real history), five entries into the anti-repetition window and lastBySlot,
+   five vectors into sessionProfiles, and left lastGenerationSignature pointing at a
+   candidate that was thrown away — so the next novelty readout compared against a
+   character the user never saw.
+
+   One helper, one list, restored in a finally. A new generator gets isolation by being
+   wrapped rather than by remembering which eight globals exist. */
+function withSpeculativeGeneration(fn){
+  const saved = {
+    charVariants,
+    history: history.slice(),
+    redoStack: redoStack.slice(),
+    recentTraitIds: recentTraitIds.slice(),
+    lastBySlot: Object.assign({}, lastBySlot),
+    sessionProfiles: sessionProfiles.slice(),
+    lastGenerationSignature: (typeof lastGenerationSignature !== 'undefined') ? lastGenerationSignature : undefined,
+    categoryUse: new Map(CATEGORY_USE),
+  };
+  try { return fn(); }
+  finally {
+    charVariants = saved.charVariants;
+    history = saved.history;
+    redoStack = saved.redoStack;
+    recentTraitIds = saved.recentTraitIds;
+    lastBySlot = saved.lastBySlot;
+    sessionProfiles = saved.sessionProfiles;
+    if (saved.lastGenerationSignature !== undefined) lastGenerationSignature = saved.lastGenerationSignature;
+    CATEGORY_USE.clear();
+    saved.categoryUse.forEach((v,k)=>CATEGORY_USE.set(k,v));
+    if (typeof updateUndoButtons === 'function') updateUndoButtons();
+  }
 }
 function variantLabelFor(cat, variants){
   const spec = PRESENTATION_VARIANTS[cat], v = (variants || charVariants)[cat];
@@ -1036,7 +1109,7 @@ let _divergeThisDraw = false;
 function pickInRange(pool, rarityPref, target, minCount, flatten){
   if (!pool || !pool.length) return null;
   const div = divergenceLevel();
-  _divergeThisDraw = div > 0 && Math.random() < div;
+  _divergeThisDraw = div > 0 && rand() < div;
   try { return _pickInRangeInner(pool, rarityPref, target, minCount, flatten); }
   finally { _divergeThisDraw = false; }
 }
@@ -1088,7 +1161,7 @@ function _pickInRangeInner(pool, rarityPref, target, minCount, flatten){
     return w;
   });
   const total = weights.reduce((a,b)=>a+b,0);
-  let r = Math.random() * total;
+  let r = rand() * total;
   for (let i=0;i<list.length;i++){ r -= weights[i]; if (r <= 0) return list[i]; }
   return list[list.length-1];
 }
@@ -1884,7 +1957,7 @@ function pickWeighted(arr, pref){
   const norm = rarityNorm(arr);
   const weights = arr.map(t => rarityWeight(t, pref, norm));
   const total = weights.reduce((a,b)=>a+b,0);
-  let r = Math.random() * total;
+  let r = rand() * total;
   for (let i=0;i<arr.length;i++){ r -= weights[i]; if (r <= 0) return arr[i]; }
   return arr[arr.length-1];
 }
@@ -1932,7 +2005,7 @@ function pickCategoryWeighted(cats, boostMap){
      among the categories this session has drawn LEAST from. Same dial, same coin, and
      the same meaning — "some of the time, don't go where you'd normally go". */
   const hasSignal = !!(boostMap && boostMap.size);
-  const roll = div > 0 && Math.random() < div;
+  const roll = div > 0 && rand() < div;
   const invert = roll && hasSignal;
   const freshen = roll && !hasSignal;
   let peak = 0;
@@ -1950,7 +2023,7 @@ function pickCategoryWeighted(cats, boostMap){
   };
   const weights = cats.map(c => weightOf(c) * tierMultiplier(c) * contextMultiplier(c));
   const total = weights.reduce((a,b)=>a+b,0);
-  let r = Math.random() * total;
+  let r = rand() * total;
   for (let i=0;i<cats.length;i++){ r -= weights[i]; if (r <= 0){ noteCategoryUse(cats[i]); return cats[i]; } }
   const last = cats[cats.length-1];
   noteCategoryUse(last);
@@ -2490,7 +2563,7 @@ function pickPersonalitySlot(axis, level, rarityPref){
     pNeutral = 1 - (t * t * (3 - 2 * t));           // smoothstep, no hard edges
   }
 
-  const useNeutral = neutralPool.length && Math.random() < pNeutral;
+  const useNeutral = neutralPool.length && rand() < pNeutral;
   const target = targetFromLevel(level);
 
   if (useNeutral){
@@ -2560,7 +2633,7 @@ function pickPersonalitySlots(rarityPref, overrides){
       (Math.abs(raw) > 10 ? moved : unmoved).push(axis);
     });
     // shuffle each group
-    const shuffle = arr => arr.map(a=>[Math.random(),a]).sort((x,y)=>x[0]-y[0]).map(x=>x[1]);
+    const shuffle = arr => arr.map(a=>[rand(),a]).sort((x,y)=>x[0]-y[0]).map(x=>x[1]);
     const ordered = shuffle(moved).concat(shuffle(unmoved));
     axesToUse = ordered.slice(0, count);
   }
@@ -2921,7 +2994,7 @@ const ARCH_NOUN = {
   "Avoidance & Procrastination":["Postponer","Deferrer"],
 };
 // Deterministic when a seed is given (mulberry32 PRNG off a string hash), otherwise
-// falls back to Math.random(). Lets any caller opt into repeatable output — e.g. the
+// falls back to rand(). Lets any caller opt into repeatable output — e.g. the
 // same character name always composing the same emergent title — without a global mode.
 function seededRandom(seed){
   let h = 0;
@@ -2934,8 +3007,8 @@ function seededRandom(seed){
   };
 }
 function pickFrom(arr, seed){
-  const rand = seed ? seededRandom(String(seed)) : Math.random;
-  return arr[Math.floor(rand()*arr.length)];
+  const roll = seed ? seededRandom(String(seed)) : rand;
+  return arr[Math.floor(roll()*arr.length)];
 }
 function emergentArchetypeName(st){
   const catOf = id => slotCat(st["prof_"+id+"_0"]);
@@ -3676,7 +3749,7 @@ function _restoreSnapshot(prev){
   setVal('charContext', charMeta.context || "");
   setText('archetypeTag', charMeta.archetypeLabel || "");
   document.getElementById('pressureSheet').style.display = pressureState ? "block" : "none";
-  diffLog = {}; rerollExclusions = {}; rerollHistory = {}; whyOpen = {};
+  diffLog = {}; rerollExclusions = {}; rerollHistory = {}; whyOpen = {}; OPEN_CARD_CONTROLS.clear();
   onSliderChange();
   renderSheet(); checkConflicts();
   updateUndoButtons();
@@ -3733,7 +3806,7 @@ function pickVerbositySlot(verbLevel, rarityPref){
     const circularOdds = circularTier === 'rarely' ? 0
                        : circularTier === 'prefer' ? clamp(0.55 + baseOdds, 0, 0.85)
                        : baseOdds;
-    const useCircular = circularOdds > 0 && Math.random() < circularOdds;
+    const useCircular = circularOdds > 0 && rand() < circularOdds;
     const ax = useCircular ? AXES.circular : AXES.verbosityHigh;
     const pool = byFilter(ax.section, ax.category);
     return mkSlot("verbosity", useCircular ? "Verbosity (circling, high-volume)" : "Verbosity (high-volume-leaning)",
@@ -3900,8 +3973,16 @@ function pickAppearanceSlots(rarityPref, overrides, resolvedCats, sourceState){
       target = targetFromMag(Math.abs(raw));
     }
     const trait = pickInRange(byFilter("Appearance", cat), rarityPref, target);
-    if (trait) out['app_'+i] = {slotId:'app_'+i, locked:false, derived,
-      label:"Appearance \u2014 "+axis.label + (derived ? " (from their habits)" : ""), target, trait};
+    /* BUG FIX: none of the five Appearance slots registered their draw in the build's
+       uniqueness registry, so an Appearance trait could be seated here AND drawn again
+       by the wildcard (which draws across sections, Appearance included) — the same
+       line twice on one sheet. Every other multi-draw path marks; these were simply
+       missed. */
+    if (trait){
+      _markUsed(trait);
+      out['app_'+i] = {slotId:'app_'+i, locked:false, derived,
+        label:"Appearance \u2014 "+axis.label + (derived ? " (from their habits)" : ""), target, trait};
+    }
   });
   const actLevel = axisLevel('activeness', overrides);
   // Floor raised from 25 to 40. Movement & Bearing has no material down at the
@@ -3911,6 +3992,7 @@ function pickAppearanceSlots(rarityPref, overrides, resolvedCats, sourceState){
   const mvPool = byFilter("Appearance","Movement & Bearing");
   const mvTarget = poolFloorTarget(mvPool, targetFromMag(Math.max(40, Math.abs(actLevel)*50)));
   const mv = withSlotMemory("app_move", ()=>pickInRange(mvPool, rarityPref, mvTarget, 8, true));
+  _markUsed(mv);
   out['app_move'] = mkSlot('app_move', "Appearance \u2014 Movement & Bearing", mvTarget, mv);
   const pEl = document.getElementById('app_presence');
   const pMag = Math.abs(intVal(pEl, 0));
@@ -3927,6 +4009,7 @@ function pickAppearanceSlots(rarityPref, overrides, resolvedCats, sourceState){
   // were returning 9, and two of them were showing up in a quarter of all characters.
   const mkTarget = poolFloorTarget(mkPool, targetFromMag(Math.max(15, pMag, woundMag)));
   const mk = withSlotMemory("app_mark", ()=>pickInRange(mkPool, rarityPref, mkTarget, 8, true));
+  _markUsed(mk);
   out['app_mark'] = mkSlot('app_mark', "Appearance \u2014 Distinguishing Marks", mkTarget, mk);
   return out;
 }
@@ -4014,7 +4097,7 @@ function pickWildcardSlot(rarityPref, index){
   const pairs = [];
   WILDCARD_SECTIONS.forEach(s=> catsOf(s).forEach(c=>{ if (byFilter(s, c).length) pairs.push([s, c]); }));
   if (!pairs.length) return null;
-  const [section, cat] = pairs[Math.floor(Math.random()*pairs.length)];
+  const [section, cat] = pairs[Math.floor(rand()*pairs.length)];
   const pool = byFilter(section, cat);
   /* Far tail, either end — an outlier can be a startlingly quiet thing as easily as a
      loud one. Affinity is suppressed for the draw so posture can't sand it down.
@@ -4032,7 +4115,7 @@ function pickWildcardSlot(rarityPref, index){
      a category uniformly from 112 first, which is the same thing that keeps vocab and
      manner healthy. The tail was thin; the slot was not.) */
   const positions = pool.map(traitPos);
-  const target = Math.random() < 0.55 ? quantile(positions, 0.9) : quantile(positions, 0.1);
+  const target = rand() < 0.55 ? quantile(positions, 0.9) : quantile(positions, 0.1);
   const prior = CURRENT_AFFINITY_VEC;
   CURRENT_AFFINITY_VEC = null;
   let trait;

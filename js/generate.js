@@ -1,8 +1,8 @@
 /* ================= SEEDED / REPRODUCIBLE GENERATION =================
    A seed string makes the entire generation deterministic: same seed + same
    settings = same character, shareable as text. Implemented by swapping
-   Math.random for a seeded PRNG for exactly the duration of the build —
-   every pick path already routes through Math.random, so nothing is missed.
+   rand() at a seeded PRNG for exactly the duration of the build —
+   every pick path already routes through rand(), so nothing is missed.
    Rerolls are intentionally NOT seeded: a reroll is you overriding the dice. */
 function hashSeedString(s){
   let h = 2166136261 >>> 0;
@@ -245,7 +245,12 @@ function generateBatch(n){
   if (!host) return;
   batchCandidates = [];
   const before = {state, charMeta, pressureState, lastSheetTraits};
-  try {
+  /* withSpeculativeGeneration: a batch runs `count` complete builds that the user has
+     not accepted, and a complete build writes to the presentation locks, the undo and
+     redo stacks, the anti-repetition window, lastBySlot, sessionProfiles, the novelty
+     signature and the category-use counter. This restored four of those and leaked the
+     rest — see the helper in engine.js. */
+  try { withSpeculativeGeneration(()=>{
     for (let i = 0; i < count; i++){
       // Each candidate needs its OWN seed, or a fixed seed in the box would produce
       // the same character five times, which is a confusing way to present a choice.
@@ -254,10 +259,15 @@ function generateBatch(n){
       if (seedEl && userSeed) seedEl.value = userSeed + "#" + (i + 1);
       try {
         if (!_runGeneration()) continue;
-        batchCandidates.push({state, meta: Object.assign({}, charMeta), pressure: pressureState});
+        /* The candidate's presentation locks are part of the candidate. They used to be
+           left in the module global and clobbered by the next candidate; now they are
+           captured here and reinstated by chooseBatch, so picking #2 gets #2's locks. */
+        batchCandidates.push({state, meta: Object.assign({}, charMeta), pressure: pressureState,
+                              variants: Object.assign({}, charVariants),
+                              signature: generationSignature(state)});
       } finally { if (seedEl) seedEl.value = userSeed; }
     }
-  } finally {
+  }); } finally {
     // Put the sheet back to whatever it was before the batch. Nothing is committed
     // until the user picks one.
     state = before.state; charMeta = before.charMeta;
@@ -293,6 +303,14 @@ function chooseBatch(i){
   snapshotHistory();
   lastSheetTraits = Object.keys(state).length ? snapshotSheetTraits(state) : null;
   state = pick.state; charMeta = pick.meta; pressureState = pick.pressure;
+  /* Committing a candidate is where the session memory a build normally writes actually
+     belongs — on the one character the user kept, not on all five. The batch itself is
+     isolated (see withSpeculativeGeneration); this is the deliberate commit. */
+  if (pick.variants) charVariants = pick.variants;
+  renderNovelty(lastGenerationSignature, pick.signature);
+  lastGenerationSignature = pick.signature;
+  rememberGeneration(state);
+  try { rememberProfile(axisProfile(state)); } catch(e){}
   markChangedSlots();
   dismissBatch();
   const pEl = document.getElementById('pressureSheet');
@@ -322,6 +340,7 @@ function _runGeneration(){
   rerollExclusions = {};
   rerollHistory = {};
   whyOpen = {};
+  OPEN_CARD_CONTROLS.clear();   // a new character means new cards; nothing is open on it
   lastDepthUntouched = [];
   // Depth-first mode: resolve wound/values/attachment/stress first, derive sliders from them.
   const depthFirst = document.getElementById('depthFirstToggle');
@@ -384,16 +403,15 @@ function _runGeneration(){
     });
   }
 
-  // Seeded build: swap the RNG for exactly the build's duration, restore in finally.
+  // Seeded build: point rand() at the seeded stream for exactly the build's duration
+  // (withRng, engine.js) rather than reassigning Math.random globally.
   const seedInput = document.getElementById('seedInput');
   const seedStr = seedInput ? seedInput.value.trim() : "";
-  const seedNum = seedStr ? hashSeedString(seedStr) : ((Date.now() ^ (Math.random()*0x7fffffff)) >>> 0);
+  const seedNum = seedStr ? hashSeedString(seedStr) : entropySeed();
   lastSeedUsed = seedStr || seedNum.toString(36);
-  const _origRandom = Math.random;
   const wantStress = !!(document.getElementById('stressToggle')||{}).checked;
   let newState0, newState, newPressure = null;
-  try {
-    Math.random = mulberry32(seedNum);
+  withRng(mulberry32(seedNum), ()=>{
     rollCharacterVariants(); // inside the seeded block, so seeds reproduce variants too
     newState0 = buildCharacterState({verbLevel, regLevel, compLevel, mannerCount, rarityPref,
       vocabPref: arch?arch.vocabPref:null, vocabCount, personalityOverrides: archOverrides});
@@ -404,20 +422,17 @@ function _runGeneration(){
       applyRequiredTraits(
         applyBudgets(applyPinnedTargets(newState0, rarityPref), rarityPref)),
       rarityPref);
-    // BUG FIX: the pressure sheet used to be built AFTER the finally block restored
-    // Math.random, so "same seed + same settings = the exact same character" — which
-    // the UI states outright — was false for every character generated with Under
-    // Pressure on. It builds inside the seeded region now, on its OWN sub-stream, so
-    // toggling the pressure sheet doesn't perturb the base character's draws either.
+    // BUG FIX: the pressure sheet used to be built AFTER the RNG was restored, so
+    // "same seed + same settings = the exact same character" — which the UI states
+    // outright — was false for every character generated with Under Pressure on. It
+    // builds inside the seeded region now, on its OWN sub-stream, so toggling the
+    // pressure sheet doesn't perturb the base character's draws either.
     if (wantStress){
-      const baseRandom = Math.random;
-      Math.random = mulberry32((seedNum ^ 0x9e3779b9) >>> 0);
-      try { newPressure = buildStressVariant(verbLevel, regLevel, mannerCount, rarityPref, newState); }
-      finally { Math.random = baseRandom; }
+      withRng(mulberry32((seedNum ^ 0x9e3779b9) >>> 0), ()=>{
+        newPressure = buildStressVariant(verbLevel, regLevel, mannerCount, rarityPref, newState);
+      });
     }
-  } finally {
-    Math.random = _origRandom;
-  }
+  });
   charMetaSeed = lastSeedUsed;
   const seedOut = document.getElementById('lastSeedReadout');
   if (seedOut) seedOut.textContent = "Seed: " + lastSeedUsed;
@@ -661,7 +676,12 @@ function rerollSlot(slotId){
   if (old.label && /second facet/.test(old.label)) replacement.label = old.label;
   state[slotId] = replacement;
   reapplyConstraintsAfterMutation();
-  renderSheet(); checkConflicts();
+  /* Was renderSheet(): the sheet was torn down and rebuilt to change ONE card, which
+     destroyed the Toss button the user had just pressed (dropping focus to <body>) and
+     closed every open control strip. renderSlotChange replaces the card and puts the
+     caret back on the same control, so Toss-until-you-like-it works from the keyboard
+     and nothing else on the page moves. */
+  renderSlotChange(slotId); checkConflicts();
 }
 
 // Step back through the traits this slot has held. The trait you step back TO is
@@ -684,10 +704,10 @@ function rerollBack(slotId){
   if (cur && cur.trait) diffLog[slotId] = {from: cur.trait.trait, to: prev.trait.trait};
   state[slotId] = prev;
   reapplyConstraintsAfterMutation();
-  renderSheet(); checkConflicts();
+  renderSlotChange(slotId); checkConflicts();
 }
 
-function toggleWhy(slotId){ whyOpen[slotId] = !whyOpen[slotId]; renderSheet(); }
+function toggleWhy(slotId){ whyOpen[slotId] = !whyOpen[slotId]; renderSlotChange(slotId); }
 
 async function editTraitNote(slotId){
   const s = state[slotId];
@@ -695,9 +715,9 @@ async function editTraitNote(slotId){
   const note = await askForName(`Note on "${s.trait.trait}":`, traitNotes[slotId] || "");
   if (note === null) return;
   traitNotes[slotId] = note;
-  renderSheet();
+  renderSlotChange(slotId);
 }
-function clearTraitNote(slotId){ delete traitNotes[slotId]; renderSheet(); }
+function clearTraitNote(slotId){ delete traitNotes[slotId]; renderSlotChange(slotId); }
 
 // Favourite / never, straight off the card, writing into the same constraint sets the
 // Constraints panel edits — so a star here shows up as an "always" chip there.
@@ -712,7 +732,9 @@ function favouriteTrait(id){
     bannedTraitIds.delete(id);     // required beats banned, as everywhere else
     toast(`"${t.trait}" will now be included on every character.`);
   }
-  refreshConstraintChips(); renderSheet();
+  // Every card showing this trait's star/ban state can change, so this one stays a
+  // full render — but it no longer throws the caret away doing it.
+  refreshConstraintChips(); withPreservedFocus(()=>{ renderSheet(); });
   if (typeof savePrefs === 'function') savePrefs();
 }
 function banTrait(id){
@@ -726,25 +748,26 @@ function banTrait(id){
     requiredTraitIds = requiredTraitIds.filter(x=>x!==id);
     toast(`"${t.trait}" will never be drawn again.`);
   }
-  refreshConstraintChips(); renderSheet();
+  refreshConstraintChips(); withPreservedFocus(()=>{ renderSheet(); });
   if (typeof savePrefs === 'function') savePrefs();
 }
 function clearExclusions(slotId){
   delete rerollExclusions[slotId];
-  renderSheet();
+  renderSlotChange(slotId);
 }
-function dismissDiff(slotId){ delete diffLog[slotId]; renderSheet(); }
+function dismissDiff(slotId){ delete diffLog[slotId]; renderSlotChange(slotId); }
 
+// A lock is a CSS class and one aria-pressed. It used to rebuild all 37 cards.
 function toggleLock(slotId){
-  if (state[slotId]) { state[slotId].locked = !state[slotId].locked; renderSheet(); }
+  if (state[slotId]) { state[slotId].locked = !state[slotId].locked; renderSlotChange(slotId); }
 }
 function lockAll(){
   Object.values(state).forEach(s=>{ if (s && s.trait) s.locked = true; });
-  renderSheet();
+  withPreservedFocus(()=>{ renderSheet(); });
 }
 function unlockAll(){
   Object.values(state).forEach(s=>{ if (s) s.locked = false; });
-  renderSheet();
+  withPreservedFocus(()=>{ renderSheet(); });
 }
 
 /* ================= PIN INTENSITY =================
@@ -761,7 +784,7 @@ function togglePin(slotId){
   } else {
     pinnedTargets[slotId] = clamp((typeof s.target === 'number') ? s.target : traitPos(s.trait), 1, 5);
   }
-  renderSheet();
+  renderSlotChange(slotId);
 }
 function adjustPin(slotId, delta){
   if (pinnedTargets[slotId] === undefined) return;
@@ -790,9 +813,9 @@ function adjustPin(slotId, delta){
     else { state[slotId].target = pinnedTargets[slotId]; state[slotId].pinned = true; }
     reapplyConstraintsAfterMutation();
   }
-  renderSheet();
+  renderSlotChange(slotId);
 }
-function unpinAll(){ pinnedTargets = {}; renderSheet(); }
+function unpinAll(){ pinnedTargets = {}; withPreservedFocus(()=>{ renderSheet(); }); }
 
 // Applied after a fresh buildCharacterState (before lock-merge, so lock still wins):
 // for every slot with a pin, redraw within the SAME section/category the fresh build
