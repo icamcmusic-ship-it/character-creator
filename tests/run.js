@@ -62,6 +62,9 @@ const ctx = loadEngine([
   'polarityPrior','TRAIT_CONTEXTS','TRAIT_WORLD_TAGS','TRAIT_REVIEW_STATES',
   'ARCHETYPE_INTENT','ARCHETYPE_VARIATIONS','effectiveArchetype','archetypeAxisBlend','ARCHETYPE_MUST_FLOOR',
   'internalDimensions','INTERNAL_DIMENSIONS','profileSectionEnabled',
+  'recentPenalty','RECENT_PENALTY','RECENT_DECAY','RECENT_FAMILY_PENALTY','setAvoidSet','avoidSetFrom','avoidPenalty',
+  'archiveCharacter','forgetArchive','getArchive','diversityScore','referenceFromState','pickWildcardSlot','strongestLean',
+  'exportArchive','importArchive',
 ]);
 const A = ctx.api;
 const T = A.TRAITS;
@@ -2175,6 +2178,84 @@ check('internal dimensions separate what one slider conflates', ()=>{
   assert(g.emoDepth > sh.emoDepth, `guarded depth ${g.emoDepth.toFixed(2)} should exceed shallow ${sh.emoDepth.toFixed(2)}`);
   assert(g.emoExpress < 0 && sh.emoExpress <= 0, 'both should read as unexpressive');
   return `guarded: depth ${g.emoDepth.toFixed(2)} / expression ${g.emoExpress.toFixed(2)}; shallow: depth ${sh.emoDepth.toFixed(2)}`;
+});
+
+group('Variety: decay, semantic repetition, modes, objective, exception');
+
+check('the recent-trait penalty decays with age and remembers concept families', ()=>{
+  const fam = T.find(t=>t.conceptFamily);
+  const other = T.find(t=>t.conceptFamily === fam.conceptFamily && t.id !== fam.id) || fam;
+  A.forgetRecentTraits();
+  ctx.evalIn('_avoidRecentActive = true');
+  A.rememberGeneration({a:{slotId:'a', trait:fam}});
+  const fresh = A.recentPenalty(fam), sibling = A.recentPenalty(other);
+  for (let i=0;i<6;i++) A.rememberGeneration({b:{slotId:'b', trait:T[i+50]}});
+  const aged = A.recentPenalty(fam);
+  A.forgetRecentTraits();
+  ctx.evalIn('_avoidRecentActive = false');
+  assert(fresh < aged && aged < 1, `penalty should fade: fresh ${fresh.toFixed(2)}, six later ${aged.toFixed(2)}`);
+  assert(other === fam || (sibling < 1 && sibling > fresh), `a same-family trait should be penalised more softly than the exact one (${sibling.toFixed(2)} vs ${fresh.toFixed(2)})`);
+  return `exact ${fresh.toFixed(2)} → ${aged.toFixed(2)} after six; family ${sibling.toFixed(2)}`;
+});
+
+check('"same world, different person" avoids the current sheet\'s traits, families and categories', ()=>{
+  let st;
+  A.withRng(A.mulberry32(6161), ()=>{ st = A.buildCharacterState({verbLevel:0, regLevel:0, compLevel:0, mannerCount:3, vocabCount:2, rarityPref:0, vocabPref:null, personalityOverrides:{}}); });
+  const avoid = A.avoidSetFrom(st);
+  const seated = Object.values(st).find(x=>x&&x.trait).trait;
+  A.setAvoidSet(avoid);
+  const pen = A.avoidPenalty(seated);
+  let other;
+  A.withRng(A.mulberry32(6161), ()=>{ other = A.buildCharacterState({verbLevel:0, regLevel:0, compLevel:0, mannerCount:3, vocabCount:2, rarityPref:0, vocabPref:null, personalityOverrides:{}}); });
+  A.setAvoidSet(null);
+  const ids = new Set(Object.values(st).filter(x=>x&&x.trait).map(x=>x.trait.id));
+  const shared = Object.values(other).filter(x=>x&&x.trait&&ids.has(x.trait.id)).length;
+  const total = Object.values(other).filter(x=>x&&x.trait).length;
+  assert(pen < 0.2, 'a seated trait was not heavily penalised');
+  assert(shared / total < 0.15, `${shared} of ${total} traits shared with the avoided sheet — same seed, so any overlap is the avoid set failing`);
+  return `same seed, ${shared}/${total} shared after avoidance`;
+});
+
+check('the diversity objective ranks a twin below a stranger', ()=>{
+  let a, b;
+  A.withRng(A.mulberry32(7171), ()=>{ a = A.buildCharacterState({verbLevel:0, regLevel:0, compLevel:0, mannerCount:3, vocabCount:2, rarityPref:0, vocabPref:null, personalityOverrides:{}}); });
+  A.withRng(A.mulberry32(7272), ()=>{ b = A.buildCharacterState({verbLevel:1.5, regLevel:-1.5, compLevel:1, mannerCount:3, vocabCount:2, rarityPref:0, vocabPref:null, personalityOverrides:{friendliness:-80, discipline:-80, honesty:-80}}); });
+  const ref = [A.referenceFromState(a, 'A')];
+  const twin = A.diversityScore(a, ref), stranger = A.diversityScore(b, ref);
+  assert(twin.score < stranger.score, `twin ${twin.score.toFixed(2)} should score below stranger ${stranger.score.toFixed(2)}`);
+  assert(twin.terms.traitOverlap === 1, 'a copy should overlap itself completely');
+  return `twin ${twin.score.toFixed(2)} vs stranger ${stranger.score.toFixed(2)}`;
+});
+
+check('the archive round-trips and never stores sheets', ()=>{
+  A.forgetArchive();
+  let st; A.withRng(A.mulberry32(8181), ()=>{ st = A.buildCharacterState({verbLevel:0, regLevel:0, compLevel:0, mannerCount:3, vocabCount:2, rarityPref:0, vocabPref:null, personalityOverrides:{}}); });
+  A.archiveCharacter(st, {name:'Test'});
+  const dumped = A.exportArchive();
+  A.forgetArchive(); A.importArchive(dumped);
+  const back = A.getArchive();
+  A.forgetArchive();
+  assert(back.length === 1 && back[0].ids.size > 10 && back[0].name === 'Test', 'archive did not round-trip');
+  assert(!JSON.stringify(dumped).includes('"desc"'), 'the archive serialised trait text');
+  return `${back[0].ids.size} ids, ${back[0].defining.size} defining, no trait text`;
+});
+
+check('the wildcard is a real exception when the sheet leans, and says so', ()=>{
+  // A partial sheet leaning hard toward warmth: the wildcard should cut the other way.
+  const warm = T.filter(t=>t.pol && t.pol.warm === 1 && t.section === 'Personality Traits').slice(0, 8);
+  const partial = Object.fromEntries(warm.map((t,i)=>['pers_'+i, {slotId:'pers_'+i, trait:t}]));
+  const lean = A.strongestLean(partial);
+  assert(lean && lean.ax === 'warm' && lean.v > 0, 'the lean was not read off the partial sheet');
+  let hits = 0, tries = 0;
+  for (let i=0;i<40;i++){
+    ctx.evalIn('_buildUsedIds = new Set()');
+    const w = A.withRng(A.mulberry32(9000+i), ()=> A.pickWildcardSlot(0, 0, partial));
+    if (!w) continue; tries++;
+    if (w.exceptionAxis === 'warm' && w.trait.pol && w.trait.pol.warm === -1) hits++;
+    assert(typeof w.exceptionWhy === 'string' && w.exceptionWhy.length > 20, 'no explanation on the wildcard');
+  }
+  assert(hits / tries > 0.5, `only ${hits}/${tries} wildcards cut against the warmth lean`);
+  return `${hits}/${tries} draws opposed the lean, each explained`;
 });
 
 /* Bank figures, printed every run. Comments across the codebase cited the bank size as

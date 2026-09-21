@@ -489,6 +489,15 @@
         <button class="btn-secondary" data-on="click" data-act="generateBatch" data-args="[5]" title="Generate five complete characters at once and pick the one you want — the rest are discarded">Roll 5, pick one</button>
         <button class="btn-primary btn-roll" data-on="click" data-act="randomizeAndGenerate" data-args="[]" title="Randomize every slider, then build">🎲 Randomize All</button>
       </div>
+      <!-- The two named modes the audit asks for, plus the batch that picks itself.
+           "Same world" keeps the context and settings and avoids the current person's
+           traits, concept families and categories; "variation" holds the five most
+           defining cards and rerolls the rest. -->
+      <div class="buildRow buildRowModes">
+        <button class="btn-secondary" data-on="click" data-act="generateSameWorld" data-args="[]" title="Keep the world — context, age, settings — and build someone who shares as little as possible with the person on screen">Same world, different person</button>
+        <button class="btn-secondary" data-on="click" data-act="generateVariation" data-args="[]" title="Hold the five most defining cards and reroll everything else, with divergence off">Variation of this person</button>
+        <button class="btn-secondary" data-on="click" data-act="generateBatchDistinct" data-args="[5]" title="Roll five and keep the one furthest from your accepted characters, by the diversity objective">Roll 5, keep the most different</button>
+      </div>
       <label class="modeSwitch tinkerBar" title="Quick shows the essentials; Tinker Mode reveals every control. Hidden controls keep their values.">
         <input type="checkbox" id="advancedToggle" data-on="change" data-act="applyAdvancedMode" data-args="[]">
         <span class="tinkerLabel"><span aria-hidden="true">🔧</span> Tinker Mode</span>

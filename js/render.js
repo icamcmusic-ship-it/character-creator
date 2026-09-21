@@ -443,6 +443,7 @@ function traitCardHTML(id, s, includeControls, showDiff, accent, tagLabel){
         ${includeControls ? bandHTML(t, s) : ``}
         ${t.example ? `<div class="exampleLine">&ldquo;${escHTML(t.example)}&rdquo;</div>` : ``}
         ${includeControls ? freqBudgetHTML(t) : ``}
+        ${s.exceptionWhy ? `<div class="traitNote exceptionNote"><b>Why it's here.</b> ${escHTML(s.exceptionWhy)}</div>` : ``}
         ${includeControls && traitNotes[id] ? `<div class="traitNote"><b>Note.</b> ${escHTML(traitNotes[id])} <button ${actAttr('click', 'clearTraitNote', id)}>remove</button></div>` : ``}
         ${diff ? `<div class="diffNote">↺ was: "${escHTML(diff.from)}" <button ${actAttr('click', 'dismissDiff', id)}>dismiss</button></div>` : ``}
         ${includeControls && whyOpen[id] ? `<div class="whyNote">${explainPick(id, s)}${(rerollExclusions[id]&&rerollExclusions[id].size)?`<div class="whyExcl">Excluded from rerolls here: ${rerollExclusions[id].size} trait${rerollExclusions[id].size>1?"s":""} you've already passed on. <button ${actAttr('click', 'clearExclusions', id)}>reset</button></div>`:``}</div>` : ``}

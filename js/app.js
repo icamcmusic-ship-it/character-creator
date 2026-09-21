@@ -176,6 +176,9 @@ async function saveCharacter(btnEl){
       settings: captureSettings(), savedAt: new Date().toISOString(),
     }));
     await loadSavedList();
+    // A saved character is an accepted one: the diversity objective measures the next
+    // batch against it, and "same world" avoids it.
+    if (typeof archiveCharacter === 'function') archiveCharacter(state, {name});
     toast(storageIsDurable()
       ? 'Saved "' + name + '"'
       : 'Saved "' + name + '" to this session only — this browser is not storing data, so export it to a file to keep it.',
@@ -449,7 +452,10 @@ function newCharacterId(){
   return 'ch_' + Date.now().toString(36) + '_' + _castIdSeq.toString(36);
 }
 function castEntry(state, variants, meta, extra){
-  return Object.assign({id: newCharacterId(), state, variants, meta}, extra || {});
+  const entry = Object.assign({id: newCharacterId(), state, variants, meta}, extra || {});
+  // Joining the cast is acceptance, for the diversity objective's purposes.
+  if (typeof archiveCharacter === 'function') archiveCharacter(state, {id: entry.id, name: meta && meta.name});
+  return entry;
 }
 let castStates = [];
 let lastCastSeed = null;

@@ -295,6 +295,7 @@ function withSpeculativeGeneration(fn){
     history: history.slice(),
     redoStack: redoStack.slice(),
     recentTraitIds: recentTraitIds.slice(),
+    recentFamilies: recentFamilies.slice(),
     lastBySlot: Object.assign({}, lastBySlot),
     sessionProfiles: sessionProfiles.slice(),
     lastGenerationSignature: (typeof lastGenerationSignature !== 'undefined') ? lastGenerationSignature : undefined,
@@ -306,6 +307,7 @@ function withSpeculativeGeneration(fn){
     history = saved.history;
     redoStack = saved.redoStack;
     recentTraitIds = saved.recentTraitIds;
+    recentFamilies = saved.recentFamilies;
     lastBySlot = saved.lastBySlot;
     sessionProfiles = saved.sessionProfiles;
     if (saved.lastGenerationSignature !== undefined) lastGenerationSignature = saved.lastGenerationSignature;
@@ -1540,9 +1542,13 @@ function rememberGeneration(st){
   if (!ids.size) return;
   recentTraitIds.push(ids);
   while (recentTraitIds.length > RECENT_WINDOW) recentTraitIds.shift();
+  const fams = new Set();
+  Object.values(st || {}).forEach(s=>{ if (s && s.trait && s.trait.conceptFamily) fams.add(s.trait.conceptFamily); });
+  recentFamilies.push(fams);
+  while (recentFamilies.length > RECENT_WINDOW) recentFamilies.shift();
   rememberSlotDraws(st);
 }
-function forgetRecentTraits(){ recentTraitIds = []; }
+function forgetRecentTraits(){ recentTraitIds = []; recentFamilies = []; }
 /* Which traits keep coming back across the session's recent window. recentTraitIds has
    held this the whole time and nothing ever showed it to anyone. */
 function recurringTraits(minCount){
@@ -1562,12 +1568,152 @@ function avoidRecentEnabled(){
   return el ? !!el.checked : true;   // default-on; see RECENT_WINDOW above
 }
 let _avoidRecentActive = false;   // resolved once per build, not per draw
+/* DECAY, and SEMANTIC repetition. The penalty used to be flat across the window: a
+   trait from twelve characters ago was penalised exactly as hard as one from the last
+   character, so the window behaved like a twelve-character ban list and then an
+   amnesty. It now decays with age, so the last character's traits are what the next
+   one actively avoids and the tail of the window only nudges.
+
+   And it used to track IDS only, so "different wording, same narrative function" — a
+   paraphrase of the trait you just had — sailed through the novelty check. Entries
+   that declare a conceptFamily are remembered by family too, at a softer penalty,
+   which is what the audit means by distinguishing exact from semantic repetition. */
+const RECENT_DECAY = 0.82;            // per character of age
+const RECENT_FAMILY_PENALTY = 0.7;    // same concept family as a recent trait
+let recentFamilies = [];              // array of Sets of conceptFamily, newest last
 function recentPenalty(t){
-  if (!_avoidRecentActive || !recentTraitIds.length) return 1;
-  for (let i = recentTraitIds.length - 1; i >= 0; i--){
-    if (recentTraitIds[i].has(t.id)) return RECENT_PENALTY;
+  let m = avoidPenalty(t);
+  if (!_avoidRecentActive || !recentTraitIds.length) return m;
+  const n = recentTraitIds.length;
+  for (let i = n - 1; i >= 0; i--){
+    const age = n - 1 - i;
+    if (recentTraitIds[i].has(t.id)){
+      // penalty strength fades toward 1 with age: 1 - (1-P)*decay^age
+      m *= 1 - (1 - RECENT_PENALTY) * Math.pow(RECENT_DECAY, age);
+      break;
+    }
   }
+  if (t.conceptFamily && recentFamilies.length){
+    for (let i = recentFamilies.length - 1; i >= 0; i--){
+      const age = recentFamilies.length - 1 - i;
+      if (recentFamilies[i].has(t.conceptFamily)){
+        m *= 1 - (1 - RECENT_FAMILY_PENALTY) * Math.pow(RECENT_DECAY, age);
+        break;
+      }
+    }
+  }
+  return m;
+}
+
+/* ================= "SAME WORLD, DIFFERENT PERSON" =================
+   An explicit avoid set: the trait ids, concept families and resolved categories of a
+   character the next build must NOT resemble. Unlike the recent-history window this is
+   a stated choice, so it is not gated on the avoid-recent toggle and it survives replay
+   mode (a "different person from X" is reproducible given X). Set by
+   generateSameWorld(), cleared after the build. */
+let AVOID_SET = null;   // {ids:Set, families:Set, cats:Set}
+function setAvoidSet(v){ AVOID_SET = v || null; }
+function avoidPenalty(t){
+  if (!AVOID_SET || !t) return 1;
+  if (AVOID_SET.ids.has(t.id)) return 0.08;
+  if (t.conceptFamily && AVOID_SET.families.has(t.conceptFamily)) return 0.35;
   return 1;
+}
+function avoidCategoryMultiplier(cat){
+  return (AVOID_SET && AVOID_SET.cats.has(cat)) ? 0.3 : 1;
+}
+function avoidSetFrom(st){
+  const ids = new Set(), families = new Set(), cats = new Set();
+  Object.values(st || {}).forEach(sl=>{
+    const t = sl && sl.trait; if (!t) return;
+    ids.add(t.id); if (t.conceptFamily) families.add(t.conceptFamily);
+  });
+  PROFILE_SECTIONS.forEach(ps=>{ const c = slotCat((st||{})['prof_'+ps.id+'_0']); if (c) cats.add(c); });
+  return {ids, families, cats};
+}
+
+/* ================= THE PROJECT ARCHIVE =================
+   The recent window is a session thing and forgets. A project's ACCEPTED characters —
+   saved, kept from a batch, added to a cast — are what a new one should be measured
+   against for real, and they persist with the project (Feature F). The archive holds
+   signatures, not sheets. */
+let PROJECT_ARCHIVE = [];   // [{id, name, ids:Set, families:Set, cats:Set, defining:Set, prof}]
+function archiveCharacter(st, meta){
+  if (!st || !Object.keys(st).length) return;
+  const sig = avoidSetFrom(st);
+  const all = Object.values(st).filter(x=>x && x.trait);
+  const score = t => (RTIER_SCORE[t.rtier || rarityTier(t)] || 0) * 10 + (t.intensity || 0);
+  const defining = new Set(all.slice().sort((a,b)=>score(b.trait)-score(a.trait)).slice(0, 5).map(x=>x.trait.id));
+  let prof = {};
+  try { prof = (typeof axisProfile === 'function') ? axisProfile(st) : {}; } catch(e){}
+  PROJECT_ARCHIVE.push({id: (meta && meta.id) || null, name: (meta && meta.name) || '', ids: sig.ids, families: sig.families,
+    cats: sig.cats, defining, prof, at: Date.now()});
+  while (PROJECT_ARCHIVE.length > 200) PROJECT_ARCHIVE.shift();
+}
+function forgetArchive(){ PROJECT_ARCHIVE = []; }
+function getArchive(){ return PROJECT_ARCHIVE; }
+// Serialisable form for a project file; Sets do not survive JSON.
+function exportArchive(){ return PROJECT_ARCHIVE.map(a=>({id:a.id, name:a.name, ids:[...a.ids], families:[...a.families], cats:[...a.cats], defining:[...a.defining], prof:a.prof, at:a.at})); }
+function importArchive(list){
+  PROJECT_ARCHIVE = (list || []).map(a=>({id:a.id||null, name:a.name||'', ids:new Set(a.ids||[]), families:new Set(a.families||[]),
+    cats:new Set(a.cats||[]), defining:new Set(a.defining||[]), prof:a.prof||{}, at:a.at||0}));
+}
+
+/* ================= THE DIVERSITY OBJECTIVE =================
+   "Produce a bounded candidate batch and choose a set that balances user intent, hard
+   validity, semantic diversity, and narrative utility ... treat the weights as tunable
+   hypotheses, not a universal formula." Scores a candidate sheet's DISTANCE from a set
+   of references (the current character, the archive): higher is more distinct. Every
+   term is a plain overlap or distance so the weights mean something; they live in one
+   table so they can be argued with. */
+const DIVERSITY_OBJECTIVE_WEIGHTS = {
+  traitOverlap: 1.0,      // share of trait ids in common
+  familyOverlap: 0.6,     // share of concept families in common (semantic repetition)
+  categoryOverlap: 0.8,   // share of resolved profile categories in common
+  definingOverlap: 1.5,   // the reference's five defining traits appearing here at all
+  profileDistance: 0.5,   // axis-profile distance (0..~2), as a bonus
+};
+function _overlapShare(a, b){
+  if (!a.size || !b.size) return 0;
+  let n = 0; a.forEach(v=>{ if (b.has(v)) n++; });
+  return n / Math.min(a.size, b.size);
+}
+function _profDist(a, b){
+  const keys = new Set([...Object.keys(a||{}), ...Object.keys(b||{})]);
+  let s = 0, k = 0; keys.forEach(ax=>{ const d = (a[ax]||0) - (b[ax]||0); s += d*d; k++; });
+  return k ? Math.sqrt(s / k) : 0;
+}
+function diversityScore(candidateState, references){
+  const sig = avoidSetFrom(candidateState);
+  const ids = new Set(); Object.values(candidateState).forEach(x=>{ if (x && x.trait) ids.add(x.trait.id); });
+  let prof = {}; try { prof = axisProfile(candidateState); } catch(e){}
+  const W = DIVERSITY_OBJECTIVE_WEIGHTS;
+  if (!references || !references.length) return {score: 0, terms: {}, worst: null};
+  // Distance to the NEAREST reference is what matters: a candidate that is far from
+  // most of the archive but a twin of one member is a twin.
+  let worst = null;
+  references.forEach(ref=>{
+    const t = {
+      traitOverlap: _overlapShare(ids, ref.ids),
+      familyOverlap: _overlapShare(sig.families, ref.families),
+      categoryOverlap: _overlapShare(sig.cats, ref.cats),
+      definingOverlap: ref.defining ? [...ref.defining].filter(id=>ids.has(id)).length / Math.max(1, ref.defining.size) : 0,
+      profileDistance: _profDist(prof, ref.prof || {}),
+    };
+    const score = -W.traitOverlap*t.traitOverlap - W.familyOverlap*t.familyOverlap - W.categoryOverlap*t.categoryOverlap
+                  - W.definingOverlap*t.definingOverlap + W.profileDistance*Math.min(2, t.profileDistance);
+    if (!worst || score < worst.score) worst = {score, terms: t, ref};
+  });
+  return worst;
+}
+function referenceFromState(st, name){
+  const sig = avoidSetFrom(st);
+  const ids = new Set(); Object.values(st||{}).forEach(x=>{ if (x && x.trait) ids.add(x.trait.id); });
+  const all = Object.values(st||{}).filter(x=>x && x.trait);
+  const score = t => (RTIER_SCORE[t.rtier || rarityTier(t)] || 0) * 10 + (t.intensity || 0);
+  const defining = new Set(all.slice().sort((a,b)=>score(b.trait)-score(a.trait)).slice(0,5).map(x=>x.trait.id));
+  let prof = {}; try { prof = axisProfile(st); } catch(e){}
+  return {name: name || '', ids, families: sig.families, cats: sig.cats, defining, prof};
 }
 
 // Returns the eligible slice around `target`, widening only if the pool is too
@@ -2779,15 +2925,17 @@ function withReplayMode(on, fn){
   const prev = REPLAY_MODE;
   REPLAY_MODE = !!on;
   if (!on) { try { return fn(); } finally { REPLAY_MODE = prev; } }
-  const savedRecent = recentTraitIds, savedSlots = lastBySlot;
+  const savedRecent = recentTraitIds, savedSlots = lastBySlot, savedFams = recentFamilies;
   const savedUse = new Map(CATEGORY_USE);
   recentTraitIds = [];
+  recentFamilies = [];
   lastBySlot = {};
   CATEGORY_USE.clear();
   try { return fn(); }
   finally {
     REPLAY_MODE = prev;
     recentTraitIds = savedRecent;
+    recentFamilies = savedFams;
     lastBySlot = savedSlots;
     CATEGORY_USE.clear();
     savedUse.forEach((v,k)=>CATEGORY_USE.set(k,v));
@@ -2804,7 +2952,7 @@ const CATEGORY_BASELINE = 0.4;
 function categoryWeights(cats, boostMap){
   const boost = AFFINITY();
   return cats.map(c => (CATEGORY_BASELINE + boost * ((boostMap && boostMap.get(c)) || 0))
-                       * tierMultiplier(c) * contextMultiplier(c));
+                       * tierMultiplier(c) * contextMultiplier(c) * avoidCategoryMultiplier(c));
 }
 /* A category whose pool is empty under the active bans (or the character's
    presentation lock) is not a candidate. Category resolution used to consider every
@@ -2863,7 +3011,7 @@ function pickCategoryWeighted(catsIn, boostMap){
     const b = (boostMap && boostMap.get(c)) || 0;
     return BASELINE + boost * (invert ? Math.max(0, peak - b) : b);
   };
-  const weights = cats.map(c => weightOf(c) * tierMultiplier(c) * contextMultiplier(c));
+  const weights = cats.map(c => weightOf(c) * tierMultiplier(c) * contextMultiplier(c) * avoidCategoryMultiplier(c));
   // (Deliberately not categoryWeights() below: this path also has to express the two
   // divergence branches, which are a per-draw coin and have no meaning in a prediction.)
   const total = weights.reduce((a,b)=>a+b,0);
@@ -5258,14 +5406,48 @@ function wildcardCount(){
   const el = document.getElementById('wildcardCount');
   return el ? clamp(parseInt(el.value, 10) || 0, 0, 3) : 1;
 }
-function pickWildcardSlot(rarityPref, index){
+/* Which axis the partial sheet leans on hardest, and which way — read straight off
+   the polarity tags already seated. The wildcard uses it to pick something that
+   actually cuts against the person being built, rather than a random tail trait that
+   is merely labelled as not fitting. */
+function strongestLean(partial){
+  const sums = {};
+  Object.values(partial || {}).forEach(sl=>{
+    const t = sl && sl.trait; if (!t || !t.pol) return;
+    Object.entries(t.pol).forEach(([ax,v])=>{ if (v && AXIS_LABELS[ax]) sums[ax] = (sums[ax]||0) + v; });
+  });
+  let best = null;
+  Object.entries(sums).forEach(([ax,v])=>{ if (!best || Math.abs(v) > Math.abs(best.v)) best = {ax, v}; });
+  return best && Math.abs(best.v) >= 2 ? best : null;
+}
+const EXCEPTION_SURVIVES = {
+  protect: "it survives because it protects something the rest of them would not know how to",
+  soothe:  "it survives because it is how they calm down, and nothing else on the sheet does that job",
+  connect: "it survives because it is the one door they leave open",
+  avoid:   "it survives because it is where they go when the rest of this is too much",
+  perform: "it survives because it is a performance, and they know it is",
+  control: "it survives because it is the one place they insist on holding the reins",
+  provide: "it survives because somebody depends on it",
+  repair:  "it survives because it is what they reach for after the damage",
+  default: "it survives because a person is not a theorem — this is the exception that proves they are one",
+};
+function pickWildcardSlot(rarityPref, index, partial){
   /* Picking a uniform SECTION and then a uniform CATEGORY within it weighted the draw
      by how finely a section happens to be subdivided, not by how much content it holds:
      a Mannerism category came up at 1/84 while a Verbosity one came up at 1/35, for no
      reason anyone chose. Flatten to a single uniform draw over all eligible categories. */
-  const pairs = [];
+  const lean = strongestLean(partial);
+  const opposes = t => lean && t.pol && Math.sign(t.pol[lean.ax] || 0) === -Math.sign(lean.v) && !_buildUsedIds.has(t.id);
+  let pairs = [];
   WILDCARD_SECTIONS.forEach(s=> catsOf(s).forEach(c=>{ if (byFilter(s, c).length) pairs.push([s, c]); }));
   if (!pairs.length) return null;
+  /* When the sheet leans, draw the category uniformly among those that can actually
+     answer it — many categories hold nothing on the leaning axis at all, and picking
+     one of those first meant the "exception" was usually just a tail draw. */
+  if (lean){
+    const able = pairs.filter(([s, c]) => byFilter(s, c).some(opposes));
+    if (able.length) pairs = able;
+  }
   const [section, cat] = pairs[Math.floor(rand()*pairs.length)];
   const pool = byFilter(section, cat);
   /* Far tail, either end — an outlier can be a startlingly quiet thing as easily as a
@@ -5288,13 +5470,29 @@ function pickWildcardSlot(rarityPref, index){
   const prior = CURRENT_AFFINITY_VEC;
   CURRENT_AFFINITY_VEC = null;
   let trait;
-  try { trait = _drawUnique(()=>pickInRange(pool, rarityPref, target, 3)); }
+  /* MEANINGFUL EXCEPTION. A tail draw with affinity suppressed was "labelled as not
+     fitting without checking actual mismatch": most of the time it neither agreed nor
+     disagreed with anything. If the partial sheet leans hard on an axis, prefer a
+     candidate that pulls the other way on THAT axis — a real contradiction — and say
+     which axis and why it survives. If nothing in the category opposes the lean, the
+     old tail draw stands, honestly labelled. */
+  let opposing = null;
+  if (lean) opposing = pool.filter(opposes);
+  try {
+    if (opposing && opposing.length) trait = _drawUnique(()=>pickInRange(opposing, rarityPref, target, 3));
+    if (!trait) trait = _drawUnique(()=>pickInRange(pool, rarityPref, target, 3));
+  }
   finally { CURRENT_AFFINITY_VEC = prior; }
   if (!trait) return null;
   _markUsed(trait);
   const slotId = "wild_" + (index || 0);
+  const contradicts = lean && trait.pol && Math.sign(trait.pol[lean.ax] || 0) === -Math.sign(lean.v);
+  const why = contradicts
+    ? `Cuts against the sheet's strongest lean (${AXIS_LABELS[lean.ax]}, ${lean.v > 0 ? 'high' : 'low'}) — ` + (EXCEPTION_SURVIVES[trait.behaviorFunction] || EXCEPTION_SURVIVES.default) + '.'
+    : `A far-tail draw from ${cat}; nothing in that category opposes the sheet's strongest lean, so this is texture rather than a contradiction.`;
   return {slotId, locked:false, wildcard:true, target,
-          label:"Doesn't fit the rest — " + cat, trait};
+          label: (contradicts ? "The exception — " : "Doesn't fit the rest — ") + cat, trait,
+          exceptionAxis: contradicts ? lean.ax : null, exceptionWhy: why};
 }
 function wildcardEnabled(){
   const el = document.getElementById('wildcardToggle');
@@ -5390,7 +5588,7 @@ function buildCharacterState(opts){
   // just seated (see the wound → distinguishing-marks link) and the resolved vice.
   if (on('genAppearance')) Object.assign(obj, pickAppearanceSlots(rarityPref, fullOverrides, resolvedCats, obj));
   for (let w = 0; w < wildcardCount(); w++){
-    const wild = pickWildcardSlot(rarityPref, w);
+    const wild = pickWildcardSlot(rarityPref, w, obj);
     if (wild) obj[wild.slotId] = wild;
   }
   return obj;

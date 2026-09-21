@@ -1233,3 +1233,8 @@
 .dimRow > span:first-child, .dimRow > span:nth-child(2){ min-width:200px; }
 .dimSplit{ background: rgba(138,107,191,.08); border-radius:6px; padding:2px 6px; }
 .dimFlag{ font-size:.68rem; text-transform:uppercase; letter-spacing:.04em; color:var(--accent-violet); font-weight:600; }
+
+/* ---- Variety modes and the diversity objective ---------------------------- */
+.buildRowModes{ margin-top:6px; }
+.batchDist{ display:block; margin-top:4px; font-size:.7rem; color:var(--accent-violet); font-weight:600; }
+.exceptionNote{ border-left-color: var(--accent-rust); }

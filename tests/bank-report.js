@@ -14,12 +14,13 @@ const {loadEngine} = require('./harness');
 const args = new Set(process.argv.slice(2));
 const JSON_OUT = args.has('--json');
 const DIVERSITY = args.has('--diversity');
+const PRESETS = args.has('--presets');
 const SAMPLE = parseInt((process.argv.find(a=>a.startsWith('--n=')) || '--n=600').slice(4), 10);
 
 const ctx = loadEngine(['TRAITS','CATS_BY_SECTION','RTIER_ORDER','rarityTier','ARCHETYPES','PERSONALITY_AXES',
   'PRESENTATION_VARIANTS','AXIS_TO_POLCODE','AXIS_LABELS','TRAIT_PACKS','PROFILE_SECTIONS','buildCharacterState',
   'mulberry32','withRng','finalizeSheet','forgetRecentTraits','forgetSlotDraws','forgetCategoryUse','slotCat',
-  'polarityPrior','TRAIT_CONTEXTS']);
+  'polarityPrior','TRAIT_CONTEXTS','effectiveArchetype','archetypeFidelity','PERSONALITY_AXES','withArchetypeProfile']);
 const A = ctx.api, T = A.TRAITS;
 const out = {version: null, bank: {}, sections: [], grid: {}, cells: {}, thin: [], target: {}, polarity: [],
              archetypes: {}, hints: [], review: {}, packs: [], schema: {}, diversity: null};
@@ -187,6 +188,38 @@ if (DIVERSITY){
   say('  role x values joint, top 5: ' + [...profJoint.entries()].sort((a,b)=>b[1]-a[1]).slice(0,5).map(([k,v])=>`${k} ${pct(v,jn)}`).join(' · '));
   out.diversity = {sample: SAMPLE, distinctIds: seen.size, meanSlots: +(slotsTotal/SAMPLE).toFixed(2), duplicateSheets: dupes, slots: rows,
     marginals: Object.fromEntries([...catCounts.entries()].map(([id,m])=>[id, Object.fromEntries(m)]))};
+}
+
+/* ---------------- per-preset recipe report ----------------
+   The audit's "track these per common recipe/preset": concentration and the
+   algorithmic half of recognisability (direction fidelity). Author-judged
+   recognisability is a separate exercise and is not claimed here. */
+if (PRESETS){
+  head(`Per-preset recipes — ${Math.max(20, Math.floor(SAMPLE/12))} builds each at the preset's own numbers`);
+  const N = Math.max(20, Math.floor(SAMPLE/12));
+  say('  direction  top-profile-share             worst-slot top-1  preset');
+  const rows = [];
+  Object.keys(A.ARCHETYPES).forEach(key=>{
+    const arch = A.effectiveArchetype(key, 'base');
+    const slotCounts = new Map(), catCounts = new Map(); let dirSum = 0, dirN = 0;
+    for (let i=0;i<N;i++){
+      let st;
+      A.withArchetypeProfile(arch.profile, ()=> A.withRng(A.mulberry32(810000+i), ()=>{
+        const ov = {}; A.PERSONALITY_AXES.forEach(a=>{ ov[a.id] = arch.pers[a.id] !== undefined ? arch.pers[a.id] : 0; });
+        st = A.finalizeSheet(A.buildCharacterState({verbLevel:arch.verbosity||0, regLevel:arch.register||0, compLevel:arch.composure||0,
+          mannerCount:3, vocabCount:2, rarityPref:0, vocabPref:arch.vocabPref||null, personalityOverrides:ov}), {rarityPref:0, applyPins:false});
+      }));
+      const f = A.archetypeFidelity(st, arch); if (f){ dirSum += f.pct; dirN++; }
+      Object.entries(st).forEach(([slot,sl])=>{ if (!sl||!sl.trait) return; if (!slotCounts.has(slot)) slotCounts.set(slot,new Map()); const m=slotCounts.get(slot); m.set(sl.trait.id,(m.get(sl.trait.id)||0)+1); });
+      A.PROFILE_SECTIONS.filter(ps=>!ps.drawAll).forEach(ps=>{ const c=A.slotCat(st['prof_'+ps.id+'_0']); if(!c) return; const k=ps.id+':'+c; catCounts.set(k,(catCounts.get(k)||0)+1); });
+    }
+    let worst = 0, worstSlot = '';
+    slotCounts.forEach((m,slot)=>{ const top = Math.max(...m.values())/N; if (top > worst){ worst = top; worstSlot = slot; } });
+    const topCat = [...catCounts.entries()].sort((a,b)=>b[1]-a[1])[0];
+    rows.push({key, direction: dirN ? +(dirSum/dirN).toFixed(0) : null, topProfile: topCat ? topCat[0] : null, topProfileShare: topCat ? +(topCat[1]/N).toFixed(2) : null, worstSlot, worstTop1: +worst.toFixed(2)});
+    say(`  ${String(dirN ? Math.round(dirSum/dirN) + '%' : '—').padStart(9)}  ${(topCat ? pct(topCat[1],N) + ' ' + topCat[0] : '—').padEnd(38).slice(0,38)}  ${pct(worst,1).padStart(6)} ${worstSlot.padEnd(14)} ${A.ARCHETYPES[key].label}`);
+  });
+  out.presets = rows;
 }
 
 if (JSON_OUT) console.log(JSON.stringify(out, null, 1));
