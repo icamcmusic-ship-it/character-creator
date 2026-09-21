@@ -1293,3 +1293,6 @@
   .voiceHead { display:flex; flex-wrap:wrap; gap:8px; align-items:baseline; margin-bottom:6px; font-size:.88rem; }
   .voiceLine { margin:4px 0 6px; padding:6px 0 6px 12px; border-left:3px solid var(--golden-deep); font-style:italic; line-height:1.6; }
   .sharedDevice { background:var(--bubblegum); color:#fff; border-radius:8px; padding:0 6px; }
+
+  /* Content packs */
+  .packRow { display:flex; align-items:baseline; gap:7px; padding:5px 9px; border:1px solid var(--border-strong); border-radius:10px; margin:0 6px 6px 0; font-size:.83rem; }

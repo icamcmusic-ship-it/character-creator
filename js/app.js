@@ -1029,6 +1029,36 @@ function copyVoiceLab(btnEl){
   copyText(`# Voice lab — ${charMeta.name || "Unnamed Character"} (${voiceLabMode})\n\n` + voiceLabToMarkdown(state, voiceLabMode), btnEl);
 }
 
+// ================= CONTENT PACKS =================
+/* The manifests have been in the engine since the schema pass; this is the control.
+   Core can never be turned off — it is the bank, not a pack — and a pack that would
+   empty the draw entirely is refused rather than silently producing blank slots. */
+function refreshPackUI(){
+  const grid = document.getElementById('packGrid');
+  if (!grid || typeof TRAIT_PACKS === 'undefined') return;
+  const off = new Set(getDisabledPacks());
+  grid.innerHTML = TRAIT_PACKS.map(p=>{
+    const n = TRAITS.filter(t=>t.pack === p.id).length;
+    const core = p.id === 'core';
+    return `<label class="packRow"><input type="checkbox" ${off.has(p.id) ? '' : 'checked'} ${core ? 'disabled' : ''}
+      ${actAttr('change', 'onPackToggle', p.id, "$el")}> <b>${escHTML(p.id)}</b>
+      <span class="sub">${n.toLocaleString()} traits${core ? ' · always on' : ''}</span></label>`;
+  }).join("");
+}
+function onPackToggle(id, el){
+  if (id === 'core'){ if (el) el.checked = true; return; }
+  setPackEnabled(id, !!(el && el.checked));
+  const left = TRAITS.filter(t=>isPackEnabled(t.pack)).length;
+  if (!left){ setPackEnabled(id, true); if (el) el.checked = true; toast("That would leave nothing to draw from.", "warn"); return; }
+  toast(`${el && el.checked ? "Enabled" : "Disabled"} pack "${id}" — ${left.toLocaleString()} traits in play. Generate again to see it.`, "ok", 5000);
+  refreshPackUI();
+}
+function setAllPacks(on){
+  TRAIT_PACKS.forEach(p=>{ if (p.id !== 'core') setPackEnabled(p.id, on); });
+  refreshPackUI();
+  toast(on ? "All packs enabled." : "Core pack only. Generate again to see it.");
+}
+
 const TABS = [
   {key:'single', view:'view-single', btn:'tabSingleBtn'},
   {key:'cast',   view:'view-cast',   btn:'tabCastBtn'},
@@ -2959,6 +2989,7 @@ function updateStickyBar(){
 }
 
 buildProfileSectionUI();
+refreshPackUI();
 populateArchetypeSelect();
 buildSeedPicker();
 buildPersonalitySliders();

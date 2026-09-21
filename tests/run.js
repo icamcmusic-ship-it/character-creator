@@ -73,6 +73,7 @@ const ctx = loadEngine([
   'applyArcEvent','replayArc','arcSummary','arcToMarkdown',
   'VOICE_PROMPTS','VOICE_PROMPT_IDS','VOICE_MODES','voiceRules','composeVoiceLine','voiceLab',
   'voiceComparison','voiceLabToMarkdown',
+  'TRAIT_PACKS','setPackEnabled','isPackEnabled','getDisabledPacks','setDisabledPacks','packOfId',
 ]);
 const A = ctx.api;
 const T = A.TRAITS;
@@ -2605,6 +2606,54 @@ check('the cast comparison marks devices more than one character reaches for', (
   const md = A.voiceLabToMarkdown(members[0].state, 'baseline');
   assert(/### Refusing/.test(md) && /- Rules: /.test(md), 'the markdown is missing its structure');
   return `${cmp.repeated.length} shared across 3; twins share ${twins.repeated.length}`;
+});
+
+
+group('Content studio: the pack system and the author tools');
+
+check('the studio tool validates the live bank and reports every pack', ()=>{
+  const {execFileSync} = require('child_process');
+  const run = (...args) => execFileSync('node', [require('path').join(__dirname, '..', 'tools', 'studio.js'), ...args], {encoding:'utf8'});
+  const v = run('validate');
+  assert(/The bank validates\./.test(v), 'studio validate is not clean:\n' + v.split('\n').slice(0,8).join('\n'));
+  const p = run('packs');
+  A.TRAIT_PACKS.forEach(pk=> assert(p.includes(pk.id), `packs output is missing "${pk.id}"`));
+  const n = run('nearest', 'apologises by leaving the room');
+  assert(/Nearest existing content/.test(n) && /#\d+/.test(n), 'nearest found nothing');
+  const c = run('coverage', '--n=3');
+  assert(/empty cells/.test(c), 'coverage printed no heatmap');
+  return `validate clean · ${A.TRAIT_PACKS.length} packs · nearest and coverage answer`;
+});
+
+check('disabling a pack removes exactly its traits from every draw, and core cannot go', ()=>{
+  const pack = A.TRAIT_PACKS.find(p=>p.id === 'life');
+  const before = A.byFilter('Recovery & Repair', 'Apology').length;
+  assert(before, 'no Apology pool to test with');
+  A.setPackEnabled('life', false);
+  const during = A.byFilter('Recovery & Repair', 'Apology').length;
+  const anyLife = A.TRAITS.filter(t=>t.pack === 'life' && A.isPackEnabled(t.pack)).length;
+  A.setPackEnabled('life', true);
+  const after = A.byFilter('Recovery & Repair', 'Apology').length;
+  assert(during === 0 && anyLife === 0, `${during} traits survived disabling "${pack.id}"`);
+  assert(after === before, `the pool did not come back: ${after} vs ${before}`);
+  assert(A.getDisabledPacks().length === 0, 'the disabled set was not restored');
+  A.TRAITS.forEach(t=> assert(t.pack, `#${t.id} belongs to no pack`));
+  return `${before} Apology traits gone and back; every trait carries a pack`;
+});
+
+check('every trait id sits inside its pack manifest range', ()=>{
+  const ranges = new Map(A.TRAIT_PACKS.map(p=>[p.id, p.ids]));
+  let checked = 0;
+  A.TRAITS.forEach(t=>{
+    const r = ranges.get(t.pack);
+    assert(r, `#${t.id} names pack "${t.pack}", which has no manifest`);
+    assert(t.id >= r[0] && t.id <= r[1], `#${t.id} (${t.pack}) is outside ${r[0]}–${r[1]}`);
+    checked++;
+  });
+  // Manifests must not overlap, or packOfId would be ambiguous.
+  const sorted = A.TRAIT_PACKS.slice().sort((a,b)=>a.ids[0]-b.ids[0]);
+  for (let i=1;i<sorted.length;i++) assert(sorted[i].ids[0] > sorted[i-1].ids[1], `${sorted[i].id} overlaps ${sorted[i-1].id}`);
+  return `${checked.toLocaleString()} ids inside ${A.TRAIT_PACKS.length} non-overlapping ranges`;
 });
 
 if (failed){

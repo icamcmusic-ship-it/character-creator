@@ -428,6 +428,16 @@
         <div id="profileSectionsGrid"></div>
       </details>
 
+      <details class="advanced advOnly" id="packPanel">
+        <summary><h3>Content packs</h3></summary>
+        <div class="sub" style="margin:8px 0;">The bank ships as packs. Turning one off removes its traits from every draw — useful for keeping a setting clean, or for seeing what a pack actually contributes. The choice travels with exports and saved settings. <code>node tools/studio.js packs</code> prints the same list.</div>
+        <div id="packGrid" class="row"></div>
+        <div class="actionRow" style="margin-top:8px;">
+          <button class="btn-secondary" data-on="click" data-act="setAllPacks" data-args="[true]">Enable all</button>
+          <button class="btn-secondary" data-on="click" data-act="setAllPacks" data-args="[false]">Core only</button>
+        </div>
+      </details>
+
       <details class="advanced advOnly" id="personalityPanel">
         <summary><h3>Personality Profile (13 axes)</h3></summary>
         <div class="row" style="margin-top:10px;" id="personalitySlidersGrid"></div>
