@@ -67,6 +67,8 @@ const ctx = loadEngine([
   'exportArchive','importArchive',
   'motivationChain','pressureChain','structuredContradiction','traitDimensions','characterLabel','DIM_DEFAULTS_BY_SECTION',
   'contextualView','contextualViews','CONTEXT_MODES','CONTEXT_MODE_IDS','CONTEXT_LENS_RULES',
+  'RELATIONSHIP_ROLES','RELATIONSHIP_STATUS','relationshipRole','roleOverridesFor','edgeDefaults','makeEdge',
+  'pruneEdges','validateEdge','edgesToMarkdown','castBundle','applyCastBundle','castEntry',
 ]);
 const A = ctx.api;
 const T = A.TRAITS;
@@ -2406,6 +2408,50 @@ check('threat puts the stress response in front and the repair behind', ()=>{
   const md = A.sheetToText(found.st, {name:'X', viewContext:'threat'}, null);
   assert(md.includes('## Under threat') && md.includes('**Amplified:**'), 'the export should carry the context section');
   return `${v.counts.amplified} forward, ${v.counts.suppressed} quiet; exported`;
+});
+
+
+group('Relationship workspace: directed edges, roles, round-trip');
+
+check('an edge starts populated from both sheets and says why', ()=>{
+  const a = _mechSheet(7401), b = _mechSheet(7402);
+  const d = A.edgeDefaults(a, b, 'mentor');
+  assert(d.trust >= 1 && d.trust <= 5 && d.dependence >= 1 && d.dependence <= 5, 'trust/dependence out of range');
+  assert(A.RELATIONSHIP_STATUS.includes(d.status), `status ${d.status}`);
+  assert(typeof d.wants === 'string' && typeof d.conceals === 'string' && typeof d.knows === 'string', 'the text fields are missing');
+  const e = A.makeEdge('x','y','mentor', d);
+  assert(!A.validateEdge(e).length, 'a default edge should validate: ' + A.validateEdge(e).join('; '));
+  const bad = A.validateEdge({from:'x', to:'y', trust:9, dependence:3, status:'sideways', role:'nope'});
+  assert(bad.length >= 3, 'a malformed edge should be rejected field by field');
+  return `${d.status}, trust ${d.trust}, dep ${d.dependence}${d.why.length ? ' — ' + d.why[0] : ''}`;
+});
+
+check('a role pushes the new member against the anchor on its opposed axes', ()=>{
+  const anchor = {}; A.PERSONALITY_AXES.forEach(a=>{ anchor[a.id] = 70; });
+  const rng = A.mulberry32(99);
+  const role = A.relationshipRole('antagonist');
+  const out = A.roleOverridesFor(anchor, 'antagonist', rng);
+  role.oppose.forEach(ax=> assert(out[ax] <= -35, `${ax} should oppose the anchor, got ${out[ax]}`));
+  role.align.forEach(ax=> assert(out[ax] === 70, `${ax} should copy the anchor, got ${out[ax]}`));
+  A.PERSONALITY_AXES.forEach(a=> assert(out[a.id] >= -100 && out[a.id] <= 100, `${a.id} out of slider range`));
+  return `${role.label}: opposes ${role.oppose.join(', ')}`;
+});
+
+check('edges survive a cast round-trip and dangling ones are dropped', ()=>{
+  const m1 = A.castEntry(_mechSheet(7403), null, {name:'Ada'});
+  const m2 = A.castEntry(_mechSheet(7404), null, {name:'Bo'});
+  const edges = [A.makeEdge(m1.id, m2.id, 'rival', A.edgeDefaults(m1.state, m2.state, 'rival')),
+                 A.makeEdge(m1.id, 'ghost', 'ally', {})];
+  const kept = A.pruneEdges(edges, [m1, m2]);
+  assert(kept.length === 1 && kept[0].to === m2.id, 'the edge naming a missing member should be dropped');
+  const md = A.edgesToMarkdown(kept, [m1, m2]);
+  assert(md.includes('Ada → Bo') && md.includes('Rival') && /trust \d\/5/.test(md), 'the markdown is missing the edge: ' + md);
+  const bundle = {format:'character-voice-cast', version:1, members:[{id:m1.id, state:m1.state, meta:m1.meta},{id:m2.id, state:m2.state, meta:m2.meta}], edges: kept};
+  const res = A.applyCastBundle(bundle);
+  const live = ctx.evalIn('relationshipEdges.length'), names = ctx.evalIn('castStates.map(c=>c.meta.name).join(",")');
+  assert(live === 1 && names === 'Ada,Bo', `round-trip gave ${names} with ${live} edge(s)`);
+  assert(res.dropped === 0, 'nothing should be dropped on a clean bundle');
+  return `1 of 2 edges kept, "${md.split('\n')[0].slice(0, 44)}…"`;
 });
 
 if (failed){

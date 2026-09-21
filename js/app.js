@@ -502,6 +502,7 @@ function generateCast(){
   const seedNum = castSeed.num;
   lastCastSeed = castSeed.label;
   castStates = [];
+  relationshipEdges = [];
   // withoutContextBias: the cast is not "six more of the character you just made" —
   // see the note on the helper in engine.js.
   // withSavedVariants: each cast member rolls its own presentation locks, and the
@@ -667,13 +668,18 @@ async function removeCastMember(i){
   if (!await askForConfirm(`Remove "${c.meta.name}" from the cast?`, "Remove")) return;
   const name = c.meta.name;
   castStates.splice(i, 1);
+  // An edge naming a member who has left is a lie about the ensemble — see pruneEdges.
+  const before = relationshipEdges.length;
+  relationshipEdges = pruneEdges(relationshipEdges, castStates);
   renderCast();
   refreshRelSelectors();
+  if (before !== relationshipEdges.length) toast(`${before - relationshipEdges.length} relationship edge(s) went with them.`, "warn", 5000);
   toast(`Removed "${name}" from the cast.`);
 }
 function castToMarkdown(){
   const head = `# Character Cast\n\n_${castStates.length} characters_\n`;
-  return head + castStates.map(c=>sheetToText(c.state, c.meta, null)).join("\n");
+  const edges = relationshipEdges.length ? `\n## Relationships\n\n${edgesToMarkdown(relationshipEdges, castStates)}\n` : "";
+  return head + edges + castStates.map(c=>sheetToText(c.state, c.meta, null)).join("\n");
 }
 function copyCast(btnEl){
   copyText(castToMarkdown(), btnEl);
@@ -688,12 +694,7 @@ function downloadCast(){
 const CAST_FORMAT_VERSION = 1;
 function exportCastJSON(){
   if (!castStates.length){ toast("Generate a cast first.", "warn"); return; }
-  downloadText(JSON.stringify({
-    format: "character-voice-cast", version: CAST_FORMAT_VERSION,
-    exported: new Date().toISOString(),
-    seed: lastCastSeed || null,
-    members: castStates.map(c=>({state: c.state, meta: c.meta, variants: c.variants || null})),
-  }, null, 2), "character_cast.json");
+  downloadText(JSON.stringify(castBundle(), null, 2), "character_cast.json");
   toast(`Exported ${castStates.length} cast member${castStates.length===1?'':'s'}.`);
 }
 function importCastJSON(fileInput){
@@ -703,31 +704,170 @@ function importCastJSON(fileInput){
   reader.onload = ()=>{
     try {
       const p = JSON.parse(reader.result);
-      if (p.format !== "character-voice-cast") throw new Error("Not a cast file.");
-      if (!Array.isArray(p.members)) throw new Error("The `members` block is not a list.");
       // Same structural validation and id re-linking the single-character import does —
       // a malformed member must not get as far as renderCast and throw there.
-      let orphans = 0;
-      const relink = st => { if (!st) return st;
-        Object.values(st).forEach(s2=>{
-          if (s2 && s2.trait){ const live = TRAITS_BY_ID.get(s2.trait.id); if (live) s2.trait = live; else orphans++; }
-        }); return st; };
-      const next = p.members.map((m, i)=>{
-        validateSheetPayload({state: m.state, charMeta: m.meta});
-        return {state: relink(m.state || {}), variants: m.variants || null,
-                meta: m.meta || {name: "Character " + (i+1), age:"", context:"", archetypeLabel:"Imported"}};
-      });
-      castStates = next;
-      lastCastSeed = p.seed || lastCastSeed;
+      const {orphans, dropped} = applyCastBundle(p);
       renderCast();
       refreshRelSelectors();
+      renderEdges();
       switchTab('cast');
-      toast(`Imported ${next.length} cast member${next.length===1?'':'s'}.`);
+      toast(`Imported ${castStates.length} cast member${castStates.length===1?'':'s'}${relationshipEdges.length ? ` and ${relationshipEdges.length} edge${relationshipEdges.length===1?'':'s'}` : ``}.`);
       if (orphans) toast(orphans + " trait(s) in this file no longer exist in the pool; their saved text was kept as-is.", "warn", 6000);
+      if (dropped) toast(dropped + " edge(s) named members not in this file and were dropped.", "warn", 6000);
     } catch(e){ toast("Could not import cast: " + e.message, "warn", 6000); }
     fileInput.value = "";
   };
   reader.readAsText(file);
+}
+
+// ================= RELATIONSHIP WORKSPACE =================
+/* Directed edges between cast members. Lives beside castStates, travels in the cast
+   file, and is pruned whenever a member leaves. See RELATIONSHIP_ROLES in engine.js. */
+let relationshipEdges = [];
+function castMemberById(id){ return castStates.find(c => c.id === id) || null; }
+function _relPartyId(key){
+  if (key === "__single__") return null;
+  const c = getCharByKey(key);
+  return c ? c.id : null;
+}
+function refreshRoleSelect(){
+  const sel = document.getElementById('relRole');
+  if (!sel || sel.options.length) return;
+  sel.innerHTML = `<option value="">No named role</option>` +
+    RELATIONSHIP_ROLES.map(r => `<option value="${escHTML(r.id)}" title="${escAttr(r.blurb)}">${escHTML(r.label)}</option>`).join("");
+}
+function addRelationshipEdge(){
+  const ka = strVal('relA', ''), kb = strVal('relB', '');
+  const from = _relPartyId(ka), to = _relPartyId(kb);
+  if (!from || !to){ toast("Edges join cast members. Add the current character to the cast first (Cast tab → Add current).", "warn", 5000); return; }
+  if (from === to){ toast("Pick two different characters.", "warn"); return; }
+  const roleId = strVal('relRole', '') || null;
+  const A = castMemberById(from), B = castMemberById(to);
+  const d = edgeDefaults(A.state, B.state, roleId);
+  const edge = makeEdge(from, to, roleId, d);
+  if (relationshipEdges.some(e => e.id === edge.id)){ toast("That edge already exists — edit it below.", "warn"); return; }
+  relationshipEdges.push(edge);
+  renderEdges();
+  toast(`Added ${A.meta.name} → ${B.meta.name}${d.why.length ? ` (${d.why.join("; ")})` : ``}.`, "ok", 5000);
+}
+function removeRelationshipEdge(id){
+  relationshipEdges = relationshipEdges.filter(e => e.id !== id);
+  renderEdges();
+}
+function editRelationshipEdge(id, field, el){
+  const e = relationshipEdges.find(x => x.id === id);
+  if (!e || !el) return;
+  if (field === 'trust' || field === 'dependence') e[field] = clamp(parseInt(el.value, 10) || 3, 1, 5);
+  else if (field === 'status') e.status = RELATIONSHIP_STATUS.includes(el.value) ? el.value : 'equal';
+  else e[field] = String(el.value || "").slice(0, 600);
+  // No re-render: the field being typed into is the field being stored.
+  const stamp = document.getElementById('edgeStamp');
+  if (stamp) stamp.textContent = `${relationshipEdges.length} edge${relationshipEdges.length===1?'':'s'} · saved with the cast`;
+}
+function renderEdges(){
+  const host = document.getElementById('relEdges');
+  if (!host) return;
+  refreshRoleSelect();
+  relationshipEdges = pruneEdges(relationshipEdges, castStates);
+  const stamp = document.getElementById('edgeStamp');
+  if (stamp) stamp.textContent = relationshipEdges.length ? `${relationshipEdges.length} edge${relationshipEdges.length===1?'':'s'} · saved with the cast` : "No edges yet.";
+  const name = id => { const m = castMemberById(id); return m ? m.meta.name : id; };
+  const text = (e, k, ph) => `<label class="edgeField"><span>${k}</span><input type="text" value="${escAttr(e[k] || "")}" placeholder="${escAttr(ph)}" ${actAttr('change', 'editRelationshipEdge', e.id, k, "$el")}></label>`;
+  host.innerHTML = relationshipEdges.map(e => {
+    const role = relationshipRole(e.role);
+    return `<div class="edgeCard" data-edge="${escAttr(e.id)}">
+      <div class="edgeHead"><b>${escHTML(name(e.from))}</b> → <b>${escHTML(name(e.to))}</b>${role ? ` <span class="edgeRole">${escHTML(role.label)}</span>` : ``}
+        <button class="savedAct savedDel" ${actAttr('click', 'removeRelationshipEdge', e.id)} aria-label="Remove this edge">remove</button></div>
+      <div class="edgeNums">
+        <label>trust <input type="range" min="1" max="5" step="1" value="${e.trust}" ${actAttr('input', 'editRelationshipEdge', e.id, 'trust', "$el")} aria-label="trust"></label>
+        <label>dependence <input type="range" min="1" max="5" step="1" value="${e.dependence}" ${actAttr('input', 'editRelationshipEdge', e.id, 'dependence', "$el")} aria-label="dependence"></label>
+        <label>stands <select ${actAttr('change', 'editRelationshipEdge', e.id, 'status', "$el")} aria-label="status">${RELATIONSHIP_STATUS.map(s => `<option value="${s}"${s===e.status?' selected':''}>${s}</option>`).join("")}</select></label>
+      </div>
+      ${text(e, 'obligation', 'What they owe the other')}
+      ${text(e, 'knows', 'What they know about the other')}
+      ${text(e, 'wants', 'What they want from the other')}
+      ${text(e, 'conceals', 'What they hide from the other')}
+      ${text(e, 'notes', 'Anything else')}
+    </div>`;
+  }).join("");
+}
+/* Generate a cast member INTO a role opposite the character in selector A. */
+function generateForRole(){
+  const ka = strVal('relA', '');
+  const anchor = getCharByKey(ka);
+  if (!anchor){ toast("Pick a character in the A slot first.", "warn"); return; }
+  const roleId = strVal('relRole', '');
+  const role = relationshipRole(roleId);
+  if (!role){ toast("Pick a role for the new member.", "warn"); return; }
+  const anchorId = anchor.id || null;
+  const seed = resolveSeed("");
+  const src = {};
+  /* A slot carries an unsigned target (1..5) and the resolved category carries the
+     sign, so the slider value is recovered from the pair rather than from `target`
+     alone — which would have read every axis as leaning high. */
+  PERSONALITY_AXES.forEach(a=>{
+    const s2 = anchor.state["pers_"+a.id];
+    const cat = s2 && s2.trait ? s2.trait.category : null;
+    const mag = Math.round(clamp((s2 && s2.target) || 0, 0, 5) * 20);
+    src[a.id] = cat === a.pos ? mag : cat === a.neg ? -mag : 0;
+  });
+  let variants = null, st;
+  withRng(mulberry32(seed.num), ()=>{
+    const overrides = roleOverridesFor(src, roleId, rand);
+    const forcedProfileCats = Object.assign({}, role.profile || {});
+    st = withoutContextBias(()=> withSpeculativeGeneration(()=> withCharacterVariants(()=> {
+      const built = finalizeSheet(buildCharacterState({
+        verbLevel: (rand()*4)-2, regLevel: (rand()*4)-2, compLevel: (rand()*4)-2,
+        mannerCount: intVal('mannerCount', 3), vocabCount: intVal('vocabCount', 2),
+        rarityPref: rarityPrefVal(), vocabPref:null, personalityOverrides: overrides, forcedProfileCats,
+      }), {rarityPref: rarityPrefVal(), applyPins:false});
+      variants = Object.assign({}, charVariants);
+      return built;
+    })));
+  });
+  const entry = castEntry(st, variants, {name: `${role.label} of ${anchor.meta.name || "the character"}`, age:"", context:`Generated as the ${role.label.toLowerCase()} of ${anchor.meta.name || "the character"}`, archetypeLabel:"Cast member (" + role.label + ")", seed: seed.label});
+  castStates.push(entry);
+  if (anchorId){
+    const d = edgeDefaults(entry.state, anchor.state, roleId);
+    relationshipEdges.push(makeEdge(entry.id, anchorId, roleId, d));
+  }
+  renderCast();
+  refreshRelSelectors();
+  renderEdges();
+  toast(`Added ${entry.meta.name}${anchorId ? " with an edge back to " + anchor.meta.name : " (add the anchor to the cast to record the edge)"}.`, "ok", 5000);
+}
+/* The cast file, as an object: exportCastJSON writes it, importCastJSON reads it, and
+   the test suite round-trips it without a browser. */
+function castBundle(){
+  return {
+    format: "character-voice-cast", version: CAST_FORMAT_VERSION,
+    exported: new Date().toISOString(),
+    seed: lastCastSeed || null,
+    members: castStates.map(c=>({id: c.id, state: c.state, meta: c.meta, variants: c.variants || null})),
+    edges: pruneEdges(relationshipEdges, castStates),
+  };
+}
+function applyCastBundle(p){
+  if (p.format !== "character-voice-cast") throw new Error("Not a cast file.");
+  if (!Array.isArray(p.members)) throw new Error("The `members` block is not a list.");
+  let orphans = 0;
+  const relink = st => { if (!st) return st;
+    Object.values(st).forEach(s2=>{
+      if (s2 && s2.trait){ const live = TRAITS_BY_ID.get(s2.trait.id); if (live) s2.trait = live; else orphans++; }
+    }); return st; };
+  const next = p.members.map((m, i)=>{
+    validateSheetPayload({state: m.state, charMeta: m.meta});
+    return {id: (typeof m.id === 'string' && m.id) ? m.id : newCharacterId(),
+            state: relink(m.state || {}), variants: m.variants || null,
+            meta: m.meta || {name: "Character " + (i+1), age:"", context:"", archetypeLabel:"Imported"}};
+  });
+  const edges = Array.isArray(p.edges) ? p.edges : [];
+  const bad = edges.map(validateEdge).filter(x => x.length);
+  if (bad.length) throw new Error("Bad edge: " + bad[0][0]);
+  castStates = next;
+  relationshipEdges = pruneEdges(edges.map(e => makeEdge(e.from, e.to, e.role, e)), next);
+  lastCastSeed = p.seed || lastCastSeed;
+  return {orphans, dropped: edges.length - relationshipEdges.length};
 }
 
 const TABS = [
@@ -1626,6 +1766,7 @@ async function importWorkspaceJSON(fileInput){
 
 // ================= RELATIONSHIP GENERATOR =================
 function refreshRelSelectors(){
+  if (typeof renderEdges === 'function') renderEdges();
   const a = document.getElementById('relA'), b = document.getElementById('relB');
   const opts = [];
   if (Object.keys(state).length) opts.push({key:"__single__", label:(charMeta.name||"Current character")});

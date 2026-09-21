@@ -5969,6 +5969,118 @@ function contextualViews(st){
   return CONTEXT_MODE_IDS.map(id => contextualView(st, id));
 }
 
+// ================= RELATIONSHIP WORKSPACE (MVP) =================
+/* Relationships were a pairwise axis comparison: two profiles, the axes where they
+   differ, a verdict. Nothing was stored, nothing was directed, and nothing said what
+   either party wanted from the other. The workspace adds directed edges between cast
+   members — {from, to, trust, dependence, status, obligation, knows, wants, conceals}
+   — with defaults derived from the sheets so an edge starts populated rather than
+   blank, and roles that can generate a new member to fill a seat opposite someone.
+   Everything here is pure; the cast array and the edge list live in app.js. */
+const RELATIONSHIP_ROLES = [
+  {id:"rival",      label:"Rival",      blurb:"Wants the same thing, from the other side.", oppose:["assertiveness","honesty"], align:["ambition","intelligence"], status:"equal", trust:2, dependence:2},
+  {id:"mentor",     label:"Mentor",     blurb:"Has been where they are going.",            oppose:["activeness","rebelliousness"], align:["intelligence"], profile:{role:"Leader", attachment:"Secure"}, status:"above", trust:4, dependence:2},
+  {id:"protege",    label:"Protégé",    blurb:"Is where they used to be.",                  oppose:["confidence"], align:["curiosity"], profile:{role:"Outsider"}, status:"below", trust:3, dependence:4},
+  {id:"confidant",  label:"Confidant",  blurb:"Knows the version nobody else sees.",       oppose:[], align:["honesty","friendliness"], profile:{attachment:"Secure", role:"Connector"}, status:"equal", trust:5, dependence:3},
+  {id:"dependant",  label:"Dependant",  blurb:"Needs them, and they know it.",             oppose:["assertiveness","discipline"], align:[], profile:{attachment:"Anxious"}, status:"below", trust:3, dependence:5},
+  {id:"antagonist", label:"Antagonist", blurb:"Stands in the way on purpose.",             oppose:["friendliness","agreeableness","honesty"], align:["assertiveness"], profile:{values:"Self-Interested"}, status:"equal", trust:1, dependence:1},
+  {id:"ally",       label:"Ally",       blurb:"On the same side, for now.",                oppose:["emotion"], align:["ambition","positivity"], profile:{values:"Loyalty-Bound"}, status:"equal", trust:4, dependence:3},
+  {id:"ex",         label:"The ex",     blurb:"Knows too much and still cares, or says not.", oppose:["friendliness","discipline"], align:["emotion"], profile:{attachment:"Avoidant"}, status:"equal", trust:2, dependence:2},
+];
+const RELATIONSHIP_STATUS = ["above","equal","below"];
+function relationshipRole(id){ return RELATIONSHIP_ROLES.find(r => r.id === id) || null; }
+
+/* Personality overrides for a member generated INTO a role opposite an anchor: the
+   role's opposed axes flip against the anchor, its aligned axes copy the anchor, and
+   the rest are a fresh roll — the same recipe as the foil finder, with the role
+   choosing the axes instead of the dice. */
+function roleOverridesFor(anchorOverrides, roleId, rng){
+  const role = relationshipRole(roleId);
+  const out = {};
+  PERSONALITY_AXES.forEach(a=>{
+    const src = anchorOverrides[a.id] || 0;
+    if (role && role.oppose.includes(a.id)){
+      const mag = Math.max(35, Math.abs(src));
+      out[a.id] = src > 0 ? -mag : src < 0 ? mag : (rng() < 0.5 ? -mag : mag);
+    } else if (role && role.align.includes(a.id)){
+      out[a.id] = Math.abs(src) >= 15 ? src : Math.round((rng()*2-1)*40);
+    } else out[a.id] = Math.round((rng()*2-1)*45);
+  });
+  return out;
+}
+
+/* A directed edge's defaults, read off the two sheets. Every number comes with its
+   reason so the author can see what to overrule. */
+function edgeDefaults(fromState, toState, roleId){
+  const role = relationshipRole(roleId);
+  const dim = internalDimensions(fromState);
+  const pa = axisProfile(fromState), pb = axisProfile(toState);
+  const why = [];
+  let trust = role ? role.trust : 3;
+  if (dim.trust > 0.3){ trust = Math.min(5, trust + 1); why.push("trust runs high in them"); }
+  if (dim.trust < -0.3){ trust = Math.max(1, trust - 1); why.push("trust runs guarded in them"); }
+  const honB = (pb.hon || 0), honA = (pa.hon || 0);
+  if (honB < -0.4 && honA > 0.2){ trust = Math.max(1, trust - 1); why.push("the other deals crooked and they deal straight"); }
+  let dependence = role ? role.dependence : 3;
+  const attach = _profTrait(fromState, "attachment");
+  if (attach && attach.category === "Anxious"){ dependence = Math.min(5, dependence + 1); why.push("anxious attachment leans in"); }
+  if (attach && attach.category === "Avoidant"){ dependence = Math.max(1, dependence - 1); why.push("avoidant attachment holds back"); }
+  const roleA = _profTrait(fromState, "role");
+  if (roleA && roleA.category === "Caretaker"){ dependence = Math.max(1, dependence - 1); why.push("a caretaker is depended on, not dependent"); }
+  let status = role ? role.status : "equal";
+  if (!role){
+    const d = (pa.asrt || 0) - (pb.asrt || 0);
+    status = d > 0.6 ? "above" : d < -0.6 ? "below" : "equal";
+    if (status !== "equal") why.push(`assertiveness gap of ${d.toFixed(1)}`);
+  }
+  const want = _profTrait(fromState, "motivation", /Core Want/i);
+  const lie = _profTrait(fromState, "motivation", /The Lie/i);
+  const defence = _profTrait(fromState, "motivation", /The Defence/i);
+  const contraB = contradictionFor(toState);
+  const woundB = _profTrait(toState, "motivation", /Core Wound/i);
+  const sharp = (pa.intel || 0) > 0.2 || (pa.cur || 0) > 0.2;
+  const knows = contraB ? (sharp ? `Has noticed that they are ${contraB.hi.trait} and also ${contraB.lo.trait}.` : `Has not noticed the contradiction the reader can see.`)
+              : woundB ? (sharp ? `Suspects ${woundB.trait}.` : `Knows nothing of ${woundB.trait}.`) : "";
+  const wants = want ? `${want.trait} — and this person is in the way of it, or the route to it.` : "";
+  const conceals = lie ? `That underneath it they believe ${lie.trait}.` : defence ? `${defence.trait}.` : "";
+  const obligation = role ? ({mentor:"To make them ready and then let go.", protege:"To become worth the time.", confidant:"To keep what they were told.", dependant:"To be there when it counts.", ally:"To hold the line when it costs.", ex:"None that either will admit to.", rival:"Only to fight fair, and only if watched.", antagonist:"None."})[role.id] || "" : "";
+  return {trust, dependence, status, obligation, knows, wants, conceals, why};
+}
+
+function makeEdge(fromId, toId, roleId, defaults, extra){
+  return Object.assign({id: "e_" + fromId + "_" + toId + "_" + (roleId || "x"), from: fromId, to: toId, role: roleId || null,
+    trust: 3, dependence: 3, status: "equal", obligation: "", knows: "", wants: "", conceals: "", notes: ""}, defaults || {}, extra || {});
+}
+/* Edges that name a member no longer in the cast are dropped, not repaired: a
+   dangling edge is a lie about the ensemble. */
+function pruneEdges(edges, members){
+  const ids = new Set((members || []).map(m => m.id));
+  return (edges || []).filter(e => e && ids.has(e.from) && ids.has(e.to) && e.from !== e.to);
+}
+function validateEdge(e){
+  const problems = [];
+  if (!e || typeof e !== 'object') return ["edge is not an object"];
+  ["from","to"].forEach(k => { if (typeof e[k] !== 'string' || !e[k]) problems.push(`edge.${k} must be a member id`); });
+  ["trust","dependence"].forEach(k => { if (!Number.isInteger(e[k]) || e[k] < 1 || e[k] > 5) problems.push(`edge.${k} must be 1..5`); });
+  if (!RELATIONSHIP_STATUS.includes(e.status)) problems.push("edge.status must be above/equal/below");
+  if (e.role && !relationshipRole(e.role)) problems.push(`edge.role "${e.role}" is not a known role`);
+  ["obligation","knows","wants","conceals","notes"].forEach(k => { if (e[k] !== undefined && typeof e[k] !== 'string') problems.push(`edge.${k} must be text`); });
+  return problems;
+}
+function edgesToMarkdown(edges, members){
+  const name = id => { const m = (members || []).find(x => x.id === id); return m ? (m.meta && m.meta.name) || id : id; };
+  return (edges || []).map(e => {
+    const role = relationshipRole(e.role);
+    const L = [`- **${name(e.from)} → ${name(e.to)}**${role ? ` (${role.label})` : ``}: trust ${e.trust}/5 · dependence ${e.dependence}/5 · stands ${e.status}`];
+    if (e.obligation) L.push(`  - owes: ${e.obligation}`);
+    if (e.knows) L.push(`  - knows: ${e.knows}`);
+    if (e.wants) L.push(`  - wants: ${e.wants}`);
+    if (e.conceals) L.push(`  - conceals: ${e.conceals}`);
+    if (e.notes) L.push(`  - notes: ${e.notes}`);
+    return L.join("\n");
+  }).join("\n");
+}
+
 function buildStressVariant(baseVerbLevel, baseRegLevel, mannerCount, rarityPref, sourceState){
   /* Scaled by the pressure dial rather than pinned to the extreme. At 1.0 these are
      exactly the values this function has always used, so the default is unchanged; at

@@ -1264,3 +1264,17 @@
   .traitCard.ctx-amplified { box-shadow:0 0 0 2px var(--golden-deep) inset; }
   .traitCard.ctx-exception { box-shadow:0 0 0 2px var(--bubblegum) inset; }
   .ctxNote { font-size:.78rem; }
+
+  /* Relationship workspace */
+  .relWorkspace { margin-top:12px; }
+  .edgeList { display:grid; gap:10px; margin-top:8px; }
+  .edgeCard { border:1px solid var(--border-strong); border-radius:12px; padding:10px 12px; font-size:.84rem; }
+  .edgeHead { display:flex; align-items:center; gap:6px; flex-wrap:wrap; margin-bottom:6px; }
+  .edgeRole { font-size:.72rem; padding:1px 7px; border-radius:10px; background:var(--golden-deep); color:#fff; }
+  .edgeNums { display:flex; flex-wrap:wrap; gap:12px; margin:4px 0 6px; }
+  .edgeNums label { display:inline-flex; align-items:center; gap:6px; font-size:.78rem; }
+  .edgeNums input[type=range] { width:90px; }
+  .edgeField { display:grid; grid-template-columns:90px 1fr; gap:6px; align-items:center; margin:3px 0; }
+  .edgeField span { font-size:.74rem; text-transform:uppercase; letter-spacing:.04em; color:var(--text-soft, #6b7a8a); }
+  .edgeField input { width:100%; font-size:.82rem; }
+  @media (max-width:600px){ .edgeField { grid-template-columns:1fr; } }

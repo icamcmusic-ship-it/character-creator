@@ -721,6 +721,25 @@
         </div>
       </div>
     </div>
+    <div class="controls relWorkspace">
+      <h3 style="margin:0 0 4px;">Relationship workspace</h3>
+      <div class="sub" style="margin:0 0 10px;">Directed edges between cast members: what A owes, knows, wants and hides from B. Defaults are read off the two sheets; every field is yours to overwrite. Edges travel in the cast file.</div>
+      <div class="row">
+        <div class="field">
+          <label for="relRole">Role (for the edge, or for a new member opposite A)</label>
+          <select id="relRole"></select>
+        </div>
+        <div class="field">
+          <label>&nbsp;</label>
+          <div class="actionRow">
+            <button class="btn-secondary" data-on="click" data-act="addRelationshipEdge" data-args="[]" title="Add a directed edge A → B with defaults read from both sheets">Add edge A → B</button>
+            <button class="btn-secondary" data-on="click" data-act="generateForRole" data-args="[]" title="Generate a new cast member built to sit in this role opposite A">Generate a member in this role</button>
+          </div>
+        </div>
+      </div>
+      <div class="sub" id="edgeStamp">No edges yet.</div>
+      <div id="relEdges" class="edgeList"></div>
+    </div>
     <div class="sheet" id="relSheet">
       <div class="sheetHeader"><h2 id="relTitle">Relationship</h2></div>
       <div id="relBody"></div>
