@@ -123,6 +123,17 @@ const FREQ_BUDGET = {
   4: {label:"most scenes",               hint:"Load-bearing. This is one of the two or three things that define the voice."},
   5: {label:"nearly every page",         hint:"Dominant. Overuse is the risk here — it can tip into caricature fast."}
 };
+/* The four dimensions the audit asks for, kept apart from intensity: frequency,
+   visibility, persistence and narrative salience. Compact on the card, fully spelled
+   out in the title, and marked when they were inferred from the section rather than
+   authored on the trait. */
+function dimsChipHTML(t){
+  const d = (typeof traitDimensions === 'function') ? traitDimensions(t) : null;
+  if (!d) return ``;
+  const parts = ['frequency','visibility','persistence','narrativeSalience'];
+  const title = parts.map(k => `${DIM_LABELS[k]}: ${d[k]}/5${d.inferred.includes(k) ? ' (inferred from the section)' : ''}`).join('\n');
+  return `<span class="dimsChip" title="${escHTML(title)}"><span aria-hidden="true">F${d.frequency} V${d.visibility} P${d.persistence} S${d.narrativeSalience}</span><span class="srOnly">${escHTML(title.replace(/\n/g, '; '))}</span></span>`;
+}
 function freqBudgetHTML(t){
   const b = FREQ_BUDGET[t.intensity] || FREQ_BUDGET[3];
   return `<div class="freqBudget"><b>Use:</b> ${b.label} <span class="freqHint">— ${b.hint}</span></div>`;
@@ -434,6 +445,7 @@ function traitCardHTML(id, s, includeControls, showDiff, accent, tagLabel){
         <div class="traitName">${escHTML(t.trait)}
           <span class="rarityBadge rarity-${tier}" title="${escHTML(RARITY_TIER_HINT[tier]||'')}"><span class="rarityGlyph" aria-hidden="true">${RTIER_GLYPH[tier]||"·"}</span>${escHTML(RTIER_LABEL[tier]||tier)}</span>
           <span class="intensityDots" title="Intensity ${t.intensity}/5 (continuous position ${traitPos(t).toFixed(2)})"><span aria-hidden="true">${intensityDots(t.intensity)}</span><span class="srOnly">intensity ${t.intensity} of 5</span></span>
+          ${dimsChipHTML(t)}
           ${s.wildcard ? `<span class="wildBadge" title="Deliberately drawn against the grain — see 'the one thing that doesn't fit'">outlier</span>` : ``}
           ${s.derived ? `<span class="wildBadge" style="background:var(--emerald-deep);border-color:var(--emerald-deep);" title="Derived from this character's psychology rather than a slider">derived</span>` : ``}
           ${s.budgeted ? `<span class="wildBadge budgetBadge" title="${escHTML(s.budgetWhy || 'Adjusted to fit a budget you set')}">budgeted</span>` : ``}
@@ -605,12 +617,15 @@ function summaryCardHTML(){
   const slots = Object.values(state).filter(s=> s && s.trait);
   if (!slots.length) return "";
 
-  const emergent = (typeof emergentArchetypeName === 'function') ? emergentArchetypeName(state) : null;
+  const emergent = (typeof characterLabel === 'function') ? characterLabel(state, charMeta) : null;
   // "Unnamed Character" is the generator's placeholder, not a name the user chose — an
   // emergent title says far more, so it takes the headline when there is no real name.
   const named = charMeta.name && charMeta.name !== "Unnamed Character" ? charMeta.name : null;
   const title = named || (emergent && emergent.name) || "This character";
   const sub = (emergent && named) ? emergent.name : "";
+  // The label is the author's once they have edited it; the pencil is how they take it.
+  const labelBtn = `<button class="labelEdit" ${actAttr('click', 'editCharacterLabel')} title="${emergent && emergent.authored ? 'Your label — edit it' : 'Rename the emergent label'}" aria-label="Edit the character label">✎</button>`
+    + (emergent && emergent.authored ? `<button class="labelEdit" ${actAttr('click', 'clearCharacterLabel')} title="Go back to the emergent label" aria-label="Clear your label">×</button>` : ``);
 
   // The loudest traits are the sheet's own headline: highest intensity first, and among
   // equals prefer the deeper sections over a mannerism, since "what they want" carries
@@ -625,12 +640,18 @@ function summaryCardHTML(){
 
   let h = `<div class="summaryCard" id="summaryCard">
     <div class="summaryHead">
-      <div class="summaryName">${escHTML(title)}</div>
-      ${sub ? `<div class="summarySub">${escHTML(sub)}</div>` : ``}
+      <div class="summaryName">${escHTML(title)}${sub ? `` : labelBtn}</div>
+      ${sub ? `<div class="summarySub">${escHTML(sub)}${labelBtn}</div>` : ``}
     </div>`;
 
   const brief = characterBriefHTML();
   if (brief) h += brief;
+  const chain = (typeof motivationChain === 'function') ? motivationChain(state) : null;
+  if (chain && chain.links.length > 1){
+    h += `<details class="chainBox"><summary>How the pieces connect <span class="chainCount">${chain.links.length} links</span></summary><ol class="chainList">` +
+      chain.links.map(l => `<li><span class="chainKey">${escHTML(l.key)}</span> ${escHTML(l.text)} <span class="chainFrom">← ${escHTML(l.from.join(" · "))}</span></li>`).join("") +
+      `</ol></details>`;
+  }
 
   if (loudest.length){
     h += `<ul class="summaryTraits">` + loudest.map(s=>
@@ -972,12 +993,16 @@ function renderSheet(){
     /* Framed as a prompt, not a defect — see the CONTRADICTION AS CONTENT note in
        engine.js. Sits above the tension list, because it is the one a writer can
        actually use tonight. */
-    const contra = contradictionFor(state);
+    const contra = (typeof structuredContradiction === 'function') ? structuredContradiction(state, charMeta) : contradictionFor(state);
     if (contra){
+      const fields = (contra.fields || []).map(f => `<div class="contraField"><b>${escHTML(f.prompt)}</b> ${
+        f.answer ? `<span class="contraAnswer">${escHTML(f.answer)}</span>` : (f.derived ? `<span class="contraDerived">${escHTML(f.derived)}</span>` : `<span class="sub">unanswered</span>`)
+      } <button class="contraEdit" ${actAttr('click', 'answerContradiction', f.key)} title="Write your own answer">${f.answer ? 'edit' : 'answer'}</button>${f.answer ? `<button class="contraEdit" ${actAttr('click', 'answerContradiction', f.key, true)} title="Remove your answer">clear</button>` : ``}</div>`).join("");
       h += `<div class="tensionBlock" style="border-left-color:var(--golden-deep); margin-top:10px;">
         <div class="tensionTitle" style="color:var(--golden-deep);">The contradiction &mdash; ${escHTML(contra.axisLabel)}</div>
         <div style="margin:6px 0;">They are <b>${escHTML(contra.hi.trait)}</b> and also <b>${escHTML(contra.lo.trait)}</b>.</div>
         <div style="margin:6px 0; font-style:italic;">${escHTML(contra.question)}</div>
+        ${fields}
         <div class="sub" style="margin:6px 0 0;">Not an error to fix. A ${escHTML(contra.tier.toLowerCase())} opposition on one axis is where a character stops being a list of traits — answer the question and the rest of the sheet reorganises around it.</div>
       </div>`;
     }
@@ -1097,6 +1122,11 @@ function renderSheet(){
     const pfp = voiceFingerprint(pressureState, charMeta);
     if (pfp) head += `<div class="pressureBlock"><b>How they sound once it starts.</b> <i>${escHTML(pfp)}</i></div>`;
     if (pm.recovery) head += `<div class="pressureBlock"><b>Afterwards.</b> ${escHTML(pm.recovery)}</div>`;
+    const chain = (typeof pressureChain === 'function') ? pressureChain(state, pressureState) : null;
+    if (chain){
+      head += `<ol class="chainList pressureChain">` + chain.stages.map(sg =>
+        `<li><b>${escHTML(sg.title)}.</b> ${escHTML(sg.text)} <span class="chainFrom">← ${escHTML(sg.from.join(" · ") || "the pressure dial")}</span></li>`).join("") + `</ol>`;
+    }
     pbody.innerHTML = head;
     const pgroups = [
       {title:"Speech Under Pressure", ids:["verbosity","register","grammar"]},
@@ -1290,7 +1320,19 @@ function sheetToText(st, meta, pState){
   if (meta.age) bits.push(`**Age:** ${meta.age}`);
   if (meta.context) bits.push(`**Context:** ${meta.context}`);
   if (meta.archetypeLabel) bits.push(`**Archetype:** ${meta.archetypeLabel}`);
+  if (meta.label) bits.push(`**Label:** ${meta.label}`);
   if (bits.length) L.push("", bits.join("  \n"));
+  try {
+    const chain = motivationChain(st);
+    if (chain && chain.links.length > 1){
+      L.push("", "**How the pieces connect:**", ...chain.links.map(l => `${l.links ? '' : ''}1. _${l.key}_ — ${l.text} (from: ${l.from.join(", ")})`));
+    }
+    const contra = structuredContradiction(st, meta);
+    if (contra){
+      L.push("", `**The contradiction — ${contra.axisLabel}:** ${contra.hi.trait} and also ${contra.lo.trait}. _${contra.question}_`,
+        ...contra.fields.map(f => `- ${f.prompt} ${f.answer || f.derived || "(unanswered)"}`));
+    }
+  } catch(e){}
   try {
     const co = coherenceScore(st);
     if (co) L.push("", `_Coherence: ${co.pct}% (${co.lift>=0?"+":""}${co.lift} vs a ${co.basePct}% chance baseline) — ${co.label}_`);
@@ -1305,6 +1347,8 @@ function sheetToText(st, meta, pState){
     const t = slot.trait;
     const out = [`- **${t.trait}** — ${t.desc}`];
     out.push(`  - *${t.category}* · intensity ${t.intensity}/5 · ${t.rarity} · use: ${(FREQ_BUDGET[t.intensity]||FREQ_BUDGET[3]).label}`);
+    const d = (typeof traitDimensions === 'function') ? traitDimensions(t) : null;
+    if (d) out.push(`  - frequency ${d.frequency} · visibility ${d.visibility} · persistence ${d.persistence} · salience ${d.narrativeSalience}${d.inferred.length ? ` (${d.inferred.length === 4 ? 'all' : d.inferred.join(', ')} inferred)` : ''}`);
     if (showEx && t.example) out.push(`  - > ${t.example}`);
     return out.join("\n");
   };
@@ -1351,6 +1395,10 @@ function sheetToText(st, meta, pState){
     if (pm.level !== undefined && pm.level < 0.99) L.push(`_Shown at ${Math.round(pm.level*100)}% pressure._`, "");
     if (pm.trigger) L.push(`**What sets it off.** ${plainify(pm.trigger)}`, "");
     if (pm.recovery) L.push(`**Afterwards.** ${pm.recovery}`, "");
+    try {
+      const chain = pressureChain(st, pState);
+      if (chain) L.push(...chain.stages.map(sg => `1. **${sg.title}.** ${sg.text} (from: ${sg.from.join(", ") || "the pressure dial"})`), "");
+    } catch(e){}
     /* The base sheet's `block` helper filters slots whose TRAIT is null; the pressure
        section checked only that the slot existed, so one blanked or banned-out pressure
        slot threw `Cannot read properties of null (reading 'trait')` and aborted the

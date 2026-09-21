@@ -131,6 +131,28 @@ function announceStorageMode(){
   el.textContent = "This browser is not allowing local storage (private mode, or site data is blocked). Saves will last only until you close this tab — export to a file to keep anything.";
 }
 
+/* The emergent label is the generator's first guess; the author's edit replaces it in
+   the summary, the save and the export. An empty answer clears the override. */
+async function editCharacterLabel(){
+  if (!Object.keys(state).length){ toast("Generate a character first.", "warn"); return; }
+  const current = (typeof characterLabel === 'function' && characterLabel(state, charMeta)) || {};
+  const next = await askForName("Label this character:", charMeta.label || current.name || "");
+  if (next === null) return;
+  charMeta.label = next;
+  renderSheet();
+}
+function clearCharacterLabel(){ delete charMeta.label; renderSheet(); }
+async function answerContradiction(key, clear){
+  const contra = (typeof structuredContradiction === 'function') ? structuredContradiction(state, charMeta) : null;
+  const field = contra && contra.fields.find(f => f.key === key);
+  if (!field) return;
+  charMeta.contradictionAnswers = Object.assign({}, charMeta.contradictionAnswers || {});
+  if (clear){ delete charMeta.contradictionAnswers[key]; renderSheet(); return; }
+  const next = await askForName(field.prompt, field.answer || "");
+  if (next === null) return;
+  charMeta.contradictionAnswers[key] = next;
+  renderSheet();
+}
 async function saveCharacter(btnEl){
   if(!Object.keys(state).length){ toast("Generate a character first.", "warn"); return; }
   if (!storageIsDurable()){

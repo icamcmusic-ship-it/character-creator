@@ -65,6 +65,7 @@ const ctx = loadEngine([
   'recentPenalty','RECENT_PENALTY','RECENT_DECAY','RECENT_FAMILY_PENALTY','setAvoidSet','avoidSetFrom','avoidPenalty',
   'archiveCharacter','forgetArchive','getArchive','diversityScore','referenceFromState','pickWildcardSlot','strongestLean',
   'exportArchive','importArchive',
+  'motivationChain','pressureChain','structuredContradiction','traitDimensions','characterLabel','DIM_DEFAULTS_BY_SECTION',
 ]);
 const A = ctx.api;
 const T = A.TRAITS;
@@ -2275,6 +2276,79 @@ check('the wildcard is a real exception when the sheet leans, and says so', ()=>
 })();
 
 console.log('\n' + (failed ? '\x1b[31m' : '\x1b[32m') + passed + ' passed, ' + failed + ' failed\x1b[0m');
+
+group('Mechanics: linked chains, structured contradiction, dimensions, editable label');
+
+const _mechSheet = (seed)=>{
+  let st;
+  A.withRng(A.mulberry32(seed), ()=>{ st = A.buildCharacterState({verbLevel:0, regLevel:0, compLevel:0, mannerCount:3, vocabCount:2, rarityPref:0, vocabPref:null, personalityOverrides:{}}); });
+  return st;
+};
+
+check('the motivation chain links want → belief → origin → need → strategy, each grounded in a named card', ()=>{
+  const st = _mechSheet(7101);
+  const chain = A.motivationChain(st);
+  assert(chain, 'no chain for a sheet with Motivation & Wound on');
+  const keys = chain.links.map(l=>l.key);
+  ['want','belief','origin','need','strategy'].forEach(k=> assert(keys.includes(k), `chain is missing the ${k} link (${keys.join(', ')})`));
+  chain.links.forEach(l=> assert(l.from.length && l.text.length > 10, `link ${l.key} is not grounded`));
+  const again = A.motivationChain(st);
+  assert(JSON.stringify(again) === JSON.stringify(chain), 'the chain is not deterministic for the same sheet');
+  return keys.join(' → ');
+});
+
+check('the pressure chain runs trigger → appraisal → tactic → threshold → aftermath → repair, from base traits', ()=>{
+  const st = _mechSheet(7102);
+  let ps;
+  A.withRng(A.mulberry32(7102), ()=>{ ps = A.buildStressVariant(0, 0, 2, 'balanced', st); });
+  const chain = A.pressureChain(st, ps);
+  assert(chain, 'no pressure chain');
+  const keys = chain.stages.map(s=>s.key);
+  ['trigger','appraisal','threshold','aftermath'].forEach(k=> assert(keys.includes(k), `missing ${k} stage (${keys.join(', ')})`));
+  // Sections can be toggled by earlier tests, so the grounded stages are checked against
+  // what is actually seated rather than assumed.
+  const seated = id => Object.keys(st).some(k=>k.startsWith('prof_'+id+'_') && st[k] && st[k].trait);
+  assert(keys.includes('tactic') === seated('stress'), 'the tactic stage should exist exactly when a stress card is seated');
+  assert(keys.includes('repair') === seated('repair'), 'the repair stage should exist exactly when a Recovery & Repair card is seated');
+  chain.stages.forEach(s=> assert(s.from.length || s.key==='threshold', `stage ${s.key} names no base trait`));
+  return keys.join(' → ');
+});
+
+check('a contradiction carries when / with whom / what changes / cost, and the author\'s answers win', ()=>{
+  let found = null;
+  for (let seed = 7200; seed < 7260 && !found; seed++){ const st = _mechSheet(seed); const c = A.structuredContradiction(st, {}); if (c) found = {st, c}; }
+  assert(found, 'no contradiction in 60 sheets');
+  const keys = found.c.fields.map(f=>f.key);
+  assert(keys.join() === 'when,who,change,cost', `fields are ${keys.join()}`);
+  assert(found.c.fields.find(f=>f.key==='change').derived, 'the change field should always be derivable from the pair');
+  const c2 = A.structuredContradiction(found.st, {contradictionAnswers:{when:'only after midnight'}});
+  assert(c2.fields[0].answer === 'only after midnight', 'the author answer was not carried');
+  return `${found.c.axisLabel}: ${found.c.fields.filter(f=>f.derived).length}/4 derived`;
+});
+
+check('trait dimensions come from the trait when authored and are flagged when inferred', ()=>{
+  const authored = T.find(t=> t.frequency && t.visibility && t.persistence && t.narrativeSalience);
+  const bare = T.find(t=> !t.frequency && !t.visibility && t.section === 'Appearance');
+  const d1 = A.traitDimensions(authored), d2 = A.traitDimensions(bare);
+  assert(!d1.inferred.length && d1.frequency === authored.frequency, 'authored dimensions should be used as written');
+  assert(d2.inferred.length === 4 && d2.visibility === 5, `an Appearance trait should infer visibility 5 (${JSON.stringify(d2)})`);
+  const secs = new Set(T.map(t=>t.section)); Object.keys(A.DIM_DEFAULTS_BY_SECTION).forEach(sec=> assert(secs.has(sec), `DIM_DEFAULTS names an unknown section "${sec}"`));
+  return `authored ${authored.trait} · inferred ${bare.trait} → V${d2.visibility} P${d2.persistence}`;
+});
+
+check('the author\'s label overrides the emergent name and survives export', ()=>{
+  const st = _mechSheet(7103);
+  const em = A.characterLabel(st, {});
+  const mine = A.characterLabel(st, {label:'The Quiet Fixer'});
+  assert(!em || !em.authored, 'an unedited label should not read as authored');
+  assert(mine.name === 'The Quiet Fixer' && mine.authored, 'the label was not honoured');
+  const md = A.sheetToText(st, {name:'X', label:'The Quiet Fixer'}, null);
+  assert(md.includes('**Label:** The Quiet Fixer'), 'label missing from the export');
+  assert(md.includes('How the pieces connect'), 'the chain is missing from the export');
+  assert(/frequency \d · visibility \d/.test(md), 'dimensions are missing from the export');
+  return `emergent "${em && em.name}" → authored "${mine.name}"`;
+});
+
 if (failed){
   console.log('\nFailures:');
   failures.forEach(f=>console.log('  - ' + f));

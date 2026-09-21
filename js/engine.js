@@ -5657,6 +5657,208 @@ function pressureRecovery(st){
   return bits.length ? bits.join(" ") : null;
 }
 
+// ================= MECHANICS: CHAINS, STRUCTURED CONTRADICTION, DIMENSIONS =================
+/* The deep sections were drawn independently and read independently: a Want, a Lie,
+   a Wound and a Need on four separate cards with nothing saying how one produced the
+   next. The chain below is pure composition of slots already on the sheet, so it is
+   deterministic per character and costs nothing to rebuild — but it is the difference
+   between a list of psychological nouns and a mechanism a writer can push on. Every
+   link names the trait it reads from, so the explanation can be checked against the
+   cards rather than taken on trust. */
+function _profTrait(st, sectionId, catRe){
+  const id = Object.keys(st || {}).find(k => k.startsWith("prof_" + sectionId + "_") && st[k] && st[k].trait
+    && (!catRe || catRe.test(st[k].trait.category)));
+  return id ? st[id].trait : null;
+}
+const STRATEGY_BY_STRESS = {
+  "Fight (attack the threat)": "meets it head-on before it can land",
+  "Flight (remove yourself)": "leaves before it can land",
+  "Freeze (shut down)": "goes still and waits for it to pass",
+  "Fawn (appease the threat)": "makes themselves useful to it until it stops being a threat",
+};
+const STRATEGY_BY_VALUES = {
+  "Rigid & Principled": "a rule they will not bend",
+  "Pragmatic & Flexible": "whatever works this time",
+  "Loyalty-Bound": "the people they have decided are theirs",
+  "Self-Interested": "their own position first",
+  "Idealistic & Visionary": "a picture of how it ought to be",
+};
+function motivationChain(st){
+  const want = _profTrait(st, "motivation", /Core Want/i);
+  const fear = _profTrait(st, "motivation", /Core Fear/i);
+  const wound = _profTrait(st, "motivation", /Core Wound/i);
+  const lie = _profTrait(st, "motivation", /The Lie/i);
+  const need = _profTrait(st, "motivation", /The Need/i);
+  const ghost = _profTrait(st, "motivation", /The Ghost/i);
+  const defence = _profTrait(st, "motivation", /The Defence/i);
+  const origin = _profTrait(st, "origins");
+  const stress = _profTrait(st, "stress");
+  const values = _profTrait(st, "values");
+  const aim = _profTrait(st, "goals", /Longer Aim/i);
+  const price = _profTrait(st, "goals", /Price/i);
+  if (!want && !need && !wound) return null;
+  const links = [];
+  const add = (key, text, from) => links.push({key, text, from: from.filter(Boolean).map(t => t.trait)});
+  if (want) add("want", `The conscious goal is ${want.trait}${want.desc ? ` — ${want.desc}` : ``}`, [want]);
+  if (lie && want) add("belief", `They chase it because they believe ${lie.trait}: the want is what that belief makes look like the answer.`, [lie, want]);
+  else if (lie) add("belief", `Underneath, they believe ${lie.trait}.`, [lie]);
+  if (wound) add("origin", `The belief was learned from ${wound.trait}${ghost ? `, and it is still attached to ${ghost.trait}` : ``}.`, [wound, ghost]);
+  if (need) add("need", `What would actually help is ${need.trait}${want ? ` — which the want stands in front of rather than delivering` : ``}.`, [need, want]);
+  if (defence) add("strategy", `The strategy built on top is ${defence.trait}: it keeps the wound covered and keeps the need unmet.`, [defence]);
+  if (stress || values){
+    const s = stress ? STRATEGY_BY_STRESS[stress.category] : null;
+    const v = values ? STRATEGY_BY_VALUES[values.category] : null;
+    add("method", `When the strategy is tested they ${s || "fall back on habit"}${v ? `, and justify it by ${v}` : ``}.`, [stress, values]);
+  }
+  if (fear) add("fear", `The thing they organise their life to avoid is ${fear.trait}${wound ? ` — the wound happening again` : ``}.`, [fear]);
+  if (origin) add("counterweight", `The one place the belief does not hold: ${origin.trait}. ${origin.desc || ""}`.trim(), [origin]);
+  if (aim || price) add("stakes", `${aim ? `Right now it points at ${aim.trait}.` : ``}${price ? ` The cost they are already paying: ${price.trait}.` : ``}`.trim(), [aim, price]);
+  return {want, fear, wound, lie, need, ghost, defence, origin, stress, values, links};
+}
+
+/* The pressure sheet had a trigger and an aftermath but no middle: nothing said how the
+   trigger was READ, what the first move was, how far it has to go before the sheet's
+   shifts happen, or what the repair looks like. Each stage names the base trait it is
+   grounded in; a stage with nothing to ground it is omitted rather than invented. */
+const APPRAISAL_BY_ATTACHMENT = {
+  "Secure": "reads it as a problem to solve, not a verdict on them",
+  "Anxious": "reads it as the first sign of being left",
+  "Avoidant": "reads it as a demand, and demands are the thing to get away from",
+  "Disorganized": "reads it two ways at once and acts on whichever arrives first",
+};
+const THRESHOLD_BY_VALUES = {
+  "Rigid & Principled": "when a rule is broken in front of them",
+  "Pragmatic & Flexible": "only once the workaround has also failed",
+  "Loyalty-Bound": "the moment one of their people is touched",
+  "Self-Interested": "when it starts to cost them personally",
+  "Idealistic & Visionary": "when the picture of how it should be is mocked",
+};
+function pressureChain(st, pst){
+  const fear = _profTrait(st, "motivation", /Core Fear/i);
+  const wound = _profTrait(st, "motivation", /Core Wound/i);
+  const lie = _profTrait(st, "motivation", /The Lie/i);
+  const attach = _profTrait(st, "attachment");
+  const stress = _profTrait(st, "stress");
+  const values = _profTrait(st, "values");
+  const repair = _profTrait(st, "repair");
+  const level = pst && pst.__pressure ? pst.__pressure.level : 1;
+  const stages = [];
+  const add = (key, title, text, from) => stages.push({key, title, text, from: from.filter(Boolean).map(t => t.trait)});
+  if (fear || wound) add("trigger", "Trigger", fear
+    ? `Anything that looks like ${fear.trait}${wound ? `, especially when it rhymes with ${wound.trait}` : ``}.`
+    : `Anything that reopens ${wound.trait}.`, [fear, wound]);
+  if (attach || lie){
+    const a = attach ? APPRAISAL_BY_ATTACHMENT[attach.category] : null;
+    add("appraisal", "How they read it", `${a ? `They ${a}` : `They read it through the belief`}${lie ? `, because underneath they still hold that ${lie.trait}` : ``}.`, [attach, lie]);
+  }
+  if (stress){
+    const shifted = pst ? Object.values(pst).filter(s => s && s.shifted).map(s => `${s.fromCat} → ${s.toCat}`) : [];
+    add("tactic", "First move", `${stress.trait}: ${stress.desc || STRATEGY_BY_STRESS[stress.category] || ""}${shifted.length ? ` Under load the profile shifts: ${shifted.join("; ")}.` : ``}`.trim(), [stress]);
+  }
+  if (values || level !== undefined){
+    const v = values ? THRESHOLD_BY_VALUES[values.category] : null;
+    add("threshold", "Where it tips", `${v ? `It tips ${v}` : `It tips when the pressure passes their composure`}${level < 0.99 ? ` — the sheet shows them at ${Math.round(level*100)}%, short of that` : ` — the sheet shows them past it`}.`, [values]);
+  }
+  const rec = pressureRecovery(st);
+  if (rec) add("aftermath", "Afterwards", rec, [stress, attach]);
+  if (repair) add("repair", "How they repair it", `${repair.trait}: ${repair.desc || ""}${repair.example ? ` — “${repair.example}”` : ``}`.trim(), [repair]);
+  return stages.length ? {level, stages} : null;
+}
+
+/* A contradiction was an axis, two trait names and one question. What a scene needs is
+   the four things the audit names: when the second face appears, with whom, what
+   actually changes, and what it costs. Derived from the traits' own conditions and
+   the sheet's context roles where the data exists, and left as a prompt the author
+   answers where it does not. Answers live in charMeta.contradictionAnswers so they
+   save, export and survive a re-render. */
+const CONTEXT_WORDS = {public:"in public", private:"in private", authority:"in front of authority", threat:"under threat",
+  intimacy:"with someone close", fatigue:"when tired", work:"at work", home:"at home", stranger:"with strangers", peer:"among peers", dependent:"with someone who depends on them"};
+function structuredContradiction(st, meta){
+  const base = contradictionFor(st);
+  if (!base) return null;
+  const fn = _profTrait(st, "contradiction");
+  const condsOf = t => (t.conditions || []).map(c => CONTEXT_WORDS[c] || c);
+  const hiWhen = condsOf(base.hi), loWhen = condsOf(base.lo);
+  const roles = ["Among Peers","Under Authority","With Dependents"].map(c => _profTrait(st, "contextrole", new RegExp("^" + c + "$"))).filter(Boolean);
+  const attach = _profTrait(st, "attachment");
+  const derived = {
+    when: hiWhen.length || loWhen.length
+      ? `${base.hi.trait} ${hiWhen.length ? hiWhen.join(" or ") : "by default"}; ${base.lo.trait} ${loWhen.length ? loWhen.join(" or ") : "the rest of the time"}.`
+      : null,
+    who: roles.length ? `The context roles give the likely split: ${roles.map(r => `${r.category.toLowerCase()} they are ${r.trait}`).join("; ")}.` : (attach ? `${attach.category} attachment decides who gets which face.` : null),
+    change: `On ${base.axisLabel.toLowerCase()} they move from ${base.hi.trait} to ${base.lo.trait} — a ${base.tier.toLowerCase()} swing.`,
+    cost: fn ? `${fn.trait}: ${fn.desc || ""}`.trim() : null,
+    fn,
+  };
+  const prompts = {
+    when: "When does the second face appear?",
+    who: "With whom?",
+    change: "What actually changes?",
+    cost: "What does it cost them?",
+  };
+  const answers = (meta && meta.contradictionAnswers) || {};
+  const fields = Object.keys(prompts).map(k => ({key:k, prompt:prompts[k], derived: derived[k], answer: answers[k] || ""}));
+  return Object.assign({}, base, {fields, fn});
+}
+
+/* Intensity was doing four jobs. A trait can be constant but invisible (a private
+   ritual), rare but unmissable (a scar), or loud and gone in a scene (a flare of
+   temper). Where the bank carries the four dimensions they are used as written;
+   elsewhere they are inferred from what the section is, so every card can show them
+   and the export can carry them — with the inference flagged so nobody mistakes a
+   default for an authored judgment. */
+const DIM_DEFAULTS_BY_SECTION = {
+  "Appearance":            {visibility:5, persistence:5},
+  "Mannerisms":            {visibility:4, persistence:4},
+  "Habits & Vices":        {visibility:3, persistence:4},
+  "Verbosity Traits":      {visibility:4, persistence:4},
+  "Vocabulary Traits":     {visibility:4, persistence:4},
+  "Dialogue Grammar Traits": {visibility:4, persistence:4},
+  "Personality Traits":    {visibility:3, persistence:4},
+  "Humor Style":           {visibility:4, persistence:4},
+  "Social Role in a Group": {visibility:3, persistence:4},
+  "Role by Context":       {visibility:3, persistence:3},
+  "Motivation & Wound":    {visibility:1, persistence:5},
+  "Positive Origins":      {visibility:1, persistence:5},
+  "Goals & Stakes":        {visibility:2, persistence:3},
+  "Attachment & Intimacy Style": {visibility:2, persistence:5},
+  "Conflict & Stress Response":  {visibility:3, persistence:4},
+  "Values & Moral Line":   {visibility:3, persistence:5},
+  "Contradiction Functions": {visibility:2, persistence:4},
+  "Recovery & Repair":     {visibility:3, persistence:4},
+  "Ordinary Texture":      {visibility:3, persistence:3},
+  "Competence & Method":   {visibility:3, persistence:5},
+};
+const DIM_LABELS = {frequency:"how often it shows", visibility:"how easily others see it", persistence:"how long it lasts", narrativeSalience:"how much weight it carries"};
+function traitDimensions(t){
+  if (!t) return null;
+  const def = DIM_DEFAULTS_BY_SECTION[t.section] || {visibility:3, persistence:3};
+  const inferred = [];
+  const pick = (key, fallback) => {
+    const v = t[key];
+    if (Number.isInteger(v) && v >= 1 && v <= 5) return v;
+    inferred.push(key);
+    return fallback;
+  };
+  const rt = RTIER_ORDER.indexOf(rarityTier(t));
+  return {
+    frequency: pick("frequency", clamp(t.intensity || 3, 1, 5)),
+    visibility: pick("visibility", def.visibility),
+    persistence: pick("persistence", def.persistence),
+    narrativeSalience: pick("narrativeSalience", clamp(Math.round((rt + 1 + (t.intensity || 3)) / 2), 1, 5)),
+    inferred,
+  };
+}
+
+/* The emergent label is a first draft. Once the author has a better name for what
+   the sheet adds up to, it should be theirs — and should outlive the next re-render,
+   the save and the export. */
+function characterLabel(st, meta){
+  if (meta && meta.label) return {name: meta.label, exact: true, authored: true};
+  const em = emergentArchetypeName(st);
+  return em ? Object.assign({authored:false}, em) : null;
+}
+
 function buildStressVariant(baseVerbLevel, baseRegLevel, mannerCount, rarityPref, sourceState){
   /* Scaled by the pressure dial rather than pinned to the extreme. At 1.0 these are
      exactly the values this function has always used, so the default is unchanged; at
