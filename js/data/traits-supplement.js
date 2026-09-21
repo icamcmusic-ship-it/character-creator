@@ -2357,3 +2357,6 @@ let MANNERS_TAG_STATS = null;
   apply(MANNERS_CRUDE_IDS, -1);
   MANNERS_TAG_STATS = {listed: MANNERS_COURTEOUS_IDS.length + MANNERS_CRUDE_IDS.length, applied, skipped};
 })();
+
+TRAIT_PACKS.push({id:"supplement", label:"Intensity-tail supplements", version:"1", ids:[90000, 109999],
+  applicability:{era:"any", realism:"any", tone:"any"}, blurb:"The intensity-tail supplements, the appearance sets, and the neutral pools."});

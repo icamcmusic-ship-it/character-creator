@@ -57,6 +57,9 @@ const ctx = loadEngine([
   'bannedTraitIds','bannedSections','requiredCategories','intensityCaps','setBudgetReport',
   'archetypeProblem','normalizeArchetype','isNegated','suppressContextTag','clearContextSuppression',
   'magFromPos','bandHalf','cloneSheet','decodeSavedRecord','SAVE_FORMAT','pinnedTargets',
+  // §4–7 build: schema, packs, character-relative profile
+  'assertTraitShape','TRAIT_PACKS','setPackEnabled','isPackEnabled','getDisabledPacks','setDisabledPacks',
+  'polarityPrior','TRAIT_CONTEXTS','TRAIT_WORLD_TAGS','TRAIT_REVIEW_STATES',
 ]);
 const A = ctx.api;
 const T = A.TRAITS;
@@ -2008,6 +2011,79 @@ check('B33 — malformed archetype records are rejected before anything is writt
   assert(A.archetypeProblem({label:'x', pers:{warmth: 5000}}), 'an out-of-range axis passed');
   assert(!A.archetypeProblem({label:'x', verbosity:1, pers:{friendliness:40}}), 'a valid record was rejected');
   return 'four malformed shapes rejected, valid one accepted';
+});
+
+/* ================= §4–7: SCHEMA, PACKS, PROFILE UNITS =================
+   The foundations the content pass and the feature work build on. */
+group('Trait schema and packs');
+
+check('the bank passes the extended shape assertion', ()=>{
+  const problems = A.assertTraitShape();
+  assert(!problems.length, problems.length + ' problems: ' + problems.slice(0,3).join(' | '));
+  return T.length + ' traits, optional fields validated';
+});
+
+check('a malformed optional field is caught at load, not at a draw', ()=>{
+  const bad = [
+    {conditions: ['public','sleeping']},            // unknown context
+    {frequency: 9},                                 // out of scale
+    {worldTags: 'modern'},                          // not a list
+    {supports: [999999999]},                        // dangling id
+    {reviewStatus: 'maybe'},                        // unknown state
+    {examplesBySituation: {public: 7}},             // wrong value type
+  ];
+  const results = bad.map(extra=> ctx.evalIn(`(function(){
+    const t = Object.assign({}, TRAITS[0], {id: 999999998}, ${JSON.stringify(extra)});
+    TRAITS.push(t);
+    try { return assertTraitShape().filter(p=>p.startsWith('#999999998')).length; }
+    finally { TRAITS.pop(); }
+  })()`));
+  const missed = results.map((n,i)=> n ? null : Object.keys(bad[i])[0]).filter(Boolean);
+  assert(!missed.length, 'not caught: ' + missed.join(', '));
+  return bad.length + ' malformed shapes each named in the report';
+});
+
+check('every trait is stamped with the pack that owns its id range', ()=>{
+  const ids = new Set(A.TRAIT_PACKS.map(p=>p.id));
+  const unowned = T.filter(t=>!t.pack || !ids.has(t.pack));
+  assert(!unowned.length, unowned.length + ' traits without a pack: ' + unowned.slice(0,3).map(t=>t.id).join(', '));
+  // Ranges must not overlap: a trait can belong to one pack only.
+  const ranges = A.TRAIT_PACKS.map(p=>p.ids).sort((a,b)=>a[0]-b[0]);
+  for (let i=1;i<ranges.length;i++) assert(ranges[i][0] > ranges[i-1][1], 'overlapping pack id ranges');
+  return A.TRAIT_PACKS.length + ' packs, ranges disjoint';
+});
+
+check('disabling a pack removes it from draws but never from saved-character resolution', ()=>{
+  const pack = A.TRAIT_PACKS.find(p=>p.id !== 'core');
+  const sample = T.find(t=>t.pack === pack.id);
+  const before = A.byFilter(sample.section, sample.category).some(t=>t.id === sample.id);
+  A.setPackEnabled(pack.id, false);
+  const during = A.byFilter(sample.section, sample.category).some(t=>t.id === sample.id);
+  const resolves = A.TRAITS_BY_ID.get(sample.id) === sample;
+  const expanded = A.expandSlots({x: {slotId:'x', trait:{__id: sample.id}}});
+  A.setPackEnabled(pack.id, true);
+  assert(before, 'the sample trait was not drawable to begin with');
+  assert(!during, 'a disabled pack was still drawable');
+  assert(resolves && expanded.x.trait === sample, 'a saved reference to a disabled pack failed to resolve');
+  return `"${pack.label}" off: not drawn, still resolves`;
+});
+
+check('the axis profile is a property of the sheet, read against the bank prior', ()=>{
+  // Same traits → same profile, whatever else is loaded; a sheet leaning exactly the
+  // way the bank leans by default reads ~0; leaning further reads positive.
+  const ax = 'intel';
+  const plus  = T.filter(t=>t.section==='Personality Traits' && t.pol && t.pol[ax] === 1).slice(0, 6);
+  const minus = T.filter(t=>t.section==='Personality Traits' && t.pol && t.pol[ax] === -1).slice(0, 6);
+  const mk = list => Object.fromEntries(list.map((t,i)=>['pers_'+i, {slotId:'pers_'+i, trait:t}]));
+  const p1 = A.axisProfile(mk(plus)), p2 = A.axisProfile(mk(plus)), pm = A.axisProfile(mk(minus));
+  assert(p1[ax] === p2[ax], 'the same sheet produced two different readings');
+  assert(p1[ax] > 0 && pm[ax] < 0, `six +${ax} traits read ${p1[ax].toFixed(2)}, six -${ax} read ${pm[ax].toFixed(2)}`);
+  // The prior is the bank's own lean; a mixed sheet in the bank's proportions reads near zero.
+  const prior = A.polarityPrior(ax);
+  const nPlus = Math.round(6 * (1 + prior) / 2), nMinus = 6 - nPlus;
+  const mixed = A.axisProfile(mk(plus.slice(0, nPlus).concat(minus.slice(0, nMinus))));
+  assert(Math.abs(mixed[ax]) < 0.6, `a bank-proportioned mix read ${mixed[ax].toFixed(2)}, not ~0`);
+  return `+${p1[ax].toFixed(2)} / ${pm[ax].toFixed(2)} / mixed ${mixed[ax].toFixed(2)} (prior ${prior.toFixed(2)})`;
 });
 
 /* Bank figures, printed every run. Comments across the codebase cited the bank size as

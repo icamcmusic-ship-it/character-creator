@@ -1604,7 +1604,7 @@ function axisProfile(st){
   // more predictive data for how two characters clash) were invisible to Relationship
   // and Ensemble analysis. Voice traits carry pol too but are deliberately excluded here:
   // this profile is about who the character IS, not how they happen to phrase things.
-  const prof = {}, raw = {};
+  const prof = {}, raw = {}, counts = {};
   Object.keys(st).filter(k=>k.startsWith("pers_") || k.startsWith("prof_")).forEach(id=>{
     // BUG FIX: slots can legitimately hold a null trait (exhausted pool, disabled
     // section on a loaded save); dereferencing .trait.pol here crashed the whole
@@ -1612,16 +1612,31 @@ function axisProfile(st){
     const t = st[id] && st[id].trait;
     if (!t || !t.pol) return;
     Object.entries(t.pol).forEach(([ax,v])=>{
-      if (!AXIS_LABELS[ax]) return;
+      if (!AXIS_LABELS[ax] || !v) return;
       raw[ax] = (raw[ax]||0) + v;
+      counts[ax] = (counts[ax]||0) + 1;
     });
   });
-  // Normalised per axis by how much tagged material that axis actually has — see the
-  // POLARITY COVERAGE NORMALISATION note in engine.js. Without this the radar reads
-  // "analytical and rebellious, in a bad mood" for practically every character,
-  // because those are the axes with the most lopsided tagging, not because the
-  // character is any of those things.
-  Object.entries(raw).forEach(([ax, v])=>{ prof[ax] = polNormalise(ax, v); });
+  /* CHARACTER-RELATIVE, WITH A BANK PRIOR. This used to divide the raw sum by the
+     square root of the whole bank's tag count for the axis (polNormalise). Two things
+     were wrong with that. It did not remove the sign imbalance at all — the same
+     divisor scales both poles, so an axis tagged 7:1 positive still read positive for
+     nearly everyone. And it made a SAVED character's numbers depend on the size of the
+     bank: adding content moved every existing sheet's radar, fidelity and relationship
+     read without the sheet changing.
+
+     Each axis is now scored against the sheet's own tagged evidence. `prior` is the
+     bank's expected value per tagged draw ((pos - neg) / (pos + neg)), so a character
+     is measured by how far their traits lean RELATIVE to what the bank hands out by
+     default — an axis everyone would read positive on reads neutral unless this person
+     actually leans further than that. The divisor is the sheet's own count, so the
+     number no longer moves when the bank grows. Units: roughly a z-like score, with
+     ±2 meaning "every tagged trait on the sheet leans this way". */
+  Object.entries(raw).forEach(([ax, v])=>{
+    const n = counts[ax] || 1;
+    const prior = polarityPrior(ax);
+    prof[ax] = (v - n * prior) / Math.sqrt(n);
+  });
   return prof;
 }
 // Category-pair interpretive notes for the two-character Relationship view — the same

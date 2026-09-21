@@ -44,8 +44,34 @@ const TRAITS_BY_ID = new Map();       // id -> trait (undo/import re-linking)
 const TRAITS_BY_KEY = new Map();      // "section||category" -> trait[]
 const CATS_BY_SECTION = new Map();    // section -> category[] (first-seen order)
 const SECTION_OF_CATEGORY = new Map(); // category -> section (categories are unique to one)
+/* ================= PACK INDEX =================
+   TRAIT_PACKS (declared in traits-core.js, one manifest per data file) says which id
+   range each pack owns. Each trait is stamped with its pack at load, and a project can
+   disable a pack: byFilter stops drawing from it, but TRAITS_BY_ID keeps every entry so
+   a saved character written against that pack still opens with all its cards. */
+const PACKS_BY_ID = new Map();
+(typeof TRAIT_PACKS !== 'undefined' ? TRAIT_PACKS : []).forEach(p=> PACKS_BY_ID.set(p.id, p));
+function packOfId(id){
+  for (const p of (typeof TRAIT_PACKS !== 'undefined' ? TRAIT_PACKS : [])){
+    if (id >= p.ids[0] && id <= p.ids[1]) return p.id;
+  }
+  return 'core';
+}
+let disabledPacks = new Set();
+function setPackEnabled(id, on){ if (on) disabledPacks.delete(id); else disabledPacks.add(id); }
+function isPackEnabled(id){ return !disabledPacks.has(id); }
+function getDisabledPacks(){ return [...disabledPacks]; }
+function setDisabledPacks(list){ disabledPacks = new Set(list || []); }
+
 (function indexTraits(){
   TRAITS.forEach(t=>{
+    t.pack = packOfId(t.id);
+    // The editorial state of an entry. Everything the bank has ever shipped was written
+    // and then treated as reviewed by default, which made "core vs secondary" mostly an
+    // absence-of-annotation distinction — see the audit's 2.4% figure. Entries are now
+    // explicitly `unreviewed` unless a pass has looked at them; the tagging passes below
+    // and the hand-reviewed lists promote what they touch.
+    if (!t.reviewStatus) t.reviewStatus = 'unreviewed';
     TRAITS_BY_ID.set(t.id, t);
     if (!SECTION_OF_CATEGORY.has(t.category)) SECTION_OF_CATEGORY.set(t.category, t.section);
     const key = t.section + "||" + t.category;
@@ -138,8 +164,8 @@ let TIER_TAG_STATS = null;
   let matched = 0;
   TRAITS.forEach(t=>{
     if (t.section !== "Personality Traits") return;
-    if (secondary.has(t.trait.toLowerCase())){ t.tier = "secondary"; matched++; }
-    else t.tier = "core";
+    if (secondary.has(t.trait.toLowerCase())){ t.tier = "secondary"; matched++; t.reviewStatus = 'reviewed'; }
+    else t.tier = "core";   // behaviourally core; editorially still whatever reviewStatus says
   });
   TIER_TAG_STATS = {listed: SECONDARY_TRAIT_NAMES.length, matched};
 })();
@@ -305,6 +331,7 @@ function byFilter(section, category){
   if (bannedSections.has(section)) return [];
   if (bannedCategories.has(category)) return [];
   if (bannedTraitIds.size) pool = pool.filter(t=>!bannedTraitIds.has(t.id));
+  if (disabledPacks.size) pool = pool.filter(t=>!disabledPacks.has(t.pack));
   // Variant lock (Phase 3): applied here so EVERY path — generation, reroll, pin
   // adjust, cast, foil — respects the character's committed presentation, with no
   // way for a mixed sheet to slip through a specialized pick path.
@@ -324,6 +351,33 @@ function catsOf(section){ return CATS_BY_SECTION.get(section) || []; }
    The test suite covers this for CI. It does not cover somebody hand-editing a data
    file locally and reloading, which is exactly when the feedback is worth having. Runs
    only with ?dev=1 in the URL, so it costs a normal load nothing. */
+/* ================= TRAIT SCHEMA, INCLUDING THE OPTIONAL STRUCTURED FIELDS =================
+   The founding shape is {id, section, category, trait, desc, example, intensity, rarity,
+   pol}. The audit's schema evolution adds optional fields in stages; every one of them
+   is optional so the existing bank is valid unchanged, and every one is validated here
+   so a malformed value fails at load in ?dev=1 and in the test suite, not at a draw.
+
+     conceptFamily     string   — the concept this is a paraphrase-family member of; the
+                                  near-duplicate review groups by it
+     behaviorFunction  string   — what the behaviour DOES for the person (protect, signal,
+                                  soothe, control, connect, avoid, perform, repair …)
+     conditions        string[] — contexts in which it is active: public, private,
+                                  authority, threat, intimacy, fatigue, work, home
+     exceptions        string[] — who or what it does not apply to ("except family")
+     frequency         1..5     — how often it shows, independently of intensity
+     visibility        1..5     — how noticeable it is to others
+     persistence       1..5     — how stable across time
+     narrativeSalience 1..5     — how much of the character it explains
+     worldTags         string[] — applicability: modern, pre-modern, any, urban, rural …
+     supports/conflicts/requires  number[] — trait ids
+     examplesBySituation  {context: string}
+     reviewStatus      'unreviewed' | 'reviewed' | 'flagged'
+     revision          string
+   A physical characteristic does not acquire a moral vector by being given these
+   fields, and a neutral behaviour can be explicitly unpolarised. */
+const TRAIT_CONTEXTS = ['public','private','authority','threat','intimacy','fatigue','work','home','stranger','peer','dependent'];
+const TRAIT_WORLD_TAGS = ['any','modern','pre-modern','industrial','futuristic','urban','rural','military','institutional','domestic','online'];
+const TRAIT_REVIEW_STATES = ['unreviewed','reviewed','flagged'];
 function assertTraitShape(){
   const problems = [];
   const seenIds = new Set();
@@ -342,6 +396,32 @@ function assertTraitShape(){
     Object.entries(t.pol || {}).forEach(([ax, v])=>{
       if (!AXIS_LABELS[ax]) push(t, `pol names an unknown axis "${ax}"`);
       if (typeof v !== 'number') push(t, `pol.${ax} is not a number`);
+    });
+    // ---- optional structured fields ----
+    const strList = (k, allowed) => {
+      if (t[k] === undefined) return;
+      if (!Array.isArray(t[k]) || t[k].some(x=>typeof x !== 'string')) return push(t, `${k} is not a list of strings`);
+      if (allowed) t[k].forEach(x=>{ if (!allowed.includes(x)) push(t, `${k} has an unknown value "${x}"`); });
+    };
+    const scale = k => { if (t[k] !== undefined && (!Number.isInteger(t[k]) || t[k] < 1 || t[k] > 5)) push(t, `${k} ${t[k]} is not 1-5`); };
+    const idList = k => { if (t[k] !== undefined && (!Array.isArray(t[k]) || t[k].some(x=>!Number.isInteger(x)))) push(t, `${k} is not a list of trait ids`); };
+    ['conceptFamily','behaviorFunction','revision'].forEach(k=>{ if (t[k] !== undefined && typeof t[k] !== 'string') push(t, `${k} is not a string`); });
+    strList('conditions', TRAIT_CONTEXTS); strList('exceptions'); strList('worldTags', TRAIT_WORLD_TAGS);
+    ['frequency','visibility','persistence','narrativeSalience'].forEach(scale);
+    ['supports','conflicts','requires'].forEach(idList);
+    if (t.examplesBySituation !== undefined){
+      if (!t.examplesBySituation || typeof t.examplesBySituation !== 'object' || Array.isArray(t.examplesBySituation)) push(t, 'examplesBySituation is not an object');
+      else Object.entries(t.examplesBySituation).forEach(([c,v])=>{
+        if (!TRAIT_CONTEXTS.includes(c)) push(t, `examplesBySituation names an unknown context "${c}"`);
+        if (typeof v !== 'string') push(t, `examplesBySituation.${c} is not a string`);
+      });
+    }
+    if (t.reviewStatus !== undefined && !TRAIT_REVIEW_STATES.includes(t.reviewStatus)) push(t, `reviewStatus "${t.reviewStatus}" is not one of ${TRAIT_REVIEW_STATES.join('/')}`);
+  });
+  // Cross-reference: supports/conflicts/requires must name real ids.
+  TRAITS.forEach(t=>{
+    ['supports','conflicts','requires'].forEach(k=>{
+      (t[k] || []).forEach(id=>{ if (!seenIds.has(id)) push(t, `${k} names a trait id that does not exist (${id})`); });
     });
   });
   return problems;
@@ -2648,6 +2728,15 @@ let POL_NORM = {};
 function polNormalise(ax, raw){
   const d = POL_NORM[ax];
   return d ? raw / d : raw;
+}
+/* The bank's expected value per tagged draw on an axis, in -1..1. This is the "prior"
+   axisProfile subtracts so that a sheet is read relative to what the bank hands out by
+   default rather than in absolute tag counts — see the note there. Calibrated from the
+   bank once at load; it is a property of the CONTENT, not of any character. */
+function polarityPrior(ax){
+  const c = POL_COUNTS[ax];
+  if (!c || !(c.pos + c.neg)) return 0;
+  return (c.pos - c.neg) / (c.pos + c.neg);
 }
 
 /* ================= CONTRADICTION AS CONTENT =================

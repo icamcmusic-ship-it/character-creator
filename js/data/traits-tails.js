@@ -230,3 +230,6 @@ const TRAITS_TAILS = [
 ];
 
 TRAITS.push(...TRAITS_TAILS);
+
+TRAIT_PACKS.push({id:"tails", label:"Appearance depth and tail fill", version:"1", ids:[120000, 129999],
+  applicability:{era:"any", realism:"any", tone:"any"}, blurb:"Appearance depth and the i1/i5 tail fill."});

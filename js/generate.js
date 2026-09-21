@@ -234,9 +234,12 @@ function renderNovelty(prevSig, curSig){
    a meter and not a warning. */
 /* Reference realised magnitude for a FULLY expressed archetype axis, measured from
    the generator itself: 20 samples per built-in preset, generated at that preset's own
-   settings, give |axisProfile| values distributed roughly 0.04 (p10) to 0.40 (p99)
-   with a median near 0.09. The 90th percentile, 0.2, is the point at which an axis is
-   as loudly expressed as this bank realistically expresses one.
+   settings, give |axisProfile| values distributed roughly 0.20 (p10) to 2.30 (p99)
+   with a median near 1.02, in axisProfile's character-relative units (see the note
+   on it in app.js — the divisor is the sheet's own tag count, and the bank prior is
+   subtracted). The 90th percentile, 1.85, is the point at which an axis is as loudly
+   expressed as this bank realistically expresses one. Re-measure this whenever
+   axisProfile's units change; `node tests/bank-report.js` does not do it for you.
 
    It has to be an empirical constant because axisProfile is already normalised against
    the bank's own polarity coverage — its units mean nothing in the archetype's -100..100
@@ -250,7 +253,7 @@ function renderNovelty(prevSig, curSig){
    questions and only one of them is well-conditioned. Direction ("did the sheet lean
    the way the preset asked?") is a clean proportion. Strength is relative to the
    reference above and is labelled as such. */
-const FIDELITY_REF_MAG = 0.2;
+const FIDELITY_REF_MAG = 1.85;
 function archetypeFidelity(st, arch){
   if (!arch || !arch.pers) return null;
   const prof = axisProfile(st);

@@ -1451,6 +1451,9 @@ function captureSettings(){
     // Bookmarks. Deliberately NOT part of `constraints`: a favourite does not steer
     // generation, which is the whole point of splitting it from "always include".
     favouriteTraitIds: (typeof getFavouriteTraitIds === 'function') ? getFavouriteTraitIds() : [],
+    // Content packs switched off for this workspace. Part of the settings because a
+    // character generated with a pack off should replay with it off.
+    disabledPacks: (typeof getDisabledPacks === 'function') ? getDisabledPacks() : [],
     rerollExclusions: excl,
   };
 }
@@ -1489,6 +1492,8 @@ function restoreSettings(s){
   const mbm = document.getElementById('mutationBudgetMode');
   if (mbm) mbm.value = c.mutationBudgetMode || 'enforce';
   if (typeof setFavouriteTraitIds === 'function') setFavouriteTraitIds(s.favouriteTraitIds || []);
+  if (typeof setDisabledPacks === 'function') setDisabledPacks(s.disabledPacks || []);
+  if (typeof refreshPackUI === 'function') refreshPackUI();
   if (typeof refreshBudgetUI === 'function') refreshBudgetUI();
   rerollExclusions = {};
   Object.entries(s.rerollExclusions || {}).forEach(([k,v])=>{ rerollExclusions[k] = new Set(v); });
@@ -1817,6 +1822,9 @@ function validateSheetPayload(p){
   }
   if (p.settings && p.settings.sliders !== undefined && !isPlainObject(p.settings.sliders))
     throw new Error("The `settings.sliders` block is not an object.");
+  if (p.settings && p.settings.disabledPacks !== undefined &&
+      (!Array.isArray(p.settings.disabledPacks) || p.settings.disabledPacks.some(x=>typeof x !== 'string')))
+    throw new Error("The `settings.disabledPacks` block is not a list of pack ids.");
   return p;
 }
 

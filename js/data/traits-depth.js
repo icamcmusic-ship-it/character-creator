@@ -187,3 +187,6 @@ const TRAITS_DEPTH = [
 ];
 
 TRAITS.push(...TRAITS_DEPTH);
+
+TRAIT_PACKS.push({id:"depth", label:"Need / Ghost / Defence", version:"1", ids:[130000, 139999],
+  applicability:{era:"any", realism:"any", tone:"any"}, blurb:"The Need, the Ghost, the Defence, and the listening mannerisms."});
