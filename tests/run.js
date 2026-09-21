@@ -71,6 +71,8 @@ const ctx = loadEngine([
   'pruneEdges','validateEdge','edgesToMarkdown','castBundle','applyCastBundle','castEntry',
   'ARC_SHAPES','ARC_SHAPE_IDS','arcShape','makeArcEvent','validateArcEvent','proposeArcChanges',
   'applyArcEvent','replayArc','arcSummary','arcToMarkdown',
+  'VOICE_PROMPTS','VOICE_PROMPT_IDS','VOICE_MODES','voiceRules','composeVoiceLine','voiceLab',
+  'voiceComparison','voiceLabToMarkdown',
 ]);
 const A = ctx.api;
 const T = A.TRAITS;
@@ -2534,6 +2536,75 @@ check('a cyclical event puts an earlier accepted change back, and bad events are
   assert(A.validateArcEvent({id:'x', seq:0, shape:'sideways', changes:'no'}).length >= 3, 'a malformed event should be rejected field by field');
   assert(!A.validateArcEvent(first).length, 'a real event should validate');
   return `${cyc.changes.length} change(s) put back`;
+});
+
+
+group('Voice lab: composed lines, named rules, pressure and cast comparison');
+
+check('every prompt composes a line that names the rules that shaped it', ()=>{
+  const st = _mechSheet(7601);
+  const lines = A.voiceLab(st, 'baseline');
+  assert(lines.length === A.VOICE_PROMPT_IDS.length, `${lines.length} lines for ${A.VOICE_PROMPT_IDS.length} prompts`);
+  lines.forEach(l=>{
+    assert(l.text && l.text.length > 2 && !/undefined/.test(l.text), `${l.promptId}: "${l.text}"`);
+    assert(l.rules.length, `${l.promptId} names no rule`);
+  });
+  const again = A.voiceLab(st, 'baseline');
+  assert(JSON.stringify(again) === JSON.stringify(lines), 'the lab is not deterministic for one sheet');
+  const other = A.voiceLab(_mechSheet(7602), 'baseline');
+  assert(other.some((l,i)=> l.text !== lines[i].text), 'two different characters produced identical lines');
+  return lines[0].text.slice(0, 54) + '…';
+});
+
+check('the rules a line names are rules the sheet actually carries', ()=>{
+  let sharp = null;
+  for (let seed = 7610; seed < 7640 && !sharp; seed++){
+    const st = _mechSheet(seed);
+    const r = A.voiceRules(st);
+    if (r.direct || r.yielding) sharp = {st, r};
+  }
+  assert(sharp, 'no sheet with an assertiveness lean in 30');
+  const line = A.composeVoiceLine(sharp.st, 'refuse', 'baseline');
+  const expect = sharp.r.direct ? /high assertiveness/ : /low assertiveness/;
+  assert(line.rules.some(x=>expect.test(x)), `refusal cites ${line.rules.join('; ')} for a ${sharp.r.direct ? 'direct' : 'yielding'} sheet`);
+  assert(A.composeVoiceLine(sharp.st, 'nope', 'baseline') === null, 'an unknown prompt should return null, not a line');
+  return `${sharp.r.direct ? 'direct' : 'yielding'}: "${line.text.slice(0, 40)}…"`;
+});
+
+check('pressure drops the politeness layer and brings the stress response in', ()=>{
+  // The stress section can be toggled off by an earlier test, so seat the card by hand
+  // and search only for the opener lean.
+  let found = null;
+  for (let seed = 7650; seed < 7700 && !found; seed++){
+    const st = _mechSheet(seed);
+    st.prof_stress_0 = {slotId:'prof_stress_0', trait: T.find(t=>t.section==='Conflict & Stress Response')};
+    const r = A.voiceRules(st);
+    if (r.formal || r.casual || r.mannered) found = {st, r};
+  }
+  assert(found, 'no sheet with an opener rule in 50');
+  const base = A.composeVoiceLine(found.st, 'refuse', 'baseline');
+  const pres = A.composeVoiceLine(found.st, 'refuse', 'pressure');
+  assert(pres.text !== base.text, 'pressure changed nothing');
+  assert(!pres.rules.some(x=>/register|manners/.test(x)), `pressure kept the politeness rules: ${pres.rules.join('; ')}`);
+  assert(pres.rules.some(x=>/stress response/.test(x)), `pressure did not bring the stress response: ${pres.rules.join('; ')}`);
+  return `"${base.text.slice(0,30)}…" → "${pres.text.slice(0,30)}…"`;
+});
+
+check('the cast comparison marks devices more than one character reaches for', ()=>{
+  const members = [7671, 7672, 7673].map((seed, i)=> ({state:_mechSheet(seed), meta:{name:'M'+(i+1)}}));
+  const cmp = A.voiceComparison(members, 'apologise', 'baseline');
+  assert(cmp.rows.length === 3, `${cmp.rows.length} rows`);
+  cmp.rows.forEach(r=> r.shared.forEach(k=> assert(cmp.repeated.includes(k), `${r.name} marks "${k}" as shared but it is not in the repeated list`)));
+  const counted = {};
+  cmp.rows.forEach(r=> new Set(r.line.rules).forEach(k=>{ counted[k] = (counted[k]||0)+1; }));
+  Object.keys(counted).forEach(k=>{
+    if (counted[k] > 1) assert(cmp.repeated.includes(k), `"${k}" is used by ${counted[k]} members and was not marked`);
+  });
+  const twins = A.voiceComparison([members[0], {state:members[0].state, meta:{name:'Twin'}}], 'apologise', 'baseline');
+  assert(twins.repeated.length, 'two identical sheets should share every device');
+  const md = A.voiceLabToMarkdown(members[0].state, 'baseline');
+  assert(/### Refusing/.test(md) && /- Rules: /.test(md), 'the markdown is missing its structure');
+  return `${cmp.repeated.length} shared across 3; twins share ${twins.repeated.length}`;
 });
 
 if (failed){

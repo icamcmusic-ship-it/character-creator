@@ -6239,6 +6239,187 @@ function arcToMarkdown(events){
   }).join("\n\n");
 }
 
+// ================= VOICE LABORATORY (MVP) =================
+/* The fingerprint pasted four authored examples together: real sentences, but sentences
+   about four unrelated moments. The lab asks the question a writer actually has —
+   "what does this person say when they have to refuse?" — and composes an answer out
+   of the sheet's own voice rules, naming every rule that shaped it. Composition is
+   deterministic (seeded on the sheet, the prompt and the mode), so the same character
+   always says the same thing and two characters can be compared honestly.
+
+   These are not meant to be publishable prose. They are a demonstration of shape:
+   length, directness, hedging, register, and which devices the character reaches for. */
+const VOICE_PROMPTS = [
+  {id:"refuse",   label:"Refusing",          setup:"Someone they can't simply dismiss asks them for something they will not give."},
+  {id:"apologise",label:"Apologising",       setup:"They were wrong, it was noticed, and the room is waiting."},
+  {id:"persuade", label:"Persuading",        setup:"They need someone to do something that person does not want to do."},
+  {id:"conceal",  label:"Concealing",        setup:"A direct question about the one thing they are not going to say."},
+  {id:"request",  label:"Making a request",  setup:"They want something small from someone they do not know well."},
+  {id:"askhelp",  label:"Asking for help",   setup:"They cannot do it alone, and the person who can help is right there."},
+  {id:"lie",      label:"Lying",             setup:"The truth costs too much, and they have about a second to decide."},
+];
+const VOICE_PROMPT_IDS = VOICE_PROMPTS.map(p => p.id);
+const VOICE_MODES = ["baseline", "pressure"];
+
+/* The rules, read off the sheet once. Everything the composer uses comes from here, so
+   the "which rules shaped this" list can never drift from what actually shaped it. */
+function voiceRules(st){
+  const slot = id => st && st[id] && st[id].trait ? st[id].trait : null;
+  const many = pre => Object.keys(st || {}).filter(k => k.startsWith(pre) && st[k] && st[k].trait).map(k => st[k].trait);
+  const p = axisProfile(st);
+  const rules = [];
+  const verbosity = slot("verbosity"), register = slot("register"), grammar = slot("grammar");
+  const vocab = many("vocab"), manner = many("manner");
+  if (verbosity) rules.push({key:"verbosity", label:verbosity.trait, why:"how much they say"});
+  if (register) rules.push({key:"register", label:register.trait, why:"how formal they are"});
+  if (grammar) rules.push({key:"grammar", label:grammar.trait, why:"how they build a sentence"});
+  vocab.slice(0,2).forEach(t => rules.push({key:"vocab", label:t.trait, why:"the words they reach for"}));
+  const lean = ax => (p[ax] || 0);
+  return {
+    verbosity, register, grammar, vocab, manner, rules, profile:p,
+    long: lean("vol") > 0.2, terse: lean("vol") < -0.2,
+    formal: lean("form") > 0.2, casual: lean("form") < -0.2,
+    direct: lean("asrt") > 0.2, yielding: lean("asrt") < -0.2,
+    warm: lean("warm") > 0.2, cold: lean("warm") < -0.2,
+    straight: lean("hon") > 0.2, slippery: lean("hon") < -0.2,
+    open: lean("emo") > 0.2, guarded: lean("emo") < -0.2,
+    mannered: lean("man") > 0.2, blunt: lean("man") < -0.2,
+    stress: slot("prof_stress_0"), values: slot("prof_values_0"),
+  };
+}
+
+/* Fragment tables. Each fragment carries the rule that justifies it, so a composed
+   line can be traced clause by clause. */
+const _VF = (text, rule) => ({text, rule});
+const VOICE_FRAGMENTS = {
+  opener: {
+    formal:  [_VF("If I may.", "formal register"), _VF("Forgive me.", "formal register"), _VF("With respect.", "formal register")],
+    casual:  [_VF("Look.", "casual register"), _VF("Right.", "casual register"), _VF("Yeah, so.", "casual register")],
+    neutral: [_VF("", "no opener — nothing in the sheet reaches for one")],
+    mannered:[_VF("Thank you for asking me properly.", "high manners"), _VF("You've been decent about this, so I'll be plain.", "high manners")],
+  },
+  refuse: {
+    direct:  [_VF("No.", "high assertiveness — the refusal is the whole sentence"), _VF("I'm not going to do that.", "high assertiveness")],
+    yielding:[_VF("I don't think I can, I'm sorry — it's not that I don't want to.", "low assertiveness — the refusal arrives wrapped"), _VF("I'd rather not, if that's all right.", "low assertiveness")],
+    mid:     [_VF("I'm going to say no to that.", "no strong assertiveness lean")],
+  },
+  apologise: {
+    straight:[_VF("I was wrong. That's all it is.", "high honesty — the apology concedes the point")],
+    slippery:[_VF("I'm sorry you took it that way.", "low honesty — the apology moves the fault")],
+    open:    [_VF("I've been sick about it since.", "high emotional expression")],
+    guarded: [_VF("It won't happen again.", "guarded emotion — the feeling stays off the page")],
+  },
+  persuade: {
+    direct:  [_VF("Here's what you're going to do, and here's why you'll want to.", "high assertiveness")],
+    warm:    [_VF("I wouldn't ask if there were another way to do it.", "high warmth")],
+    cold:    [_VF("You can do it now or you can do it later with more paperwork.", "low warmth")],
+    mid:     [_VF("I think this is the better road. Let me show you why.", "no strong lean")],
+  },
+  conceal: {
+    slippery:[_VF("That's a long story, and not a very interesting one.", "low honesty — deflection by boredom")],
+    straight:[_VF("I'm not going to answer that.", "high honesty — refuses rather than lies")],
+    guarded: [_VF("Nothing worth the telling.", "guarded emotion")],
+    mid:     [_VF("Ask me another time.", "no strong lean")],
+  },
+  request: {
+    mannered:[_VF("When you have a moment — and only then — could I trouble you?", "high manners")],
+    blunt:   [_VF("Give me a hand with this.", "low manners")],
+    terse:   [_VF("Need a minute.", "low verbosity")],
+    mid:     [_VF("Could you help me with something?", "no strong lean")],
+  },
+  askhelp: {
+    open:    [_VF("I can't do this on my own and I've stopped pretending otherwise.", "high emotional expression")],
+    guarded: [_VF("There's a piece of this that's outside my remit. That's all.", "guarded emotion — the ask is reframed as logistics")],
+    yielding:[_VF("Only if you've got time. Really, only if you have.", "low assertiveness")],
+    mid:     [_VF("I need help with this part.", "no strong lean")],
+  },
+  lie: {
+    slippery:[_VF("I was with Marcus. All evening.", "low honesty — a specific, checkable lie, told smoothly")],
+    straight:[_VF("...Yes. Yes, that's right.", "high honesty — the lie comes out badly because lying is not what they do")],
+    mid:     [_VF("Something like that.", "no strong lean")],
+  },
+  tail: {
+    long:    [_VF("I know that's more words than it needed.", "high verbosity"), _VF("And there's a whole other half to it, but you've had enough of me.", "high verbosity")],
+    terse:   [_VF("", "low verbosity — nothing follows")],
+    warm:    [_VF("We're all right, though. You and me.", "high warmth")],
+    cold:    [_VF("", "low warmth — no softening")],
+  },
+};
+const PRESSURE_TAIL = {
+  "Fight (attack the threat)": _VF("And if you want to make something of it, make it.", "stress response: fight"),
+  "Flight (remove yourself)":  _VF("I need some air. We'll do this another time.", "stress response: flight"),
+  "Freeze (shut down)":        _VF("...", "stress response: freeze"),
+  "Fawn (appease the threat)": _VF("Whatever's easiest for you. Honestly. Whatever's easiest.", "stress response: fawn"),
+};
+
+function _pickFrag(list, rng){ return list && list.length ? list[Math.floor(rng() * list.length)] : null; }
+function composeVoiceLine(st, promptId, mode){
+  const prompt = VOICE_PROMPTS.find(p => p.id === promptId);
+  if (!prompt) return null;
+  const r = voiceRules(st);
+  const underPressure = mode === "pressure";
+  let seed = 11;
+  Object.values(st || {}).forEach(s => { if (s && s.trait) seed = (seed * 31 + s.trait.id) >>> 0; });
+  const rng = mulberry32(hashSeedString(String(seed) + "|" + promptId + "|" + (mode || "baseline")));
+  const parts = [], used = [];
+  const take = frag => { if (!frag) return; if (frag.text) parts.push(frag.text); used.push(frag.rule); };
+  const table = VOICE_FRAGMENTS[promptId];
+  /* Pressure strips the politeness layer first — the opener and the manners are the
+     first things to go when someone is holding themselves together. */
+  if (!underPressure){
+    // The mannered openers thank someone for asking, so they only belong where someone
+    // has actually asked — otherwise an apology opens by thanking the injured party.
+    const asked = promptId === "refuse" || promptId === "request" || promptId === "askhelp";
+    if (r.mannered && asked) take(_pickFrag(VOICE_FRAGMENTS.opener.mannered, rng));
+    else if (r.formal) take(_pickFrag(VOICE_FRAGMENTS.opener.formal, rng));
+    else if (r.casual) take(_pickFrag(VOICE_FRAGMENTS.opener.casual, rng));
+  }
+  const pick = (...keys) => { for (const k of keys){ if (r[k] && table[k]) return _pickFrag(table[k], rng); } return _pickFrag(table.mid || table.straight || Object.values(table)[0], rng); };
+  take(pick("direct","yielding","slippery","straight","open","guarded","warm","cold","mannered","blunt","terse"));
+  if (!underPressure && r.long) take(_pickFrag(VOICE_FRAGMENTS.tail.long, rng));
+  if (!underPressure && r.warm) take(_pickFrag(VOICE_FRAGMENTS.tail.warm, rng));
+  if (underPressure && r.stress) take(PRESSURE_TAIL[r.stress.category]);
+  /* A vocabulary trait's own example is the one genuinely authored thing available, so
+     it rides along as the character's habitual device rather than being paraphrased. */
+  const device = r.vocab.filter(t => t.example)[0] || r.grammar;
+  const text = parts.join(" ").replace(/\s+/g, " ").trim();
+  return {
+    prompt: prompt.label, promptId, setup: prompt.setup, mode: underPressure ? "pressure" : "baseline",
+    text: text || "(this sheet has no voice traits to compose from)",
+    rules: used.filter(Boolean),
+    device: device ? {label: device.trait, example: device.example || ""} : null,
+  };
+}
+function voiceLab(st, mode){
+  return VOICE_PROMPT_IDS.map(id => composeVoiceLine(st, id, mode)).filter(Boolean);
+}
+/* Cast comparison. Two characters who reach for the same device are the failure this
+   panel exists to catch, so a rule or device used by more than one member is marked. */
+function voiceComparison(members, promptId, mode){
+  const rows = (members || []).map(m => ({
+    name: (m.meta && m.meta.name) || "Unnamed",
+    line: composeVoiceLine(m.state, promptId, mode),
+  })).filter(r => r.line);
+  const counts = {};
+  rows.forEach(r => {
+    const keys = r.line.rules.concat(r.line.device ? ["device: " + r.line.device.label] : []);
+    new Set(keys).forEach(k => { counts[k] = (counts[k] || 0) + 1; });
+  });
+  const repeated = Object.keys(counts).filter(k => counts[k] > 1).sort((a, b) => counts[b] - counts[a]);
+  rows.forEach(r => {
+    r.shared = r.line.rules.concat(r.line.device ? ["device: " + r.line.device.label] : []).filter(k => repeated.includes(k));
+  });
+  return {promptId, mode: mode === "pressure" ? "pressure" : "baseline", rows, repeated,
+    note: repeated.length
+      ? `${repeated.length} device${repeated.length===1?'':'s'} shared by more than one character — if these are the ones you can hear, the cast has one voice with different hats on.`
+      : "No shared devices in this prompt. Every character reaches for something different."};
+}
+function voiceLabToMarkdown(st, mode){
+  return voiceLab(st, mode).map(l =>
+    `### ${l.prompt}\n\n_${l.setup}_\n\n> ${l.text}\n\n- Rules: ${l.rules.join("; ") || "none"}${l.device ? `\n- Habitual device: ${l.device.label}` : ""}`
+  ).join("\n\n");
+}
+
 function buildStressVariant(baseVerbLevel, baseRegLevel, mannerCount, rarityPref, sourceState){
   /* Scaled by the pressure dial rather than pinned to the extreme. At 1.0 these are
      exactly the values this function has always used, so the default is unchanged; at

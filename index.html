@@ -631,6 +631,18 @@
       </div>
       <div id="sheetBody"></div>
 
+      <div class="arcPanel" id="voiceLabPanel" style="display:none;">
+        <div class="sheetHeader"><h2>Voice lab</h2></div>
+        <div class="sub" style="margin:0 0 8px;">Seven situations, answered in this character's voice. Each line is composed from the sheet's own rules — verbosity, register, manners, assertiveness, honesty, warmth — and says which ones shaped it. Shapes, not publishable prose.</div>
+        <div class="actionRow" style="margin:0 0 10px;">
+          <button class="btn-secondary active" id="vlMode_baseline" aria-pressed="true" data-on="click" data-act="setVoiceLabMode" data-args="[&quot;baseline&quot;]">Baseline</button>
+          <button class="btn-secondary" id="vlMode_pressure" aria-pressed="false" data-on="click" data-act="setVoiceLabMode" data-args="[&quot;pressure&quot;]">Under pressure</button>
+          <button class="btn-secondary" data-on="click" data-act="copyVoiceLab" data-args="[&quot;$el&quot;]">Copy</button>
+          <label class="inlineToggle"><input type="checkbox" id="voiceLabInExport"> Include in exports</label>
+        </div>
+        <div id="voiceLabBody"></div>
+      </div>
+
       <div class="arcPanel" id="arcPanel" style="display:none;">
         <div class="sheetHeader"><h2>Arc</h2></div>
         <div class="sub" style="margin:0 0 8px;">What happened to them, in order. Each event names the belief it tested, the choice and the cost, and proposes trait changes you accept one at a time. Undoing an event replays the arc from the original sheet.</div>
@@ -711,6 +723,16 @@
   </div>
 
   <div id="view-rel" class="viewSection" role="tabpanel" aria-labelledby="tabRelBtn" aria-hidden="true">
+    <div class="controls">
+      <h3 style="margin:0 0 4px;">Voice comparison</h3>
+      <div class="sub" style="margin:0 0 8px;">The same situation, answered by every member of the cast. Devices more than one of them reaches for are marked — that is the ensemble speaking with one voice in different hats.</div>
+      <div class="actionRow">
+        <select id="voiceComparePrompt" data-on="change" data-act="renderVoiceCompare" data-args="[]" aria-label="Situation"></select>
+        <button class="btn-secondary" data-on="click" data-act="setVoiceLabMode" data-args="[&quot;baseline&quot;]">Baseline</button>
+        <button class="btn-secondary" data-on="click" data-act="setVoiceLabMode" data-args="[&quot;pressure&quot;]">Under pressure</button>
+      </div>
+      <div id="voiceCompareBody" style="margin-top:10px;"></div>
+    </div>
     <div class="controls">
       <div class="sub" style="margin:0 0 10px;">Generate a cast first, then analyse how any two members would rub together based on where their personality axes clash or align.</div>
       <div class="row">

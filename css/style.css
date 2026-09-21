@@ -1287,3 +1287,9 @@
   .arcChange { border-left:3px solid var(--border-strong); padding:6px 10px; margin:6px 0; }
   .arcChange.accepted { border-left-color:var(--emerald, #2e9e77); }
   .arcChange .actionRow { margin-top:4px; }
+
+  /* Voice lab */
+  .voiceCard { border:1px solid var(--border-strong); border-radius:12px; padding:10px 12px; margin-bottom:10px; }
+  .voiceHead { display:flex; flex-wrap:wrap; gap:8px; align-items:baseline; margin-bottom:6px; font-size:.88rem; }
+  .voiceLine { margin:4px 0 6px; padding:6px 0 6px 12px; border-left:3px solid var(--golden-deep); font-style:italic; line-height:1.6; }
+  .sharedDevice { background:var(--bubblegum); color:#fff; border-radius:8px; padding:0 6px; }

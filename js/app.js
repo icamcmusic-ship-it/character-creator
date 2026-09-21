@@ -978,6 +978,57 @@ function renderArc(){
   }).join("") || `<div class="sub">No events yet.</div>`;
 }
 
+// ================= VOICE LAB PANEL =================
+/* Seven prompts, composed from the sheet's own voice rules — see composeVoiceLine.
+   The cast view gets the same prompt across every member so a shared device is
+   visible as a shared device rather than as a coincidence. */
+let voiceLabMode = 'baseline';
+function setVoiceLabMode(mode){
+  voiceLabMode = VOICE_MODES.includes(mode) ? mode : 'baseline';
+  renderVoiceLab();
+  renderVoiceCompare();
+}
+function renderVoiceLab(){
+  const host = document.getElementById('voiceLabBody');
+  if (!host) return;
+  const panel = document.getElementById('voiceLabPanel');
+  const has = Object.keys(state).length > 0;
+  if (panel) panel.style.display = has ? "block" : "none";
+  if (!has){ host.innerHTML = ""; return; }
+  ['baseline','pressure'].forEach(m=>{
+    const btn = document.getElementById('vlMode_' + m);
+    if (btn){ btn.classList.toggle('active', voiceLabMode === m); btn.setAttribute('aria-pressed', voiceLabMode === m); }
+  });
+  host.innerHTML = voiceLab(state, voiceLabMode).map(l => `
+    <div class="voiceCard">
+      <div class="voiceHead"><b>${escHTML(l.prompt)}</b> <span class="sub">${escHTML(l.setup)}</span></div>
+      <blockquote class="voiceLine">${escHTML(l.text)}</blockquote>
+      <div class="sub">Shaped by: ${escHTML(l.rules.join("; ") || "nothing on this sheet")}${l.device ? ` · habitual device: <b>${escHTML(l.device.label)}</b>` : ``}</div>
+    </div>`).join("");
+}
+function renderVoiceCompare(){
+  const host = document.getElementById('voiceCompareBody');
+  if (!host) return;
+  const sel = document.getElementById('voiceComparePrompt');
+  if (sel && !sel.options.length){
+    sel.innerHTML = VOICE_PROMPTS.map(p => `<option value="${escHTML(p.id)}">${escHTML(p.label)}</option>`).join("");
+  }
+  if (!castStates.length){ host.innerHTML = `<div class="sub">Generate a cast to compare voices.</div>`; return; }
+  const cmp = voiceComparison(castStates, strVal('voiceComparePrompt', 'refuse'), voiceLabMode);
+  host.innerHTML = `<div class="sub" style="margin-bottom:8px;">${escHTML(cmp.note)}</div>` + cmp.rows.map(r => `
+    <div class="voiceCard">
+      <div class="voiceHead"><b>${escHTML(r.name)}</b></div>
+      <blockquote class="voiceLine">${escHTML(r.line.text)}</blockquote>
+      <div class="sub">${r.line.rules.map(rule => r.shared.includes(rule)
+        ? `<span class="sharedDevice" title="More than one character in this cast reaches for this">${escHTML(rule)}</span>`
+        : escHTML(rule)).join("; ") || "nothing"}</div>
+    </div>`).join("");
+}
+function copyVoiceLab(btnEl){
+  if (!Object.keys(state).length){ toast("Generate a character first.", "warn"); return; }
+  copyText(`# Voice lab — ${charMeta.name || "Unnamed Character"} (${voiceLabMode})\n\n` + voiceLabToMarkdown(state, voiceLabMode), btnEl);
+}
+
 const TABS = [
   {key:'single', view:'view-single', btn:'tabSingleBtn'},
   {key:'cast',   view:'view-cast',   btn:'tabCastBtn'},
@@ -1875,6 +1926,7 @@ async function importWorkspaceJSON(fileInput){
 // ================= RELATIONSHIP GENERATOR =================
 function refreshRelSelectors(){
   if (typeof renderEdges === 'function') renderEdges();
+  if (typeof renderVoiceCompare === 'function') renderVoiceCompare();
   const a = document.getElementById('relA'), b = document.getElementById('relB');
   const opts = [];
   if (Object.keys(state).length) opts.push({key:"__single__", label:(charMeta.name||"Current character")});

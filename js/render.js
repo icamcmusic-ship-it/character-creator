@@ -1127,6 +1127,7 @@ function renderSheet(){
   }
 
   if (typeof renderArc === 'function') renderArc();
+  if (typeof renderVoiceLab === 'function') renderVoiceLab();
   renderChangeList();
   refreshBudgetMeters();
   refreshJumpToSection();
@@ -1416,6 +1417,13 @@ function sheetToText(st, meta, pState){
   block("Speech Pattern", ["verbosity","register","grammar"]);
   block("Vocabulary", Object.keys(st).filter(k=>k.startsWith("vocab")));
   block("Mannerisms", Object.keys(st).filter(k=>k.startsWith("manner")));
+
+  // ---- Voice lab ----
+  try {
+    if (typeof voiceLabToMarkdown === 'function' && boolVal('voiceLabInExport', false)){
+      L.push("", "## Voice lab", "", voiceLabToMarkdown(st, typeof voiceLabMode !== 'undefined' ? voiceLabMode : 'baseline'));
+    }
+  } catch(e){}
 
   // ---- The arc ----
   if (typeof arcEvents !== 'undefined' && arcEvents.length){
