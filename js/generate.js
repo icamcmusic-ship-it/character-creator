@@ -733,6 +733,7 @@ function _runGeneration(){
     archetypeBlend: archKey ? archetypeBlendLevel() : null,
     seed: charMetaSeed
   };
+  charMeta.viewContext = (typeof viewContext !== 'undefined') ? viewContext : 'baseline';
   charMeta.archFidelity = arch ? archetypeFidelity(state, arch) : null;
   const emergent = emergentArchetypeName(state);
   if (emergent && !archKey) charMeta.archetypeLabel = emergent.name + (emergent.exact ? "" : " *");

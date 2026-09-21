@@ -66,6 +66,7 @@ const ctx = loadEngine([
   'archiveCharacter','forgetArchive','getArchive','diversityScore','referenceFromState','pickWildcardSlot','strongestLean',
   'exportArchive','importArchive',
   'motivationChain','pressureChain','structuredContradiction','traitDimensions','characterLabel','DIM_DEFAULTS_BY_SECTION',
+  'contextualView','contextualViews','CONTEXT_MODES','CONTEXT_MODE_IDS','CONTEXT_LENS_RULES',
 ]);
 const A = ctx.api;
 const T = A.TRAITS;
@@ -2347,6 +2348,64 @@ check('the author\'s label overrides the emergent name and survives export', ()=
   assert(md.includes('How the pieces connect'), 'the chain is missing from the export');
   assert(/frequency \d · visibility \d/.test(md), 'dimensions are missing from the export');
   return `emergent "${em && em.name}" → authored "${mine.name}"`;
+});
+
+
+group('Contextual engine: baseline plus four lenses');
+
+check('every context classes every seated card, deterministically, with a reason', ()=>{
+  const st = _mechSheet(7301);
+  const n = Object.values(st).filter(x=>x&&x.trait).length;
+  const views = A.contextualViews(st);
+  assert(views.length === 5 && views[0].context === 'baseline', 'expected baseline + four contexts');
+  views.forEach(v=>{
+    assert(v.slots.length === n, `${v.context} classed ${v.slots.length} of ${n} cards`);
+    v.slots.forEach(s=> assert(['active','amplified','suppressed','exception'].includes(s.status) && s.why, `${v.context}: ${s.trait.trait} has no status/why`));
+  });
+  const again = A.contextualViews(st);
+  assert(JSON.stringify(again.map(v=>v.counts)) === JSON.stringify(views.map(v=>v.counts)), 'views are not deterministic');
+  assert(views[0].counts.active === n, 'the baseline should leave every card active');
+  return views.slice(1).map(v=>`${v.context} +${v.counts.amplified}/−${v.counts.suppressed}`).join(' · ');
+});
+
+check('public and private disagree about the interior: wounds hide in public and show in private', ()=>{
+  let seen = 0, ok = 0;
+  for (let seed = 7310; seed < 7330; seed++){
+    const st = _mechSheet(seed);
+    const pub = A.contextualView(st, 'public'), prv = A.contextualView(st, 'private');
+    Object.keys(st).filter(k=>k.startsWith('prof_motivation_') && st[k] && st[k].trait).forEach(k=>{
+      seen++;
+      const a = pub.byId[k].status, b = prv.byId[k].status;
+      if ((a === 'suppressed' || a === 'exception') && (b === 'amplified' || b === 'exception')) ok++;
+    });
+  }
+  assert(seen && ok / seen > 0.9, `${ok}/${seen} motivation cards flip between public and private`);
+  return `${ok}/${seen} flip`;
+});
+
+check('authored conditions and exceptions outrank the section rules', ()=>{
+  const cond = T.find(t=> t.conditions && t.conditions.includes('authority'));
+  const st = {a:{slotId:'a', trait:cond}, b:{slotId:'b', trait:Object.assign({}, cond, {conditions:['peer'], exceptions:['the boss']})}};
+  const v = A.contextualView(st, 'authority');
+  assert(v.byId.a.status === 'amplified' && v.byId.a.rule === 'conditions', `authored-for-authority card read ${v.byId.a.status} by ${v.byId.a.rule}`);
+  assert(v.byId.b.status === 'exception' && /the boss/.test(v.byId.b.why), `an exception naming the boss should win: ${v.byId.b.status} / ${v.byId.b.why}`);
+  const pub = A.contextualView(st, 'public');
+  assert(pub.byId.a.status === 'suppressed', 'a card authored for authority only should be suppressed in public');
+  return `${cond.trait}: amplified under authority, suppressed in public, exception wins`;
+});
+
+check('threat puts the stress response in front and the repair behind', ()=>{
+  // Earlier tests may have toggled the stress section off, so seat one by hand.
+  const st = _mechSheet(7340);
+  st.prof_stress_0 = {slotId:'prof_stress_0', trait: T.find(t=>t.section==='Conflict & Stress Response')};
+  const found = {st, stress:'prof_stress_0'};
+  const v = A.contextualView(found.st, 'threat');
+  assert(v.byId[found.stress].status === 'amplified', 'the stress card should be amplified under threat');
+  const rep = A.CONTEXT_LENS_RULES.threat.find(r=>r.status==='suppressed' && /repair/i.test(r.why));
+  assert(rep, 'no rule suppresses repair under threat');
+  const md = A.sheetToText(found.st, {name:'X', viewContext:'threat'}, null);
+  assert(md.includes('## Under threat') && md.includes('**Amplified:**'), 'the export should carry the context section');
+  return `${v.counts.amplified} forward, ${v.counts.suppressed} quiet; exported`;
 });
 
 if (failed){

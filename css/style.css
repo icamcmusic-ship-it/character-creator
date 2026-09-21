@@ -1253,3 +1253,14 @@
   .contraAnswer { color:var(--text); }
   .contraEdit, .labelEdit { font-size:.72rem; padding:1px 7px; margin-left:6px; border:1px solid var(--border-strong); background:transparent; color:inherit; border-radius:10px; cursor:pointer; }
   .dimsChip { display:inline-block; font-size:.68rem; letter-spacing:.03em; padding:1px 6px; margin-left:6px; border:1px solid var(--border-strong); border-radius:10px; color:var(--text-soft, #6b7a8a); vertical-align:middle; cursor:help; }
+
+  /* Contextual engine */
+  .contextBar { margin:0 0 12px; padding:10px 12px; border:1px solid var(--border-strong); border-radius:12px; background:var(--card, transparent); }
+  .ctxModes { display:flex; flex-wrap:wrap; gap:6px; }
+  .ctxModeBtn { font-size:.8rem; padding:4px 11px; border-radius:14px; border:1px solid var(--border-strong); background:transparent; color:inherit; cursor:pointer; }
+  .ctxModeBtn.active { background:var(--golden-deep); color:#fff; border-color:var(--golden-deep); }
+  .ctxHeadline { margin-top:8px; font-size:.84rem; color:var(--text-soft, #6b7a8a); }
+  .traitCard.ctx-suppressed { opacity:.55; }
+  .traitCard.ctx-amplified { box-shadow:0 0 0 2px var(--golden-deep) inset; }
+  .traitCard.ctx-exception { box-shadow:0 0 0 2px var(--bubblegum) inset; }
+  .ctxNote { font-size:.78rem; }

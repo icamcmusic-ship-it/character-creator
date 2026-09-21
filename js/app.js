@@ -316,6 +316,7 @@ async function loadSavedCharacter(name){
        an older save carrying full embedded trait copies rather than {__id} stubs. Both
        shapes arrive here the same way, so a save written by any build still loads. */
     state = rec.state; charMeta = rec.charMeta || {name, age:"", context:"", archetypeLabel:"Loaded"};
+    if (typeof viewContext !== 'undefined') viewContext = CONTEXT_MODE_IDS.includes(charMeta.viewContext) ? charMeta.viewContext : 'baseline';
     pressureState = rec.pressureState || null;
     pinnedTargets = rec.pinnedTargets || {};
     charVariants = rec.charVariants || {};

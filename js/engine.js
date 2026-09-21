@@ -5859,6 +5859,116 @@ function characterLabel(st, meta){
   return em ? Object.assign({authored:false}, em) : null;
 }
 
+// ================= CONTEXTUAL CHARACTER ENGINE (MVP) =================
+/* The sheet was one static list: the same 40 cards whether the character is alone,
+   in a crowd, in front of their boss or being threatened. Real behaviour is a
+   baseline plus per-context activation and suppression. This is the first pass at
+   that, kept deterministic and explainable: for a chosen context every seated card is
+   classed active, amplified, suppressed or exception, with the rule that decided it
+   written out. Rules read, in order of authority: the trait's own `conditions` and
+   `exceptions` (authored intent), the trait's section (what kind of thing it is), its
+   dimensions (how visible and persistent it is), the character's internal dimensions
+   (who they are), and the trait's polarity on the axes the context tests. Nothing
+   here draws a trait: the baseline sheet is the truth and a context is a lens on it. */
+const CONTEXT_MODES = [
+  {id:"baseline",  label:"Baseline",      tags:[],                     blurb:"The sheet as generated — no room, no audience."},
+  {id:"public",    label:"In public",     tags:["public","stranger"],  blurb:"Strangers present. Surface shows; the interior goes quiet."},
+  {id:"private",   label:"In private",    tags:["private","home","intimacy"], blurb:"Alone or with someone close. The interior shows; the performance drops."},
+  {id:"authority", label:"Under authority", tags:["authority","work"], blurb:"Someone with power over them is in the room."},
+  {id:"threat",    label:"Under threat",  tags:["threat","fatigue"],   blurb:"Something has gone wrong. The stress response takes the wheel."},
+];
+const CONTEXT_MODE_IDS = CONTEXT_MODES.map(m => m.id);
+function contextMode(id){ return CONTEXT_MODES.find(m => m.id === id) || CONTEXT_MODES[0]; }
+
+/* Per-context rules on section and polarity. Each entry is {test, status, why}; the
+   first matching rule after the authored ones wins, so the order is the priority. */
+const _SURFACE_SECTIONS = new Set(["Appearance","Mannerisms","Verbosity Traits","Vocabulary Traits","Dialogue Grammar Traits","Humor Style"]);
+const _INTERIOR_SECTIONS = new Set(["Motivation & Wound","Positive Origins","Attachment & Intimacy Style","Contradiction Functions"]);
+const CONTEXT_LENS_RULES = {
+  public: [
+    {test:(t,d)=> t.category === "Among Peers", status:"amplified", why:"the peer-room role is on show"},
+    {test:(t,d)=> t.category === "With Dependents" || t.category === "Under Authority", status:"suppressed", why:"a role for a different room"},
+    {test:(t,d)=> _INTERIOR_SECTIONS.has(t.section), status:"suppressed", why:"interior material — it drives them, but nobody in the room sees it"},
+    {test:(t,d)=> d.visibility <= 2, status:"suppressed", why:"low visibility — strangers would not catch it"},
+    {test:(t,d,dim)=> dim.selfPresent > 0.3 && t.pol && t.pol.ego === 1, status:"amplified", why:"self-presentation runs high, so the confident face comes forward with an audience"},
+    {test:(t,d,dim)=> dim.emoExpress < -0.3 && t.pol && t.pol.emo === 1, status:"suppressed", why:"emotional expression runs guarded — the open version stays home"},
+    {test:(t,d)=> _SURFACE_SECTIONS.has(t.section), status:"amplified", why:"surface behaviour is what an audience gets"},
+  ],
+  private: [
+    {test:(t,d)=> t.category === "With Dependents", status:"amplified", why:"the people who depend on them are the private room"},
+    {test:(t,d)=> t.category === "Among Peers" || t.category === "Under Authority", status:"suppressed", why:"a role for a different room"},
+    {test:(t,d)=> _INTERIOR_SECTIONS.has(t.section), status:"amplified", why:"interior material — this is where it is allowed out"},
+    {test:(t,d,dim)=> dim.selfPresent > 0.3 && t.pol && t.pol.ego === 1, status:"suppressed", why:"the grandiose face is a performance, and there is no audience"},
+    {test:(t,d,dim)=> dim.emoDepth > 0.3 && t.pol && t.pol.emo === 1, status:"amplified", why:"emotional depth runs high; in private the guard comes down"},
+    {test:(t,d)=> t.section === "Ordinary Texture" || t.section === "Habits & Vices", status:"amplified", why:"habits and small pleasures belong to unwatched time"},
+    {test:(t,d)=> t.section === "Appearance" && d.visibility >= 5, status:"active", why:"still there; nobody is looking"},
+  ],
+  authority: [
+    {test:(t,d)=> t.category === "Under Authority", status:"amplified", why:"exactly the room this role is for"},
+    {test:(t,d)=> t.category === "Among Peers" || t.category === "With Dependents", status:"suppressed", why:"a role for a different room"},
+    {test:(t,d,dim)=> dim.obedience > 0.3 && t.pol && t.pol.rebel === 1, status:"suppressed", why:"institutional obedience runs high — the defiance waits until the boss has left"},
+    {test:(t,d,dim)=> dim.obedience < -0.3 && t.pol && t.pol.rebel === 1, status:"amplified", why:"institutional obedience runs low — authority is what the defiance is for"},
+    {test:(t,d,dim)=> dim.obedience > 0.3 && t.pol && t.pol.asrt === 1, status:"suppressed", why:"assertion is dialled down in front of rank"},
+    {test:(t,d)=> t.pol && t.pol.form === 1, status:"amplified", why:"formality rises with rank in the room"},
+    {test:(t,d)=> t.pol && t.pol.form === -1, status:"suppressed", why:"the casual register is withheld from rank"},
+    {test:(t,d)=> t.section === "Motivation & Wound" && /Core Want|The Lie/.test(t.category), status:"active", why:"still driving, still hidden"},
+    {test:(t,d)=> _INTERIOR_SECTIONS.has(t.section), status:"suppressed", why:"interior material stays interior in front of power"},
+  ],
+  threat: [
+    {test:(t,d)=> t.section === "Conflict & Stress Response", status:"amplified", why:"the stress response takes the wheel"},
+    {test:(t,d)=> /Core Fear|The Defence|The Lie/.test(t.category), status:"amplified", why:"fear, defence and the lie are what a threat is made of"},
+    {test:(t,d)=> t.section === "Recovery & Repair", status:"suppressed", why:"repair comes after, not during"},
+    {test:(t,d)=> t.section === "Humor Style" && t.category !== "Dry & Deadpan" && t.category !== "Cruel & Barbed", status:"suppressed", why:"the jokes stop; only the dry and the barbed kinds survive a threat"},
+    {test:(t,d)=> t.section === "Humor Style", status:"amplified", why:"the kind of humour that is a weapon comes out under threat"},
+    {test:(t,d)=> t.section === "Ordinary Texture" || t.section === "Positive Origins", status:"suppressed", why:"ordinary texture and good history are the first things a threat switches off"},
+    {test:(t,d,dim)=> dim.trust < -0.3 && t.pol && t.pol.warm === 1, status:"suppressed", why:"trust runs guarded — warmth is withdrawn when it might be used against them"},
+    {test:(t,d)=> t.pol && t.pol.agr === -1, status:"amplified", why:"the hard edge shows"},
+    {test:(t,d)=> d.persistence <= 2 && t.pol && t.pol.warm === 1, status:"suppressed", why:"a passing warmth is the first thing to go"},
+    {test:(t,d)=> t.section === "Values & Moral Line", status:"active", why:"what they will and will not do is being tested, not changed"},
+  ],
+};
+
+function _exceptionHits(t, mode){
+  const ex = t.exceptions || [];
+  if (!ex.length) return null;
+  const words = mode.tags.concat(mode.id === "private" ? ["family","partner","friends","close"] : mode.id === "authority" ? ["boss","rank","superiors"] : []);
+  const hit = ex.find(e => words.some(w => String(e).toLowerCase().includes(w)));
+  return hit || null;
+}
+
+function contextualView(st, contextId){
+  const mode = contextMode(contextId);
+  const dim = internalDimensions(st);
+  const slots = [];
+  Object.keys(st || {}).forEach(id => {
+    const s = st[id]; const t = s && s.trait; if (!t) return;
+    const d = traitDimensions(t);
+    let status = "active", why = mode.id === "baseline" ? "baseline" : "no rule moves it here", rule = "none";
+    if (mode.id !== "baseline"){
+      const ex = _exceptionHits(t, mode);
+      const conds = t.conditions || [];
+      if (ex){ status = "exception"; why = `authored exception: "${ex}"`; rule = "exceptions"; }
+      else if (conds.length && conds.some(c => mode.tags.includes(c))){ status = "amplified"; why = `authored for ${conds.join("/")}`; rule = "conditions"; }
+      else if (conds.length){ status = "suppressed"; why = `authored for ${conds.join("/")} only`; rule = "conditions"; }
+      else {
+        const r = (CONTEXT_LENS_RULES[mode.id] || []).find(r => r.test(t, d, dim));
+        if (r){ status = r.status; why = r.why; rule = "section/polarity"; }
+      }
+    }
+    slots.push({slotId:id, trait:t, status, why, rule});
+  });
+  const counts = {active:0, amplified:0, suppressed:0, exception:0};
+  slots.forEach(s => counts[s.status]++);
+  const headline = mode.id === "baseline" ? mode.blurb
+    : `${mode.blurb} ${counts.amplified} come forward, ${counts.suppressed} go quiet${counts.exception ? `, ${counts.exception} authored exception${counts.exception>1?"s":""}` : ``}.`;
+  return {context: mode.id, label: mode.label, counts, headline, slots, byId: Object.fromEntries(slots.map(s => [s.slotId, s]))};
+}
+
+/* Every context at once, for the comparison export and the test suite. */
+function contextualViews(st){
+  return CONTEXT_MODE_IDS.map(id => contextualView(st, id));
+}
+
 function buildStressVariant(baseVerbLevel, baseRegLevel, mannerCount, rarityPref, sourceState){
   /* Scaled by the pressure dial rather than pinned to the extreme. At 1.0 these are
      exactly the values this function has always used, so the default is unchanged; at

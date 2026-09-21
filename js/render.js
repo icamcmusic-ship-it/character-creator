@@ -438,8 +438,12 @@ function traitCardHTML(id, s, includeControls, showDiff, accent, tagLabel){
      is rendered from there, so it survives a rebuild and the ARIA state is true.
      data-slot is what makes a single card replaceable without rebuilding all 37. */
   const openNow = includeControls && OPEN_CARD_CONTROLS.has(id);
+  const cv = includeControls && CONTEXT_VIEW && CONTEXT_VIEW.context !== 'baseline' ? CONTEXT_VIEW.byId[id] : null;
+  const ctxClass = cv && cv.status !== 'active' ? ` ctx-${cv.status}` : ``;
+  const ctxNote = cv && cv.status !== 'active'
+    ? `<div class="traitNote ctxNote"><b>${escHTML(CONTEXT_VIEW.label)}:</b> ${cv.status} — ${escHTML(cv.why)}.</div>` : ``;
   return `
-    <div class="traitCard${s.wildcard ? ' wildcardCard' : ''}${changedClass}${tag ? ' tagged' : ''}${openNow ? ' controlsOpen' : ''}"${style} data-slot="${escAttr(id)}">
+    <div class="traitCard${s.wildcard ? ' wildcardCard' : ''}${changedClass}${tag ? ' tagged' : ''}${openNow ? ' controlsOpen' : ''}${ctxClass}"${style} data-slot="${escAttr(id)}">
       ${tag}
       <div class="traitMain">
         <div class="traitName">${escHTML(t.trait)}
@@ -456,6 +460,7 @@ function traitCardHTML(id, s, includeControls, showDiff, accent, tagLabel){
         ${t.example ? `<div class="exampleLine">&ldquo;${escHTML(t.example)}&rdquo;</div>` : ``}
         ${includeControls ? freqBudgetHTML(t) : ``}
         ${s.exceptionWhy ? `<div class="traitNote exceptionNote"><b>Why it's here.</b> ${escHTML(s.exceptionWhy)}</div>` : ``}
+        ${ctxNote}
         ${includeControls && traitNotes[id] ? `<div class="traitNote"><b>Note.</b> ${escHTML(traitNotes[id])} <button ${actAttr('click', 'clearTraitNote', id)}>remove</button></div>` : ``}
         ${diff ? `<div class="diffNote">↺ was: "${escHTML(diff.from)}" <button ${actAttr('click', 'dismissDiff', id)}>dismiss</button></div>` : ``}
         ${includeControls && whyOpen[id] ? `<div class="whyNote">${explainPick(id, s)}${(rerollExclusions[id]&&rerollExclusions[id].size)?`<div class="whyExcl">Excluded from rerolls here: ${rerollExclusions[id].size} trait${rerollExclusions[id].size>1?"s":""} you've already passed on. <button ${actAttr('click', 'clearExclusions', id)}>reset</button></div>`:``}</div>` : ``}
@@ -843,6 +848,23 @@ function restoreContextTag(label){
   renderContextTags();
 }
 
+/* The context lens. `viewContext` is view state, not character state: it is captured
+   in charMeta.viewContext so an export says which room it describes, but a saved
+   character always saves its baseline sheet. */
+let viewContext = 'baseline';
+let CONTEXT_VIEW = null;
+function setViewContext(id){
+  viewContext = CONTEXT_MODE_IDS.includes(id) ? id : 'baseline';
+  charMeta.viewContext = viewContext;
+  renderSheet();
+}
+function contextBarHTML(){
+  const view = CONTEXT_VIEW;
+  const btns = CONTEXT_MODES.map(m =>
+    `<button type="button" class="ctxModeBtn${m.id === viewContext ? ' active' : ''}" role="tab" aria-selected="${m.id === viewContext}" ${actAttr('click', 'setViewContext', m.id)} title="${escAttr(m.blurb)}">${escHTML(m.label)}</button>`).join("");
+  const line = view ? `<div class="ctxHeadline">${escHTML(view.headline)}</div>` : ``;
+  return `<div class="contextBar" id="contextBar"><div class="ctxModes" role="tablist" aria-label="Context">${btns}</div>${line}</div>`;
+}
 function renderSheet(){
   const sheet = document.getElementById('sheet');
   sheet.classList.add('show');
@@ -857,7 +879,8 @@ function renderSheet(){
 
   const body = document.getElementById('sheetBody');
   body.innerHTML = "";
-  body.innerHTML = summaryCardHTML();
+  CONTEXT_VIEW = (typeof contextualView === 'function') ? contextualView(state, viewContext) : null;
+  body.innerHTML = contextBarHTML() + summaryCardHTML();
   // Baseline for the per-slot change detection in renderSlotChange.
   noteRenderedTraits();
   /* Not filtered on ids.length any more: a profile section that produced nothing is
@@ -1323,6 +1346,15 @@ function sheetToText(st, meta, pState){
   if (meta.label) bits.push(`**Label:** ${meta.label}`);
   if (bits.length) L.push("", bits.join("  \n"));
   try {
+    const ctxId = meta.viewContext && meta.viewContext !== 'baseline' ? meta.viewContext : null;
+    if (ctxId){
+      const v = contextualView(st, ctxId);
+      L.push("", `## ${v.label}`, "", `_${v.headline}_`, "");
+      ["amplified","suppressed","exception"].forEach(k=>{
+        const rows = v.slots.filter(x=>x.status===k);
+        if (rows.length) L.push(`**${k[0].toUpperCase()+k.slice(1)}:**`, ...rows.map(x=>`- ${x.trait.trait} — ${x.why}`), "");
+      });
+    }
     const chain = motivationChain(st);
     if (chain && chain.links.length > 1){
       L.push("", "**How the pieces connect:**", ...chain.links.map(l => `${l.links ? '' : ''}1. _${l.key}_ — ${l.text} (from: ${l.from.join(", ")})`));
