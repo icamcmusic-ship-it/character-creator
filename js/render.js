@@ -101,6 +101,14 @@ const SECTION_COLORS = {
   "Humor Style": "var(--dusk-blue)",
   "Habits & Vices": "var(--emerald-deep)",
 };
+// The §6 sections. Kept to the same four-colour rotation as the sections above them.
+SECTION_COLORS["Competence & Method"] = "var(--emerald-deep)";
+SECTION_COLORS["Positive Origins"] = "var(--golden-deep)";
+SECTION_COLORS["Goals & Stakes"] = "var(--bubblegum)";
+SECTION_COLORS["Ordinary Texture"] = "var(--dusk-blue)";
+SECTION_COLORS["Recovery & Repair"] = "var(--emerald-deep)";
+SECTION_COLORS["Contradiction Functions"] = "var(--golden-deep)";
+SECTION_COLORS["Role by Context"] = "var(--dusk-blue)";
 SECTION_COLORS["Appearance"] = "var(--accent-violet)";
 SECTION_COLORS["Required (constraints)"] = "var(--accent-amber)";
 SECTION_COLORS["The one thing that doesn't fit"] = "var(--accent-rust)";
@@ -763,8 +771,7 @@ function emptyGroupReason(title){
   }
   const ps = PROFILE_SECTIONS.find(p=>p.label === title);
   if (ps){
-    const tog = document.getElementById('sec_'+ps.id);
-    if (tog && !tog.checked) return "Switched off in the Character Profile panel.";
+    if (!profileSectionEnabled(ps)) return "Switched off in the Character Profile panel.";
     if (bannedSections.has(ps.section)) return `The whole "${ps.section}" section is banned in your constraints, so nothing here can ever be drawn.`;
     const cats = catsOf(ps.section);
     if (cats.length && cats.every(c => bannedCategories.has(c)))
@@ -1107,6 +1114,8 @@ const SECTION_GLYPHS = {
   "Attachment & Intimacy":"◆", "Humor Style":"◼", "Habits & Vices":"▲", "Appearance":"✦",
   "Required (constraints)":"✚", "The one thing that doesn't fit":"✳",
   "Where They Stand Under Pressure":"▲",
+  "Competence & Method":"▲", "Positive Origins":"●", "Goals & Stakes":"◆", "Ordinary Texture":"◼",
+  "Recovery & Repair":"▲", "Contradiction Functions":"●", "Role by Context":"◼",
 };
 function sectionGlyph(title){ return SECTION_GLYPHS[title] || "◆"; }
 

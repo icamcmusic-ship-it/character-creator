@@ -1213,7 +1213,8 @@ async function resetAllToDefaults(){
   Object.entries(DEFAULTS.toggles).forEach(([id, v])=>{ const el = document.getElementById(id); if (el) el.checked = v; });
   PERSONALITY_AXES.forEach(a=>{ const el = document.getElementById('pers_'+a.id); if (el) el.value = 0; });
   PROFILE_SECTIONS.forEach(ps=>{
-    const tog = document.getElementById('sec_'+ps.id); if (tog) tog.checked = true;
+    // A section's shipped default, not "on": the §6 sections that ship off stay off.
+    const tog = document.getElementById('sec_'+ps.id); if (tog) tog.checked = ps.defaultOn !== false;
     const sel = document.getElementById('type_'+ps.id); if (sel) sel.value = "";
     clearAutoProfileType(ps.id);
   });
@@ -2214,7 +2215,7 @@ function buildProfileSectionUI(){
          </select>`;
     div.innerHTML = `
       <div class="head">
-        <input type="checkbox" id="sec_${ps.id}" checked>
+        <input type="checkbox" id="sec_${ps.id}" ${ps.defaultOn === false ? '' : 'checked'}>
         <label for="sec_${ps.id}">${escHTML(ps.label)}</label>
       </div>
       <div class="blurb">${escHTML(ps.blurb)}</div>

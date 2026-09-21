@@ -1682,7 +1682,39 @@ const WEIGHT_MATRIX = {
   // character actually resolved to one of them, that fact fed nothing forward into
   // vocab/grammar/manner or any other profile section, unlike every original category.
   "role:Connector": { vocab:{"Pragmatic Focus & Speech Functions":TIER_WEAK}, humor:{"Warm & Playful":TIER_WEAK} },
-  "values:Idealistic & Visionary": { vocab:{"Directness & Literalness":TIER_WEAK}, grammar:{"Structural Shifts":TIER_WEAK}, humor:{"Warm & Playful":TIER_WEAK} },
+  "values:Idealistic & Visionary": { vocab:{"Directness & Literalness":TIER_WEAK}, grammar:{"Structural Shifts":TIER_WEAK}, humor:{"Warm & Playful":TIER_WEAK},
+                                     goals:{"The Longer Aim":TIER_WEAK} },
+  /* ---- Links INTO the §6 sections, so a competence, an origin or a repair style is
+     nudged by the facts already resolved rather than rolled blind. Deliberately light
+     (mostly WEAK): the point of these sections is to widen who a character can be,
+     and a strong cascade would just re-derive the wound from the other side. */
+  "attachment:Secure":        { origins:{"Stable Care":TIER_MODERATE,"Learned Trust":TIER_WEAK}, repair:{"Apology":TIER_WEAK},
+                                texture:{"Preferences & Small Pleasures":TIER_WEAK} },
+  "attachment:Avoidant":      { repair:{"Avoidance & Humour":TIER_MODERATE,"Restitution & Practical Care":TIER_WEAK},
+                                contradiction:{"Exceptions & Detachment":TIER_WEAK} },
+  "attachment:Anxious":       { repair:{"Apology":TIER_MODERATE}, origins:{"Repaired Conflict":TIER_WEAK} },
+  "attachment:Disorganized":  { repair:{"Changed Boundaries & Failed Repair":TIER_MODERATE} },
+  "stress:Fight (attack the threat)":   { repair:{"Changed Boundaries & Failed Repair":TIER_WEAK}, competence:{"Hands & Materials":TIER_WEAK} },
+  "stress:Fawn (appease the threat)":   { repair:{"Apology":TIER_MODERATE,"Restitution & Practical Care":TIER_WEAK},
+                                          contradiction:{"Protective Hypocrisy":TIER_WEAK} },
+  "stress:Flight (remove yourself)":    { repair:{"Avoidance & Humour":TIER_MODERATE} },
+  "stress:Freeze (shut down)":          { repair:{"Avoidance & Humour":TIER_WEAK} },
+  "role:Leader":       { competence:{"Systems & Logistics":TIER_MODERATE,"People & Rooms":TIER_WEAK}, origins:{"Earned Success":TIER_WEAK} },
+  "role:Caretaker":    { competence:{"People & Rooms":TIER_MODERATE}, origins:{"Stable Care":TIER_WEAK}, repair:{"Restitution & Practical Care":TIER_MODERATE} },
+  "role:Skeptic":      { competence:{"Craft & Knowledge":TIER_WEAK}, contradiction:{"Aspirational Values":TIER_WEAK} },
+  "role:Connector":    { competence:{"People & Rooms":TIER_MODERATE} },
+  "role:Outsider":     { competence:{"Craft & Knowledge":TIER_WEAK,"Hands & Materials":TIER_WEAK} },
+  "vices:Restraint & Discipline": { competence:{"Systems & Logistics":TIER_MODERATE}, contradiction:{"Aspirational Values":TIER_WEAK} },
+  "vices:Compulsion & Ritual":    { texture:{"Routines":TIER_MODERATE} },
+  "vices:Avoidance & Procrastination": { repair:{"Avoidance & Humour":TIER_MODERATE}, texture:{"Practised Badly":TIER_WEAK} },
+  "humor:Warm & Playful":         { texture:{"Affiliations":TIER_WEAK}, repair:{"Avoidance & Humour":TIER_WEAK} },
+  "humor:Absurd & Chaotic":       { texture:{"Practised Badly":TIER_WEAK} },
+  "vices:Substance & Consumption": { texture:{"Preferences & Small Pleasures":TIER_WEAK} },
+  "vices:Risk & Escape":          { texture:{"Practised Badly":TIER_WEAK}, origins:{"Earned Success":TIER_WEAK} },
+  "humor:Self-Deprecating":       { repair:{"Avoidance & Humour":TIER_WEAK}, contradiction:{"Aspirational Values":TIER_WEAK} },
+  "values:Loyalty-Bound":         { contradiction:{"Protective Hypocrisy":TIER_MODERATE}, texture:{"Affiliations":TIER_WEAK} },
+  "values:Rigid & Principled":    { contradiction:{"Exceptions & Detachment":TIER_WEAK}, repair:{"Changed Boundaries & Failed Repair":TIER_WEAK} },
+  "values:Self-Interested":       { goals:{"The Price & The Competing Claim":TIER_WEAK} },
   "humor:Intellectual & Wordplay": { vocab:{"Morphological & Structural Lexicon":TIER_WEAK,"Precision & Specificity Level":TIER_WEAK} },
   "vices:Avoidance & Procrastination": { grammar:{"Disfluencies & Flow":TIER_WEAK}, stress:{"Flight":TIER_WEAK} },
 
@@ -3190,8 +3222,38 @@ const PROFILE_SECTIONS = [
    blurb:"What they find funny, and how it lands."},
   {id:"vices", section:"Habits & Vices", label:"Habits & Vices", drawAll:false,
    blurb:"The standing patterns that fill their days."},
+  /* ---- The 2026 audit's §6 sections (js/data/traits-life.js) ----------------
+     `defaultOn:false` ships a section switched off: it exists, has a toggle, a type
+     selector and a weight, and is drawn the moment the user wants it — but a default
+     sheet does not grow by twenty cards. The three that ship ON are the ones that
+     answer the audit's central complaint about the default sheet: that it explained
+     every character through injury and never through competence, intent, or what
+     went right. */
+  {id:"competence", section:"Competence & Method", label:"Competence & Method", drawAll:false, defaultOn:true,
+   blurb:"What they can actually do, how they think about doing it, and the limit that comes with it."},
+  {id:"origins", section:"Positive Origins", label:"Positive Origins", drawAll:false, defaultOn:true,
+   blurb:"What went right — the trust learned, the care that held, the thing repaired — that explains behaviour without a wound."},
+  {id:"goals", section:"Goals & Stakes", label:"Goals & Stakes", drawAll:true, defaultOn:true,
+   blurb:"The immediate objective, the longer aim, and what it costs or competes with."},
+  {id:"texture", section:"Ordinary Texture", label:"Ordinary Texture", drawAll:false, defaultOn:false,
+   blurb:"Preferences, routines, affiliations, a thing practised badly — texture that does not need a rare slot."},
+  {id:"repair", section:"Recovery & Repair", label:"Recovery & Repair", drawAll:false, defaultOn:false,
+   blurb:"What they do after a conflict, which the pressure sheet's aftermath reads from."},
+  {id:"contradiction", section:"Contradiction Functions", label:"Contradiction Functions", drawAll:false, defaultOn:false,
+   blurb:"What the contradiction is for — protective hypocrisy, aspirational values, the exceptions they make."},
+  {id:"contextrole", section:"Role by Context", label:"Role by Context", drawAll:true, defaultOn:false,
+   blurb:"The seat they take among peers, under authority, and with dependents — not one seat in every room."},
 ];
 
+
+/* Is this section drawn? A missing toggle (a trimmed page, the test harness) used to
+   read as ON, which was fine when every section shipped on. The §6 sections ship off
+   by default, so an absent control has to mean "the shipped default", not "yes". */
+function profileSectionEnabled(ps){
+  const tog = document.getElementById('sec_'+ps.id);
+  if (tog) return !!tog.checked;
+  return ps.defaultOn !== false;
+}
 
 // Resolves which TYPE each profile section lands on, one section at a time, in the order
 // PROFILE_SECTIONS is defined — so a later section (say, Values) can be biased by an
@@ -3217,8 +3279,7 @@ function predictProfileCategories(withConfidence){
   const chosen = {}, conf = {};
   PROFILE_SECTIONS.forEach(ps=>{
     if (ps.drawAll) return;
-    const tog = document.getElementById('sec_'+ps.id);
-    if (tog && !tog.checked) return;
+    if (!profileSectionEnabled(ps)) return;
     const sel = document.getElementById('type_'+ps.id);
     if (sel && sel.value){ chosen[ps.id] = sel.value; conf[ps.id] = 1; return; }
     const cats = catsOf(ps.section);
@@ -3241,8 +3302,7 @@ function resolveProfileCategories(rarityPref, overrides, forcedCats){
   const chosen = {};
   PROFILE_SECTIONS.forEach(ps=>{
     if (ps.drawAll) return; // Motivation & Wound always draws every category; nothing to "resolve"
-    const tog = document.getElementById('sec_'+ps.id);
-    if (tog && !tog.checked) return;
+    if (!profileSectionEnabled(ps)) return;
     if (forcedCats && forcedCats[ps.id]) { chosen[ps.id] = forcedCats[ps.id]; return; }
     const sel = document.getElementById('type_'+ps.id);
     const manual = (sel && sel.value) ? sel.value : null;
@@ -3299,8 +3359,7 @@ function pickProfileSlots(rarityPref, resolvedCats, onlySectionId, skipSectionId
     ? PROFILE_SECTIONS.filter(ps=>ps.id === onlySectionId)
     : PROFILE_SECTIONS.filter(ps=>ps.id !== skipSectionId);
   sections.forEach(ps=>{
-    const tog = document.getElementById('sec_'+ps.id);
-    if (tog && !tog.checked) return;
+    if (!profileSectionEnabled(ps)) return;
     const target = profileTarget(ps.id);
 
     if (ps.drawAll){
@@ -4049,8 +4108,7 @@ function deriveDepthCategories(){
   lastDepthMotivation = motivTraits;
   PROFILE_SECTIONS.forEach(ps=>{
     if (ps.drawAll) return;
-    const tog = document.getElementById('sec_'+ps.id);
-    if (tog && !tog.checked) return;
+    if (!profileSectionEnabled(ps)) return;
     const sel = document.getElementById('type_'+ps.id);
     // A value depth-first itself wrote on a PREVIOUS run is not a user choice. Without
     // this the second run treated the first run's automatic pick as a fixed manual
@@ -5237,8 +5295,7 @@ function activeRuleChips(){
   }).length;
   if (manual) n('fixed profile types', manual);
   const off = (typeof PROFILE_SECTIONS !== 'undefined' ? PROFILE_SECTIONS : []).filter(ps=>{
-    const tog = document.getElementById('sec_'+ps.id);
-    return tog && !tog.checked;
+    return !profileSectionEnabled(ps);
   }).length;
   if (off) n('sections off', off);
   const seedEl = document.getElementById('seedInput');

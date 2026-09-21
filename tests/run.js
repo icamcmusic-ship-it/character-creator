@@ -1619,8 +1619,12 @@ check('no polarity axis becomes more one-sided', ()=>{
   /* The mood fix added a positive pole to one axis by hand. Five more have the same
      shape, and polNormalise can only stop them reading as posture on the radar — it
      cannot give polarityFit material to select on when the slider points the thin way. */
-  const FLOORS = {   // measured positive share; the band is 40-60% and these sit outside it
-    ego: [0.36, 0.44], vol: [0.36, 0.44], intel: [0.64, 0.72], form: [0.68, 0.76], act: [0.60, 0.68],
+  /* Measured positive share; the band is 40-60% and these sit outside it. Tightened
+     after the 2026 §4.4 polarity pack: formality 72 -> 68%, analytical 69 -> 67%,
+     self-confidence 38.5 -> 39.5%; physical energy (64 -> 60%) and wordiness
+     (38.5 -> 40%) are now inside the general band and no longer listed. */
+  const FLOORS = {
+    ego: [0.37, 0.45], intel: [0.62, 0.70], form: [0.62, 0.70],
   };
   const poles = {};
   T.forEach(t=> Object.entries(t.pol || {}).forEach(([ax, v])=>{
