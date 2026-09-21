@@ -1278,3 +1278,12 @@
   .edgeField span { font-size:.74rem; text-transform:uppercase; letter-spacing:.04em; color:var(--text-soft, #6b7a8a); }
   .edgeField input { width:100%; font-size:.82rem; }
   @media (max-width:600px){ .edgeField { grid-template-columns:1fr; } }
+
+  /* Arc panel */
+  .arcPanel { margin-top:16px; padding-top:12px; border-top:1px dashed var(--border-strong); }
+  .arcEvent { border:1px solid var(--border-strong); border-radius:12px; padding:10px 12px; margin-bottom:10px; font-size:.85rem; }
+  .arcHead { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:6px; }
+  .arcSeq { display:inline-flex; align-items:center; justify-content:center; width:22px; height:22px; border-radius:50%; background:var(--dusk-blue); color:#fff; font-size:.75rem; }
+  .arcChange { border-left:3px solid var(--border-strong); padding:6px 10px; margin:6px 0; }
+  .arcChange.accepted { border-left-color:var(--emerald, #2e9e77); }
+  .arcChange .actionRow { margin-top:4px; }

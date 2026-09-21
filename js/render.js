@@ -1126,6 +1126,7 @@ function renderSheet(){
     insight.style.display = h ? "block" : "none";
   }
 
+  if (typeof renderArc === 'function') renderArc();
   renderChangeList();
   refreshBudgetMeters();
   refreshJumpToSection();
@@ -1355,6 +1356,7 @@ function sheetToText(st, meta, pState){
         if (rows.length) L.push(`**${k[0].toUpperCase()+k.slice(1)}:**`, ...rows.map(x=>`- ${x.trait.trait} — ${x.why}`), "");
       });
     }
+    if (meta.arc && meta.arc.events) L.push("", `_Arc: ${meta.arc.line}_`);
     const chain = motivationChain(st);
     if (chain && chain.links.length > 1){
       L.push("", "**How the pieces connect:**", ...chain.links.map(l => `${l.links ? '' : ''}1. _${l.key}_ — ${l.text} (from: ${l.from.join(", ")})`));
@@ -1414,6 +1416,11 @@ function sheetToText(st, meta, pState){
   block("Speech Pattern", ["verbosity","register","grammar"]);
   block("Vocabulary", Object.keys(st).filter(k=>k.startsWith("vocab")));
   block("Mannerisms", Object.keys(st).filter(k=>k.startsWith("manner")));
+
+  // ---- The arc ----
+  if (typeof arcEvents !== 'undefined' && arcEvents.length){
+    L.push("", "## Arc", "", `_${arcSummary(arcEvents).line}_`, "", arcToMarkdown(arcEvents));
+  }
 
   // ---- Under pressure ----
   if (pState){

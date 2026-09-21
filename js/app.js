@@ -195,6 +195,10 @@ async function saveCharacter(btnEl){
       state: compressSlots(state), charMeta,
       pressureState: compressSlots(pressureState),
       pinnedTargets, charVariants, traitNotes,
+      /* The arc is the character's history, so a save without it loses the difference
+         between who they are and who they started as. The base sheet is compressed the
+         same way the live one is; the events are ids and text already. */
+      arcBase: arcBase ? compressSlots(arcBase) : null, arcEvents,
       settings: captureSettings(), savedAt: new Date().toISOString(),
     }));
     await loadSavedList();
@@ -317,6 +321,9 @@ async function loadSavedCharacter(name){
        shapes arrive here the same way, so a save written by any build still loads. */
     state = rec.state; charMeta = rec.charMeta || {name, age:"", context:"", archetypeLabel:"Loaded"};
     if (typeof viewContext !== 'undefined') viewContext = CONTEXT_MODE_IDS.includes(charMeta.viewContext) ? charMeta.viewContext : 'baseline';
+    if (typeof resetArc === 'function'){
+      arcEvents = (Array.isArray(rec.arcEvents) ? rec.arcEvents : []).filter(e=>!validateArcEvent(e).length);
+      arcBase = rec.arcBase ? expandSlots(rec.arcBase) : JSON.parse(JSON.stringify(state)); if (arcEvents.length) arcReplay(); else renderArc(); }
     pressureState = rec.pressureState || null;
     pinnedTargets = rec.pinnedTargets || {};
     charVariants = rec.charVariants || {};
@@ -868,6 +875,107 @@ function applyCastBundle(p){
   relationshipEdges = pruneEdges(edges.map(e => makeEdge(e.from, e.to, e.role, e)), next);
   lastCastSeed = p.seed || lastCastSeed;
   return {orphans, dropped: edges.length - relationshipEdges.length};
+}
+
+// ================= ARC PANEL =================
+/* `arcBase` is the sheet as generated; `state` is always the replayed result, so the
+   cards on screen are the character as of the last accepted change. Declining a change
+   or removing an event replays from the base rather than trying to invert an edit. */
+let arcBase = null;
+let arcEvents = [];
+function arcReplay(){
+  if (!arcBase) return;
+  state = replayArc(arcBase, arcEvents);
+  charMeta.arc = arcSummary(arcEvents);
+  renderSheet();
+  renderArc();
+}
+function resetArc(keepBase){
+  arcEvents = [];
+  arcBase = keepBase ? arcBase : (Object.keys(state).length ? JSON.parse(JSON.stringify(state)) : null);
+  if (charMeta) delete charMeta.arc;
+}
+async function addArcEvent(){
+  if (!Object.keys(state).length){ toast("Generate a character first — an arc happens to someone.", "warn"); return; }
+  if (!arcBase) arcBase = JSON.parse(JSON.stringify(state));
+  const title = await askForName("What happened?", "");
+  if (title === null) return;
+  const shape = strVal('arcShape', 'growth');
+  const ev = makeArcEvent(arcEvents.length + 1, {title, shape, at: new Date().toISOString()});
+  ev.changes = proposeArcChanges(state, ev, arcEvents);
+  arcEvents.push(ev);
+  renderArc();
+  toast(ev.changes.length
+    ? `Event added with ${ev.changes.length} proposed change${ev.changes.length===1?'':'s'} — accept the ones you want.`
+    : `Event added. ${shape === 'steadfast' ? "Steadfast: the cost is the record, nothing on the sheet moves." : "Nothing on this sheet moved for it."}`, "ok", 6000);
+}
+function editArcEvent(id, field, el){
+  const e = arcEvents.find(x => x.id === id);
+  if (!e || !el) return;
+  if (field === 'shape'){
+    e.shape = ARC_SHAPE_IDS.includes(el.value) ? el.value : 'growth';
+    // A new shape is a different proposal, and only unaccepted changes are re-proposed:
+    // a change the author has already taken is theirs, not the shape's.
+    const kept = (e.changes || []).filter(c => c.accepted);
+    e.changes = kept.concat(proposeArcChanges(replayArc(arcBase, arcEvents.filter(x => x.seq < e.seq)), e, arcEvents.filter(x => x.seq < e.seq))
+      .filter(c => !kept.some(k => k.slotId === c.slotId)));
+    arcReplay();
+    return;
+  }
+  e[field] = String(el.value || "").slice(0, 600);
+  const s = document.getElementById('arcStamp');
+  if (s) s.textContent = arcSummary(arcEvents).line;
+}
+function setArcChange(eventId, slotId, accepted){
+  const e = arcEvents.find(x => x.id === eventId);
+  const c = e && (e.changes || []).find(x => x.slotId === slotId);
+  if (!c) return;
+  c.accepted = !!accepted;
+  arcReplay();
+}
+async function removeArcEvent(id){
+  const e = arcEvents.find(x => x.id === id);
+  if (!e) return;
+  if (!await askForConfirm(`Undo "${e.title || 'event ' + e.seq}"? The arc replays from the original sheet without it.`, "Undo")) return;
+  arcEvents = arcEvents.filter(x => x.id !== id);
+  arcEvents.forEach((x, i) => { x.seq = i + 1; });
+  arcReplay();
+  toast("Event undone; the arc was replayed without it.");
+}
+function renderArc(){
+  const host = document.getElementById('arcBody');
+  if (!host) return;
+  const panel = document.getElementById('arcPanel');
+  if (panel) panel.style.display = Object.keys(state).length ? "block" : "none";
+  const stamp = document.getElementById('arcStamp');
+  if (stamp) stamp.textContent = arcSummary(arcEvents).line;
+  const sel = document.getElementById('arcShape');
+  if (sel && !sel.options.length){
+    sel.innerHTML = ARC_SHAPES.map(s => `<option value="${escHTML(s.id)}" title="${escAttr(s.blurb)}">${escHTML(s.label)}</option>`).join("");
+  }
+  const field = (e, k, label, ph) => `<label class="edgeField"><span>${label}</span><input type="text" value="${escAttr(e[k] || "")}" placeholder="${escAttr(ph)}" ${actAttr('change', 'editArcEvent', e.id, k, "$el")}></label>`;
+  host.innerHTML = arcEvents.slice().sort((a,b)=>a.seq-b.seq).map(e => {
+    const changes = (e.changes || []).map(c => {
+      const from = TRAITS_BY_ID.get(c.fromId), to = TRAITS_BY_ID.get(c.toId);
+      return `<div class="arcChange${c.accepted ? ' accepted' : ''}">
+        <div><b>${escHTML(from ? from.trait : String(c.fromId))}</b> → <b>${escHTML(to ? to.trait : String(c.toId))}</b></div>
+        <div class="sub">${escHTML(c.why)}</div>
+        <div class="actionRow">
+          <button class="btn-secondary" ${actAttr('click', 'setArcChange', e.id, c.slotId, true)} aria-pressed="${c.accepted}">${c.accepted ? 'accepted' : 'accept'}</button>
+          <button class="btn-secondary" ${actAttr('click', 'setArcChange', e.id, c.slotId, false)} aria-pressed="${!c.accepted}">${c.accepted ? 'undo' : 'declined'}</button>
+        </div>
+      </div>`;
+    }).join("");
+    return `<div class="arcEvent">
+      <div class="arcHead"><span class="arcSeq">${e.seq}</span> <b>${escHTML(e.title || "Untitled event")}</b>
+        <select ${actAttr('change', 'editArcEvent', e.id, 'shape', "$el")} aria-label="Arc shape">${ARC_SHAPES.map(s=>`<option value="${s.id}"${s.id===e.shape?' selected':''}>${escHTML(s.label)}</option>`).join("")}</select>
+        <button class="savedAct savedDel" ${actAttr('click', 'removeArcEvent', e.id)} aria-label="Undo this event">undo</button></div>
+      ${field(e, 'beliefChallenged', 'belief', 'Which belief this tested')}
+      ${field(e, 'choice', 'choice', 'What they chose to do')}
+      ${field(e, 'cost', 'cost', 'What it cost them')}
+      ${changes || `<div class="sub">${e.shape === 'steadfast' ? "Steadfast — nothing on the sheet moves; the cost is the record." : "No changes proposed."}</div>`}
+    </div>`;
+  }).join("") || `<div class="sub">No events yet.</div>`;
 }
 
 const TABS = [

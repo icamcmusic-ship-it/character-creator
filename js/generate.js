@@ -734,6 +734,8 @@ function _runGeneration(){
     seed: charMetaSeed
   };
   charMeta.viewContext = (typeof viewContext !== 'undefined') ? viewContext : 'baseline';
+  // A freshly generated character starts its arc over — see resetArc in app.js.
+  if (typeof resetArc === 'function') resetArc(false);
   charMeta.archFidelity = arch ? archetypeFidelity(state, arch) : null;
   const emergent = emergentArchetypeName(state);
   if (emergent && !archKey) charMeta.archetypeLabel = emergent.name + (emergent.exact ? "" : " *");

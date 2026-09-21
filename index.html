@@ -631,6 +631,17 @@
       </div>
       <div id="sheetBody"></div>
 
+      <div class="arcPanel" id="arcPanel" style="display:none;">
+        <div class="sheetHeader"><h2>Arc</h2></div>
+        <div class="sub" style="margin:0 0 8px;">What happened to them, in order. Each event names the belief it tested, the choice and the cost, and proposes trait changes you accept one at a time. Undoing an event replays the arc from the original sheet.</div>
+        <div class="actionRow" style="margin:0 0 10px;">
+          <select id="arcShape" aria-label="Arc shape for the next event"></select>
+          <button class="btn-secondary" data-on="click" data-act="addArcEvent" data-args="[]">Add an event</button>
+          <span class="sub" id="arcStamp">No events yet. The sheet is where they start.</span>
+        </div>
+        <div id="arcBody"></div>
+      </div>
+
       <div class="pressureSheet" id="pressureSheet" style="display:none;">
         <div class="pressureTitle">Under Pressure</div>
         <!-- Shown when the base sheet has been edited since this variant was derived

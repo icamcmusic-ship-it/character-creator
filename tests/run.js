@@ -69,6 +69,8 @@ const ctx = loadEngine([
   'contextualView','contextualViews','CONTEXT_MODES','CONTEXT_MODE_IDS','CONTEXT_LENS_RULES',
   'RELATIONSHIP_ROLES','RELATIONSHIP_STATUS','relationshipRole','roleOverridesFor','edgeDefaults','makeEdge',
   'pruneEdges','validateEdge','edgesToMarkdown','castBundle','applyCastBundle','castEntry',
+  'ARC_SHAPES','ARC_SHAPE_IDS','arcShape','makeArcEvent','validateArcEvent','proposeArcChanges',
+  'applyArcEvent','replayArc','arcSummary','arcToMarkdown',
 ]);
 const A = ctx.api;
 const T = A.TRAITS;
@@ -2452,6 +2454,86 @@ check('edges survive a cast round-trip and dangling ones are dropped', ()=>{
   assert(live === 1 && names === 'Ada,Bo', `round-trip gave ${names} with ${live} edge(s)`);
   assert(res.dropped === 0, 'nothing should be dropped on a clean bundle');
   return `1 of 2 edges kept, "${md.split('\n')[0].slice(0, 44)}…"`;
+});
+
+
+group('Arcs: proposed changes, acceptance, replay and undo');
+
+check('an event proposes changes in its own direction, deterministically, and steadfast proposes none', ()=>{
+  const st = _mechSheet(7501);
+  const grow = A.makeArcEvent(1, {title:'She told the truth', shape:'growth', cost:'Lost the job she had been protecting for nine years'});
+  const c1 = A.proposeArcChanges(st, grow, []);
+  const c2 = A.proposeArcChanges(st, grow, []);
+  assert(c1.length, 'growth proposed nothing');
+  assert(JSON.stringify(c1) === JSON.stringify(c2), 'the proposal is not deterministic in the event id');
+  c1.forEach(c=> assert(c.why && c.accepted === false && c.fromId !== c.toId, 'a change must be explained and start unaccepted'));
+  const still = A.proposeArcChanges(st, A.makeArcEvent(2, {shape:'steadfast', title:'He stayed'}), []);
+  assert(!still.length, 'steadfast should propose nothing at all');
+  const down = A.proposeArcChanges(st, A.makeArcEvent(3, {shape:'deterioration', title:'He drank instead'}), []);
+  assert(down.length, 'deterioration proposed nothing');
+  assert(JSON.stringify(down) !== JSON.stringify(c1), 'growth and deterioration should not propose the same thing');
+  return `growth ${c1.length}, deterioration ${down.length}, steadfast 0`;
+});
+
+check('only accepted changes apply, and the source sheet is never mutated', ()=>{
+  const st = _mechSheet(7502);
+  const ev = A.makeArcEvent(1, {title:'The letter arrived', shape:'growth'});
+  ev.changes = A.proposeArcChanges(st, ev, []);
+  assert(ev.changes.length >= 1, 'no changes to test with');
+  const before = JSON.stringify(st);
+  const untouched = A.applyArcEvent(st, ev);
+  assert(JSON.stringify(untouched) === before, 'nothing accepted, so nothing should change');
+  ev.changes[0].accepted = true;
+  const after = A.applyArcEvent(st, ev);
+  assert(JSON.stringify(st) === before, 'applyArcEvent mutated the state it was given');
+  assert(after[ev.changes[0].slotId].trait.id === ev.changes[0].toId, 'the accepted change did not apply');
+  assert(after[ev.changes[0].slotId].arcEvent === ev.id, 'the changed slot should name the event that changed it');
+  return `${ev.changes[0].slotId} applied on accept only`;
+});
+
+check('replaying the arc without an event reconstructs the character exactly', ()=>{
+  const base = _mechSheet(7503);
+  const evs = [];
+  ['growth','deterioration','growth'].forEach((shape, i)=>{
+    const st = A.replayArc(base, evs);
+    const ev = A.makeArcEvent(i+1, {title:'Event '+(i+1), shape, cost:'It cost them more than they will admit to anyone'});
+    ev.changes = A.proposeArcChanges(st, ev, evs);
+    ev.changes.forEach(c=>{ c.accepted = true; });
+    evs.push(ev);
+  });
+  const full = A.replayArc(base, evs);
+  const withoutSecond = A.replayArc(base, evs.filter(e=>e.seq !== 2));
+  const firstOnly = A.replayArc(base, evs.filter(e=>e.seq === 1));
+  assert(JSON.stringify(full) !== JSON.stringify(base), 'three accepted events changed nothing');
+  assert(JSON.stringify(withoutSecond) !== JSON.stringify(full), 'undoing an event changed nothing');
+  assert(JSON.stringify(A.replayArc(base, evs)) === JSON.stringify(full), 'replay is not deterministic');
+  // Dropping every event has to land exactly back on the sheet it started from.
+  assert(JSON.stringify(A.replayArc(base, [])) === JSON.stringify(base), 'an empty arc is not the baseline');
+  assert(JSON.stringify(firstOnly) !== JSON.stringify(base), 'the first event did nothing');
+  const sum = A.arcSummary(evs);
+  assert(sum.events === 3 && sum.changes >= 3 && sum.shape === 'growth', `summary reads ${JSON.stringify(sum.counts)}`);
+  const md = A.arcToMarkdown(evs);
+  assert(/### 1\. Event 1 — _Growth_/.test(md) && /\*\*Changed\*\*/.test(md), 'the arc markdown is wrong: ' + md.slice(0, 120));
+  return sum.line;
+});
+
+check('a cyclical event puts an earlier accepted change back, and bad events are rejected', ()=>{
+  const base = _mechSheet(7504);
+  const first = A.makeArcEvent(1, {title:'He swore off it', shape:'growth'});
+  first.changes = A.proposeArcChanges(base, first, []);
+  assert(first.changes.length, 'nothing to cycle back from');
+  first.changes.forEach(c=>{ c.accepted = true; });
+  const after = A.applyArcEvent(base, first);
+  const cyc = A.makeArcEvent(2, {title:'And then, in March', shape:'cyclical'});
+  cyc.changes = A.proposeArcChanges(after, cyc, [first]);
+  assert(cyc.changes.length, 'cyclical proposed nothing to revert');
+  assert(cyc.changes.every(c=> first.changes.some(f=> f.slotId === c.slotId && f.fromId === c.toId)), 'a cyclical change should restore an earlier from-trait');
+  cyc.changes.forEach(c=>{ c.accepted = true; });
+  const backAgain = A.applyArcEvent(after, cyc);
+  cyc.changes.forEach(c=> assert(backAgain[c.slotId].trait.id === c.toId, 'the revert did not apply'));
+  assert(A.validateArcEvent({id:'x', seq:0, shape:'sideways', changes:'no'}).length >= 3, 'a malformed event should be rejected field by field');
+  assert(!A.validateArcEvent(first).length, 'a real event should validate');
+  return `${cyc.changes.length} change(s) put back`;
 });
 
 if (failed){

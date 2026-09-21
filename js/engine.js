@@ -6081,6 +6081,164 @@ function edgesToMarkdown(edges, members){
   }).join("\n");
 }
 
+// ================= ARCS AND VERSIONED EVENTS (MVP) =================
+/* A character was a single frozen sheet: the tool could say who someone is and had no
+   way to say who they became. An arc is an ordered log of events, each carrying the
+   belief it challenged, the choice made, the cost paid, and a shape — and each
+   proposing a small set of trait changes the author accepts or declines one at a time.
+   Nothing is applied behind the author's back, every event stores the before and after
+   for the slots it touched, and the whole arc replays from the baseline sheet, so
+   undoing an event is exact rather than approximate. */
+const ARC_SHAPES = [
+  {id:"growth",        label:"Growth",        blurb:"The belief loosened. They move toward the thing they were avoiding.", dir:1},
+  {id:"deterioration", label:"Deterioration", blurb:"The belief won. They move further into the defence.", dir:-1},
+  {id:"steadfast",     label:"Steadfast",     blurb:"It cost them and they did not move. Nothing on the sheet changes; the cost is the record.", dir:0},
+  {id:"cyclical",      label:"Cyclical",      blurb:"They have been here before. This undoes the last change of the opposite kind.", dir:0},
+];
+const ARC_SHAPE_IDS = ARC_SHAPES.map(s => s.id);
+function arcShape(id){ return ARC_SHAPES.find(s => s.id === id) || null; }
+
+function newEventId(seq){ return "ev_" + String(seq).padStart(3, "0"); }
+function makeArcEvent(seq, fields){
+  return Object.assign({
+    id: newEventId(seq), seq, title: "", beliefChallenged: "", choice: "", cost: "",
+    shape: "growth", changes: [], at: null,
+  }, fields || {});
+}
+function validateArcEvent(e){
+  const problems = [];
+  if (!e || typeof e !== 'object') return ["event is not an object"];
+  if (typeof e.id !== 'string' || !e.id) problems.push("event.id is missing");
+  if (!Number.isInteger(e.seq) || e.seq < 1) problems.push("event.seq must be a positive integer");
+  if (!ARC_SHAPE_IDS.includes(e.shape)) problems.push(`event.shape "${e.shape}" is not a known shape`);
+  ["title","beliefChallenged","choice","cost"].forEach(k => { if (e[k] !== undefined && typeof e[k] !== 'string') problems.push(`event.${k} must be text`); });
+  if (!Array.isArray(e.changes)) problems.push("event.changes must be a list");
+  else e.changes.forEach((c, i) => {
+    if (!c || typeof c.slotId !== 'string') problems.push(`change ${i} has no slotId`);
+    if (c && c.toId !== null && !Number.isInteger(c.toId)) problems.push(`change ${i} has a bad toId`);
+    if (c && typeof c.accepted !== 'boolean') problems.push(`change ${i} has no accepted flag`);
+  });
+  return problems;
+}
+
+/* The proposal. Deterministic in the event id, so the same event always proposes the
+   same changes and an arc can be rebuilt on another machine. Growth moves the loudest
+   negative personality card toward its positive pole and retires the Lie; deterioration
+   does the reverse and hardens the Defence; steadfast proposes nothing; cyclical
+   reverses the most recent accepted change of the opposite direction. */
+function _oppositeCategory(t, dir){
+  const ax = PERSONALITY_AXES.find(a => a.pos === t.category || a.neg === t.category || a.mid === t.category);
+  if (!ax) return null;
+  return dir > 0 ? ax.pos : ax.neg;
+}
+function proposeArcChanges(st, event, priorEvents){
+  const shape = arcShape(event.shape);
+  if (!shape) return [];
+  const out = [];
+  const push = (slotId, trait, why) => {
+    const cur = st[slotId] && st[slotId].trait;
+    if (!trait || !cur || trait.id === cur.id) return;
+    out.push({slotId, fromId: cur.id, toId: trait.id, why, accepted: false});
+  };
+  if (shape.id === "cyclical"){
+    // Walk backwards for an accepted change and put that slot back where it was.
+    for (let i = (priorEvents || []).length - 1; i >= 0 && out.length < 2; i--){
+      (priorEvents[i].changes || []).forEach(c => {
+        if (!c.accepted || out.some(o => o.slotId === c.slotId)) return;
+        const back = TRAITS_BY_ID.get(c.fromId);
+        if (back && st[c.slotId] && st[c.slotId].trait && st[c.slotId].trait.id !== c.fromId){
+          out.push({slotId: c.slotId, fromId: st[c.slotId].trait.id, toId: c.fromId,
+                    why: `back to where event ${priorEvents[i].seq} found them — this has happened before`, accepted: false});
+        }
+      });
+    }
+    return out;
+  }
+  if (shape.dir === 0) return out;   // steadfast: the cost is the record
+  withRng(mulberry32(hashSeedString(event.id + "|" + event.shape)), ()=>{
+    // 1. The loudest personality card pointing the wrong way for this shape.
+    const pers = Object.keys(st).filter(k => k.startsWith("pers_") && st[k] && st[k].trait)
+      .map(k => ({k, t: st[k].trait}))
+      .filter(x => {
+        const ax = PERSONALITY_AXES.find(a => a.pos === x.t.category || a.neg === x.t.category || a.mid === x.t.category);
+        if (!ax) return false;
+        return shape.dir > 0 ? x.t.category !== ax.pos : x.t.category !== ax.neg;
+      })
+      .sort((a, b) => (b.t.intensity || 3) - (a.t.intensity || 3));
+    if (pers.length){
+      const chosen = pers[0];
+      const cat = _oppositeCategory(chosen.t, shape.dir);
+      const pool = cat ? byFilter(SECTION_OF_CATEGORY.get(cat) || chosen.t.section, cat) : [];
+      push(chosen.k, pickInRange(pool, "balanced", clamp((chosen.t.intensity || 3) - 0.5, 1, 5), 3),
+        `${shape.label.toLowerCase()} on ${chosen.t.category.split("—")[0].trim()}: they move from "${chosen.t.trait}" toward the other pole`);
+    }
+    // 2. The Lie loosens on growth; the Defence hardens on deterioration.
+    const targetCat = shape.dir > 0 ? /The Lie/i : /The Defence/i;
+    const slotId = Object.keys(st).find(k => k.startsWith("prof_motivation_") && st[k] && st[k].trait && targetCat.test(st[k].trait.category));
+    if (slotId){
+      const cur = st[slotId].trait;
+      const pool = byFilter(cur.section, cur.category).filter(t => t.id !== cur.id);
+      const want = shape.dir > 0 ? clamp((cur.intensity || 3) - 1, 1, 5) : clamp((cur.intensity || 3) + 1, 1, 5);
+      push(slotId, pickInRange(pool, "balanced", want, 3),
+        shape.dir > 0 ? `the lie they believe loosens its grip` : `the defence they built gets thicker`);
+    }
+    // 3. Attachment moves one step on a strong event.
+    const att = Object.keys(st).find(k => k.startsWith("prof_attachment_") && st[k] && st[k].trait);
+    if (att && (event.cost || "").length > 20){
+      const ladder = ["Disorganized", "Avoidant", "Anxious", "Secure"];
+      const at = ladder.indexOf(st[att].trait.category);
+      const next = at >= 0 ? ladder[clamp(at + shape.dir, 0, ladder.length - 1)] : null;
+      if (next && next !== st[att].trait.category){
+        push(att, pickInRange(byFilter("Attachment & Intimacy Style", next), "balanced", 3, 3),
+          `a cost that size moves them from ${st[att].trait.category} toward ${next}`);
+      }
+    }
+  });
+  return out;
+}
+
+/* Applying an event is applying only its ACCEPTED changes, and never mutating the
+   state handed in: an arc is a chain of snapshots, not an edit in place. */
+function applyArcEvent(st, event){
+  const next = {};
+  Object.keys(st || {}).forEach(k => { next[k] = Object.assign({}, st[k]); });
+  (event.changes || []).forEach(c => {
+    if (!c.accepted) return;
+    const t = TRAITS_BY_ID.get(c.toId);
+    if (t && next[c.slotId]) next[c.slotId] = Object.assign({}, next[c.slotId], {trait: t, arcEvent: event.id});
+  });
+  return next;
+}
+function replayArc(baseState, events){
+  return (events || []).slice().sort((a, b) => a.seq - b.seq).reduce((st, e) => applyArcEvent(st, e), baseState || {});
+}
+/* What the arc adds up to, for the header and the export. */
+function arcSummary(events){
+  const kept = (events || []).filter(e => (e.changes || []).some(c => c.accepted));
+  const counts = {};
+  ARC_SHAPE_IDS.forEach(id => { counts[id] = (events || []).filter(e => e.shape === id).length; });
+  const dominant = ARC_SHAPE_IDS.slice().sort((a, b) => counts[b] - counts[a])[0];
+  const changes = (events || []).reduce((n, e) => n + (e.changes || []).filter(c => c.accepted).length, 0);
+  return {events: (events || []).length, eventsWithChanges: kept.length, changes, counts,
+    shape: (events || []).length ? dominant : null,
+    line: (events || []).length
+      ? `${events.length} event${events.length===1?'':'s'}, ${changes} accepted change${changes===1?'':'s'} — mostly ${arcShape(dominant).label.toLowerCase()}.`
+      : "No events yet. The sheet is where they start."};
+}
+function arcToMarkdown(events){
+  return (events || []).slice().sort((a,b)=>a.seq-b.seq).map(e => {
+    const L = [`### ${e.seq}. ${e.title || "Untitled event"} — _${(arcShape(e.shape)||{}).label || e.shape}_`];
+    if (e.beliefChallenged) L.push(`- **Belief challenged:** ${e.beliefChallenged}`);
+    if (e.choice) L.push(`- **Choice:** ${e.choice}`);
+    if (e.cost) L.push(`- **Cost:** ${e.cost}`);
+    (e.changes || []).forEach(c => {
+      const from = TRAITS_BY_ID.get(c.fromId), to = TRAITS_BY_ID.get(c.toId);
+      L.push(`- ${c.accepted ? "**Changed**" : "Proposed (declined)"}: ${from ? from.trait : c.fromId} → ${to ? to.trait : c.toId} — ${c.why}`);
+    });
+    return L.join("\n");
+  }).join("\n\n");
+}
+
 function buildStressVariant(baseVerbLevel, baseRegLevel, mannerCount, rarityPref, sourceState){
   /* Scaled by the pressure dial rather than pinned to the extreme. At 1.0 these are
      exactly the values this function has always used, so the default is unchanged; at
