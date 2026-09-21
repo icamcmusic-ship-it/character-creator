@@ -558,6 +558,18 @@
       </div>
       <div class="storageStatus" id="storageStatus" role="status" style="display:none;"></div>
             <div class="savedList" id="savedList"></div>
+      <details class="advanced" id="projectPanel">
+        <summary><h3>Project library &amp; backup</h3></summary>
+        <div class="sub" style="margin:8px 0;">A project groups the characters, cast, relationship edges and arc events of one book or campaign. A backup bundle carries every project and every saved character to another machine, and shows you what it would overwrite before it writes anything.</div>
+        <div class="actionRow" style="margin-bottom:8px;">
+          <button class="btn-secondary" data-on="click" data-act="newProject" data-args="[]">New project</button>
+          <button class="btn-secondary" data-on="click" data-act="fileIntoProject" data-args="[]" title="File the character, cast, edges and arc on screen into the current project">File what's on screen</button>
+          <button class="btn-secondary" data-on="click" data-act="exportBackupBundle" data-args="[]">Export backup</button>
+          <label class="btn-secondary" style="cursor:pointer;">Import backup<input type="file" accept=".json,application/json" style="display:none;" data-on="change" data-act="importBackupBundle" data-args="[&quot;$el&quot;]"></label>
+        </div>
+        <div id="projectList"></div>
+        <div id="backupPreview" class="tensionBlock" style="display:none;"></div>
+      </details>
     </div>
 
     <div class="warnBox" id="warnBox" role="status"></div>

@@ -6420,6 +6420,104 @@ function voiceLabToMarkdown(st, mode){
   ).join("\n\n");
 }
 
+// ================= PROJECT LIBRARY AND BACKUP BUNDLE (MVP) =================
+/* Saved characters were a flat list of names in one browser's storage, with no way to
+   say "these six belong to the same book" and no way to get the lot onto another
+   machine. A project groups characters, casts, relationship edges, arc events, the
+   settings that produced them and the diversity archive; a backup bundle is every
+   project plus the loose saves, with a merge preview on the way back in so an import
+   can never quietly overwrite work. Everything here is pure — the storage calls live
+   in app.js — so the merge logic is testable without a browser. */
+const PROJECT_FORMAT = "character-voice-project";
+const BACKUP_FORMAT = "character-voice-backup";
+const BACKUP_VERSION = 1;
+function newProjectId(){ return "pj_" + Date.now().toString(36) + "_" + Math.floor(Math.random() * 1e6).toString(36); }
+function makeProject(name, fields){
+  return Object.assign({
+    format: PROJECT_FORMAT, id: newProjectId(), name: name || "Untitled project", tags: [],
+    characters: [], casts: [], edges: [], events: [], settings: null, archive: [],
+    created: new Date().toISOString(), updated: new Date().toISOString(),
+  }, fields || {});
+}
+function validateProject(p){
+  const problems = [];
+  if (!p || typeof p !== 'object') return ["project is not an object"];
+  if (typeof p.id !== 'string' || !p.id) problems.push("project.id is missing");
+  if (typeof p.name !== 'string' || !p.name) problems.push("project.name is missing");
+  ["characters","casts","edges","events","archive","tags"].forEach(k => {
+    if (!Array.isArray(p[k])) problems.push(`project.${k} must be a list`);
+  });
+  if (Array.isArray(p.tags) && p.tags.some(t => typeof t !== 'string')) problems.push("project.tags must be text");
+  if (Array.isArray(p.edges)) p.edges.forEach((e, i) => { const bad = validateEdge(e); if (bad.length) problems.push(`edge ${i}: ${bad[0]}`); });
+  if (Array.isArray(p.events)) p.events.forEach((e, i) => { const bad = validateArcEvent(e); if (bad.length) problems.push(`event ${i}: ${bad[0]}`); });
+  return problems;
+}
+function projectSummary(p){
+  return `${p.characters.length} character${p.characters.length===1?'':'s'} · ${p.casts.length} cast${p.casts.length===1?'':'s'} · ${p.edges.length} edge${p.edges.length===1?'':'s'} · ${p.events.length} event${p.events.length===1?'':'s'}`;
+}
+function makeBackupBundle(projects, loose, meta){
+  return Object.assign({
+    format: BACKUP_FORMAT, version: BACKUP_VERSION, exported: new Date().toISOString(),
+    projects: (projects || []).slice(), characters: (loose || []).slice(),
+  }, meta || {});
+}
+function validateBackupBundle(b){
+  const problems = [];
+  if (!b || typeof b !== 'object') return ["the file is not a backup bundle"];
+  if (b.format !== BACKUP_FORMAT) return [`this is not a backup bundle (format "${b.format}")`];
+  if (!Number.isInteger(b.version) || b.version > BACKUP_VERSION) problems.push(`version ${b.version} is newer than this build understands (${BACKUP_VERSION})`);
+  if (!Array.isArray(b.projects)) problems.push("the `projects` block is not a list");
+  else b.projects.forEach((p, i) => { const bad = validateProject(p); if (bad.length) problems.push(`project ${i} (${(p && p.name) || "?"}): ${bad[0]}`); });
+  if (!Array.isArray(b.characters)) problems.push("the `characters` block is not a list");
+  else b.characters.forEach((c, i) => { if (!c || typeof c.name !== 'string' || !c.record) problems.push(`character ${i} has no name/record`); });
+  return problems;
+}
+
+/* The preview. Nothing is written until the author has seen this: for both collections,
+   which entries are new, which already exist unchanged, and which would be overwritten
+   — the last group named one by one, because that is the group a person regrets. */
+function _stamp(v){ return v && (v.updated || v.savedAt) ? String(v.updated || v.savedAt) : null; }
+function mergePreview(existing, incoming){
+  const keyOf = x => x.id || x.name;
+  const have = new Map((existing || []).map(x => [keyOf(x), x]));
+  const out = {add: [], same: [], conflict: []};
+  (incoming || []).forEach(x => {
+    const k = keyOf(x), mine = have.get(k);
+    if (!mine){ out.add.push(x); return; }
+    if (JSON.stringify(mine) === JSON.stringify(x)){ out.same.push(x); return; }
+    const a = _stamp(mine), b = _stamp(x);
+    out.conflict.push({key: k, name: x.name || k, mine, theirs: x,
+      newer: a && b ? (b > a ? "theirs" : a > b ? "mine" : "same age") : "unknown"});
+  });
+  return out;
+}
+function backupPreview(bundle, existingProjects, existingCharacters){
+  return {
+    projects: mergePreview(existingProjects, bundle.projects || []),
+    characters: mergePreview(existingCharacters, bundle.characters || []),
+  };
+}
+/* `choices` maps a conflict key to "theirs" (overwrite) or "mine" (keep). Anything not
+   named is kept, because the safe default for work already on this machine is to leave
+   it alone. */
+function applyMerge(existing, preview, choices){
+  const out = (existing || []).slice();
+  const keyOf = x => x.id || x.name;
+  const idx = new Map(out.map((x, i) => [keyOf(x), i]));
+  preview.add.forEach(x => { idx.set(keyOf(x), out.push(x) - 1); });
+  preview.conflict.forEach(c => {
+    if ((choices || {})[c.key] !== "theirs") return;
+    const at = idx.get(c.key);
+    if (at === undefined) idx.set(c.key, out.push(c.theirs) - 1);
+    else out[at] = c.theirs;
+  });
+  return out;
+}
+function mergeSummaryLine(preview){
+  const n = (p) => `${p.add.length} new, ${p.conflict.length} already here and different, ${p.same.length} identical`;
+  return `Projects: ${n(preview.projects)}. Characters: ${n(preview.characters)}.`;
+}
+
 function buildStressVariant(baseVerbLevel, baseRegLevel, mannerCount, rarityPref, sourceState){
   /* Scaled by the pressure dial rather than pinned to the extreme. At 1.0 these are
      exactly the values this function has always used, so the default is unchanged; at

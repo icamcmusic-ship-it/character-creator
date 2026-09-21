@@ -74,6 +74,8 @@ const ctx = loadEngine([
   'VOICE_PROMPTS','VOICE_PROMPT_IDS','VOICE_MODES','voiceRules','composeVoiceLine','voiceLab',
   'voiceComparison','voiceLabToMarkdown',
   'TRAIT_PACKS','setPackEnabled','isPackEnabled','getDisabledPacks','setDisabledPacks','packOfId',
+  'makeProject','validateProject','projectSummary','makeBackupBundle','validateBackupBundle',
+  'mergePreview','backupPreview','applyMerge','mergeSummaryLine','BACKUP_FORMAT','BACKUP_VERSION',
 ]);
 const A = ctx.api;
 const T = A.TRAITS;
@@ -2283,7 +2285,6 @@ check('the wildcard is a real exception when the sheet leans, and says so', ()=>
     Object.entries(byRarity).map(([k,v])=>v.toLocaleString()+' '+k).join(' / ') + '\x1b[0m');
 })();
 
-console.log('\n' + (failed ? '\x1b[31m' : '\x1b[32m') + passed + ' passed, ' + failed + ' failed\x1b[0m');
 
 group('Mechanics: linked chains, structured contradiction, dimensions, editable label');
 
@@ -2656,6 +2657,60 @@ check('every trait id sits inside its pack manifest range', ()=>{
   return `${checked.toLocaleString()} ids inside ${A.TRAIT_PACKS.length} non-overlapping ranges`;
 });
 
+
+group('Project library and backup bundle: merge preview before anything is written');
+
+check('a project validates, and a malformed one is rejected field by field', ()=>{
+  const p = A.makeProject('The Book');
+  assert(!A.validateProject(p).length, 'a fresh project should validate: ' + A.validateProject(p).join('; '));
+  assert(/0 characters/.test(A.projectSummary(p)), 'summary reads ' + A.projectSummary(p));
+  const bad = A.validateProject({id:'', name:'', characters:'no', casts:[], edges:[{from:1}], events:[], archive:[], tags:[7]});
+  assert(bad.length >= 4, 'a malformed project should collect several problems, got ' + bad.length);
+  const withBadEdge = A.makeProject('X', {edges:[{from:'a', to:'b', trust:9, dependence:3, status:'sideways'}]});
+  assert(A.validateProject(withBadEdge).some(x=>/edge 0/.test(x)), 'a bad edge inside a project should be caught');
+  return `${bad.length} problems found in a broken project`;
+});
+
+check('a bundle round-trips and one from the future is refused', ()=>{
+  const p = A.makeProject('Book One');
+  const b = A.makeBackupBundle([p], [{name:'Ada', record:{state:{}, savedAt:'2026-01-01T00:00:00Z'}}]);
+  assert(!A.validateBackupBundle(b).length, 'a fresh bundle should validate: ' + A.validateBackupBundle(b).join('; '));
+  assert(b.format === A.BACKUP_FORMAT && b.version === A.BACKUP_VERSION, 'the bundle is not stamped');
+  assert(A.validateBackupBundle({format:'something-else'}).length, 'a foreign file should be refused');
+  assert(A.validateBackupBundle(Object.assign({}, b, {version: A.BACKUP_VERSION + 1})).some(x=>/newer/.test(x)), 'a future version should be refused');
+  assert(A.validateBackupBundle(Object.assign({}, b, {characters:[{name:'x'}]})).length, 'a character with no record should be refused');
+  return 'round-trips; foreign and future files refused';
+});
+
+check('the preview separates new, identical and would-overwrite, and names the last group', ()=>{
+  const mine = [A.makeProject('Kept'), A.makeProject('Shared')];
+  mine[1].updated = '2026-01-01T00:00:00Z';
+  const theirs = [Object.assign({}, mine[1], {name:'Shared, edited', updated:'2026-06-01T00:00:00Z'}),
+                  JSON.parse(JSON.stringify(mine[0])), A.makeProject('Brand new')];
+  const pv = A.mergePreview(mine, theirs);
+  assert(pv.same.length === 1, `${pv.same.length} identical`);
+  assert(pv.add.length === 1 && pv.add[0].name === 'Brand new', 'the new project was not spotted');
+  assert(pv.conflict.length === 1 && pv.conflict[0].newer === 'theirs', `conflict reads ${JSON.stringify(pv.conflict.map(c=>c.newer))}`);
+  assert(pv.conflict[0].mine && pv.conflict[0].theirs, 'a conflict must carry both versions to choose between');
+  return A.mergeSummaryLine({projects:pv, characters:{add:[],same:[],conflict:[]}});
+});
+
+check('nothing is overwritten unless it was chosen, and the choice is per entry', ()=>{
+  const mine = [A.makeProject('A'), A.makeProject('B')];
+  const theirs = [Object.assign({}, mine[0], {name:'A, theirs'}), Object.assign({}, mine[1], {name:'B, theirs'}), A.makeProject('C')];
+  const pv = A.mergePreview(mine, theirs);
+  assert(pv.conflict.length === 2, `${pv.conflict.length} conflicts`);
+  const kept = A.applyMerge(mine, pv, {});
+  assert(kept.length === 3 && kept.find(p=>p.id===mine[0].id).name === 'A', 'an unchosen conflict must keep the local copy');
+  assert(kept.some(p=>p.name === 'C'), 'a brand new entry should arrive without being chosen');
+  const one = A.applyMerge(mine, pv, {[pv.conflict[0].key]: 'theirs'});
+  assert(one.find(p=>p.id===mine[0].id).name === 'A, theirs', 'the chosen conflict did not overwrite');
+  assert(one.find(p=>p.id===mine[1].id).name === 'B', 'an unchosen conflict was overwritten anyway');
+  assert(JSON.stringify(mine.map(p=>p.name)) === '["A","B"]', 'applyMerge mutated the list it was given');
+  return `2 conflicts: one taken, one kept, 1 added`;
+});
+
+console.log('\n' + (failed ? '\x1b[31m' : '\x1b[32m') + passed + ' passed, ' + failed + ' failed\x1b[0m');
 if (failed){
   console.log('\nFailures:');
   failures.forEach(f=>console.log('  - ' + f));

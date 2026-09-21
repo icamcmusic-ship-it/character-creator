@@ -1059,6 +1059,170 @@ function setAllPacks(on){
   toast(on ? "All packs enabled." : "Core pack only. Generate again to see it.");
 }
 
+// ================= PROJECT LIBRARY =================
+/* Projects live under `project:<id>` beside the `character:<name>` saves. The current
+   project is the one new saves, casts, edges and arc events are filed under; the loose
+   saves stay exactly where they were, so nothing here breaks an existing library. */
+let projects = [];
+let currentProjectId = null;
+const PROJECT_KEY = id => 'project:' + id;
+function currentProject(){ return projects.find(p => p.id === currentProjectId) || null; }
+async function loadProjects(){
+  try {
+    const res = await storage.list('project:');
+    const keys = (res && res.keys) || [];
+    const rows = await Promise.all(keys.map(async k => {
+      try { return JSON.parse((await storage.get(k)).value); } catch(e){ return null; }
+    }));
+    projects = rows.filter(p => p && !validateProject(p).length);
+    if (!projects.some(p => p.id === currentProjectId)) currentProjectId = projects.length ? projects[0].id : null;
+  } catch(e){ projects = []; }
+  renderProjects();
+}
+async function saveProject(p){
+  p.updated = new Date().toISOString();
+  await storage.set(PROJECT_KEY(p.id), JSON.stringify(p));
+}
+async function newProject(){
+  const name = await askForName("Name this project:", "");
+  if (!name) return;
+  const p = makeProject(name);
+  projects.push(p); currentProjectId = p.id;
+  await saveProject(p);
+  renderProjects();
+  toast(`Project "${name}" created. Saves, casts and arcs now file under it.`, "ok", 5000);
+}
+async function switchProject(id){
+  currentProjectId = id || null;
+  renderProjects();
+  const p = currentProject();
+  if (p) toast(`Working in "${p.name}" — ${projectSummary(p)}.`, "ok", 5000);
+}
+async function renameProject(id){
+  const p = projects.find(x => x.id === id);
+  if (!p) return;
+  const name = await askForName("Rename this project:", p.name);
+  if (!name) return;
+  p.name = name; await saveProject(p); renderProjects();
+}
+async function deleteProject(id){
+  const p = projects.find(x => x.id === id);
+  if (!p) return;
+  if (!await askForConfirm(`Delete the project "${p.name}"? Its ${projectSummary(p)} go with it. The characters saved separately are untouched.`, "Delete")) return;
+  await storage.delete(PROJECT_KEY(id));
+  projects = projects.filter(x => x.id !== id);
+  if (currentProjectId === id) currentProjectId = projects.length ? projects[0].id : null;
+  renderProjects();
+  toast(`Deleted "${p.name}".`);
+}
+/* File the work in front of you into the current project: the sheet, the cast, the
+   edges, the arc, the settings that produced them and the diversity archive. */
+async function fileIntoProject(){
+  const p = currentProject();
+  if (!p){ toast("Create a project first.", "warn"); return; }
+  if (!Object.keys(state).length){ toast("Generate or load a character first.", "warn"); return; }
+  const name = charMeta.name && charMeta.name !== "Unnamed Character" ? charMeta.name : "Character " + (p.characters.length + 1);
+  const record = {name, state: compressSlots(state), charMeta,
+    arcBase: arcBase ? compressSlots(arcBase) : null, arcEvents,
+    savedAt: new Date().toISOString()};
+  const at = p.characters.findIndex(c => c.name === name);
+  if (at >= 0){
+    if (!await askForConfirm(`"${name}" is already in this project. Replace it with what is on screen?`, "Replace")) return;
+    p.characters[at] = record;
+  } else p.characters.push(record);
+  if (castStates.length) p.casts = [{name: "Cast", members: castStates.map(c => ({id: c.id, name: c.meta.name, state: compressSlots(c.state), meta: c.meta}))}];
+  p.edges = pruneEdges(relationshipEdges, castStates);
+  p.events = arcEvents;
+  p.settings = captureSettings();
+  if (typeof exportArchive === 'function') p.archive = exportArchive();
+  await saveProject(p);
+  renderProjects();
+  toast(`Filed "${name}" into "${p.name}" — ${projectSummary(p)}.`, "ok", 6000);
+}
+function renderProjects(){
+  const host = document.getElementById('projectList');
+  if (!host) return;
+  host.innerHTML = projects.length ? projects.map(p => `
+    <div class="projectRow${p.id === currentProjectId ? ' current' : ''}">
+      <button class="savedOpen" ${actAttr('click', 'switchProject', p.id)} title="Work in this project">
+        <b>${escHTML(p.name)}</b><span>${escHTML(projectSummary(p))}${p.id === currentProjectId ? ' · current' : ''}</span></button>
+      <button class="savedAct" ${actAttr('click', 'renameProject', p.id)}>rename</button>
+      <button class="savedAct savedDel" ${actAttr('click', 'deleteProject', p.id)}>delete</button>
+    </div>`).join("") : `<div class="sub">No projects yet. A project groups the characters, cast, relationships and arcs of one book or campaign, and is what a backup bundle carries.</div>`;
+}
+
+/* ---- Backup bundles ---- */
+async function _looseCharacters(){
+  const res = await storage.list('character:');
+  const keys = (res && res.keys) || [];
+  return (await Promise.all(keys.map(async k => {
+    try { return {name: k.replace('character:', ''), record: JSON.parse((await storage.get(k)).value)}; }
+    catch(e){ return null; }
+  }))).filter(Boolean);
+}
+async function exportBackupBundle(){
+  const loose = await _looseCharacters();
+  const bundle = makeBackupBundle(projects, loose, {archive: (typeof exportArchive === 'function') ? exportArchive() : []});
+  downloadText(JSON.stringify(bundle, null, 2), "character_backup.json");
+  toast(`Backed up ${projects.length} project${projects.length===1?'':'s'} and ${loose.length} saved character${loose.length===1?'':'s'}.`, "ok", 6000);
+}
+let _pendingBackup = null;
+function importBackupBundle(fileInput){
+  const file = fileInput.files && fileInput.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = async ()=>{
+    try {
+      const bundle = JSON.parse(reader.result);
+      const problems = validateBackupBundle(bundle);
+      if (problems.length) throw new Error(problems[0]);
+      const loose = await _looseCharacters();
+      const preview = backupPreview(bundle, projects, loose);
+      _pendingBackup = {bundle, preview};
+      renderBackupPreview();
+    } catch(e){ toast("Could not read that backup: " + e.message, "warn", 7000); }
+    fileInput.value = "";
+  };
+  reader.readAsText(file);
+}
+function renderBackupPreview(){
+  const host = document.getElementById('backupPreview');
+  if (!host) return;
+  if (!_pendingBackup){ host.innerHTML = ""; host.style.display = "none"; return; }
+  const {preview} = _pendingBackup;
+  const conflicts = preview.projects.conflict.concat(preview.characters.conflict);
+  host.style.display = "block";
+  host.innerHTML = `<div class="tensionTitle">Before anything is written</div>
+    <div class="sub" style="margin:4px 0 8px;">${escHTML(mergeSummaryLine(preview))}</div>` +
+    (conflicts.length ? `<div class="sub" style="margin-bottom:6px;">These already exist here and differ. Ticked means take the version in the file; unticked keeps what is on this machine.</div>` +
+      conflicts.map(c => `<label class="packRow"><input type="checkbox" data-conflict="${escAttr(c.key)}"> <b>${escHTML(c.name)}</b> <span class="sub">the file's copy is ${escHTML(c.newer)}</span></label>`).join("")
+      : `<div class="sub">Nothing here would be overwritten.</div>`) +
+    `<div class="actionRow" style="margin-top:8px;">
+      <button class="btn-primary" ${actAttr('click', 'applyBackupImport')}>Import</button>
+      <button class="btn-secondary" ${actAttr('click', 'cancelBackupImport')}>Cancel</button>
+    </div>`;
+}
+function cancelBackupImport(){ _pendingBackup = null; renderBackupPreview(); toast("Import cancelled; nothing was written."); }
+async function applyBackupImport(){
+  if (!_pendingBackup) return;
+  const {preview} = _pendingBackup;
+  const choices = {};
+  document.querySelectorAll('#backupPreview [data-conflict]').forEach(el => {
+    if (el.checked) choices[el.getAttribute('data-conflict')] = "theirs";
+  });
+  const loose = await _looseCharacters();
+  const nextProjects = applyMerge(projects, preview.projects, choices);
+  const nextChars = applyMerge(loose, preview.characters, choices);
+  for (const p of nextProjects) await saveProject(p);
+  for (const c of nextChars) await storage.set('character:' + c.name, JSON.stringify(c.record));
+  if (Array.isArray(_pendingBackup.bundle.archive) && typeof importArchive === 'function') importArchive(_pendingBackup.bundle.archive);
+  _pendingBackup = null;
+  await loadProjects();
+  await loadSavedList();
+  renderBackupPreview();
+  toast(`Imported. ${nextProjects.length} project(s) and ${nextChars.length} saved character(s) are now here.`, "ok", 6000);
+}
+
 const TABS = [
   {key:'single', view:'view-single', btn:'tabSingleBtn'},
   {key:'cast',   view:'view-cast',   btn:'tabCastBtn'},
@@ -2990,6 +3154,7 @@ function updateStickyBar(){
 
 buildProfileSectionUI();
 refreshPackUI();
+loadProjects();
 populateArchetypeSelect();
 buildSeedPicker();
 buildPersonalitySliders();

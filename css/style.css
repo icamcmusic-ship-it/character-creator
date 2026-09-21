@@ -1296,3 +1296,8 @@
 
   /* Content packs */
   .packRow { display:flex; align-items:baseline; gap:7px; padding:5px 9px; border:1px solid var(--border-strong); border-radius:10px; margin:0 6px 6px 0; font-size:.83rem; }
+
+  /* Project library */
+  .projectRow { display:flex; align-items:center; gap:6px; margin-bottom:6px; }
+  .projectRow.current { outline:2px solid var(--golden-deep); outline-offset:2px; border-radius:10px; }
+  .projectRow .savedOpen { flex:1; }
