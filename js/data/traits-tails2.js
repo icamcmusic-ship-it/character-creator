@@ -251,3 +251,6 @@ const TRAITS_TAILS2 = [
 ];
 
 TRAITS.push(...TRAITS_TAILS2);
+
+TRAIT_PACKS.push({id:"tails2", label:"Thin-pool tails", version:"1", ids:[150000, 159999],
+  applicability:{era:"any", realism:"any", tone:"any"}, blurb:"Intensity tails for the thin pools."});

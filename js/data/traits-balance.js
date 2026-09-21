@@ -612,3 +612,6 @@ const TRAITS_BALANCE = [
 ];
 
 TRAITS.push(...TRAITS_BALANCE);
+
+TRAIT_PACKS.push({id:"balance", label:"Balance pass", version:"1", ids:[140000, 149999],
+  applicability:{era:"any", realism:"any", tone:"any"}, blurb:"The polarity and coverage balance pass."});

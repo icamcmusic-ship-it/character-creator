@@ -408,3 +408,6 @@ const TRAITS_SITUATIONAL = [
 ];
 
 TRAITS.push(...TRAITS_SITUATIONAL);
+
+TRAIT_PACKS.push({id:"situational", label:"Situational personality pools", version:"1", ids:[110000, 119999],
+  applicability:{era:"any", realism:"any", tone:"any"}, blurb:"The thirteen middle-pole personality pools."});

@@ -6,6 +6,14 @@
    into an unreviewable diff.
    Supplemental sets (ids 90000+) live in traits-supplement.js.
    ========================================================================== */
+/* ================= CONTENT PACKS =================
+   Every data file registers a manifest here: what it is, which id range it owns, what
+   version it is at, and where it applies (era / realism / tone). The engine indexes
+   each trait to its pack by id range, so a pack can be switched off for a project
+   without its traits being deleted — a saved character that references a disabled
+   pack still resolves (TRAITS_BY_ID keeps everything), it just cannot draw from it.
+   Declared here because this is the first file the page loads. */
+const TRAIT_PACKS = [];
 const TRAITS = [
 {id:1,section:"Verbosity Traits",category:"High-Volume & Wordy",trait:"Babbling",desc:"Uttering rapid, incoherent, or nonsensical words.",example:"—and then the thing, the other thing, no wait, the first thing—",intensity:4,rarity:"uncommon",pol:{"vol":1,"pace":1,"form":0,"warm":0}},
 {id:2,section:"Verbosity Traits",category:"High-Volume & Wordy",trait:"Blathering",desc:"Talking foolishly, mindlessly, or excessively.",example:"So anyway, my point, and I do have one, is basically, well, several things.",intensity:4,rarity:"uncommon",pol:{"vol":0,"pace":0,"form":0,"warm":0}},
@@ -4629,3 +4637,7 @@ const TRAITS = [
 {id:6019,section:"Vocabulary Traits",category:"Conceptual Framework & Loanwords",trait:"Weave of multiple domains",desc:"Draws freely from several unrelated conceptual sources in the same breath, without settling on one.",example:"It's a slow burn, and also a long road, and also — I don't know, a held breath. Pick one, I can't.",intensity:2,rarity:"uncommon",pol:{}},
 {id:6020,section:"Vocabulary Traits",category:"Conceptual Framework & Loanwords",trait:"Sparse metaphor user",desc:"Almost never reaches for figurative comparison, describing things as they literally are.",example:"It's bad. Just bad. I don't need a metaphor for it.",intensity:1,rarity:"common",pol:{}}
 ];
+
+TRAIT_PACKS.push({id:"core", label:"Core bank", version:"3", ids:[1, 89999],
+  applicability:{era:"any", realism:"any", tone:"any"},
+  blurb:"The original hand-authored bank across every section."});

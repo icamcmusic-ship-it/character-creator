@@ -57,6 +57,25 @@ const ctx = loadEngine([
   'bannedTraitIds','bannedSections','requiredCategories','intensityCaps','setBudgetReport',
   'archetypeProblem','normalizeArchetype','isNegated','suppressContextTag','clearContextSuppression',
   'magFromPos','bandHalf','cloneSheet','decodeSavedRecord','SAVE_FORMAT','pinnedTargets',
+  // §4–7 build: schema, packs, character-relative profile
+  'assertTraitShape','TRAIT_PACKS','setPackEnabled','isPackEnabled','getDisabledPacks','setDisabledPacks',
+  'polarityPrior','TRAIT_CONTEXTS','TRAIT_WORLD_TAGS','TRAIT_REVIEW_STATES',
+  'ARCHETYPE_INTENT','ARCHETYPE_VARIATIONS','effectiveArchetype','archetypeAxisBlend','ARCHETYPE_MUST_FLOOR',
+  'internalDimensions','INTERNAL_DIMENSIONS','profileSectionEnabled',
+  'recentPenalty','RECENT_PENALTY','RECENT_DECAY','RECENT_FAMILY_PENALTY','setAvoidSet','avoidSetFrom','avoidPenalty',
+  'archiveCharacter','forgetArchive','getArchive','diversityScore','referenceFromState','pickWildcardSlot','strongestLean',
+  'exportArchive','importArchive',
+  'motivationChain','pressureChain','structuredContradiction','traitDimensions','characterLabel','DIM_DEFAULTS_BY_SECTION',
+  'contextualView','contextualViews','CONTEXT_MODES','CONTEXT_MODE_IDS','CONTEXT_LENS_RULES',
+  'RELATIONSHIP_ROLES','RELATIONSHIP_STATUS','relationshipRole','roleOverridesFor','edgeDefaults','makeEdge',
+  'pruneEdges','validateEdge','edgesToMarkdown','castBundle','applyCastBundle','castEntry',
+  'ARC_SHAPES','ARC_SHAPE_IDS','arcShape','makeArcEvent','validateArcEvent','proposeArcChanges',
+  'applyArcEvent','replayArc','arcSummary','arcToMarkdown',
+  'VOICE_PROMPTS','VOICE_PROMPT_IDS','VOICE_MODES','voiceRules','composeVoiceLine','voiceLab',
+  'voiceComparison','voiceLabToMarkdown',
+  'TRAIT_PACKS','setPackEnabled','isPackEnabled','getDisabledPacks','setDisabledPacks','packOfId',
+  'makeProject','validateProject','projectSummary','makeBackupBundle','validateBackupBundle',
+  'mergePreview','backupPreview','applyMerge','mergeSummaryLine','BACKUP_FORMAT','BACKUP_VERSION',
 ]);
 const A = ctx.api;
 const T = A.TRAITS;
@@ -1616,8 +1635,12 @@ check('no polarity axis becomes more one-sided', ()=>{
   /* The mood fix added a positive pole to one axis by hand. Five more have the same
      shape, and polNormalise can only stop them reading as posture on the radar — it
      cannot give polarityFit material to select on when the slider points the thin way. */
-  const FLOORS = {   // measured positive share; the band is 40-60% and these sit outside it
-    ego: [0.36, 0.44], vol: [0.36, 0.44], intel: [0.64, 0.72], form: [0.68, 0.76], act: [0.60, 0.68],
+  /* Measured positive share; the band is 40-60% and these sit outside it. Tightened
+     after the 2026 §4.4 polarity pack: formality 72 -> 68%, analytical 69 -> 67%,
+     self-confidence 38.5 -> 39.5%; physical energy (64 -> 60%) and wordiness
+     (38.5 -> 40%) are now inside the general band and no longer listed. */
+  const FLOORS = {
+    ego: [0.37, 0.45], intel: [0.62, 0.70], form: [0.62, 0.70],
   };
   const poles = {};
   T.forEach(t=> Object.entries(t.pol || {}).forEach(([ax, v])=>{
@@ -2010,6 +2033,242 @@ check('B33 — malformed archetype records are rejected before anything is writt
   return 'four malformed shapes rejected, valid one accepted';
 });
 
+/* ================= §4–7: SCHEMA, PACKS, PROFILE UNITS =================
+   The foundations the content pass and the feature work build on. */
+group('Trait schema and packs');
+
+check('the bank passes the extended shape assertion', ()=>{
+  const problems = A.assertTraitShape();
+  assert(!problems.length, problems.length + ' problems: ' + problems.slice(0,3).join(' | '));
+  return T.length + ' traits, optional fields validated';
+});
+
+check('a malformed optional field is caught at load, not at a draw', ()=>{
+  const bad = [
+    {conditions: ['public','sleeping']},            // unknown context
+    {frequency: 9},                                 // out of scale
+    {worldTags: 'modern'},                          // not a list
+    {supports: [999999999]},                        // dangling id
+    {reviewStatus: 'maybe'},                        // unknown state
+    {examplesBySituation: {public: 7}},             // wrong value type
+  ];
+  const results = bad.map(extra=> ctx.evalIn(`(function(){
+    const t = Object.assign({}, TRAITS[0], {id: 999999998}, ${JSON.stringify(extra)});
+    TRAITS.push(t);
+    try { return assertTraitShape().filter(p=>p.startsWith('#999999998')).length; }
+    finally { TRAITS.pop(); }
+  })()`));
+  const missed = results.map((n,i)=> n ? null : Object.keys(bad[i])[0]).filter(Boolean);
+  assert(!missed.length, 'not caught: ' + missed.join(', '));
+  return bad.length + ' malformed shapes each named in the report';
+});
+
+check('every trait is stamped with the pack that owns its id range', ()=>{
+  const ids = new Set(A.TRAIT_PACKS.map(p=>p.id));
+  const unowned = T.filter(t=>!t.pack || !ids.has(t.pack));
+  assert(!unowned.length, unowned.length + ' traits without a pack: ' + unowned.slice(0,3).map(t=>t.id).join(', '));
+  // Ranges must not overlap: a trait can belong to one pack only.
+  const ranges = A.TRAIT_PACKS.map(p=>p.ids).sort((a,b)=>a[0]-b[0]);
+  for (let i=1;i<ranges.length;i++) assert(ranges[i][0] > ranges[i-1][1], 'overlapping pack id ranges');
+  return A.TRAIT_PACKS.length + ' packs, ranges disjoint';
+});
+
+check('disabling a pack removes it from draws but never from saved-character resolution', ()=>{
+  const pack = A.TRAIT_PACKS.find(p=>p.id !== 'core');
+  const sample = T.find(t=>t.pack === pack.id);
+  const before = A.byFilter(sample.section, sample.category).some(t=>t.id === sample.id);
+  A.setPackEnabled(pack.id, false);
+  const during = A.byFilter(sample.section, sample.category).some(t=>t.id === sample.id);
+  const resolves = A.TRAITS_BY_ID.get(sample.id) === sample;
+  const expanded = A.expandSlots({x: {slotId:'x', trait:{__id: sample.id}}});
+  A.setPackEnabled(pack.id, true);
+  assert(before, 'the sample trait was not drawable to begin with');
+  assert(!during, 'a disabled pack was still drawable');
+  assert(resolves && expanded.x.trait === sample, 'a saved reference to a disabled pack failed to resolve');
+  return `"${pack.label}" off: not drawn, still resolves`;
+});
+
+check('the axis profile is a property of the sheet, read against the bank prior', ()=>{
+  // Same traits → same profile, whatever else is loaded; a sheet leaning exactly the
+  // way the bank leans by default reads ~0; leaning further reads positive.
+  const ax = 'intel';
+  const plus  = T.filter(t=>t.section==='Personality Traits' && t.pol && t.pol[ax] === 1).slice(0, 6);
+  const minus = T.filter(t=>t.section==='Personality Traits' && t.pol && t.pol[ax] === -1).slice(0, 6);
+  const mk = list => Object.fromEntries(list.map((t,i)=>['pers_'+i, {slotId:'pers_'+i, trait:t}]));
+  const p1 = A.axisProfile(mk(plus)), p2 = A.axisProfile(mk(plus)), pm = A.axisProfile(mk(minus));
+  assert(p1[ax] === p2[ax], 'the same sheet produced two different readings');
+  assert(p1[ax] > 0 && pm[ax] < 0, `six +${ax} traits read ${p1[ax].toFixed(2)}, six -${ax} read ${pm[ax].toFixed(2)}`);
+  // The prior is the bank's own lean; a mixed sheet in the bank's proportions reads near zero.
+  const prior = A.polarityPrior(ax);
+  const nPlus = Math.round(6 * (1 + prior) / 2), nMinus = 6 - nPlus;
+  const mixed = A.axisProfile(mk(plus.slice(0, nPlus).concat(minus.slice(0, nMinus))));
+  assert(Math.abs(mixed[ax]) < 0.6, `a bank-proportioned mix read ${mixed[ax].toFixed(2)}, not ~0`);
+  return `+${p1[ax].toFixed(2)} / ${pm[ax].toFixed(2)} / mixed ${mixed[ax].toFixed(2)} (prior ${prior.toFixed(2)})`;
+});
+
+group('Archetype intent and balance');
+
+check('every built-in preset declares an intent, and its must-axes are axes it sets', ()=>{
+  const bad = [];
+  Object.entries(A.ARCHETYPES).forEach(([k, arch])=>{
+    const it = A.ARCHETYPE_INTENT[k];
+    if (!it) return bad.push(k + ': no intent');
+    it.must.forEach(ax=>{ if (arch.pers[ax] === undefined) bad.push(`${k}: must-axis ${ax} is not set by the preset`); });
+    ['must','nudge','open'].forEach(f=>{ if (!Array.isArray(it[f])) bad.push(`${k}: ${f} is not a list`); });
+    it.nudge.concat(it.open).forEach(id=>{ if (!A.PROFILE_SECTIONS.some(p=>p.id===id)) bad.push(`${k}: unknown section ${id}`); });
+  });
+  assert(!bad.length, bad.slice(0,5).join('; '));
+  return Object.keys(A.ARCHETYPES).length + ' presets, all with intent';
+});
+
+check('every built-in preset has at least two named variations that leave its must-axes alone', ()=>{
+  const bad = [];
+  Object.entries(A.ARCHETYPES).forEach(([k, arch])=>{
+    const vs = A.ARCHETYPE_VARIATIONS[k];
+    if (!vs || vs.length < 2) return bad.push(k + ': fewer than two variations');
+    const must = new Set(A.ARCHETYPE_INTENT[k].must);
+    vs.forEach(v=>{
+      Object.keys(v.pers || {}).forEach(ax=>{ if (must.has(ax)) bad.push(`${k}/${v.id}: touches must-axis ${ax}`); });
+      Object.entries(v.profile || {}).forEach(([sec, cat])=>{
+        const ps = A.PROFILE_SECTIONS.find(p=>p.id===sec);
+        if (!ps) return bad.push(`${k}/${v.id}: unknown section ${sec}`);
+        if (!A.catsOf(ps.section).includes(cat)) bad.push(`${k}/${v.id}: ${sec} has no category "${cat}"`);
+      });
+    });
+  });
+  assert(!bad.length, bad.slice(0,5).join('; '));
+  return 'variations valid';
+});
+
+check('a variation changes the effective preset; the must-axes hold at the blend floor', ()=>{
+  const base = A.effectiveArchetype('conartist', 'base');
+  const abr = A.effectiveArchetype('conartist', 'abrasive');
+  assert(abr.pers.manners < base.pers.manners, 'the abrasive variation did not lower manners');
+  assert(abr.pers.honesty === base.pers.honesty, 'a variation moved a must-axis');
+  assert(abr.profile.humor === 'Cruel & Barbed', 'the variation profile override was not applied');
+  ctx.evalIn("(function(){ const el = document._set('archetypeBlend', {value:'0.3'}); })()");
+  const wMust = A.archetypeAxisBlend(base, 'honesty'), wOther = A.archetypeAxisBlend(base, 'manners');
+  ctx.evalIn("document._els.delete('archetypeBlend')");
+  assert(wMust >= A.ARCHETYPE_MUST_FLOOR, 'must-axis blend fell below the floor at 30%');
+  assert(Math.abs(wOther - 0.3) < 1e-9, 'a non-must axis did not follow the blend control');
+  return `honesty held at ${wMust}, manners at ${wOther}`;
+});
+
+check('preset input balance: no axis is set in one direction more than 2.5x the other', ()=>{
+  /* The audit measured discipline 20:5 and emotional capacity 9:15 across 34 presets.
+     Eight presets were added for the thin sides; this keeps the catalogue from
+     drifting back. */
+  const bad = [];
+  A.PERSONALITY_AXES.forEach(a=>{
+    let p=0,n=0;
+    Object.values(A.ARCHETYPES).forEach(x=>{ const v=x.pers&&x.pers[a.id]; if (v>0) p++; else if (v<0) n++; });
+    if (p && n && (p/n > 2.5 || n/p > 2.5)) bad.push(`${a.id} ${p}:${n}`);
+    if ((p && !n) || (n && !p)) bad.push(`${a.id} ${p}:${n} one-sided`);
+  });
+  assert(!bad.length, 'lopsided: ' + bad.join(', '));
+  return 'every axis within 2.5:1';
+});
+
+check('profile hints: no single category is hinted by more than a quarter of presets', ()=>{
+  const counts = {}; const total = Object.keys(A.ARCHETYPES).length;
+  Object.values(A.ARCHETYPES).forEach(x=>Object.entries(x.profile||{}).forEach(([k,v])=>{ counts[k+':'+v]=(counts[k+':'+v]||0)+1; }));
+  const over = Object.entries(counts).filter(([,n])=>n/total > 0.25);
+  assert(!over.length, 'over-used hints: ' + over.map(([k,n])=>`${k} (${n}/${total})`).join(', '));
+  const top = Object.entries(counts).sort((a,b)=>b[1]-a[1])[0];
+  return `most-used hint ${top[0]} in ${top[1]}/${total}`;
+});
+
+check('internal dimensions separate what one slider conflates', ()=>{
+  // A guarded-but-deep sheet and a shallow sheet score the same on the old axis and
+  // differently here.
+  const guarded = T.filter(t=>t.category==="Emotional Capacity — Guarded & Shallow" && t.variant==='a').slice(0,4);
+  const shallow = T.filter(t=>t.category==="Emotional Capacity — Guarded & Shallow" && t.variant==='b').slice(0,4);
+  assert(guarded.length >= 3 && shallow.length >= 3, 'not enough variant-tagged material to test');
+  const mk = list => Object.fromEntries(list.map((t,i)=>['pers_'+i, {slotId:'pers_'+i, trait:t}]));
+  const g = A.internalDimensions(mk(guarded)), sh = A.internalDimensions(mk(shallow));
+  assert(g.emoDepth > sh.emoDepth, `guarded depth ${g.emoDepth.toFixed(2)} should exceed shallow ${sh.emoDepth.toFixed(2)}`);
+  assert(g.emoExpress < 0 && sh.emoExpress <= 0, 'both should read as unexpressive');
+  return `guarded: depth ${g.emoDepth.toFixed(2)} / expression ${g.emoExpress.toFixed(2)}; shallow: depth ${sh.emoDepth.toFixed(2)}`;
+});
+
+group('Variety: decay, semantic repetition, modes, objective, exception');
+
+check('the recent-trait penalty decays with age and remembers concept families', ()=>{
+  const fam = T.find(t=>t.conceptFamily);
+  const other = T.find(t=>t.conceptFamily === fam.conceptFamily && t.id !== fam.id) || fam;
+  A.forgetRecentTraits();
+  ctx.evalIn('_avoidRecentActive = true');
+  A.rememberGeneration({a:{slotId:'a', trait:fam}});
+  const fresh = A.recentPenalty(fam), sibling = A.recentPenalty(other);
+  for (let i=0;i<6;i++) A.rememberGeneration({b:{slotId:'b', trait:T[i+50]}});
+  const aged = A.recentPenalty(fam);
+  A.forgetRecentTraits();
+  ctx.evalIn('_avoidRecentActive = false');
+  assert(fresh < aged && aged < 1, `penalty should fade: fresh ${fresh.toFixed(2)}, six later ${aged.toFixed(2)}`);
+  assert(other === fam || (sibling < 1 && sibling > fresh), `a same-family trait should be penalised more softly than the exact one (${sibling.toFixed(2)} vs ${fresh.toFixed(2)})`);
+  return `exact ${fresh.toFixed(2)} → ${aged.toFixed(2)} after six; family ${sibling.toFixed(2)}`;
+});
+
+check('"same world, different person" avoids the current sheet\'s traits, families and categories', ()=>{
+  let st;
+  A.withRng(A.mulberry32(6161), ()=>{ st = A.buildCharacterState({verbLevel:0, regLevel:0, compLevel:0, mannerCount:3, vocabCount:2, rarityPref:0, vocabPref:null, personalityOverrides:{}}); });
+  const avoid = A.avoidSetFrom(st);
+  const seated = Object.values(st).find(x=>x&&x.trait).trait;
+  A.setAvoidSet(avoid);
+  const pen = A.avoidPenalty(seated);
+  let other;
+  A.withRng(A.mulberry32(6161), ()=>{ other = A.buildCharacterState({verbLevel:0, regLevel:0, compLevel:0, mannerCount:3, vocabCount:2, rarityPref:0, vocabPref:null, personalityOverrides:{}}); });
+  A.setAvoidSet(null);
+  const ids = new Set(Object.values(st).filter(x=>x&&x.trait).map(x=>x.trait.id));
+  const shared = Object.values(other).filter(x=>x&&x.trait&&ids.has(x.trait.id)).length;
+  const total = Object.values(other).filter(x=>x&&x.trait).length;
+  assert(pen < 0.2, 'a seated trait was not heavily penalised');
+  assert(shared / total < 0.15, `${shared} of ${total} traits shared with the avoided sheet — same seed, so any overlap is the avoid set failing`);
+  return `same seed, ${shared}/${total} shared after avoidance`;
+});
+
+check('the diversity objective ranks a twin below a stranger', ()=>{
+  let a, b;
+  A.withRng(A.mulberry32(7171), ()=>{ a = A.buildCharacterState({verbLevel:0, regLevel:0, compLevel:0, mannerCount:3, vocabCount:2, rarityPref:0, vocabPref:null, personalityOverrides:{}}); });
+  A.withRng(A.mulberry32(7272), ()=>{ b = A.buildCharacterState({verbLevel:1.5, regLevel:-1.5, compLevel:1, mannerCount:3, vocabCount:2, rarityPref:0, vocabPref:null, personalityOverrides:{friendliness:-80, discipline:-80, honesty:-80}}); });
+  const ref = [A.referenceFromState(a, 'A')];
+  const twin = A.diversityScore(a, ref), stranger = A.diversityScore(b, ref);
+  assert(twin.score < stranger.score, `twin ${twin.score.toFixed(2)} should score below stranger ${stranger.score.toFixed(2)}`);
+  assert(twin.terms.traitOverlap === 1, 'a copy should overlap itself completely');
+  return `twin ${twin.score.toFixed(2)} vs stranger ${stranger.score.toFixed(2)}`;
+});
+
+check('the archive round-trips and never stores sheets', ()=>{
+  A.forgetArchive();
+  let st; A.withRng(A.mulberry32(8181), ()=>{ st = A.buildCharacterState({verbLevel:0, regLevel:0, compLevel:0, mannerCount:3, vocabCount:2, rarityPref:0, vocabPref:null, personalityOverrides:{}}); });
+  A.archiveCharacter(st, {name:'Test'});
+  const dumped = A.exportArchive();
+  A.forgetArchive(); A.importArchive(dumped);
+  const back = A.getArchive();
+  A.forgetArchive();
+  assert(back.length === 1 && back[0].ids.size > 10 && back[0].name === 'Test', 'archive did not round-trip');
+  assert(!JSON.stringify(dumped).includes('"desc"'), 'the archive serialised trait text');
+  return `${back[0].ids.size} ids, ${back[0].defining.size} defining, no trait text`;
+});
+
+check('the wildcard is a real exception when the sheet leans, and says so', ()=>{
+  // A partial sheet leaning hard toward warmth: the wildcard should cut the other way.
+  const warm = T.filter(t=>t.pol && t.pol.warm === 1 && t.section === 'Personality Traits').slice(0, 8);
+  const partial = Object.fromEntries(warm.map((t,i)=>['pers_'+i, {slotId:'pers_'+i, trait:t}]));
+  const lean = A.strongestLean(partial);
+  assert(lean && lean.ax === 'warm' && lean.v > 0, 'the lean was not read off the partial sheet');
+  let hits = 0, tries = 0;
+  for (let i=0;i<40;i++){
+    ctx.evalIn('_buildUsedIds = new Set()');
+    const w = A.withRng(A.mulberry32(9000+i), ()=> A.pickWildcardSlot(0, 0, partial));
+    if (!w) continue; tries++;
+    if (w.exceptionAxis === 'warm' && w.trait.pol && w.trait.pol.warm === -1) hits++;
+    assert(typeof w.exceptionWhy === 'string' && w.exceptionWhy.length > 20, 'no explanation on the wildcard');
+  }
+  assert(hits / tries > 0.5, `only ${hits}/${tries} wildcards cut against the warmth lean`);
+  return `${hits}/${tries} draws opposed the lean, each explained`;
+});
+
 /* Bank figures, printed every run. Comments across the codebase cited the bank size as
    6,452 / 4,358 / 2,094 / 1,900 / 1,649 / 1,400 at various points, all of them stale and
    none of them agreeing. Printing the live numbers where they are read on every test run
@@ -2025,6 +2284,431 @@ check('B33 — malformed archetype records are rejected before anything is writt
     ' sections · ' + cats + ' categories · ' +
     Object.entries(byRarity).map(([k,v])=>v.toLocaleString()+' '+k).join(' / ') + '\x1b[0m');
 })();
+
+
+group('Mechanics: linked chains, structured contradiction, dimensions, editable label');
+
+const _mechSheet = (seed)=>{
+  let st;
+  A.withRng(A.mulberry32(seed), ()=>{ st = A.buildCharacterState({verbLevel:0, regLevel:0, compLevel:0, mannerCount:3, vocabCount:2, rarityPref:0, vocabPref:null, personalityOverrides:{}}); });
+  return st;
+};
+
+check('the motivation chain links want → belief → origin → need → strategy, each grounded in a named card', ()=>{
+  const st = _mechSheet(7101);
+  const chain = A.motivationChain(st);
+  assert(chain, 'no chain for a sheet with Motivation & Wound on');
+  const keys = chain.links.map(l=>l.key);
+  ['want','belief','origin','need','strategy'].forEach(k=> assert(keys.includes(k), `chain is missing the ${k} link (${keys.join(', ')})`));
+  chain.links.forEach(l=> assert(l.from.length && l.text.length > 10, `link ${l.key} is not grounded`));
+  const again = A.motivationChain(st);
+  assert(JSON.stringify(again) === JSON.stringify(chain), 'the chain is not deterministic for the same sheet');
+  return keys.join(' → ');
+});
+
+check('the pressure chain runs trigger → appraisal → tactic → threshold → aftermath → repair, from base traits', ()=>{
+  const st = _mechSheet(7102);
+  let ps;
+  A.withRng(A.mulberry32(7102), ()=>{ ps = A.buildStressVariant(0, 0, 2, 'balanced', st); });
+  const chain = A.pressureChain(st, ps);
+  assert(chain, 'no pressure chain');
+  const keys = chain.stages.map(s=>s.key);
+  ['trigger','appraisal','threshold','aftermath'].forEach(k=> assert(keys.includes(k), `missing ${k} stage (${keys.join(', ')})`));
+  // Sections can be toggled by earlier tests, so the grounded stages are checked against
+  // what is actually seated rather than assumed.
+  const seated = id => Object.keys(st).some(k=>k.startsWith('prof_'+id+'_') && st[k] && st[k].trait);
+  assert(keys.includes('tactic') === seated('stress'), 'the tactic stage should exist exactly when a stress card is seated');
+  assert(keys.includes('repair') === seated('repair'), 'the repair stage should exist exactly when a Recovery & Repair card is seated');
+  chain.stages.forEach(s=> assert(s.from.length || s.key==='threshold', `stage ${s.key} names no base trait`));
+  return keys.join(' → ');
+});
+
+check('a contradiction carries when / with whom / what changes / cost, and the author\'s answers win', ()=>{
+  let found = null;
+  for (let seed = 7200; seed < 7260 && !found; seed++){ const st = _mechSheet(seed); const c = A.structuredContradiction(st, {}); if (c) found = {st, c}; }
+  assert(found, 'no contradiction in 60 sheets');
+  const keys = found.c.fields.map(f=>f.key);
+  assert(keys.join() === 'when,who,change,cost', `fields are ${keys.join()}`);
+  assert(found.c.fields.find(f=>f.key==='change').derived, 'the change field should always be derivable from the pair');
+  const c2 = A.structuredContradiction(found.st, {contradictionAnswers:{when:'only after midnight'}});
+  assert(c2.fields[0].answer === 'only after midnight', 'the author answer was not carried');
+  return `${found.c.axisLabel}: ${found.c.fields.filter(f=>f.derived).length}/4 derived`;
+});
+
+check('trait dimensions come from the trait when authored and are flagged when inferred', ()=>{
+  const authored = T.find(t=> t.frequency && t.visibility && t.persistence && t.narrativeSalience);
+  const bare = T.find(t=> !t.frequency && !t.visibility && t.section === 'Appearance');
+  const d1 = A.traitDimensions(authored), d2 = A.traitDimensions(bare);
+  assert(!d1.inferred.length && d1.frequency === authored.frequency, 'authored dimensions should be used as written');
+  assert(d2.inferred.length === 4 && d2.visibility === 5, `an Appearance trait should infer visibility 5 (${JSON.stringify(d2)})`);
+  const secs = new Set(T.map(t=>t.section)); Object.keys(A.DIM_DEFAULTS_BY_SECTION).forEach(sec=> assert(secs.has(sec), `DIM_DEFAULTS names an unknown section "${sec}"`));
+  return `authored ${authored.trait} · inferred ${bare.trait} → V${d2.visibility} P${d2.persistence}`;
+});
+
+check('the author\'s label overrides the emergent name and survives export', ()=>{
+  const st = _mechSheet(7103);
+  const em = A.characterLabel(st, {});
+  const mine = A.characterLabel(st, {label:'The Quiet Fixer'});
+  assert(!em || !em.authored, 'an unedited label should not read as authored');
+  assert(mine.name === 'The Quiet Fixer' && mine.authored, 'the label was not honoured');
+  const md = A.sheetToText(st, {name:'X', label:'The Quiet Fixer'}, null);
+  assert(md.includes('**Label:** The Quiet Fixer'), 'label missing from the export');
+  assert(md.includes('How the pieces connect'), 'the chain is missing from the export');
+  assert(/frequency \d · visibility \d/.test(md), 'dimensions are missing from the export');
+  return `emergent "${em && em.name}" → authored "${mine.name}"`;
+});
+
+
+group('Contextual engine: baseline plus four lenses');
+
+check('every context classes every seated card, deterministically, with a reason', ()=>{
+  const st = _mechSheet(7301);
+  const n = Object.values(st).filter(x=>x&&x.trait).length;
+  const views = A.contextualViews(st);
+  assert(views.length === 5 && views[0].context === 'baseline', 'expected baseline + four contexts');
+  views.forEach(v=>{
+    assert(v.slots.length === n, `${v.context} classed ${v.slots.length} of ${n} cards`);
+    v.slots.forEach(s=> assert(['active','amplified','suppressed','exception'].includes(s.status) && s.why, `${v.context}: ${s.trait.trait} has no status/why`));
+  });
+  const again = A.contextualViews(st);
+  assert(JSON.stringify(again.map(v=>v.counts)) === JSON.stringify(views.map(v=>v.counts)), 'views are not deterministic');
+  assert(views[0].counts.active === n, 'the baseline should leave every card active');
+  return views.slice(1).map(v=>`${v.context} +${v.counts.amplified}/−${v.counts.suppressed}`).join(' · ');
+});
+
+check('public and private disagree about the interior: wounds hide in public and show in private', ()=>{
+  let seen = 0, ok = 0;
+  for (let seed = 7310; seed < 7330; seed++){
+    const st = _mechSheet(seed);
+    const pub = A.contextualView(st, 'public'), prv = A.contextualView(st, 'private');
+    Object.keys(st).filter(k=>k.startsWith('prof_motivation_') && st[k] && st[k].trait).forEach(k=>{
+      seen++;
+      const a = pub.byId[k].status, b = prv.byId[k].status;
+      if ((a === 'suppressed' || a === 'exception') && (b === 'amplified' || b === 'exception')) ok++;
+    });
+  }
+  assert(seen && ok / seen > 0.9, `${ok}/${seen} motivation cards flip between public and private`);
+  return `${ok}/${seen} flip`;
+});
+
+check('authored conditions and exceptions outrank the section rules', ()=>{
+  const cond = T.find(t=> t.conditions && t.conditions.includes('authority'));
+  const st = {a:{slotId:'a', trait:cond}, b:{slotId:'b', trait:Object.assign({}, cond, {conditions:['peer'], exceptions:['the boss']})}};
+  const v = A.contextualView(st, 'authority');
+  assert(v.byId.a.status === 'amplified' && v.byId.a.rule === 'conditions', `authored-for-authority card read ${v.byId.a.status} by ${v.byId.a.rule}`);
+  assert(v.byId.b.status === 'exception' && /the boss/.test(v.byId.b.why), `an exception naming the boss should win: ${v.byId.b.status} / ${v.byId.b.why}`);
+  const pub = A.contextualView(st, 'public');
+  assert(pub.byId.a.status === 'suppressed', 'a card authored for authority only should be suppressed in public');
+  return `${cond.trait}: amplified under authority, suppressed in public, exception wins`;
+});
+
+check('threat puts the stress response in front and the repair behind', ()=>{
+  // Earlier tests may have toggled the stress section off, so seat one by hand.
+  const st = _mechSheet(7340);
+  st.prof_stress_0 = {slotId:'prof_stress_0', trait: T.find(t=>t.section==='Conflict & Stress Response')};
+  const found = {st, stress:'prof_stress_0'};
+  const v = A.contextualView(found.st, 'threat');
+  assert(v.byId[found.stress].status === 'amplified', 'the stress card should be amplified under threat');
+  const rep = A.CONTEXT_LENS_RULES.threat.find(r=>r.status==='suppressed' && /repair/i.test(r.why));
+  assert(rep, 'no rule suppresses repair under threat');
+  const md = A.sheetToText(found.st, {name:'X', viewContext:'threat'}, null);
+  assert(md.includes('## Under threat') && md.includes('**Amplified:**'), 'the export should carry the context section');
+  return `${v.counts.amplified} forward, ${v.counts.suppressed} quiet; exported`;
+});
+
+
+group('Relationship workspace: directed edges, roles, round-trip');
+
+check('an edge starts populated from both sheets and says why', ()=>{
+  const a = _mechSheet(7401), b = _mechSheet(7402);
+  const d = A.edgeDefaults(a, b, 'mentor');
+  assert(d.trust >= 1 && d.trust <= 5 && d.dependence >= 1 && d.dependence <= 5, 'trust/dependence out of range');
+  assert(A.RELATIONSHIP_STATUS.includes(d.status), `status ${d.status}`);
+  assert(typeof d.wants === 'string' && typeof d.conceals === 'string' && typeof d.knows === 'string', 'the text fields are missing');
+  const e = A.makeEdge('x','y','mentor', d);
+  assert(!A.validateEdge(e).length, 'a default edge should validate: ' + A.validateEdge(e).join('; '));
+  const bad = A.validateEdge({from:'x', to:'y', trust:9, dependence:3, status:'sideways', role:'nope'});
+  assert(bad.length >= 3, 'a malformed edge should be rejected field by field');
+  return `${d.status}, trust ${d.trust}, dep ${d.dependence}${d.why.length ? ' — ' + d.why[0] : ''}`;
+});
+
+check('a role pushes the new member against the anchor on its opposed axes', ()=>{
+  const anchor = {}; A.PERSONALITY_AXES.forEach(a=>{ anchor[a.id] = 70; });
+  const rng = A.mulberry32(99);
+  const role = A.relationshipRole('antagonist');
+  const out = A.roleOverridesFor(anchor, 'antagonist', rng);
+  role.oppose.forEach(ax=> assert(out[ax] <= -35, `${ax} should oppose the anchor, got ${out[ax]}`));
+  role.align.forEach(ax=> assert(out[ax] === 70, `${ax} should copy the anchor, got ${out[ax]}`));
+  A.PERSONALITY_AXES.forEach(a=> assert(out[a.id] >= -100 && out[a.id] <= 100, `${a.id} out of slider range`));
+  return `${role.label}: opposes ${role.oppose.join(', ')}`;
+});
+
+check('edges survive a cast round-trip and dangling ones are dropped', ()=>{
+  const m1 = A.castEntry(_mechSheet(7403), null, {name:'Ada'});
+  const m2 = A.castEntry(_mechSheet(7404), null, {name:'Bo'});
+  const edges = [A.makeEdge(m1.id, m2.id, 'rival', A.edgeDefaults(m1.state, m2.state, 'rival')),
+                 A.makeEdge(m1.id, 'ghost', 'ally', {})];
+  const kept = A.pruneEdges(edges, [m1, m2]);
+  assert(kept.length === 1 && kept[0].to === m2.id, 'the edge naming a missing member should be dropped');
+  const md = A.edgesToMarkdown(kept, [m1, m2]);
+  assert(md.includes('Ada → Bo') && md.includes('Rival') && /trust \d\/5/.test(md), 'the markdown is missing the edge: ' + md);
+  const bundle = {format:'character-voice-cast', version:1, members:[{id:m1.id, state:m1.state, meta:m1.meta},{id:m2.id, state:m2.state, meta:m2.meta}], edges: kept};
+  const res = A.applyCastBundle(bundle);
+  const live = ctx.evalIn('relationshipEdges.length'), names = ctx.evalIn('castStates.map(c=>c.meta.name).join(",")');
+  assert(live === 1 && names === 'Ada,Bo', `round-trip gave ${names} with ${live} edge(s)`);
+  assert(res.dropped === 0, 'nothing should be dropped on a clean bundle');
+  return `1 of 2 edges kept, "${md.split('\n')[0].slice(0, 44)}…"`;
+});
+
+
+group('Arcs: proposed changes, acceptance, replay and undo');
+
+check('an event proposes changes in its own direction, deterministically, and steadfast proposes none', ()=>{
+  const st = _mechSheet(7501);
+  const grow = A.makeArcEvent(1, {title:'She told the truth', shape:'growth', cost:'Lost the job she had been protecting for nine years'});
+  const c1 = A.proposeArcChanges(st, grow, []);
+  const c2 = A.proposeArcChanges(st, grow, []);
+  assert(c1.length, 'growth proposed nothing');
+  assert(JSON.stringify(c1) === JSON.stringify(c2), 'the proposal is not deterministic in the event id');
+  c1.forEach(c=> assert(c.why && c.accepted === false && c.fromId !== c.toId, 'a change must be explained and start unaccepted'));
+  const still = A.proposeArcChanges(st, A.makeArcEvent(2, {shape:'steadfast', title:'He stayed'}), []);
+  assert(!still.length, 'steadfast should propose nothing at all');
+  const down = A.proposeArcChanges(st, A.makeArcEvent(3, {shape:'deterioration', title:'He drank instead'}), []);
+  assert(down.length, 'deterioration proposed nothing');
+  assert(JSON.stringify(down) !== JSON.stringify(c1), 'growth and deterioration should not propose the same thing');
+  return `growth ${c1.length}, deterioration ${down.length}, steadfast 0`;
+});
+
+check('only accepted changes apply, and the source sheet is never mutated', ()=>{
+  const st = _mechSheet(7502);
+  const ev = A.makeArcEvent(1, {title:'The letter arrived', shape:'growth'});
+  ev.changes = A.proposeArcChanges(st, ev, []);
+  assert(ev.changes.length >= 1, 'no changes to test with');
+  const before = JSON.stringify(st);
+  const untouched = A.applyArcEvent(st, ev);
+  assert(JSON.stringify(untouched) === before, 'nothing accepted, so nothing should change');
+  ev.changes[0].accepted = true;
+  const after = A.applyArcEvent(st, ev);
+  assert(JSON.stringify(st) === before, 'applyArcEvent mutated the state it was given');
+  assert(after[ev.changes[0].slotId].trait.id === ev.changes[0].toId, 'the accepted change did not apply');
+  assert(after[ev.changes[0].slotId].arcEvent === ev.id, 'the changed slot should name the event that changed it');
+  return `${ev.changes[0].slotId} applied on accept only`;
+});
+
+check('replaying the arc without an event reconstructs the character exactly', ()=>{
+  const base = _mechSheet(7503);
+  const evs = [];
+  ['growth','deterioration','growth'].forEach((shape, i)=>{
+    const st = A.replayArc(base, evs);
+    const ev = A.makeArcEvent(i+1, {title:'Event '+(i+1), shape, cost:'It cost them more than they will admit to anyone'});
+    ev.changes = A.proposeArcChanges(st, ev, evs);
+    ev.changes.forEach(c=>{ c.accepted = true; });
+    evs.push(ev);
+  });
+  const full = A.replayArc(base, evs);
+  const withoutSecond = A.replayArc(base, evs.filter(e=>e.seq !== 2));
+  const firstOnly = A.replayArc(base, evs.filter(e=>e.seq === 1));
+  assert(JSON.stringify(full) !== JSON.stringify(base), 'three accepted events changed nothing');
+  assert(JSON.stringify(withoutSecond) !== JSON.stringify(full), 'undoing an event changed nothing');
+  assert(JSON.stringify(A.replayArc(base, evs)) === JSON.stringify(full), 'replay is not deterministic');
+  // Dropping every event has to land exactly back on the sheet it started from.
+  assert(JSON.stringify(A.replayArc(base, [])) === JSON.stringify(base), 'an empty arc is not the baseline');
+  assert(JSON.stringify(firstOnly) !== JSON.stringify(base), 'the first event did nothing');
+  const sum = A.arcSummary(evs);
+  assert(sum.events === 3 && sum.changes >= 3 && sum.shape === 'growth', `summary reads ${JSON.stringify(sum.counts)}`);
+  const md = A.arcToMarkdown(evs);
+  assert(/### 1\. Event 1 — _Growth_/.test(md) && /\*\*Changed\*\*/.test(md), 'the arc markdown is wrong: ' + md.slice(0, 120));
+  return sum.line;
+});
+
+check('a cyclical event puts an earlier accepted change back, and bad events are rejected', ()=>{
+  const base = _mechSheet(7504);
+  const first = A.makeArcEvent(1, {title:'He swore off it', shape:'growth'});
+  first.changes = A.proposeArcChanges(base, first, []);
+  assert(first.changes.length, 'nothing to cycle back from');
+  first.changes.forEach(c=>{ c.accepted = true; });
+  const after = A.applyArcEvent(base, first);
+  const cyc = A.makeArcEvent(2, {title:'And then, in March', shape:'cyclical'});
+  cyc.changes = A.proposeArcChanges(after, cyc, [first]);
+  assert(cyc.changes.length, 'cyclical proposed nothing to revert');
+  assert(cyc.changes.every(c=> first.changes.some(f=> f.slotId === c.slotId && f.fromId === c.toId)), 'a cyclical change should restore an earlier from-trait');
+  cyc.changes.forEach(c=>{ c.accepted = true; });
+  const backAgain = A.applyArcEvent(after, cyc);
+  cyc.changes.forEach(c=> assert(backAgain[c.slotId].trait.id === c.toId, 'the revert did not apply'));
+  assert(A.validateArcEvent({id:'x', seq:0, shape:'sideways', changes:'no'}).length >= 3, 'a malformed event should be rejected field by field');
+  assert(!A.validateArcEvent(first).length, 'a real event should validate');
+  return `${cyc.changes.length} change(s) put back`;
+});
+
+
+group('Voice lab: composed lines, named rules, pressure and cast comparison');
+
+check('every prompt composes a line that names the rules that shaped it', ()=>{
+  const st = _mechSheet(7601);
+  const lines = A.voiceLab(st, 'baseline');
+  assert(lines.length === A.VOICE_PROMPT_IDS.length, `${lines.length} lines for ${A.VOICE_PROMPT_IDS.length} prompts`);
+  lines.forEach(l=>{
+    assert(l.text && l.text.length > 2 && !/undefined/.test(l.text), `${l.promptId}: "${l.text}"`);
+    assert(l.rules.length, `${l.promptId} names no rule`);
+  });
+  const again = A.voiceLab(st, 'baseline');
+  assert(JSON.stringify(again) === JSON.stringify(lines), 'the lab is not deterministic for one sheet');
+  const other = A.voiceLab(_mechSheet(7602), 'baseline');
+  assert(other.some((l,i)=> l.text !== lines[i].text), 'two different characters produced identical lines');
+  return lines[0].text.slice(0, 54) + '…';
+});
+
+check('the rules a line names are rules the sheet actually carries', ()=>{
+  let sharp = null;
+  for (let seed = 7610; seed < 7640 && !sharp; seed++){
+    const st = _mechSheet(seed);
+    const r = A.voiceRules(st);
+    if (r.direct || r.yielding) sharp = {st, r};
+  }
+  assert(sharp, 'no sheet with an assertiveness lean in 30');
+  const line = A.composeVoiceLine(sharp.st, 'refuse', 'baseline');
+  const expect = sharp.r.direct ? /high assertiveness/ : /low assertiveness/;
+  assert(line.rules.some(x=>expect.test(x)), `refusal cites ${line.rules.join('; ')} for a ${sharp.r.direct ? 'direct' : 'yielding'} sheet`);
+  assert(A.composeVoiceLine(sharp.st, 'nope', 'baseline') === null, 'an unknown prompt should return null, not a line');
+  return `${sharp.r.direct ? 'direct' : 'yielding'}: "${line.text.slice(0, 40)}…"`;
+});
+
+check('pressure drops the politeness layer and brings the stress response in', ()=>{
+  // The stress section can be toggled off by an earlier test, so seat the card by hand
+  // and search only for the opener lean.
+  let found = null;
+  for (let seed = 7650; seed < 7700 && !found; seed++){
+    const st = _mechSheet(seed);
+    st.prof_stress_0 = {slotId:'prof_stress_0', trait: T.find(t=>t.section==='Conflict & Stress Response')};
+    const r = A.voiceRules(st);
+    if (r.formal || r.casual || r.mannered) found = {st, r};
+  }
+  assert(found, 'no sheet with an opener rule in 50');
+  const base = A.composeVoiceLine(found.st, 'refuse', 'baseline');
+  const pres = A.composeVoiceLine(found.st, 'refuse', 'pressure');
+  assert(pres.text !== base.text, 'pressure changed nothing');
+  assert(!pres.rules.some(x=>/register|manners/.test(x)), `pressure kept the politeness rules: ${pres.rules.join('; ')}`);
+  assert(pres.rules.some(x=>/stress response/.test(x)), `pressure did not bring the stress response: ${pres.rules.join('; ')}`);
+  return `"${base.text.slice(0,30)}…" → "${pres.text.slice(0,30)}…"`;
+});
+
+check('the cast comparison marks devices more than one character reaches for', ()=>{
+  const members = [7671, 7672, 7673].map((seed, i)=> ({state:_mechSheet(seed), meta:{name:'M'+(i+1)}}));
+  const cmp = A.voiceComparison(members, 'apologise', 'baseline');
+  assert(cmp.rows.length === 3, `${cmp.rows.length} rows`);
+  cmp.rows.forEach(r=> r.shared.forEach(k=> assert(cmp.repeated.includes(k), `${r.name} marks "${k}" as shared but it is not in the repeated list`)));
+  const counted = {};
+  cmp.rows.forEach(r=> new Set(r.line.rules).forEach(k=>{ counted[k] = (counted[k]||0)+1; }));
+  Object.keys(counted).forEach(k=>{
+    if (counted[k] > 1) assert(cmp.repeated.includes(k), `"${k}" is used by ${counted[k]} members and was not marked`);
+  });
+  const twins = A.voiceComparison([members[0], {state:members[0].state, meta:{name:'Twin'}}], 'apologise', 'baseline');
+  assert(twins.repeated.length, 'two identical sheets should share every device');
+  const md = A.voiceLabToMarkdown(members[0].state, 'baseline');
+  assert(/### Refusing/.test(md) && /- Rules: /.test(md), 'the markdown is missing its structure');
+  return `${cmp.repeated.length} shared across 3; twins share ${twins.repeated.length}`;
+});
+
+
+group('Content studio: the pack system and the author tools');
+
+check('the studio tool validates the live bank and reports every pack', ()=>{
+  const {execFileSync} = require('child_process');
+  const run = (...args) => execFileSync('node', [require('path').join(__dirname, '..', 'tools', 'studio.js'), ...args], {encoding:'utf8'});
+  const v = run('validate');
+  assert(/The bank validates\./.test(v), 'studio validate is not clean:\n' + v.split('\n').slice(0,8).join('\n'));
+  const p = run('packs');
+  A.TRAIT_PACKS.forEach(pk=> assert(p.includes(pk.id), `packs output is missing "${pk.id}"`));
+  const n = run('nearest', 'apologises by leaving the room');
+  assert(/Nearest existing content/.test(n) && /#\d+/.test(n), 'nearest found nothing');
+  const c = run('coverage', '--n=3');
+  assert(/empty cells/.test(c), 'coverage printed no heatmap');
+  return `validate clean · ${A.TRAIT_PACKS.length} packs · nearest and coverage answer`;
+});
+
+check('disabling a pack removes exactly its traits from every draw, and core cannot go', ()=>{
+  const pack = A.TRAIT_PACKS.find(p=>p.id === 'life');
+  const before = A.byFilter('Recovery & Repair', 'Apology').length;
+  assert(before, 'no Apology pool to test with');
+  A.setPackEnabled('life', false);
+  const during = A.byFilter('Recovery & Repair', 'Apology').length;
+  const anyLife = A.TRAITS.filter(t=>t.pack === 'life' && A.isPackEnabled(t.pack)).length;
+  A.setPackEnabled('life', true);
+  const after = A.byFilter('Recovery & Repair', 'Apology').length;
+  assert(during === 0 && anyLife === 0, `${during} traits survived disabling "${pack.id}"`);
+  assert(after === before, `the pool did not come back: ${after} vs ${before}`);
+  assert(A.getDisabledPacks().length === 0, 'the disabled set was not restored');
+  A.TRAITS.forEach(t=> assert(t.pack, `#${t.id} belongs to no pack`));
+  return `${before} Apology traits gone and back; every trait carries a pack`;
+});
+
+check('every trait id sits inside its pack manifest range', ()=>{
+  const ranges = new Map(A.TRAIT_PACKS.map(p=>[p.id, p.ids]));
+  let checked = 0;
+  A.TRAITS.forEach(t=>{
+    const r = ranges.get(t.pack);
+    assert(r, `#${t.id} names pack "${t.pack}", which has no manifest`);
+    assert(t.id >= r[0] && t.id <= r[1], `#${t.id} (${t.pack}) is outside ${r[0]}–${r[1]}`);
+    checked++;
+  });
+  // Manifests must not overlap, or packOfId would be ambiguous.
+  const sorted = A.TRAIT_PACKS.slice().sort((a,b)=>a.ids[0]-b.ids[0]);
+  for (let i=1;i<sorted.length;i++) assert(sorted[i].ids[0] > sorted[i-1].ids[1], `${sorted[i].id} overlaps ${sorted[i-1].id}`);
+  return `${checked.toLocaleString()} ids inside ${A.TRAIT_PACKS.length} non-overlapping ranges`;
+});
+
+
+group('Project library and backup bundle: merge preview before anything is written');
+
+check('a project validates, and a malformed one is rejected field by field', ()=>{
+  const p = A.makeProject('The Book');
+  assert(!A.validateProject(p).length, 'a fresh project should validate: ' + A.validateProject(p).join('; '));
+  assert(/0 characters/.test(A.projectSummary(p)), 'summary reads ' + A.projectSummary(p));
+  const bad = A.validateProject({id:'', name:'', characters:'no', casts:[], edges:[{from:1}], events:[], archive:[], tags:[7]});
+  assert(bad.length >= 4, 'a malformed project should collect several problems, got ' + bad.length);
+  const withBadEdge = A.makeProject('X', {edges:[{from:'a', to:'b', trust:9, dependence:3, status:'sideways'}]});
+  assert(A.validateProject(withBadEdge).some(x=>/edge 0/.test(x)), 'a bad edge inside a project should be caught');
+  return `${bad.length} problems found in a broken project`;
+});
+
+check('a bundle round-trips and one from the future is refused', ()=>{
+  const p = A.makeProject('Book One');
+  const b = A.makeBackupBundle([p], [{name:'Ada', record:{state:{}, savedAt:'2026-01-01T00:00:00Z'}}]);
+  assert(!A.validateBackupBundle(b).length, 'a fresh bundle should validate: ' + A.validateBackupBundle(b).join('; '));
+  assert(b.format === A.BACKUP_FORMAT && b.version === A.BACKUP_VERSION, 'the bundle is not stamped');
+  assert(A.validateBackupBundle({format:'something-else'}).length, 'a foreign file should be refused');
+  assert(A.validateBackupBundle(Object.assign({}, b, {version: A.BACKUP_VERSION + 1})).some(x=>/newer/.test(x)), 'a future version should be refused');
+  assert(A.validateBackupBundle(Object.assign({}, b, {characters:[{name:'x'}]})).length, 'a character with no record should be refused');
+  return 'round-trips; foreign and future files refused';
+});
+
+check('the preview separates new, identical and would-overwrite, and names the last group', ()=>{
+  const mine = [A.makeProject('Kept'), A.makeProject('Shared')];
+  mine[1].updated = '2026-01-01T00:00:00Z';
+  const theirs = [Object.assign({}, mine[1], {name:'Shared, edited', updated:'2026-06-01T00:00:00Z'}),
+                  JSON.parse(JSON.stringify(mine[0])), A.makeProject('Brand new')];
+  const pv = A.mergePreview(mine, theirs);
+  assert(pv.same.length === 1, `${pv.same.length} identical`);
+  assert(pv.add.length === 1 && pv.add[0].name === 'Brand new', 'the new project was not spotted');
+  assert(pv.conflict.length === 1 && pv.conflict[0].newer === 'theirs', `conflict reads ${JSON.stringify(pv.conflict.map(c=>c.newer))}`);
+  assert(pv.conflict[0].mine && pv.conflict[0].theirs, 'a conflict must carry both versions to choose between');
+  return A.mergeSummaryLine({projects:pv, characters:{add:[],same:[],conflict:[]}});
+});
+
+check('nothing is overwritten unless it was chosen, and the choice is per entry', ()=>{
+  const mine = [A.makeProject('A'), A.makeProject('B')];
+  const theirs = [Object.assign({}, mine[0], {name:'A, theirs'}), Object.assign({}, mine[1], {name:'B, theirs'}), A.makeProject('C')];
+  const pv = A.mergePreview(mine, theirs);
+  assert(pv.conflict.length === 2, `${pv.conflict.length} conflicts`);
+  const kept = A.applyMerge(mine, pv, {});
+  assert(kept.length === 3 && kept.find(p=>p.id===mine[0].id).name === 'A', 'an unchosen conflict must keep the local copy');
+  assert(kept.some(p=>p.name === 'C'), 'a brand new entry should arrive without being chosen');
+  const one = A.applyMerge(mine, pv, {[pv.conflict[0].key]: 'theirs'});
+  assert(one.find(p=>p.id===mine[0].id).name === 'A, theirs', 'the chosen conflict did not overwrite');
+  assert(one.find(p=>p.id===mine[1].id).name === 'B', 'an unchosen conflict was overwritten anyway');
+  assert(JSON.stringify(mine.map(p=>p.name)) === '["A","B"]', 'applyMerge mutated the list it was given');
+  return `2 conflicts: one taken, one kept, 1 added`;
+});
 
 console.log('\n' + (failed ? '\x1b[31m' : '\x1b[32m') + passed + ' passed, ' + failed + ' failed\x1b[0m');
 if (failed){

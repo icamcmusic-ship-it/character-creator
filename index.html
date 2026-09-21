@@ -298,37 +298,21 @@
       <div class="row">
         <div class="field">
           <label for="archetypeSelect">Archetype seed (optional)</label>
-          <select id="archetypeSelect">
+          <select id="archetypeSelect" data-on="change" data-act="onArchetypeChange" data-args="[]">
             <option value="">None &mdash; fully random</option>
-            <option value="soldier">Wounded Soldier</option>
-            <option value="conartist">Smug Con Artist</option>
-            <option value="intern">Anxious Intern</option>
-            <option value="scholar">Weary Scholar</option>
-            <option value="noble">Cold Noble</option>
-            <option value="child">Wide-eyed Child</option>
-            <option value="burntIdealist">Burnt-Out Idealist</option>
-            <option value="charmingManipulator">Charming Manipulator</option>
-            <option value="grievingParent">Grieving Parent</option>
-            <option value="reluctantSecond">Reluctant Second-in-Command</option>
-            <option value="cheerfulSociopath">Cheerful Sociopath</option>
-            <option value="furiousCaretaker">Quietly Furious Caretaker</option>
-            <option value="washedUpProdigy">Washed-Up Prodigy</option>
-            <option value="companyLoyalist">Company Loyalist</option>
-            <option value="blackSheep">Black-Sheep Returnee</option>
-            <option value="compulsiveFixer">Compulsive Fixer</option>
-            <option value="undiscussedSurvivor">Survivor Who Won't Discuss It</option>
-            <option value="workaholicAvoiding">Workaholic Avoiding a Diagnosis</option>
-            <option value="formerTrueBeliever">Former True Believer</option>
-            <option value="goldenChild">Golden Child</option>
-            <option value="competentProfessional">Quietly Excellent Professional</option>
-            <option value="contentedElder">Contented Elder</option>
-            <option value="genuinelyFunny">Genuinely Funny One</option>
-            <option value="careerBureaucrat">Career Bureaucrat</option>
-            <option value="trueZealot">Ecstatic True Believer</option>
-            <option value="alienLogic">Alien-Logic Outsider</option>
-            <option value="unbotheredYoung">Unbothered Young Person</option>
-            <option value="steadyOrganiser">Steady Organiser</option>
+            <!-- Built-in presets are filled from ARCHETYPES at boot (populateArchetypeSelect),
+                 so a preset added to the engine appears here without an HTML edit. -->
           </select>
+          <!-- A preset's named variations (ARCHETYPE_VARIATIONS) and how much of it
+               survives the blend with your own sliders. The `must` axes of a preset are
+               held at a floor whatever the blend, so it stays recognisable. -->
+          <div id="archetypeTuning" style="display:none; margin-top:8px;">
+            <label for="archetypeVariation" class="sub" style="margin:0 0 2px;">Variation</label>
+            <select id="archetypeVariation" data-on="change" data-act="onSliderChange" data-args="[]"></select>
+            <label for="archetypeBlend" class="sub" style="margin:8px 0 2px;">How much of the preset to keep <span id="archetypeBlendVal">65%</span></label>
+            <input type="range" id="archetypeBlend" min="0.2" max="1" step="0.05" value="0.65" data-on="input" data-act="onArchetypeBlendInput" data-args="[]">
+            <div class="sub" id="archetypeIntentNote" style="margin:4px 0 0;"></div>
+          </div>
         </div>
         <div class="field advOnly">
           <label for="mannerCount"># of Mannerisms</label>
@@ -444,6 +428,16 @@
         <div id="profileSectionsGrid"></div>
       </details>
 
+      <details class="advanced advOnly" id="packPanel">
+        <summary><h3>Content packs</h3></summary>
+        <div class="sub" style="margin:8px 0;">The bank ships as packs. Turning one off removes its traits from every draw — useful for keeping a setting clean, or for seeing what a pack actually contributes. The choice travels with exports and saved settings. <code>node tools/studio.js packs</code> prints the same list.</div>
+        <div id="packGrid" class="row"></div>
+        <div class="actionRow" style="margin-top:8px;">
+          <button class="btn-secondary" data-on="click" data-act="setAllPacks" data-args="[true]">Enable all</button>
+          <button class="btn-secondary" data-on="click" data-act="setAllPacks" data-args="[false]">Core only</button>
+        </div>
+      </details>
+
       <details class="advanced advOnly" id="personalityPanel">
         <summary><h3>Personality Profile (13 axes)</h3></summary>
         <div class="row" style="margin-top:10px;" id="personalitySlidersGrid"></div>
@@ -505,6 +499,15 @@
         <button class="btn-secondary" data-on="click" data-act="generateBatch" data-args="[5]" title="Generate five complete characters at once and pick the one you want — the rest are discarded">Roll 5, pick one</button>
         <button class="btn-primary btn-roll" data-on="click" data-act="randomizeAndGenerate" data-args="[]" title="Randomize every slider, then build">🎲 Randomize All</button>
       </div>
+      <!-- The two named modes the audit asks for, plus the batch that picks itself.
+           "Same world" keeps the context and settings and avoids the current person's
+           traits, concept families and categories; "variation" holds the five most
+           defining cards and rerolls the rest. -->
+      <div class="buildRow buildRowModes">
+        <button class="btn-secondary" data-on="click" data-act="generateSameWorld" data-args="[]" title="Keep the world — context, age, settings — and build someone who shares as little as possible with the person on screen">Same world, different person</button>
+        <button class="btn-secondary" data-on="click" data-act="generateVariation" data-args="[]" title="Hold the five most defining cards and reroll everything else, with divergence off">Variation of this person</button>
+        <button class="btn-secondary" data-on="click" data-act="generateBatchDistinct" data-args="[5]" title="Roll five and keep the one furthest from your accepted characters, by the diversity objective">Roll 5, keep the most different</button>
+      </div>
       <label class="modeSwitch tinkerBar" title="Quick shows the essentials; Tinker Mode reveals every control. Hidden controls keep their values.">
         <input type="checkbox" id="advancedToggle" data-on="change" data-act="applyAdvancedMode" data-args="[]">
         <span class="tinkerLabel"><span aria-hidden="true">🔧</span> Tinker Mode</span>
@@ -555,6 +558,18 @@
       </div>
       <div class="storageStatus" id="storageStatus" role="status" style="display:none;"></div>
             <div class="savedList" id="savedList"></div>
+      <details class="advanced" id="projectPanel">
+        <summary><h3>Project library &amp; backup</h3></summary>
+        <div class="sub" style="margin:8px 0;">A project groups the characters, cast, relationship edges and arc events of one book or campaign. A backup bundle carries every project and every saved character to another machine, and shows you what it would overwrite before it writes anything.</div>
+        <div class="actionRow" style="margin-bottom:8px;">
+          <button class="btn-secondary" data-on="click" data-act="newProject" data-args="[]">New project</button>
+          <button class="btn-secondary" data-on="click" data-act="fileIntoProject" data-args="[]" title="File the character, cast, edges and arc on screen into the current project">File what's on screen</button>
+          <button class="btn-secondary" data-on="click" data-act="exportBackupBundle" data-args="[]">Export backup</button>
+          <label class="btn-secondary" style="cursor:pointer;">Import backup<input type="file" accept=".json,application/json" style="display:none;" data-on="change" data-act="importBackupBundle" data-args="[&quot;$el&quot;]"></label>
+        </div>
+        <div id="projectList"></div>
+        <div id="backupPreview" class="tensionBlock" style="display:none;"></div>
+      </details>
     </div>
 
     <div class="warnBox" id="warnBox" role="status"></div>
@@ -638,6 +653,29 @@
       </div>
       <div id="sheetBody"></div>
 
+      <div class="arcPanel" id="voiceLabPanel" style="display:none;">
+        <div class="sheetHeader"><h2>Voice lab</h2></div>
+        <div class="sub" style="margin:0 0 8px;">Seven situations, answered in this character's voice. Each line is composed from the sheet's own rules — verbosity, register, manners, assertiveness, honesty, warmth — and says which ones shaped it. Shapes, not publishable prose.</div>
+        <div class="actionRow" style="margin:0 0 10px;">
+          <button class="btn-secondary active" id="vlMode_baseline" aria-pressed="true" data-on="click" data-act="setVoiceLabMode" data-args="[&quot;baseline&quot;]">Baseline</button>
+          <button class="btn-secondary" id="vlMode_pressure" aria-pressed="false" data-on="click" data-act="setVoiceLabMode" data-args="[&quot;pressure&quot;]">Under pressure</button>
+          <button class="btn-secondary" data-on="click" data-act="copyVoiceLab" data-args="[&quot;$el&quot;]">Copy</button>
+          <label class="inlineToggle"><input type="checkbox" id="voiceLabInExport"> Include in exports</label>
+        </div>
+        <div id="voiceLabBody"></div>
+      </div>
+
+      <div class="arcPanel" id="arcPanel" style="display:none;">
+        <div class="sheetHeader"><h2>Arc</h2></div>
+        <div class="sub" style="margin:0 0 8px;">What happened to them, in order. Each event names the belief it tested, the choice and the cost, and proposes trait changes you accept one at a time. Undoing an event replays the arc from the original sheet.</div>
+        <div class="actionRow" style="margin:0 0 10px;">
+          <select id="arcShape" aria-label="Arc shape for the next event"></select>
+          <button class="btn-secondary" data-on="click" data-act="addArcEvent" data-args="[]">Add an event</button>
+          <span class="sub" id="arcStamp">No events yet. The sheet is where they start.</span>
+        </div>
+        <div id="arcBody"></div>
+      </div>
+
       <div class="pressureSheet" id="pressureSheet" style="display:none;">
         <div class="pressureTitle">Under Pressure</div>
         <!-- Shown when the base sheet has been edited since this variant was derived
@@ -708,6 +746,16 @@
 
   <div id="view-rel" class="viewSection" role="tabpanel" aria-labelledby="tabRelBtn" aria-hidden="true">
     <div class="controls">
+      <h3 style="margin:0 0 4px;">Voice comparison</h3>
+      <div class="sub" style="margin:0 0 8px;">The same situation, answered by every member of the cast. Devices more than one of them reaches for are marked — that is the ensemble speaking with one voice in different hats.</div>
+      <div class="actionRow">
+        <select id="voiceComparePrompt" data-on="change" data-act="renderVoiceCompare" data-args="[]" aria-label="Situation"></select>
+        <button class="btn-secondary" data-on="click" data-act="setVoiceLabMode" data-args="[&quot;baseline&quot;]">Baseline</button>
+        <button class="btn-secondary" data-on="click" data-act="setVoiceLabMode" data-args="[&quot;pressure&quot;]">Under pressure</button>
+      </div>
+      <div id="voiceCompareBody" style="margin-top:10px;"></div>
+    </div>
+    <div class="controls">
       <div class="sub" style="margin:0 0 10px;">Generate a cast first, then analyse how any two members would rub together based on where their personality axes clash or align.</div>
       <div class="row">
         <div class="field">
@@ -727,6 +775,25 @@
           </div>
         </div>
       </div>
+    </div>
+    <div class="controls relWorkspace">
+      <h3 style="margin:0 0 4px;">Relationship workspace</h3>
+      <div class="sub" style="margin:0 0 10px;">Directed edges between cast members: what A owes, knows, wants and hides from B. Defaults are read off the two sheets; every field is yours to overwrite. Edges travel in the cast file.</div>
+      <div class="row">
+        <div class="field">
+          <label for="relRole">Role (for the edge, or for a new member opposite A)</label>
+          <select id="relRole"></select>
+        </div>
+        <div class="field">
+          <label>&nbsp;</label>
+          <div class="actionRow">
+            <button class="btn-secondary" data-on="click" data-act="addRelationshipEdge" data-args="[]" title="Add a directed edge A → B with defaults read from both sheets">Add edge A → B</button>
+            <button class="btn-secondary" data-on="click" data-act="generateForRole" data-args="[]" title="Generate a new cast member built to sit in this role opposite A">Generate a member in this role</button>
+          </div>
+        </div>
+      </div>
+      <div class="sub" id="edgeStamp">No edges yet.</div>
+      <div id="relEdges" class="edgeList"></div>
     </div>
     <div class="sheet" id="relSheet">
       <div class="sheetHeader"><h2 id="relTitle">Relationship</h2></div>
@@ -770,6 +837,9 @@
 <script src="js/data/traits-depth.js" defer></script>
 <script src="js/data/traits-balance.js" defer></script>
 <script src="js/data/traits-tails2.js" defer></script>
+<script src="js/data/traits-cells.js" defer></script>
+<script src="js/data/traits-polarity.js" defer></script>
+<script src="js/data/traits-life.js" defer></script>
 <script src="js/engine.js" defer></script>
 <script src="js/generate.js" defer></script>
 <script src="js/render.js" defer></script>

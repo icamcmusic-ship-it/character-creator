@@ -225,6 +225,84 @@ mechanism is real but barely exercised. Broadening it is a data pass; the distin
 semantic and a regex was tried and removed for consistently mislabelling dispositions
 as symptoms.
 
+## What the sheet knows beyond the cards
+
+The cards are the character at rest. Six layers read across them.
+
+**Context.** The sheet has a lens above it: baseline, in public, in private, under
+authority, under threat. Every seated card is classed active, amplified, suppressed or
+an exception for the chosen room, and says which rule decided it. A trait's own
+`conditions` and `exceptions` outrank everything else; after that come the section, the
+trait's visibility and persistence, the character's internal dimensions, and its
+polarity on the axes that room tests. Nothing is redrawn — the baseline sheet is the
+character, and a context is a way of reading it. The markdown export names the room.
+
+**The chains.** The motivation cards are linked rather than listed: want → belief →
+origin → need → strategy → method → fear → counterweight → stakes, each link naming the
+card it reads from. The pressure sheet runs trigger → how they read it → first move →
+where it tips → afterwards → how they repair it, grounded in the attachment, stress,
+values and Recovery & Repair cards rather than asserted.
+
+**The contradiction.** The strongest opposed pair on one axis, with the four things a
+scene needs: when the second face appears, with whom, what actually changes, and what it
+costs. Derived where the data allows and left as a prompt where it does not; your
+answers are saved and exported.
+
+**Dimensions.** Intensity was doing four jobs, so frequency, visibility, persistence and
+narrative salience are now separate, shown on each card as `F… V… P… S…` and spelled out
+on hover. Where the bank authors them they are used as written; elsewhere they are
+inferred from the section and the chip says so.
+
+**Arc.** An ordered event log over the sheet as generated. An event names the belief it
+challenged, the choice and the cost, and carries a shape — growth, deterioration,
+steadfast, cyclical — from which it proposes a few trait changes, each explained.
+Nothing applies until you accept it, one change at a time. Undoing an event replays the
+whole arc from the baseline rather than inverting an edit, so the result is exact.
+
+**Voice lab.** Seven situations — refusing, apologising, persuading, concealing,
+requesting, asking for help, lying — answered in the character's voice and annotated
+with the rules that shaped each line. There is a pressure mode, which strips the
+politeness layer and brings the stress response in, and a cast view that puts one
+situation to every member and marks the devices more than one of them reaches for.
+These are demonstrations of shape, not publishable prose.
+
+## Casts, relationships and projects
+
+**Relationship workspace.** Cast members can be joined by directed edges carrying trust,
+dependence, standing, obligation, and what each one knows, wants and conceals about the
+other. The numbers start populated from both sheets — attachment style, the trust
+dimension, the assertiveness gap, the other's contradiction and wound — and every field
+is yours to overwrite. Eight named roles (rival, mentor, protégé, confidant, dependant,
+antagonist, ally, the ex) will also generate a new member built to sit opposite an
+anchor, with the edge recorded. Edges travel in the cast JSON and markdown, are
+validated on import, and are dropped when a member leaves.
+
+**Project library.** A project groups the characters, casts, edges, arc events, settings
+and diversity archive of one book or campaign, beside the flat saves rather than
+replacing them. A backup bundle carries every project and every saved character to
+another machine. On the way back in it shows a merge preview first: what is new, what is
+identical, and — one by one, with which copy is newer — what would be overwritten.
+Nothing is written until you choose, per entry, and anything unchosen keeps the local
+copy.
+
+## Content packs and the studio
+
+The bank ships as packs with non-overlapping id ranges. Turning one off under **Content
+packs** removes its traits from every draw; core is always on, and a toggle that would
+empty the draw is refused. The choice travels with exports and saved settings.
+
+`tools/studio.js` is the author-facing side, reading the live bank through the same
+loader the tests use and writing nothing:
+
+```bash
+node tools/studio.js validate               # schema, axis tables, cross-links, duplicate names
+node tools/studio.js coverage --n=25        # the rarity x intensity heatmap, thinnest first
+node tools/studio.js nearest "a phrase"     # what already exists near an idea
+node tools/studio.js review --pack=life     # what is unreviewed, and where
+node tools/studio.js preview --pack=life    # generate with core plus one pack only
+node tools/studio.js packs                  # the manifests and their id ranges
+```
+
 ## Rarity
 
 Rarity is an **authored** field with four tiers, and it answers a different question
@@ -269,12 +347,18 @@ no quiet content to redraw into.
 - `js/data/traits-tails.js` — Appearance depth and i1/i5 tail fill (ids 120000+)
 - `js/data/traits-depth.js` — Need / Ghost / Defence and listening traits (ids 130000+),
   including the low-intensity depth pass that gave those three pools a quiet tail
+- `js/data/traits-balance.js` — polarity and archetype balancing fill (ids 140000+)
+- `js/data/traits-cells.js` — rarity x intensity cell fill for the thinnest categories (ids 160000+)
+- `js/data/traits-polarity.js` — the axes the bank leaned on hardest, answered (ids 161000+)
+- `js/data/traits-life.js` — competence, positive origins, goals, ordinary texture,
+  recovery, contradiction functions and role by context (ids 170000+)
 - `js/engine.js` — indexes, tagging passes, the weight matrix, and every pick path
 - `js/generate.js` — seeded generation, reroll, pins, undo, scoring
 - `js/render.js` — the sheet, exports, imports, toasts
 - `js/app.js` — storage, cast, relationships, foil, UI wiring
 - `sw.js` — service worker, caches the shell so the bank isn't refetched every visit
-- `tests/` — the test harness and suite
+- `tools/studio.js` — the content studio: validate, coverage, nearest, review, preview, packs
+- `tests/` — the test harness and suite; `tests/bank-report.js` is the measurement dashboard
 - `package.json` — no build step; it exists to pin the browser-test dependency
 
 The bank used to live on a single 1.4MB line inside `js/app.js`, which made the file

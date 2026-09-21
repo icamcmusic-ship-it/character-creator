@@ -1227,3 +1227,77 @@
 .ruleConflictTitle{ font-weight:600; margin-bottom:4px; }
 .ruleConflictItem + .ruleConflictItem{ margin-top:4px; }
 .chip-fav{ background: rgba(74,111,165,.12); border-color: var(--dusk-blue, #4a6fa5); }
+
+/* ---- Internal dimensions readout ------------------------------------------ */
+.dimRow{ display:flex; gap:12px; align-items:baseline; margin:4px 0; font-size:.82rem; flex-wrap:wrap; }
+.dimRow > span:first-child, .dimRow > span:nth-child(2){ min-width:200px; }
+.dimSplit{ background: rgba(138,107,191,.08); border-radius:6px; padding:2px 6px; }
+.dimFlag{ font-size:.68rem; text-transform:uppercase; letter-spacing:.04em; color:var(--accent-violet); font-weight:600; }
+
+/* ---- Variety modes and the diversity objective ---------------------------- */
+.buildRowModes{ margin-top:6px; }
+.batchDist{ display:block; margin-top:4px; font-size:.7rem; color:var(--accent-violet); font-weight:600; }
+.exceptionNote{ border-left-color: var(--accent-rust); }
+
+  /* Mechanics: chains, structured contradiction, dimension chips, editable label */
+  .chainBox { margin:10px 0 4px; font-size:.86rem; }
+  .chainBox summary { cursor:pointer; color:var(--golden-deep); font-weight:600; }
+  .chainCount { font-weight:400; color:var(--text-soft, #6b7a8a); font-size:.78rem; margin-left:6px; }
+  .chainList { margin:6px 0 0; padding-left:20px; line-height:1.5; }
+  .chainList li { margin-bottom:5px; }
+  .chainKey { display:inline-block; font-size:.7rem; text-transform:uppercase; letter-spacing:.04em; color:var(--golden-deep); margin-right:4px; }
+  .chainFrom { display:block; font-size:.74rem; color:var(--text-soft, #6b7a8a); }
+  .pressureChain { font-size:.86rem; margin:8px 0 10px; }
+  .contraField { margin:5px 0; font-size:.83rem; }
+  .contraDerived { color:var(--text-soft, #6b7a8a); }
+  .contraAnswer { color:var(--text); }
+  .contraEdit, .labelEdit { font-size:.72rem; padding:1px 7px; margin-left:6px; border:1px solid var(--border-strong); background:transparent; color:inherit; border-radius:10px; cursor:pointer; }
+  .dimsChip { display:inline-block; font-size:.68rem; letter-spacing:.03em; padding:1px 6px; margin-left:6px; border:1px solid var(--border-strong); border-radius:10px; color:var(--text-soft, #6b7a8a); vertical-align:middle; cursor:help; }
+
+  /* Contextual engine */
+  .contextBar { margin:0 0 12px; padding:10px 12px; border:1px solid var(--border-strong); border-radius:12px; background:var(--card, transparent); }
+  .ctxModes { display:flex; flex-wrap:wrap; gap:6px; }
+  .ctxModeBtn { font-size:.8rem; padding:4px 11px; border-radius:14px; border:1px solid var(--border-strong); background:transparent; color:inherit; cursor:pointer; }
+  .ctxModeBtn.active { background:var(--golden-deep); color:#fff; border-color:var(--golden-deep); }
+  .ctxHeadline { margin-top:8px; font-size:.84rem; color:var(--text-soft, #6b7a8a); }
+  .traitCard.ctx-suppressed { opacity:.55; }
+  .traitCard.ctx-amplified { box-shadow:0 0 0 2px var(--golden-deep) inset; }
+  .traitCard.ctx-exception { box-shadow:0 0 0 2px var(--bubblegum) inset; }
+  .ctxNote { font-size:.78rem; }
+
+  /* Relationship workspace */
+  .relWorkspace { margin-top:12px; }
+  .edgeList { display:grid; gap:10px; margin-top:8px; }
+  .edgeCard { border:1px solid var(--border-strong); border-radius:12px; padding:10px 12px; font-size:.84rem; }
+  .edgeHead { display:flex; align-items:center; gap:6px; flex-wrap:wrap; margin-bottom:6px; }
+  .edgeRole { font-size:.72rem; padding:1px 7px; border-radius:10px; background:var(--golden-deep); color:#fff; }
+  .edgeNums { display:flex; flex-wrap:wrap; gap:12px; margin:4px 0 6px; }
+  .edgeNums label { display:inline-flex; align-items:center; gap:6px; font-size:.78rem; }
+  .edgeNums input[type=range] { width:90px; }
+  .edgeField { display:grid; grid-template-columns:90px 1fr; gap:6px; align-items:center; margin:3px 0; }
+  .edgeField span { font-size:.74rem; text-transform:uppercase; letter-spacing:.04em; color:var(--text-soft, #6b7a8a); }
+  .edgeField input { width:100%; font-size:.82rem; }
+  @media (max-width:600px){ .edgeField { grid-template-columns:1fr; } }
+
+  /* Arc panel */
+  .arcPanel { margin-top:16px; padding-top:12px; border-top:1px dashed var(--border-strong); }
+  .arcEvent { border:1px solid var(--border-strong); border-radius:12px; padding:10px 12px; margin-bottom:10px; font-size:.85rem; }
+  .arcHead { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:6px; }
+  .arcSeq { display:inline-flex; align-items:center; justify-content:center; width:22px; height:22px; border-radius:50%; background:var(--dusk-blue); color:#fff; font-size:.75rem; }
+  .arcChange { border-left:3px solid var(--border-strong); padding:6px 10px; margin:6px 0; }
+  .arcChange.accepted { border-left-color:var(--emerald, #2e9e77); }
+  .arcChange .actionRow { margin-top:4px; }
+
+  /* Voice lab */
+  .voiceCard { border:1px solid var(--border-strong); border-radius:12px; padding:10px 12px; margin-bottom:10px; }
+  .voiceHead { display:flex; flex-wrap:wrap; gap:8px; align-items:baseline; margin-bottom:6px; font-size:.88rem; }
+  .voiceLine { margin:4px 0 6px; padding:6px 0 6px 12px; border-left:3px solid var(--golden-deep); font-style:italic; line-height:1.6; }
+  .sharedDevice { background:var(--bubblegum); color:#fff; border-radius:8px; padding:0 6px; }
+
+  /* Content packs */
+  .packRow { display:flex; align-items:baseline; gap:7px; padding:5px 9px; border:1px solid var(--border-strong); border-radius:10px; margin:0 6px 6px 0; font-size:.83rem; }
+
+  /* Project library */
+  .projectRow { display:flex; align-items:center; gap:6px; margin-bottom:6px; }
+  .projectRow.current { outline:2px solid var(--golden-deep); outline-offset:2px; border-radius:10px; }
+  .projectRow .savedOpen { flex:1; }

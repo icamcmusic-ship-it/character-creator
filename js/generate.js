@@ -234,9 +234,12 @@ function renderNovelty(prevSig, curSig){
    a meter and not a warning. */
 /* Reference realised magnitude for a FULLY expressed archetype axis, measured from
    the generator itself: 20 samples per built-in preset, generated at that preset's own
-   settings, give |axisProfile| values distributed roughly 0.04 (p10) to 0.40 (p99)
-   with a median near 0.09. The 90th percentile, 0.2, is the point at which an axis is
-   as loudly expressed as this bank realistically expresses one.
+   settings, give |axisProfile| values distributed roughly 0.20 (p10) to 2.30 (p99)
+   with a median near 1.02, in axisProfile's character-relative units (see the note
+   on it in app.js — the divisor is the sheet's own tag count, and the bank prior is
+   subtracted). The 90th percentile, 1.85, is the point at which an axis is as loudly
+   expressed as this bank realistically expresses one. Re-measure this whenever
+   axisProfile's units change; `node tests/bank-report.js` does not do it for you.
 
    It has to be an empirical constant because axisProfile is already normalised against
    the bank's own polarity coverage — its units mean nothing in the archetype's -100..100
@@ -250,7 +253,7 @@ function renderNovelty(prevSig, curSig){
    questions and only one of them is well-conditioned. Direction ("did the sheet lean
    the way the preset asked?") is a clean proportion. Strength is relative to the
    reference above and is labelled as such. */
-const FIDELITY_REF_MAG = 0.2;
+const FIDELITY_REF_MAG = 1.85;
 function archetypeFidelity(st, arch){
   if (!arch || !arch.pers) return null;
   const prof = axisProfile(st);
@@ -407,7 +410,11 @@ function renderBatchTray(){
       .map(id => slotCat(st['prof_'+id+'_0'])).filter(Boolean);
     return [best.trait.trait].concat(facts.length ? [facts[0]] : []);
   };
+  const refs = batchReferences();
+  const scores = refs.length ? scoreBatchCandidates() : null;
+  const scoreOf = i => scores ? scores.find(s=>s.i===i) : null;
   host.innerHTML = `<div class="batchHead"><b>Pick one of ${batchCandidates.length}</b>` +
+    (refs.length ? `<button class="btn-secondary" ${actAttr('click', 'pickMostDistinct')} title="Keep the candidate furthest from your accepted characters and the sheet on screen, by the diversity objective">Keep the most different</button>` : ``) +
     `<button class="btn-secondary" ${actAttr('click', 'dismissBatch')}>Discard all</button></div>` +
     `<div class="batchGrid">` + batchCandidates.map((c, i)=>{
       const em = (typeof emergentArchetypeName === 'function') ? emergentArchetypeName(c.state) : null;
@@ -418,9 +425,11 @@ function renderBatchTray(){
       const named = c.meta && c.meta.name && c.meta.name !== "Unnamed Character";
       const title = named ? c.meta.name : ((em && em.name) || ("Candidate " + (i + 1)));
       const sub = named && em && em.name ? `<span class="batchArch">${escHTML(em.name)}</span>` : ``;
+      const sc = scoreOf(i);
+      const dist = sc ? `<span class="batchDist" title="Diversity objective: distance from the nearest accepted character${sc.nearest ? ' (' + escAttr(sc.nearest) + ')' : ''}. Higher is more distinct.">distinct ${sc.score.toFixed(2)}</span>` : ``;
       return `<button type="button" class="batchCard" ${actAttr('click', 'chooseBatch', i)} title="Keep this one">` +
         `<b>${escHTML(title)}</b>${sub}` +
-        `<span class="sub">${signature(c.state).map(escHTML).join(" · ")}</span></button>`;
+        `<span class="sub">${signature(c.state).map(escHTML).join(" · ")}</span>${dist}</button>`;
     }).join('') + `</div>`;
   host.style.display = 'block';
 }
@@ -457,6 +466,87 @@ function chooseBatch(i){
 }
 function dismissBatch(){ batchCandidates = []; renderBatchTray(); }
 
+/* ================= PICK THE MOST DIFFERENT =================
+   The batch tray asked the user to eyeball five strips. This scores each candidate
+   against the project's accepted characters (the archive) and the sheet currently on
+   screen with the diversity objective, and keeps the one furthest from its nearest
+   neighbour. The score and the nearest neighbour are shown, so "most different" is a
+   claim you can check rather than a coin the app flipped. */
+function batchReferences(){
+  const refs = getArchive().slice();
+  if (Object.keys(state).length) refs.push(referenceFromState(state, charMeta.name || 'the current sheet'));
+  return refs;
+}
+function scoreBatchCandidates(){
+  const refs = batchReferences();
+  return batchCandidates.map((c, i)=>{
+    const d = diversityScore(c.state, refs);
+    return {i, score: d ? d.score : 0, nearest: d && d.ref ? (d.ref.name || 'an earlier character') : null, terms: d ? d.terms : null};
+  });
+}
+function pickMostDistinct(){
+  if (!batchCandidates.length){ toast("Roll a batch first.", "warn"); return; }
+  const scored = scoreBatchCandidates();
+  if (!batchReferences().length){
+    toast("Nothing to be different FROM yet — save a character or keep one, and the next batch can be measured against it.", "warn", 6000);
+    return;
+  }
+  scored.sort((a,b)=>b.score-a.score);
+  const best = scored[0];
+  chooseBatch(best.i);
+  toast(`Kept the candidate furthest from ${best.nearest ? '"' + best.nearest + '"' : 'your accepted characters'}.`);
+}
+function generateBatchDistinct(n){
+  generateBatch(n);
+  if (batchCandidates.length) pickMostDistinct();
+}
+
+/* ================= TWO NAMED MODES =================
+   "Let users request 'same world, different person' or 'variation of this person'."
+
+   SAME WORLD keeps everything that describes the world — the context line, the age,
+   the settings, the content packs — and builds someone who shares as little as
+   possible with the person on screen: their trait ids, their concept families and
+   their resolved categories are all penalised for this one build. It is not seeded
+   history; it is an explicit avoid set, so it replays.
+
+   VARIATION keeps the person — the five most defining traits are locked, pins are
+   kept, the archetype and context stay — and rerolls the rest with divergence off. */
+function generateSameWorld(){
+  if (!Object.keys(state).length){ toast("Generate a character first — this builds someone else in the same world.", "warn"); return; }
+  const avoid = avoidSetFrom(state);
+  const nameEl = document.getElementById('charName');
+  const keptName = nameEl ? nameEl.value : '';
+  if (nameEl) nameEl.value = '';
+  unlockAll();
+  setAvoidSet(avoid);
+  try { runGeneration(); }
+  finally { setAvoidSet(null); if (nameEl && !nameEl.value) nameEl.value = ''; }
+  charMeta.mode = 'same-world';
+  toast(`Built someone else in the same world${keptName ? ' as "' + keptName + '"' : ''}: their traits, concept families and profile categories were all avoided.`);
+}
+function generateVariation(){
+  if (!Object.keys(state).length){ toast("Generate a character first — this makes a variation of them.", "warn"); return; }
+  const all = Object.entries(state).filter(([k,x])=> x && x.trait);
+  const score = t => (RTIER_SCORE[t.rtier || rarityTier(t)] || 0) * 10 + (t.intensity || 0);
+  const defining = all.slice().sort((a,b)=>score(b[1].trait)-score(a[1].trait)).slice(0, 5).map(([k])=>k);
+  const wasLocked = {};
+  all.forEach(([k,x])=>{ wasLocked[k] = !!x.locked; });
+  defining.forEach(k=>{ state[k].locked = true; });
+  const div = document.getElementById('divergence');
+  const prevDiv = div ? div.value : null;
+  if (div) div.value = '0';
+  try { runGeneration(); }
+  finally {
+    if (div && prevDiv !== null) div.value = prevDiv;
+    // The locks were the mechanism, not a decision the user made: put them back.
+    defining.forEach(k=>{ if (state[k] && !wasLocked[k]) state[k].locked = false; });
+    renderSheet();
+  }
+  charMeta.mode = 'variation';
+  toast(`A variation: the ${defining.length} most defining cards were held, everything else re-rolled without divergence.`);
+}
+
 function runGeneration(){
   try {
     return _runGeneration();
@@ -488,7 +578,8 @@ function _runGeneration(){
   const wantDepthFirst = !!(depthFirstEl && depthFirstEl.checked);
 
   const archKey = strVal('archetypeSelect', '');
-  const arch = ARCHETYPES[archKey] || CUSTOM_ARCHETYPES[archKey];
+  // The preset with its chosen variation folded in — see effectiveArchetype.
+  const arch = effectiveArchetype(archKey, strVal('archetypeVariation', ''));
   // BUG FIX: this used to WRITE the blended value back into the slider elements.
   // Because the blend reads the slider it just wrote, pressing Generate repeatedly
   // with an archetype selected pulled the sliders further toward the archetype each
@@ -501,8 +592,12 @@ function _runGeneration(){
     PERSONALITY_AXES.forEach(a=>{
       const el = document.getElementById('pers_'+a.id);
       const current = intVal(el, 0);
+      /* Blend weight is the user's (archetypeBlend), except on the preset's `must`
+         axes, which are held at a floor so the preset stays recognisable at any
+         setting — see ARCHETYPE_INTENT. */
+      const w = archetypeAxisBlend(arch, a.id);
       archOverrides[a.id] = (arch.pers[a.id] !== undefined)
-        ? Math.round(clamp(current*0.35 + arch.pers[a.id]*0.65, -100, 100))
+        ? Math.round(clamp(current*(1-w) + arch.pers[a.id]*w, -100, 100))
         : current;
     });
   }
@@ -519,9 +614,10 @@ function _runGeneration(){
     // custom archetype behaved unlike a built-in with the same numbers. Both are now a
     // position on the same -2..2 scale, blended the same way, and the built-in tables
     // read as absolute postures (which is how they were written).
-    verbLevel = clamp(verbLevel*0.35 + arch.verbosity*0.65, -2, 2);
-    regLevel  = clamp(regLevel*0.35  + arch.register*0.65,  -2, 2);
-    compLevel = clamp(compLevel*0.35 + arch.composure*0.65, -2, 2);
+    const wv = archetypeBlendLevel();
+    verbLevel = clamp(verbLevel*(1-wv) + arch.verbosity*wv, -2, 2);
+    regLevel  = clamp(regLevel*(1-wv)  + arch.register*wv,  -2, 2);
+    compLevel = clamp(compLevel*(1-wv) + arch.composure*wv, -2, 2);
   }
   const mannerCount = intVal('mannerCount', 3);
   const vocabCount = intVal('vocabCount', 2);
@@ -631,9 +727,15 @@ function _runGeneration(){
     name: strVal('charName', '') || "Unnamed Character",
     age: strVal('charAge', ''),
     context: strVal('charContext', ''),
-    archetypeLabel: archKey ? document.getElementById('archetypeSelect').selectedOptions[0].textContent : "Custom random",
+    archetypeLabel: archKey ? (arch && arch.label) || document.getElementById('archetypeSelect').selectedOptions[0].textContent : "Custom random",
+    archetypeKey: archKey || null,
+    archetypeVariation: (arch && arch.variation) ? arch.variation.id : null,
+    archetypeBlend: archKey ? archetypeBlendLevel() : null,
     seed: charMetaSeed
   };
+  charMeta.viewContext = (typeof viewContext !== 'undefined') ? viewContext : 'baseline';
+  // A freshly generated character starts its arc over — see resetArc in app.js.
+  if (typeof resetArc === 'function') resetArc(false);
   charMeta.archFidelity = arch ? archetypeFidelity(state, arch) : null;
   const emergent = emergentArchetypeName(state);
   if (emergent && !archKey) charMeta.archetypeLabel = emergent.name + (emergent.exact ? "" : " *");

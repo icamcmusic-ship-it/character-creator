@@ -101,6 +101,14 @@ const SECTION_COLORS = {
   "Humor Style": "var(--dusk-blue)",
   "Habits & Vices": "var(--emerald-deep)",
 };
+// The §6 sections. Kept to the same four-colour rotation as the sections above them.
+SECTION_COLORS["Competence & Method"] = "var(--emerald-deep)";
+SECTION_COLORS["Positive Origins"] = "var(--golden-deep)";
+SECTION_COLORS["Goals & Stakes"] = "var(--bubblegum)";
+SECTION_COLORS["Ordinary Texture"] = "var(--dusk-blue)";
+SECTION_COLORS["Recovery & Repair"] = "var(--emerald-deep)";
+SECTION_COLORS["Contradiction Functions"] = "var(--golden-deep)";
+SECTION_COLORS["Role by Context"] = "var(--dusk-blue)";
 SECTION_COLORS["Appearance"] = "var(--accent-violet)";
 SECTION_COLORS["Required (constraints)"] = "var(--accent-amber)";
 SECTION_COLORS["The one thing that doesn't fit"] = "var(--accent-rust)";
@@ -115,6 +123,17 @@ const FREQ_BUDGET = {
   4: {label:"most scenes",               hint:"Load-bearing. This is one of the two or three things that define the voice."},
   5: {label:"nearly every page",         hint:"Dominant. Overuse is the risk here — it can tip into caricature fast."}
 };
+/* The four dimensions the audit asks for, kept apart from intensity: frequency,
+   visibility, persistence and narrative salience. Compact on the card, fully spelled
+   out in the title, and marked when they were inferred from the section rather than
+   authored on the trait. */
+function dimsChipHTML(t){
+  const d = (typeof traitDimensions === 'function') ? traitDimensions(t) : null;
+  if (!d) return ``;
+  const parts = ['frequency','visibility','persistence','narrativeSalience'];
+  const title = parts.map(k => `${DIM_LABELS[k]}: ${d[k]}/5${d.inferred.includes(k) ? ' (inferred from the section)' : ''}`).join('\n');
+  return `<span class="dimsChip" title="${escHTML(title)}"><span aria-hidden="true">F${d.frequency} V${d.visibility} P${d.persistence} S${d.narrativeSalience}</span><span class="srOnly">${escHTML(title.replace(/\n/g, '; '))}</span></span>`;
+}
 function freqBudgetHTML(t){
   const b = FREQ_BUDGET[t.intensity] || FREQ_BUDGET[3];
   return `<div class="freqBudget"><b>Use:</b> ${b.label} <span class="freqHint">— ${b.hint}</span></div>`;
@@ -419,13 +438,18 @@ function traitCardHTML(id, s, includeControls, showDiff, accent, tagLabel){
      is rendered from there, so it survives a rebuild and the ARIA state is true.
      data-slot is what makes a single card replaceable without rebuilding all 37. */
   const openNow = includeControls && OPEN_CARD_CONTROLS.has(id);
+  const cv = includeControls && CONTEXT_VIEW && CONTEXT_VIEW.context !== 'baseline' ? CONTEXT_VIEW.byId[id] : null;
+  const ctxClass = cv && cv.status !== 'active' ? ` ctx-${cv.status}` : ``;
+  const ctxNote = cv && cv.status !== 'active'
+    ? `<div class="traitNote ctxNote"><b>${escHTML(CONTEXT_VIEW.label)}:</b> ${cv.status} — ${escHTML(cv.why)}.</div>` : ``;
   return `
-    <div class="traitCard${s.wildcard ? ' wildcardCard' : ''}${changedClass}${tag ? ' tagged' : ''}${openNow ? ' controlsOpen' : ''}"${style} data-slot="${escAttr(id)}">
+    <div class="traitCard${s.wildcard ? ' wildcardCard' : ''}${changedClass}${tag ? ' tagged' : ''}${openNow ? ' controlsOpen' : ''}${ctxClass}"${style} data-slot="${escAttr(id)}">
       ${tag}
       <div class="traitMain">
         <div class="traitName">${escHTML(t.trait)}
           <span class="rarityBadge rarity-${tier}" title="${escHTML(RARITY_TIER_HINT[tier]||'')}"><span class="rarityGlyph" aria-hidden="true">${RTIER_GLYPH[tier]||"·"}</span>${escHTML(RTIER_LABEL[tier]||tier)}</span>
           <span class="intensityDots" title="Intensity ${t.intensity}/5 (continuous position ${traitPos(t).toFixed(2)})"><span aria-hidden="true">${intensityDots(t.intensity)}</span><span class="srOnly">intensity ${t.intensity} of 5</span></span>
+          ${dimsChipHTML(t)}
           ${s.wildcard ? `<span class="wildBadge" title="Deliberately drawn against the grain — see 'the one thing that doesn't fit'">outlier</span>` : ``}
           ${s.derived ? `<span class="wildBadge" style="background:var(--emerald-deep);border-color:var(--emerald-deep);" title="Derived from this character's psychology rather than a slider">derived</span>` : ``}
           ${s.budgeted ? `<span class="wildBadge budgetBadge" title="${escHTML(s.budgetWhy || 'Adjusted to fit a budget you set')}">budgeted</span>` : ``}
@@ -435,6 +459,8 @@ function traitCardHTML(id, s, includeControls, showDiff, accent, tagLabel){
         ${includeControls ? bandHTML(t, s) : ``}
         ${t.example ? `<div class="exampleLine">&ldquo;${escHTML(t.example)}&rdquo;</div>` : ``}
         ${includeControls ? freqBudgetHTML(t) : ``}
+        ${s.exceptionWhy ? `<div class="traitNote exceptionNote"><b>Why it's here.</b> ${escHTML(s.exceptionWhy)}</div>` : ``}
+        ${ctxNote}
         ${includeControls && traitNotes[id] ? `<div class="traitNote"><b>Note.</b> ${escHTML(traitNotes[id])} <button ${actAttr('click', 'clearTraitNote', id)}>remove</button></div>` : ``}
         ${diff ? `<div class="diffNote">↺ was: "${escHTML(diff.from)}" <button ${actAttr('click', 'dismissDiff', id)}>dismiss</button></div>` : ``}
         ${includeControls && whyOpen[id] ? `<div class="whyNote">${explainPick(id, s)}${(rerollExclusions[id]&&rerollExclusions[id].size)?`<div class="whyExcl">Excluded from rerolls here: ${rerollExclusions[id].size} trait${rerollExclusions[id].size>1?"s":""} you've already passed on. <button ${actAttr('click', 'clearExclusions', id)}>reset</button></div>`:``}</div>` : ``}
@@ -596,12 +622,15 @@ function summaryCardHTML(){
   const slots = Object.values(state).filter(s=> s && s.trait);
   if (!slots.length) return "";
 
-  const emergent = (typeof emergentArchetypeName === 'function') ? emergentArchetypeName(state) : null;
+  const emergent = (typeof characterLabel === 'function') ? characterLabel(state, charMeta) : null;
   // "Unnamed Character" is the generator's placeholder, not a name the user chose — an
   // emergent title says far more, so it takes the headline when there is no real name.
   const named = charMeta.name && charMeta.name !== "Unnamed Character" ? charMeta.name : null;
   const title = named || (emergent && emergent.name) || "This character";
   const sub = (emergent && named) ? emergent.name : "";
+  // The label is the author's once they have edited it; the pencil is how they take it.
+  const labelBtn = `<button class="labelEdit" ${actAttr('click', 'editCharacterLabel')} title="${emergent && emergent.authored ? 'Your label — edit it' : 'Rename the emergent label'}" aria-label="Edit the character label">✎</button>`
+    + (emergent && emergent.authored ? `<button class="labelEdit" ${actAttr('click', 'clearCharacterLabel')} title="Go back to the emergent label" aria-label="Clear your label">×</button>` : ``);
 
   // The loudest traits are the sheet's own headline: highest intensity first, and among
   // equals prefer the deeper sections over a mannerism, since "what they want" carries
@@ -616,12 +645,18 @@ function summaryCardHTML(){
 
   let h = `<div class="summaryCard" id="summaryCard">
     <div class="summaryHead">
-      <div class="summaryName">${escHTML(title)}</div>
-      ${sub ? `<div class="summarySub">${escHTML(sub)}</div>` : ``}
+      <div class="summaryName">${escHTML(title)}${sub ? `` : labelBtn}</div>
+      ${sub ? `<div class="summarySub">${escHTML(sub)}${labelBtn}</div>` : ``}
     </div>`;
 
   const brief = characterBriefHTML();
   if (brief) h += brief;
+  const chain = (typeof motivationChain === 'function') ? motivationChain(state) : null;
+  if (chain && chain.links.length > 1){
+    h += `<details class="chainBox"><summary>How the pieces connect <span class="chainCount">${chain.links.length} links</span></summary><ol class="chainList">` +
+      chain.links.map(l => `<li><span class="chainKey">${escHTML(l.key)}</span> ${escHTML(l.text)} <span class="chainFrom">← ${escHTML(l.from.join(" · "))}</span></li>`).join("") +
+      `</ol></details>`;
+  }
 
   if (loudest.length){
     h += `<ul class="summaryTraits">` + loudest.map(s=>
@@ -763,8 +798,7 @@ function emptyGroupReason(title){
   }
   const ps = PROFILE_SECTIONS.find(p=>p.label === title);
   if (ps){
-    const tog = document.getElementById('sec_'+ps.id);
-    if (tog && !tog.checked) return "Switched off in the Character Profile panel.";
+    if (!profileSectionEnabled(ps)) return "Switched off in the Character Profile panel.";
     if (bannedSections.has(ps.section)) return `The whole "${ps.section}" section is banned in your constraints, so nothing here can ever be drawn.`;
     const cats = catsOf(ps.section);
     if (cats.length && cats.every(c => bannedCategories.has(c)))
@@ -814,6 +848,23 @@ function restoreContextTag(label){
   renderContextTags();
 }
 
+/* The context lens. `viewContext` is view state, not character state: it is captured
+   in charMeta.viewContext so an export says which room it describes, but a saved
+   character always saves its baseline sheet. */
+let viewContext = 'baseline';
+let CONTEXT_VIEW = null;
+function setViewContext(id){
+  viewContext = CONTEXT_MODE_IDS.includes(id) ? id : 'baseline';
+  charMeta.viewContext = viewContext;
+  renderSheet();
+}
+function contextBarHTML(){
+  const view = CONTEXT_VIEW;
+  const btns = CONTEXT_MODES.map(m =>
+    `<button type="button" class="ctxModeBtn${m.id === viewContext ? ' active' : ''}" role="tab" aria-selected="${m.id === viewContext}" ${actAttr('click', 'setViewContext', m.id)} title="${escAttr(m.blurb)}">${escHTML(m.label)}</button>`).join("");
+  const line = view ? `<div class="ctxHeadline">${escHTML(view.headline)}</div>` : ``;
+  return `<div class="contextBar" id="contextBar"><div class="ctxModes" role="tablist" aria-label="Context">${btns}</div>${line}</div>`;
+}
 function renderSheet(){
   const sheet = document.getElementById('sheet');
   sheet.classList.add('show');
@@ -828,7 +879,8 @@ function renderSheet(){
 
   const body = document.getElementById('sheetBody');
   body.innerHTML = "";
-  body.innerHTML = summaryCardHTML();
+  CONTEXT_VIEW = (typeof contextualView === 'function') ? contextualView(state, viewContext) : null;
+  body.innerHTML = contextBarHTML() + summaryCardHTML();
   // Baseline for the per-slot change detection in renderSlotChange.
   noteRenderedTraits();
   /* Not filtered on ids.length any more: a profile section that produced nothing is
@@ -964,12 +1016,16 @@ function renderSheet(){
     /* Framed as a prompt, not a defect — see the CONTRADICTION AS CONTENT note in
        engine.js. Sits above the tension list, because it is the one a writer can
        actually use tonight. */
-    const contra = contradictionFor(state);
+    const contra = (typeof structuredContradiction === 'function') ? structuredContradiction(state, charMeta) : contradictionFor(state);
     if (contra){
+      const fields = (contra.fields || []).map(f => `<div class="contraField"><b>${escHTML(f.prompt)}</b> ${
+        f.answer ? `<span class="contraAnswer">${escHTML(f.answer)}</span>` : (f.derived ? `<span class="contraDerived">${escHTML(f.derived)}</span>` : `<span class="sub">unanswered</span>`)
+      } <button class="contraEdit" ${actAttr('click', 'answerContradiction', f.key)} title="Write your own answer">${f.answer ? 'edit' : 'answer'}</button>${f.answer ? `<button class="contraEdit" ${actAttr('click', 'answerContradiction', f.key, true)} title="Remove your answer">clear</button>` : ``}</div>`).join("");
       h += `<div class="tensionBlock" style="border-left-color:var(--golden-deep); margin-top:10px;">
         <div class="tensionTitle" style="color:var(--golden-deep);">The contradiction &mdash; ${escHTML(contra.axisLabel)}</div>
         <div style="margin:6px 0;">They are <b>${escHTML(contra.hi.trait)}</b> and also <b>${escHTML(contra.lo.trait)}</b>.</div>
         <div style="margin:6px 0; font-style:italic;">${escHTML(contra.question)}</div>
+        ${fields}
         <div class="sub" style="margin:6px 0 0;">Not an error to fix. A ${escHTML(contra.tier.toLowerCase())} opposition on one axis is where a character stops being a list of traits — answer the question and the rest of the sheet reorganises around it.</div>
       </div>`;
     }
@@ -1005,6 +1061,24 @@ function renderSheet(){
         <div class="coherenceBar"><span style="width:${f}%; background:${col};"></span></div>
       </div>${strengthRow}<div class="coherenceNote">Of the axes this archetype takes a position on and the sheet actually expresses, ${f}% lean the way the archetype asked. The second bar is how strongly they lean, measured against the strongest expression this trait bank produces — not against the archetype's own numbers, which are in different units. Drift is legitimate: this is a compass reading, not a grade.${(af.total && af.silent) ? ` The sheet says nothing either way on ${af.silent} of the ${af.total} axes this archetype takes a position on; those are excluded rather than scored as disagreement. They are usually silent because their section is switched off, or because the traits drawn there carry no polarity on that axis.` : ``}</div>`;
     }
+    /* Internal dimensions — the pairs a single slider conflates, read separately from
+       the sheet. Only the pairs with evidence on BOTH halves are shown, and a pair is
+       flagged when its halves disagree, which is exactly where the slider would have
+       lied about this person. */
+    try {
+      const dims = internalDimensions(state);
+      const word = (d, v) => Math.abs(v) < 0.2 ? 'middling' : (v > 0 ? d.high : d.low);
+      const rows = INTERNAL_DIMENSION_PAIRS.map(([a,b])=>{
+        const da = INTERNAL_DIMENSIONS.find(d=>d.id===a), db = INTERNAL_DIMENSIONS.find(d=>d.id===b);
+        const va = dims[a], vb = dims[b];
+        if (!va && !vb) return null;
+        const split = (va > 0.2 && vb < -0.2) || (va < -0.2 && vb > 0.2);
+        return `<div class="dimRow${split ? ' dimSplit' : ''}"><span>${escHTML(da.label)}: <b>${escHTML(word(da, va))}</b></span><span>${escHTML(db.label)}: <b>${escHTML(word(db, vb))}</b></span>${split ? '<span class="dimFlag" title="These two usually travel together on one slider; here they part company.">split</span>' : ''}</div>`;
+      }).filter(Boolean);
+      if (rows.length){
+        h += `<div class="tensionBlock" style="border-left-color:var(--accent-violet); margin-top:10px;"><div class="tensionTitle" style="color:var(--accent-violet);">Two things the sliders treat as one</div>${rows.join('')}<div class="sub" style="margin:6px 0 0;">Read from the sheet, not from the controls: self-worth against self-presentation, depth against expression, and so on. A <b>split</b> is where one slider would have lied about this person.</div></div>`;
+      }
+    } catch(e){}
     // Voice fingerprint — assembled from the character's own example lines.
     const fp = voiceFingerprint(state, charMeta);
     if (fp){
@@ -1052,6 +1126,8 @@ function renderSheet(){
     insight.style.display = h ? "block" : "none";
   }
 
+  if (typeof renderArc === 'function') renderArc();
+  if (typeof renderVoiceLab === 'function') renderVoiceLab();
   renderChangeList();
   refreshBudgetMeters();
   refreshJumpToSection();
@@ -1071,6 +1147,11 @@ function renderSheet(){
     const pfp = voiceFingerprint(pressureState, charMeta);
     if (pfp) head += `<div class="pressureBlock"><b>How they sound once it starts.</b> <i>${escHTML(pfp)}</i></div>`;
     if (pm.recovery) head += `<div class="pressureBlock"><b>Afterwards.</b> ${escHTML(pm.recovery)}</div>`;
+    const chain = (typeof pressureChain === 'function') ? pressureChain(state, pressureState) : null;
+    if (chain){
+      head += `<ol class="chainList pressureChain">` + chain.stages.map(sg =>
+        `<li><b>${escHTML(sg.title)}.</b> ${escHTML(sg.text)} <span class="chainFrom">← ${escHTML(sg.from.join(" · ") || "the pressure dial")}</span></li>`).join("") + `</ol>`;
+    }
     pbody.innerHTML = head;
     const pgroups = [
       {title:"Speech Under Pressure", ids:["verbosity","register","grammar"]},
@@ -1107,6 +1188,8 @@ const SECTION_GLYPHS = {
   "Attachment & Intimacy":"◆", "Humor Style":"◼", "Habits & Vices":"▲", "Appearance":"✦",
   "Required (constraints)":"✚", "The one thing that doesn't fit":"✳",
   "Where They Stand Under Pressure":"▲",
+  "Competence & Method":"▲", "Positive Origins":"●", "Goals & Stakes":"◆", "Ordinary Texture":"◼",
+  "Recovery & Repair":"▲", "Contradiction Functions":"●", "Role by Context":"◼",
 };
 function sectionGlyph(title){ return SECTION_GLYPHS[title] || "◆"; }
 
@@ -1262,7 +1345,29 @@ function sheetToText(st, meta, pState){
   if (meta.age) bits.push(`**Age:** ${meta.age}`);
   if (meta.context) bits.push(`**Context:** ${meta.context}`);
   if (meta.archetypeLabel) bits.push(`**Archetype:** ${meta.archetypeLabel}`);
+  if (meta.label) bits.push(`**Label:** ${meta.label}`);
   if (bits.length) L.push("", bits.join("  \n"));
+  try {
+    const ctxId = meta.viewContext && meta.viewContext !== 'baseline' ? meta.viewContext : null;
+    if (ctxId){
+      const v = contextualView(st, ctxId);
+      L.push("", `## ${v.label}`, "", `_${v.headline}_`, "");
+      ["amplified","suppressed","exception"].forEach(k=>{
+        const rows = v.slots.filter(x=>x.status===k);
+        if (rows.length) L.push(`**${k[0].toUpperCase()+k.slice(1)}:**`, ...rows.map(x=>`- ${x.trait.trait} — ${x.why}`), "");
+      });
+    }
+    if (meta.arc && meta.arc.events) L.push("", `_Arc: ${meta.arc.line}_`);
+    const chain = motivationChain(st);
+    if (chain && chain.links.length > 1){
+      L.push("", "**How the pieces connect:**", ...chain.links.map(l => `${l.links ? '' : ''}1. _${l.key}_ — ${l.text} (from: ${l.from.join(", ")})`));
+    }
+    const contra = structuredContradiction(st, meta);
+    if (contra){
+      L.push("", `**The contradiction — ${contra.axisLabel}:** ${contra.hi.trait} and also ${contra.lo.trait}. _${contra.question}_`,
+        ...contra.fields.map(f => `- ${f.prompt} ${f.answer || f.derived || "(unanswered)"}`));
+    }
+  } catch(e){}
   try {
     const co = coherenceScore(st);
     if (co) L.push("", `_Coherence: ${co.pct}% (${co.lift>=0?"+":""}${co.lift} vs a ${co.basePct}% chance baseline) — ${co.label}_`);
@@ -1277,6 +1382,8 @@ function sheetToText(st, meta, pState){
     const t = slot.trait;
     const out = [`- **${t.trait}** — ${t.desc}`];
     out.push(`  - *${t.category}* · intensity ${t.intensity}/5 · ${t.rarity} · use: ${(FREQ_BUDGET[t.intensity]||FREQ_BUDGET[3]).label}`);
+    const d = (typeof traitDimensions === 'function') ? traitDimensions(t) : null;
+    if (d) out.push(`  - frequency ${d.frequency} · visibility ${d.visibility} · persistence ${d.persistence} · salience ${d.narrativeSalience}${d.inferred.length ? ` (${d.inferred.length === 4 ? 'all' : d.inferred.join(', ')} inferred)` : ''}`);
     if (showEx && t.example) out.push(`  - > ${t.example}`);
     return out.join("\n");
   };
@@ -1311,6 +1418,18 @@ function sheetToText(st, meta, pState){
   block("Vocabulary", Object.keys(st).filter(k=>k.startsWith("vocab")));
   block("Mannerisms", Object.keys(st).filter(k=>k.startsWith("manner")));
 
+  // ---- Voice lab ----
+  try {
+    if (typeof voiceLabToMarkdown === 'function' && boolVal('voiceLabInExport', false)){
+      L.push("", "## Voice lab", "", voiceLabToMarkdown(st, typeof voiceLabMode !== 'undefined' ? voiceLabMode : 'baseline'));
+    }
+  } catch(e){}
+
+  // ---- The arc ----
+  if (typeof arcEvents !== 'undefined' && arcEvents.length){
+    L.push("", "## Arc", "", `_${arcSummary(arcEvents).line}_`, "", arcToMarkdown(arcEvents));
+  }
+
   // ---- Under pressure ----
   if (pState){
     L.push("", "## Under Pressure", "");
@@ -1323,6 +1442,10 @@ function sheetToText(st, meta, pState){
     if (pm.level !== undefined && pm.level < 0.99) L.push(`_Shown at ${Math.round(pm.level*100)}% pressure._`, "");
     if (pm.trigger) L.push(`**What sets it off.** ${plainify(pm.trigger)}`, "");
     if (pm.recovery) L.push(`**Afterwards.** ${pm.recovery}`, "");
+    try {
+      const chain = pressureChain(st, pState);
+      if (chain) L.push(...chain.stages.map(sg => `1. **${sg.title}.** ${sg.text} (from: ${sg.from.join(", ") || "the pressure dial"})`), "");
+    } catch(e){}
     /* The base sheet's `block` helper filters slots whose TRAIT is null; the pressure
        section checked only that the slot existed, so one blanked or banned-out pressure
        slot threw `Cannot read properties of null (reading 'trait')` and aborted the
@@ -1405,7 +1528,7 @@ const CHAR_FORMAT_VERSION = 2;
 // Every control that changes what a generation produces.
 const SETTING_FIELDS = ['mannerCount','vocabCount','personalityCount','profileDepth',
   'rarityPref','affinityBoost','rangeFocus','profileWeight','divergence',
-  'app_stature','app_upkeep','app_presence','archetypeSelect','seedInput','sheetDensity','wildcardCount','pressureLevel',
+  'app_stature','app_upkeep','app_presence','archetypeSelect','archetypeVariation','archetypeBlend','seedInput','sheetDensity','wildcardCount','pressureLevel',
   /* The cast and foil controls were the one part of the workspace that no capture
      covered, so "export my setup" and Undo both silently dropped them and a cast was
      unreproducible from a settings file even though it now has a seed. A workspace is
@@ -1451,6 +1574,9 @@ function captureSettings(){
     // Bookmarks. Deliberately NOT part of `constraints`: a favourite does not steer
     // generation, which is the whole point of splitting it from "always include".
     favouriteTraitIds: (typeof getFavouriteTraitIds === 'function') ? getFavouriteTraitIds() : [],
+    // Content packs switched off for this workspace. Part of the settings because a
+    // character generated with a pack off should replay with it off.
+    disabledPacks: (typeof getDisabledPacks === 'function') ? getDisabledPacks() : [],
     rerollExclusions: excl,
   };
 }
@@ -1462,6 +1588,16 @@ function restoreSettings(s){
     if (el.tagName === 'SELECT'){ if ([...el.options].some(o=>o.value===v)) el.value = v; }
     else el.value = v;
   });
+  // The variation list depends on which preset is selected; rebuild it before the
+  // saved variation value is applied below, or the value has no option to land on.
+  if (typeof onArchetypeChange === 'function'){
+    onArchetypeChange(false);
+    const vsel = document.getElementById('archetypeVariation');
+    const want = s.fields && s.fields.archetypeVariation;
+    if (vsel && want && [...vsel.options].some(o=>o.value===want)) vsel.value = want;
+    const bl = document.getElementById('archetypeBlendVal'), be = document.getElementById('archetypeBlend');
+    if (bl && be) bl.textContent = Math.round(parseFloat(be.value)*100) + '%';
+  }
   Object.entries(s.toggles||{}).forEach(([id,v])=>{ const el=document.getElementById(id); if (el) el.checked = !!v; });
   Object.entries(s.sections||{}).forEach(([id,cfg])=>{
     const tog = document.getElementById('sec_'+id); if (tog) tog.checked = !!cfg.on;
@@ -1489,6 +1625,8 @@ function restoreSettings(s){
   const mbm = document.getElementById('mutationBudgetMode');
   if (mbm) mbm.value = c.mutationBudgetMode || 'enforce';
   if (typeof setFavouriteTraitIds === 'function') setFavouriteTraitIds(s.favouriteTraitIds || []);
+  if (typeof setDisabledPacks === 'function') setDisabledPacks(s.disabledPacks || []);
+  if (typeof refreshPackUI === 'function') refreshPackUI();
   if (typeof refreshBudgetUI === 'function') refreshBudgetUI();
   rerollExclusions = {};
   Object.entries(s.rerollExclusions || {}).forEach(([k,v])=>{ rerollExclusions[k] = new Set(v); });
@@ -1817,6 +1955,9 @@ function validateSheetPayload(p){
   }
   if (p.settings && p.settings.sliders !== undefined && !isPlainObject(p.settings.sliders))
     throw new Error("The `settings.sliders` block is not an object.");
+  if (p.settings && p.settings.disabledPacks !== undefined &&
+      (!Array.isArray(p.settings.disabledPacks) || p.settings.disabledPacks.some(x=>typeof x !== 'string')))
+    throw new Error("The `settings.disabledPacks` block is not a list of pack ids.");
   return p;
 }
 

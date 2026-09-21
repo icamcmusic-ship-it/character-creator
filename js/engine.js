@@ -44,8 +44,34 @@ const TRAITS_BY_ID = new Map();       // id -> trait (undo/import re-linking)
 const TRAITS_BY_KEY = new Map();      // "section||category" -> trait[]
 const CATS_BY_SECTION = new Map();    // section -> category[] (first-seen order)
 const SECTION_OF_CATEGORY = new Map(); // category -> section (categories are unique to one)
+/* ================= PACK INDEX =================
+   TRAIT_PACKS (declared in traits-core.js, one manifest per data file) says which id
+   range each pack owns. Each trait is stamped with its pack at load, and a project can
+   disable a pack: byFilter stops drawing from it, but TRAITS_BY_ID keeps every entry so
+   a saved character written against that pack still opens with all its cards. */
+const PACKS_BY_ID = new Map();
+(typeof TRAIT_PACKS !== 'undefined' ? TRAIT_PACKS : []).forEach(p=> PACKS_BY_ID.set(p.id, p));
+function packOfId(id){
+  for (const p of (typeof TRAIT_PACKS !== 'undefined' ? TRAIT_PACKS : [])){
+    if (id >= p.ids[0] && id <= p.ids[1]) return p.id;
+  }
+  return 'core';
+}
+let disabledPacks = new Set();
+function setPackEnabled(id, on){ if (on) disabledPacks.delete(id); else disabledPacks.add(id); }
+function isPackEnabled(id){ return !disabledPacks.has(id); }
+function getDisabledPacks(){ return [...disabledPacks]; }
+function setDisabledPacks(list){ disabledPacks = new Set(list || []); }
+
 (function indexTraits(){
   TRAITS.forEach(t=>{
+    t.pack = packOfId(t.id);
+    // The editorial state of an entry. Everything the bank has ever shipped was written
+    // and then treated as reviewed by default, which made "core vs secondary" mostly an
+    // absence-of-annotation distinction — see the audit's 2.4% figure. Entries are now
+    // explicitly `unreviewed` unless a pass has looked at them; the tagging passes below
+    // and the hand-reviewed lists promote what they touch.
+    if (!t.reviewStatus) t.reviewStatus = 'unreviewed';
     TRAITS_BY_ID.set(t.id, t);
     if (!SECTION_OF_CATEGORY.has(t.category)) SECTION_OF_CATEGORY.set(t.category, t.section);
     const key = t.section + "||" + t.category;
@@ -138,8 +164,8 @@ let TIER_TAG_STATS = null;
   let matched = 0;
   TRAITS.forEach(t=>{
     if (t.section !== "Personality Traits") return;
-    if (secondary.has(t.trait.toLowerCase())){ t.tier = "secondary"; matched++; }
-    else t.tier = "core";
+    if (secondary.has(t.trait.toLowerCase())){ t.tier = "secondary"; matched++; t.reviewStatus = 'reviewed'; }
+    else t.tier = "core";   // behaviourally core; editorially still whatever reviewStatus says
   });
   TIER_TAG_STATS = {listed: SECONDARY_TRAIT_NAMES.length, matched};
 })();
@@ -269,6 +295,7 @@ function withSpeculativeGeneration(fn){
     history: history.slice(),
     redoStack: redoStack.slice(),
     recentTraitIds: recentTraitIds.slice(),
+    recentFamilies: recentFamilies.slice(),
     lastBySlot: Object.assign({}, lastBySlot),
     sessionProfiles: sessionProfiles.slice(),
     lastGenerationSignature: (typeof lastGenerationSignature !== 'undefined') ? lastGenerationSignature : undefined,
@@ -280,6 +307,7 @@ function withSpeculativeGeneration(fn){
     history = saved.history;
     redoStack = saved.redoStack;
     recentTraitIds = saved.recentTraitIds;
+    recentFamilies = saved.recentFamilies;
     lastBySlot = saved.lastBySlot;
     sessionProfiles = saved.sessionProfiles;
     if (saved.lastGenerationSignature !== undefined) lastGenerationSignature = saved.lastGenerationSignature;
@@ -305,6 +333,7 @@ function byFilter(section, category){
   if (bannedSections.has(section)) return [];
   if (bannedCategories.has(category)) return [];
   if (bannedTraitIds.size) pool = pool.filter(t=>!bannedTraitIds.has(t.id));
+  if (disabledPacks.size) pool = pool.filter(t=>!disabledPacks.has(t.pack));
   // Variant lock (Phase 3): applied here so EVERY path — generation, reroll, pin
   // adjust, cast, foil — respects the character's committed presentation, with no
   // way for a mixed sheet to slip through a specialized pick path.
@@ -324,6 +353,33 @@ function catsOf(section){ return CATS_BY_SECTION.get(section) || []; }
    The test suite covers this for CI. It does not cover somebody hand-editing a data
    file locally and reloading, which is exactly when the feedback is worth having. Runs
    only with ?dev=1 in the URL, so it costs a normal load nothing. */
+/* ================= TRAIT SCHEMA, INCLUDING THE OPTIONAL STRUCTURED FIELDS =================
+   The founding shape is {id, section, category, trait, desc, example, intensity, rarity,
+   pol}. The audit's schema evolution adds optional fields in stages; every one of them
+   is optional so the existing bank is valid unchanged, and every one is validated here
+   so a malformed value fails at load in ?dev=1 and in the test suite, not at a draw.
+
+     conceptFamily     string   — the concept this is a paraphrase-family member of; the
+                                  near-duplicate review groups by it
+     behaviorFunction  string   — what the behaviour DOES for the person (protect, signal,
+                                  soothe, control, connect, avoid, perform, repair …)
+     conditions        string[] — contexts in which it is active: public, private,
+                                  authority, threat, intimacy, fatigue, work, home
+     exceptions        string[] — who or what it does not apply to ("except family")
+     frequency         1..5     — how often it shows, independently of intensity
+     visibility        1..5     — how noticeable it is to others
+     persistence       1..5     — how stable across time
+     narrativeSalience 1..5     — how much of the character it explains
+     worldTags         string[] — applicability: modern, pre-modern, any, urban, rural …
+     supports/conflicts/requires  number[] — trait ids
+     examplesBySituation  {context: string}
+     reviewStatus      'unreviewed' | 'reviewed' | 'flagged'
+     revision          string
+   A physical characteristic does not acquire a moral vector by being given these
+   fields, and a neutral behaviour can be explicitly unpolarised. */
+const TRAIT_CONTEXTS = ['public','private','authority','threat','intimacy','fatigue','work','home','stranger','peer','dependent'];
+const TRAIT_WORLD_TAGS = ['any','modern','pre-modern','industrial','futuristic','urban','rural','military','institutional','domestic','online'];
+const TRAIT_REVIEW_STATES = ['unreviewed','reviewed','flagged'];
 function assertTraitShape(){
   const problems = [];
   const seenIds = new Set();
@@ -342,6 +398,32 @@ function assertTraitShape(){
     Object.entries(t.pol || {}).forEach(([ax, v])=>{
       if (!AXIS_LABELS[ax]) push(t, `pol names an unknown axis "${ax}"`);
       if (typeof v !== 'number') push(t, `pol.${ax} is not a number`);
+    });
+    // ---- optional structured fields ----
+    const strList = (k, allowed) => {
+      if (t[k] === undefined) return;
+      if (!Array.isArray(t[k]) || t[k].some(x=>typeof x !== 'string')) return push(t, `${k} is not a list of strings`);
+      if (allowed) t[k].forEach(x=>{ if (!allowed.includes(x)) push(t, `${k} has an unknown value "${x}"`); });
+    };
+    const scale = k => { if (t[k] !== undefined && (!Number.isInteger(t[k]) || t[k] < 1 || t[k] > 5)) push(t, `${k} ${t[k]} is not 1-5`); };
+    const idList = k => { if (t[k] !== undefined && (!Array.isArray(t[k]) || t[k].some(x=>!Number.isInteger(x)))) push(t, `${k} is not a list of trait ids`); };
+    ['conceptFamily','behaviorFunction','revision'].forEach(k=>{ if (t[k] !== undefined && typeof t[k] !== 'string') push(t, `${k} is not a string`); });
+    strList('conditions', TRAIT_CONTEXTS); strList('exceptions'); strList('worldTags', TRAIT_WORLD_TAGS);
+    ['frequency','visibility','persistence','narrativeSalience'].forEach(scale);
+    ['supports','conflicts','requires'].forEach(idList);
+    if (t.examplesBySituation !== undefined){
+      if (!t.examplesBySituation || typeof t.examplesBySituation !== 'object' || Array.isArray(t.examplesBySituation)) push(t, 'examplesBySituation is not an object');
+      else Object.entries(t.examplesBySituation).forEach(([c,v])=>{
+        if (!TRAIT_CONTEXTS.includes(c)) push(t, `examplesBySituation names an unknown context "${c}"`);
+        if (typeof v !== 'string') push(t, `examplesBySituation.${c} is not a string`);
+      });
+    }
+    if (t.reviewStatus !== undefined && !TRAIT_REVIEW_STATES.includes(t.reviewStatus)) push(t, `reviewStatus "${t.reviewStatus}" is not one of ${TRAIT_REVIEW_STATES.join('/')}`);
+  });
+  // Cross-reference: supports/conflicts/requires must name real ids.
+  TRAITS.forEach(t=>{
+    ['supports','conflicts','requires'].forEach(k=>{
+      (t[k] || []).forEach(id=>{ if (!seenIds.has(id)) push(t, `${k} names a trait id that does not exist (${id})`); });
     });
   });
   return problems;
@@ -789,6 +871,35 @@ let ARCHETYPES = {
              pers:{discipline:-55, curiosity:65, intelligence:-25, activeness:-35, positivity:35, emotionalcapacity:40, assertiveness:-30}},
   stubbornCraftsman:   {label:"Stubborn Craftsman", verbosity:-2, register:-1, composure:-2, vocabPref:["Precision & Specificity Level","Directness & Literalness"],
              pers:{intelligence:-30, discipline:70, rebelliousness:-35, assertiveness:40, curiosity:-25, manners:-15, emotionalcapacity:-25}},
+
+  /* ---- THE 2026 AUDIT'S INPUT-BALANCE PASS (§4.5) -------------------------------
+     Measured over the 34 presets above: discipline set positive in 20 and negative
+     in 5; emotional capacity negative in 15 and positive in 9; honesty 13:5,
+     curiosity 11:4, positivity 11:5 — all leaning positive when specified. And
+     the profile hints: Secure attachment eleven times, Restraint & Discipline six,
+     Dry & Deadpan five, against one each for Substance, Compulsion, Risk & Escape,
+     Intellectual & Wordplay and Humorless. A user reaching for "random preset"
+     inherits that taste.
+
+     Eight presets, chosen as people first. Between them: six lean undisciplined,
+     five lean emotionally open, three are dishonest, three are incurious, three are
+     pessimists, and their hints go to the under-used categories. */
+  openHeartedShambles: {label:"Open-Hearted Shambles", verbosity:1, register:-1, composure:0, vocabPref:["Affective & Emotional Intensity","Abstractness & Sensory Modality"],
+             pers:{emotionalcapacity:75, discipline:-60, friendliness:55, honesty:50, agreeableness:35, positivity:20, curiosity:40}},
+  weepingBrawler:      {label:"Weeping Brawler", verbosity:0, register:-2, composure:2, vocabPref:["Directness & Literalness","Phonetic & Auditory Qualities"],
+             pers:{emotionalcapacity:70, assertiveness:60, discipline:-45, agreeableness:-40, manners:-45, positivity:-20, honesty:30, friendliness:-15}},
+  lovableLiar:         {label:"Lovable Liar", verbosity:1, register:-1, composure:-1, vocabPref:["Pragmatic Focus & Speech Functions","Affective & Emotional Intensity"],
+             pers:{honesty:-65, friendliness:70, emotionalcapacity:45, discipline:-40, positivity:45, confidence:30, curiosity:-20}},
+  incuriousContent:    {label:"Incurious and Content", verbosity:-1, register:-1, composure:-2, vocabPref:["Directness & Literalness","Pragmatic Focus & Speech Functions"],
+             pers:{curiosity:-70, positivity:40, discipline:-20, agreeableness:50, friendliness:35, activeness:-30, intelligence:-20}},
+  gloomyRomantic:      {label:"Gloomy Romantic", verbosity:0, register:1, composure:-1, vocabPref:["Affective & Emotional Intensity","Temporal Orientation & Tense Usage"],
+             pers:{emotionalcapacity:70, positivity:-60, discipline:-35, curiosity:30, friendliness:20, confidence:-25, activeness:-30}},
+  scatteredGenius:     {label:"Scattered Genius", verbosity:1, register:0, composure:1, vocabPref:["Conceptual Framework & Loanwords","Morphological & Structural Lexicon"],
+             pers:{intelligence:80, discipline:-75, curiosity:75, honesty:-15, manners:-30, activeness:35, agreeableness:-15, friendliness:-20}},
+  jadedFixer:          {label:"Jaded Fixer", verbosity:-1, register:0, composure:-1, vocabPref:["Pragmatic Focus & Speech Functions","Precision & Specificity Level"],
+             pers:{honesty:-50, positivity:-45, discipline:35, emotionalcapacity:-30, curiosity:-35, intelligence:40, assertiveness:35, friendliness:-30}},
+  bigHeartedBoss:      {label:"Big-Hearted Boss", verbosity:1, register:0, composure:0, vocabPref:["Directness & Literalness","Affective & Emotional Intensity"],
+             pers:{emotionalcapacity:60, assertiveness:65, friendliness:60, discipline:-25, manners:-20, positivity:40, confidence:55}},
 };
 
 /* Optional profile hints, per archetype. See ARCHETYPE PROFILE HINTS in accumulateBoost:
@@ -832,17 +943,348 @@ const ARCHETYPE_PROFILE_HINTS = {
   trueZealot:          {values:"Idealistic & Visionary", role:"Instigator", stress:"Fight (attack the threat)"},
   alienLogic:          {role:"Outsider", humor:"Intellectual & Wordplay", attachment:"Avoidant"},
   unbotheredYoung:     {attachment:"Secure", humor:"Dry & Deadpan", values:"Pragmatic & Flexible"},
-  steadyOrganiser:     {attachment:"Secure", role:"Leader", vices:"Restraint & Discipline"},
+  steadyOrganiser:     {attachment:"Anxious", role:"Leader", vices:"Restraint & Discipline"},
   cheerfulMess:        {attachment:"Disorganized", humor:"Absurd & Chaotic", vices:"Risk & Escape"},
   plainSpoken:         {attachment:"Secure", values:"Pragmatic & Flexible", humor:"Dry & Deadpan"},
   softSpokenSecond:    {role:"Peacemaker", stress:"Fawn (appease the threat)", attachment:"Anxious"},
   bluntForeman:        {role:"Leader", stress:"Fight (attack the threat)", attachment:"Secure"},
   dreamyDrifter:       {role:"Outsider", vices:"Avoidance & Procrastination", attachment:"Secure"},
   stubbornCraftsman:   {values:"Rigid & Principled", vices:"Restraint & Discipline", attachment:"Secure"},
+  // The balance pass: hints to the categories the table above barely reached.
+  openHeartedShambles: {attachment:"Anxious", vices:"Substance & Consumption", humor:"Warm & Playful"},
+  weepingBrawler:      {stress:"Fight (attack the threat)", vices:"Risk & Escape", attachment:"Disorganized"},
+  lovableLiar:         {values:"Self-Interested", humor:"Absurd & Chaotic", role:"Connector"},
+  incuriousContent:    {humor:"Humorless & Absent", values:"Pragmatic & Flexible", role:"Peacemaker"},
+  gloomyRomantic:      {attachment:"Anxious", humor:"Self-Deprecating", vices:"Substance & Consumption"},
+  scatteredGenius:     {humor:"Intellectual & Wordplay", vices:"Compulsion & Ritual", role:"Outsider"},
+  jadedFixer:          {values:"Pragmatic & Flexible", humor:"Cruel & Barbed", stress:"Flight (remove yourself)"},
+  bigHeartedBoss:      {role:"Leader", humor:"Warm & Playful", vices:"Risk & Escape"},
 };
 Object.entries(ARCHETYPE_PROFILE_HINTS).forEach(([k, profile])=>{
   if (ARCHETYPES[k]) ARCHETYPES[k].profile = profile;
 });
+
+/* ================= INTERNAL DIMENSIONS =================
+   The audit's model issue (§4.5): several sliders conflate two things. Insecurity and
+   grandiosity are not one opposite of confidence; guarded expression and shallow
+   feeling are not the same; intuition and low competence are not the same; energy and
+   initiative are not the same; friendliness and intimacy are not the same; personal
+   discipline and obedience to institutions are not the same. The fix the audit asks
+   for is to introduce the separated dimensions INTERNALLY first — derived from what is
+   on the sheet — rather than as a dozen new sliders.
+
+   Each dimension is scored from the sheet's traits by category, presentation variant,
+   concept family and behaviour function; -1..1, with 0 = no evidence. They are shown
+   as a compact readout on the summary card and consumed by the contextual engine,
+   which needs "expression" and "depth" separately to decide what a private room
+   changes. They are NOT generation inputs; nothing here changes what is drawn. */
+const INTERNAL_DIMENSIONS = [
+  {id:"selfWorth",     label:"Self-worth",         low:"self-doubting", high:"self-assured"},
+  {id:"selfPresent",   label:"Self-presentation",  low:"understated",   high:"grandiose"},
+  {id:"emoDepth",      label:"Emotional depth",    low:"shallow",       high:"deep"},
+  {id:"emoExpress",    label:"Emotional expression",low:"guarded",      high:"expressive"},
+  {id:"analytic",      label:"Analytical preference",low:"intuitive",   high:"analytical"},
+  {id:"competence",    label:"Practical competence",low:"unproven",     high:"capable"},
+  {id:"activation",    label:"Activation",         low:"slow to start", high:"quick to start"},
+  {id:"endurance",     label:"Endurance",          low:"burns out",     high:"keeps going"},
+  {id:"warmth",        label:"Social warmth",      low:"cool",          high:"warm"},
+  {id:"trust",         label:"Trust",              low:"guarded",       high:"trusting"},
+  {id:"selfDiscipline",label:"Personal discipline",low:"loose",         high:"strict"},
+  {id:"obedience",     label:"Institutional obedience", low:"defiant",  high:"compliant"},
+];
+function internalDimensions(st){
+  const acc = {}, n = {};
+  const add = (id, v) => { acc[id] = (acc[id]||0) + v; n[id] = (n[id]||0) + 1; };
+  const cats = new Set(), fams = new Set(), funcs = new Set();
+  Object.values(st || {}).forEach(sl=>{
+    const t = sl && sl.trait; if (!t) return;
+    cats.add(t.category);
+    if (t.conceptFamily) fams.add(t.conceptFamily);
+    if (t.behaviorFunction) funcs.add(t.behaviorFunction);
+    const c = t.category, v = t.variant, p = t.pol || {};
+    // self-worth vs self-presentation: the Confidence axis split by presentation variant
+    if (c === "Confidence — Self-Assured"){ add("selfWorth", 1); }
+    if (c === "Confidence — Insecure or Egotistical"){
+      if (v === "a") add("selfWorth", -1); else if (v === "b") add("selfPresent", 1); else { add("selfWorth", -0.5); add("selfPresent", 0.5); }
+    }
+    if (c === "Confidence — Situational") add("selfPresent", -0.3);
+    // depth vs expression: Emotional Capacity split by variant
+    if (c === "Emotional Capacity — Expressive & Deep"){ add("emoDepth", 1); add("emoExpress", 1); }
+    if (c === "Emotional Capacity — Guarded & Shallow"){
+      if (v === "a"){ add("emoDepth", 0.5); add("emoExpress", -1); } else if (v === "b"){ add("emoDepth", -1); add("emoExpress", -0.3); } else { add("emoDepth", -0.3); add("emoExpress", -0.6); }
+    }
+    // analytical preference vs practical competence
+    if (c === "Intelligence — Sharp & Analytical") add("analytic", 1);
+    if (c === "Intelligence — Instinctive & Unanalytical"){ add("analytic", -1); if (v === "a") add("competence", 0.5); else if (v === "b") add("competence", -0.5); }
+    if (t.section === "Competence & Method") add("competence", 1);
+    // activation vs endurance: the Activeness axis, plus discipline for endurance
+    if (c === "Activeness — Energetic & Active") add("activation", 1);
+    if (c === "Activeness — Sedentary & Low-Energy") add("activation", -1);
+    if (c === "Discipline — Self-Controlled") add("endurance", 0.6);
+    if (c === "Discipline — Impulsive & Unrestrained") add("endurance", -0.6);
+    if (c === "Restraint & Discipline") add("endurance", 0.5);
+    if (c === "Risk & Escape" || c === "Avoidance & Procrastination") add("endurance", -0.5);
+    // social warmth vs trust: Friendliness vs Attachment
+    if (c === "Friendliness — Warm & Approachable") add("warmth", 1);
+    if (c === "Friendliness — Cold & Aloof") add("warmth", -1);
+    if (c === "Secure") add("trust", 1);
+    if (c === "Avoidant" || c === "Disorganized") add("trust", -1);
+    if (c === "Anxious") add("trust", -0.4);
+    if (t.section === "Positive Origins" && c === "Learned Trust") add("trust", 1);
+    // personal discipline vs institutional obedience
+    if (c === "Discipline — Self-Controlled") add("selfDiscipline", 1);
+    if (c === "Discipline — Impulsive & Unrestrained") add("selfDiscipline", -1);
+    if (c === "Rebelliousness — Defiant") add("obedience", -1);
+    if (c === "Rebelliousness — Conforming & Compliant") add("obedience", 1);
+    if (c === "Under Authority" && t.conceptFamily){
+      if (/mutineer|arguer|truth-teller|rep|ask-not-tell/.test(t.conceptFamily)) add("obedience", -0.5);
+      if (/pet|chair-loyal|silent|invisible/.test(t.conceptFamily)) add("obedience", 0.5);
+    }
+    // behaviour functions as weak evidence
+    if (t.behaviorFunction === "protect") add("trust", -0.2);
+    if (t.behaviorFunction === "connect") add("warmth", 0.2);
+    if (t.behaviorFunction === "perform") add("selfPresent", 0.3);
+  });
+  const out = {};
+  INTERNAL_DIMENSIONS.forEach(d=>{
+    const k = n[d.id] || 0;
+    out[d.id] = k ? clamp(acc[d.id] / Math.max(1, Math.sqrt(k) * 1.2), -1, 1) : 0;
+  });
+  return out;
+}
+// The pairs the audit says the sliders conflate, for the readout: where the two halves
+// disagree is exactly where a single slider would have lied.
+const INTERNAL_DIMENSION_PAIRS = [["selfWorth","selfPresent"],["emoDepth","emoExpress"],["analytic","competence"],
+  ["activation","endurance"],["warmth","trust"],["selfDiscipline","obedience"]];
+
+/* ================= ARCHETYPE INTENT =================
+   The audit's §4.6: "presets need explicit intent specifications — what must be
+   recognizable, what should merely be nudged, and what should remain open." A preset
+   used to be a bag of numbers blended 35/65 with the sliders, with every axis treated
+   the same; a Smug Con Artist whose honesty came out neutral was still labelled a con
+   artist. `must` names the axes without which the preset is not recognisable — they
+   are blended at a floor (see effectiveArchetype) whatever the user's blend setting.
+   `nudge` is the profile hint set. `open` is stated so it is visibly a decision. Every
+   built-in preset has an entry; the test suite refuses one that does not. */
+const ARCHETYPE_INTENT = {
+  soldier:             {must:["discipline","emotionalcapacity"], nudge:["attachment","stress","values"], open:["humor","vices","role"]},
+  conartist:           {must:["honesty","confidence"], nudge:["values","humor","role"], open:["attachment","stress","vices"]},
+  intern:              {must:["confidence","assertiveness"], nudge:["attachment","stress","humor"], open:["values","vices","role"]},
+  scholar:             {must:["intelligence","activeness"], nudge:["role","humor","vices"], open:["attachment","stress","values"]},
+  noble:               {must:["manners","friendliness"], nudge:["attachment","values","role"], open:["humor","stress","vices"]},
+  child:               {must:["curiosity","positivity"], nudge:["attachment","humor","role"], open:["values","stress","vices"]},
+  burntIdealist:       {must:["positivity","honesty"], nudge:["values","vices","stress"], open:["attachment","humor","role"]},
+  charmingManipulator: {must:["honesty","friendliness"], nudge:["attachment","values","role"], open:["humor","stress","vices"]},
+  grievingParent:      {must:["positivity","emotionalcapacity"], nudge:["attachment","stress","humor"], open:["values","vices","role"]},
+  reluctantSecond:     {must:["assertiveness","discipline"], nudge:["role","values","attachment"], open:["humor","stress","vices"]},
+  cheerfulSociopath:   {must:["emotionalcapacity","positivity"], nudge:["attachment","values","humor"], open:["stress","vices","role"]},
+  furiousCaretaker:    {must:["agreeableness","discipline"], nudge:["role","stress","vices"], open:["attachment","humor","values"]},
+  washedUpProdigy:     {must:["intelligence","confidence"], nudge:["vices","humor","values"], open:["attachment","stress","role"]},
+  companyLoyalist:     {must:["rebelliousness","discipline"], nudge:["values","role","vices"], open:["attachment","humor","stress"]},
+  blackSheep:          {must:["rebelliousness","honesty"], nudge:["role","attachment","values"], open:["humor","stress","vices"]},
+  compulsiveFixer:     {must:["discipline","activeness"], nudge:["vices","role","stress"], open:["attachment","humor","values"]},
+  undiscussedSurvivor: {must:["emotionalcapacity"], nudge:["attachment","stress","humor"], open:["values","vices","role"]},
+  workaholicAvoiding:  {must:["discipline","activeness"], nudge:["vices","attachment","stress"], open:["humor","values","role"]},
+  formerTrueBeliever:  {must:["honesty","positivity"], nudge:["values","role","attachment"], open:["humor","stress","vices"]},
+  goldenChild:         {must:["confidence","positivity"], nudge:["attachment","role","values"], open:["humor","stress","vices"]},
+  competentProfessional:{must:["discipline","intelligence"], nudge:["attachment","vices","role"], open:["humor","stress","values"]},
+  contentedElder:      {must:["positivity","activeness"], nudge:["attachment","humor","values"], open:["stress","vices","role"]},
+  genuinelyFunny:      {must:["friendliness","intelligence"], nudge:["humor","role","attachment"], open:["values","stress","vices"]},
+  careerBureaucrat:    {must:["rebelliousness","manners"], nudge:["values","vices","humor"], open:["attachment","stress","role"]},
+  trueZealot:          {must:["positivity","emotionalcapacity"], nudge:["values","role","stress"], open:["attachment","humor","vices"]},
+  alienLogic:          {must:["curiosity","honesty"], nudge:["role","humor","attachment"], open:["values","stress","vices"]},
+  unbotheredYoung:     {must:["manners","confidence"], nudge:["attachment","humor","values"], open:["stress","vices","role"]},
+  steadyOrganiser:     {must:["discipline","agreeableness"], nudge:["attachment","role","vices"], open:["humor","stress","values"]},
+  cheerfulMess:        {must:["discipline","friendliness"], nudge:["attachment","humor","vices"], open:["values","stress","role"]},
+  plainSpoken:         {must:["intelligence","honesty"], nudge:["attachment","values","humor"], open:["stress","vices","role"]},
+  softSpokenSecond:    {must:["assertiveness","agreeableness"], nudge:["role","stress","attachment"], open:["humor","values","vices"]},
+  bluntForeman:        {must:["assertiveness","manners"], nudge:["role","stress","attachment"], open:["humor","values","vices"]},
+  dreamyDrifter:       {must:["discipline","curiosity"], nudge:["role","vices","attachment"], open:["humor","stress","values"]},
+  stubbornCraftsman:   {must:["discipline","rebelliousness"], nudge:["values","vices","attachment"], open:["humor","stress","role"]},
+  openHeartedShambles: {must:["emotionalcapacity","discipline"], nudge:["attachment","vices","humor"], open:["values","stress","role"]},
+  weepingBrawler:      {must:["emotionalcapacity","assertiveness"], nudge:["stress","vices","attachment"], open:["humor","values","role"]},
+  lovableLiar:         {must:["honesty","friendliness"], nudge:["values","humor","role"], open:["attachment","stress","vices"]},
+  incuriousContent:    {must:["curiosity","positivity"], nudge:["humor","values","role"], open:["attachment","stress","vices"]},
+  gloomyRomantic:      {must:["emotionalcapacity","positivity"], nudge:["attachment","humor","vices"], open:["values","stress","role"]},
+  scatteredGenius:     {must:["intelligence","discipline"], nudge:["humor","vices","role"], open:["attachment","stress","values"]},
+  jadedFixer:          {must:["honesty","positivity"], nudge:["values","humor","stress"], open:["attachment","vices","role"]},
+  bigHeartedBoss:      {must:["emotionalcapacity","assertiveness"], nudge:["role","humor","vices"], open:["attachment","stress","values"]},
+};
+
+/* ================= NAMED VARIATIONS =================
+   "Show 2–3 named variations per preset, such as socially smooth / abrasive / quiet,
+   rather than allowing a single profile hint to dominate all variations." A variation
+   is a delta on the personality numbers and an optional profile-hint override; the
+   `must` axes are never in a delta, so every variation is still recognisably its
+   preset. `base` is always present and is the unmodified preset. */
+const ARCHETYPE_VARIATIONS = {
+  soldier:  [{id:"quiet", label:"Quiet", pers:{friendliness:-45, assertiveness:10}, profile:{stress:"Freeze (shut down)"}},
+             {id:"bitter", label:"Bitter", pers:{positivity:-50, agreeableness:-40}, profile:{humor:"Cruel & Barbed", stress:"Fight (attack the threat)"}},
+             {id:"steady", label:"Steady", pers:{friendliness:20, positivity:15}, profile:{attachment:"Secure", role:"Caretaker"}}],
+  conartist:[{id:"smooth", label:"Socially smooth", pers:{manners:60, agreeableness:10}, profile:{humor:"Warm & Playful"}},
+             {id:"abrasive", label:"Abrasive", pers:{manners:-40, agreeableness:-55}, profile:{humor:"Cruel & Barbed", role:"Instigator"}},
+             {id:"quiet", label:"Quiet operator", pers:{friendliness:-10, assertiveness:-30}, profile:{humor:"Dry & Deadpan", role:"Outsider"}}],
+  intern:   [{id:"eager", label:"Eager", pers:{activeness:50, positivity:40}, profile:{role:"Connector"}},
+             {id:"frozen", label:"Frozen", pers:{activeness:-30, emotionalcapacity:-30}, profile:{stress:"Freeze (shut down)"}},
+             {id:"secretly-sharp", label:"Secretly sharp", pers:{intelligence:60, honesty:30}, profile:{role:"Skeptic"}}],
+  scholar:  [{id:"kindly", label:"Kindly", pers:{friendliness:45, positivity:10}, profile:{role:"Caretaker", humor:"Warm & Playful"}},
+             {id:"acid", label:"Acid", pers:{friendliness:-45, agreeableness:-40}, profile:{humor:"Cruel & Barbed"}},
+             {id:"distracted", label:"Distracted", pers:{discipline:-40, curiosity:80}, profile:{vices:"Compulsion & Ritual"}}],
+  noble:    [{id:"dutiful", label:"Dutiful", pers:{discipline:50, honesty:30}, profile:{values:"Loyalty-Bound"}},
+             {id:"decadent", label:"Decadent", pers:{discipline:-45, positivity:25}, profile:{vices:"Substance & Consumption", values:"Self-Interested"}},
+             {id:"melancholy", label:"Melancholy", pers:{positivity:-50, emotionalcapacity:10}, profile:{humor:"Humorless & Absent"}}],
+  child:    [{id:"bold", label:"Bold", pers:{assertiveness:50, confidence:40}, profile:{role:"Instigator"}},
+             {id:"shy", label:"Shy", pers:{assertiveness:-50, friendliness:-10}, profile:{attachment:"Anxious", role:"Outsider"}},
+             {id:"old-soul", label:"Old soul", pers:{discipline:20, emotionalcapacity:30}, profile:{humor:"Dry & Deadpan"}}],
+  burntIdealist:[{id:"quiet", label:"Quiet", pers:{friendliness:-20, assertiveness:-30}, profile:{stress:"Flight (remove yourself)"}},
+             {id:"angry", label:"Angry", pers:{agreeableness:-50, assertiveness:40}, profile:{stress:"Fight (attack the threat)", humor:"Cruel & Barbed"}},
+             {id:"wry", label:"Wry", pers:{friendliness:25}, profile:{humor:"Dry & Deadpan"}}],
+  charmingManipulator:[{id:"warm", label:"Warm", pers:{emotionalcapacity:30}, profile:{humor:"Warm & Playful"}},
+             {id:"cold", label:"Cold", pers:{emotionalcapacity:-50, agreeableness:-20}, profile:{humor:"Dry & Deadpan", attachment:"Avoidant"}},
+             {id:"needy", label:"Needy", pers:{confidence:-40}, profile:{attachment:"Anxious"}}],
+  grievingParent:[{id:"withdrawn", label:"Withdrawn", pers:{friendliness:-40, activeness:-30}, profile:{stress:"Flight (remove yourself)"}},
+             {id:"raging", label:"Raging", pers:{agreeableness:-50, assertiveness:40}, profile:{stress:"Fight (attack the threat)"}},
+             {id:"busy", label:"Busy", pers:{activeness:50, discipline:40}, profile:{vices:"Compulsion & Ritual"}}],
+  reluctantSecond:[{id:"loyal", label:"Loyal", pers:{agreeableness:20}, profile:{values:"Loyalty-Bound"}},
+             {id:"resentful", label:"Resentful", pers:{agreeableness:-40, positivity:-30}, profile:{humor:"Dry & Deadpan", attachment:"Avoidant"}},
+             {id:"secretly-ready", label:"Secretly ready", pers:{confidence:40, intelligence:30}, profile:{role:"Leader"}}],
+  cheerfulSociopath:[{id:"charming", label:"Charming", pers:{manners:50}, profile:{role:"Connector"}},
+             {id:"crude", label:"Crude", pers:{manners:-50}, profile:{humor:"Absurd & Chaotic"}},
+             {id:"quiet", label:"Quiet", pers:{friendliness:-30, assertiveness:-20}, profile:{role:"Outsider", humor:"Dry & Deadpan"}}],
+  furiousCaretaker:[{id:"martyr", label:"Martyr", pers:{emotionalcapacity:20}, profile:{humor:"Self-Deprecating"}},
+             {id:"sharp", label:"Sharp", pers:{manners:-30, honesty:40}, profile:{humor:"Cruel & Barbed"}},
+             {id:"leaving", label:"Halfway out the door", pers:{rebelliousness:50}, profile:{stress:"Flight (remove yourself)"}}],
+  washedUpProdigy:[{id:"bitter", label:"Bitter", pers:{agreeableness:-40}, profile:{humor:"Cruel & Barbed"}},
+             {id:"sweet", label:"Sweet", pers:{friendliness:40, agreeableness:30}, profile:{humor:"Warm & Playful", attachment:"Anxious"}},
+             {id:"rebuilding", label:"Rebuilding", pers:{discipline:40, positivity:20}, profile:{vices:"Restraint & Discipline"}}],
+  companyLoyalist:[{id:"true", label:"True believer", pers:{positivity:40}, profile:{values:"Idealistic & Visionary"}},
+             {id:"weary", label:"Weary", pers:{positivity:-40, activeness:-20}, profile:{humor:"Dry & Deadpan"}},
+             {id:"enforcer", label:"Enforcer", pers:{assertiveness:50, agreeableness:-30}, profile:{role:"Leader", stress:"Fight (attack the threat)"}}],
+  blackSheep:[{id:"charming", label:"Charming", pers:{friendliness:40}, profile:{humor:"Warm & Playful", role:"Connector"}},
+             {id:"sullen", label:"Sullen", pers:{friendliness:-40, positivity:-30}, profile:{humor:"Humorless & Absent"}},
+             {id:"changed", label:"Genuinely changed", pers:{discipline:40, positivity:30}, profile:{attachment:"Secure"}}],
+  compulsiveFixer:[{id:"warm", label:"Warm", pers:{friendliness:40}, profile:{role:"Caretaker"}},
+             {id:"bossy", label:"Bossy", pers:{agreeableness:-40, manners:-20}, profile:{role:"Leader"}},
+             {id:"anxious", label:"Anxious", pers:{confidence:-40}, profile:{attachment:"Anxious", stress:"Fawn (appease the threat)"}}],
+  undiscussedSurvivor:[{id:"gentle", label:"Gentle", pers:{friendliness:30, agreeableness:30}, profile:{role:"Caretaker"}},
+             {id:"hard", label:"Hard", pers:{agreeableness:-40, manners:-30}, profile:{stress:"Fight (attack the threat)"}},
+             {id:"funny", label:"Funny about it", pers:{positivity:20}, profile:{humor:"Dry & Deadpan"}}],
+  workaholicAvoiding:[{id:"cheerful", label:"Cheerful", pers:{positivity:40, friendliness:30}, profile:{humor:"Warm & Playful"}},
+             {id:"brittle", label:"Brittle", pers:{agreeableness:-40}, profile:{stress:"Fight (attack the threat)"}},
+             {id:"quiet", label:"Quiet", pers:{friendliness:-30}, profile:{attachment:"Avoidant", humor:"Humorless & Absent"}}],
+  formerTrueBeliever:[{id:"grieving", label:"Grieving", pers:{emotionalcapacity:40, activeness:-20}, profile:{stress:"Freeze (shut down)"}},
+             {id:"crusading", label:"Crusading", pers:{assertiveness:50, agreeableness:-30}, profile:{role:"Instigator", stress:"Fight (attack the threat)"}},
+             {id:"wry", label:"Wry", pers:{friendliness:20}, profile:{humor:"Dry & Deadpan"}}],
+  goldenChild:[{id:"gracious", label:"Gracious", pers:{agreeableness:30, manners:40}, profile:{role:"Peacemaker"}},
+             {id:"brittle", label:"Brittle", pers:{emotionalcapacity:-30}, profile:{attachment:"Anxious", stress:"Fawn (appease the threat)"}},
+             {id:"entitled", label:"Entitled", pers:{agreeableness:-40, manners:-20}, profile:{values:"Self-Interested"}}],
+  competentProfessional:[{id:"warm", label:"Warm", pers:{friendliness:40}, profile:{role:"Caretaker", humor:"Warm & Playful"}},
+             {id:"cool", label:"Cool", pers:{friendliness:-30, emotionalcapacity:-30}, profile:{attachment:"Avoidant"}},
+             {id:"restless", label:"Restless", pers:{curiosity:50, rebelliousness:30}, profile:{vices:"Risk & Escape"}}],
+  contentedElder:[{id:"talkative", label:"Talkative", pers:{friendliness:20}, profile:{role:"Connector"}},
+             {id:"quiet", label:"Quiet", pers:{friendliness:-20}, profile:{humor:"Dry & Deadpan"}},
+             {id:"sharp", label:"Still sharp", pers:{intelligence:50, curiosity:40}, profile:{role:"Skeptic"}}],
+  genuinelyFunny:[{id:"kind", label:"Kind", pers:{agreeableness:30}, profile:{humor:"Warm & Playful"}},
+             {id:"savage", label:"Savage", pers:{agreeableness:-40}, profile:{humor:"Cruel & Barbed"}},
+             {id:"surreal", label:"Surreal", pers:{discipline:-40}, profile:{humor:"Absurd & Chaotic"}}],
+  careerBureaucrat:[{id:"kindly", label:"Kindly", pers:{friendliness:40, agreeableness:30}, profile:{role:"Caretaker"}},
+             {id:"petty", label:"Petty", pers:{agreeableness:-40}, profile:{values:"Self-Interested", humor:"Cruel & Barbed"}},
+             {id:"secretly-anarchic", label:"Secretly anarchic", pers:{curiosity:40, discipline:-20}, profile:{humor:"Absurd & Chaotic"}}],
+  trueZealot:[{id:"gentle", label:"Gentle", pers:{agreeableness:40, friendliness:40}, profile:{role:"Caretaker"}},
+             {id:"fierce", label:"Fierce", pers:{agreeableness:-50, assertiveness:50}, profile:{role:"Leader", stress:"Fight (attack the threat)"}},
+             {id:"doubting", label:"Beginning to doubt", pers:{intelligence:30, curiosity:40}, profile:{role:"Skeptic"}}],
+  alienLogic:[{id:"gentle", label:"Gentle", pers:{friendliness:20, agreeableness:20}, profile:{humor:"Absurd & Chaotic"}},
+             {id:"cold", label:"Cold", pers:{friendliness:-30, emotionalcapacity:-30}, profile:{humor:"Dry & Deadpan"}},
+             {id:"delighted", label:"Delighted by everything", pers:{positivity:50, activeness:30}, profile:{humor:"Intellectual & Wordplay"}}],
+  unbotheredYoung:[{id:"sweet", label:"Sweet", pers:{friendliness:40, agreeableness:30}, profile:{humor:"Warm & Playful"}},
+             {id:"sullen", label:"Sullen", pers:{friendliness:-30, positivity:-30}, profile:{humor:"Humorless & Absent"}},
+             {id:"sharp", label:"Sharper than they let on", pers:{intelligence:50}, profile:{role:"Skeptic", humor:"Dry & Deadpan"}}],
+  steadyOrganiser:[{id:"warm", label:"Warm", pers:{friendliness:20}, profile:{role:"Caretaker"}},
+             {id:"brisk", label:"Brisk", pers:{assertiveness:30, manners:-20}, profile:{role:"Leader"}},
+             {id:"quiet", label:"Quiet", pers:{assertiveness:-30}, profile:{role:"Peacemaker"}}],
+  cheerfulMess:[{id:"loud", label:"Loud", pers:{assertiveness:40}, profile:{role:"Instigator"}},
+             {id:"gentle", label:"Gentle", pers:{assertiveness:-30}, profile:{role:"Peacemaker"}},
+             {id:"secretly-sad", label:"Secretly sad", pers:{positivity:-30}, profile:{humor:"Self-Deprecating", attachment:"Anxious"}}],
+  plainSpoken:[{id:"kind", label:"Kind", pers:{friendliness:40}, profile:{role:"Caretaker"}},
+             {id:"gruff", label:"Gruff", pers:{friendliness:-40}, profile:{humor:"Dry & Deadpan"}},
+             {id:"stubborn", label:"Stubborn", pers:{agreeableness:-40, rebelliousness:30}, profile:{values:"Rigid & Principled"}}],
+  softSpokenSecond:[{id:"devoted", label:"Devoted", pers:{friendliness:30}, profile:{values:"Loyalty-Bound"}},
+             {id:"resentful", label:"Quietly resentful", pers:{positivity:-30, honesty:-20}, profile:{humor:"Dry & Deadpan"}},
+             {id:"secretly-capable", label:"Secretly capable", pers:{intelligence:50, discipline:40}, profile:{role:"Skeptic"}}],
+  bluntForeman:[{id:"fair", label:"Fair", pers:{honesty:30, agreeableness:10}, profile:{values:"Rigid & Principled"}},
+             {id:"bully", label:"Bully", pers:{agreeableness:-60, emotionalcapacity:-30}, profile:{humor:"Cruel & Barbed"}},
+             {id:"soft-centred", label:"Soft-centred", pers:{emotionalcapacity:40, friendliness:30}, profile:{role:"Caretaker"}}],
+  dreamyDrifter:[{id:"sunny", label:"Sunny", pers:{positivity:40, friendliness:30}, profile:{humor:"Warm & Playful"}},
+             {id:"melancholy", label:"Melancholy", pers:{positivity:-40}, profile:{humor:"Self-Deprecating"}},
+             {id:"prickly", label:"Prickly", pers:{agreeableness:-40, rebelliousness:40}, profile:{humor:"Cruel & Barbed"}}],
+  stubbornCraftsman:[{id:"kindly", label:"Kindly", pers:{friendliness:40}, profile:{role:"Caretaker"}},
+             {id:"sour", label:"Sour", pers:{friendliness:-40, positivity:-30}, profile:{humor:"Cruel & Barbed"}},
+             {id:"proud", label:"Proud", pers:{confidence:50}, profile:{role:"Leader"}}],
+  openHeartedShambles:[{id:"sunny", label:"Sunny", pers:{positivity:40}, profile:{humor:"Warm & Playful"}},
+             {id:"tearful", label:"Tearful", pers:{positivity:-30, confidence:-30}, profile:{humor:"Self-Deprecating"}},
+             {id:"loud", label:"Loud", pers:{assertiveness:40, manners:-30}, profile:{role:"Instigator"}}],
+  weepingBrawler:[{id:"loyal", label:"Loyal", pers:{friendliness:30}, profile:{values:"Loyalty-Bound"}},
+             {id:"lost", label:"Lost", pers:{positivity:-40, confidence:-30}, profile:{humor:"Self-Deprecating"}},
+             {id:"funny", label:"Funny", pers:{positivity:20, intelligence:20}, profile:{humor:"Absurd & Chaotic"}}],
+  lovableLiar:[{id:"harmless", label:"Harmless", pers:{agreeableness:40}, profile:{humor:"Warm & Playful"}},
+             {id:"dangerous", label:"Dangerous", pers:{agreeableness:-40, emotionalcapacity:-40}, profile:{humor:"Cruel & Barbed", attachment:"Avoidant"}},
+             {id:"sad", label:"Sad underneath", pers:{positivity:-40}, profile:{attachment:"Anxious"}}],
+  incuriousContent:[{id:"warm", label:"Warm", pers:{friendliness:40}, profile:{role:"Caretaker"}},
+             {id:"gruff", label:"Gruff", pers:{friendliness:-30, manners:-30}, profile:{humor:"Dry & Deadpan"}},
+             {id:"pious", label:"Pious", pers:{discipline:40, rebelliousness:-40}, profile:{values:"Rigid & Principled"}}],
+  gloomyRomantic:[{id:"tender", label:"Tender", pers:{friendliness:40, agreeableness:30}, profile:{role:"Caretaker"}},
+             {id:"theatrical", label:"Theatrical", pers:{assertiveness:30, confidence:20}, profile:{role:"Instigator"}},
+             {id:"withdrawn", label:"Withdrawn", pers:{friendliness:-40}, profile:{attachment:"Avoidant"}}],
+  scatteredGenius:[{id:"charming", label:"Charming", pers:{friendliness:50}, profile:{role:"Connector"}},
+             {id:"prickly", label:"Prickly", pers:{friendliness:-40, agreeableness:-40}, profile:{humor:"Cruel & Barbed"}},
+             {id:"anxious", label:"Anxious", pers:{confidence:-40}, profile:{attachment:"Anxious"}}],
+  jadedFixer:[{id:"soft", label:"Soft underneath", pers:{emotionalcapacity:30, friendliness:20}, profile:{role:"Caretaker"}},
+             {id:"cruel", label:"Cruel", pers:{agreeableness:-50}, profile:{humor:"Cruel & Barbed"}},
+             {id:"tired", label:"Tired", pers:{activeness:-40}, profile:{humor:"Dry & Deadpan"}}],
+  bigHeartedBoss:[{id:"gruff", label:"Gruff", pers:{manners:-40}, profile:{humor:"Dry & Deadpan"}},
+             {id:"sentimental", label:"Sentimental", pers:{positivity:30}, profile:{humor:"Warm & Playful"}},
+             {id:"volatile", label:"Volatile", pers:{agreeableness:-40}, profile:{stress:"Fight (attack the threat)"}}],
+};
+Object.entries(ARCHETYPE_INTENT).forEach(([k, v])=>{ if (ARCHETYPES[k]) ARCHETYPES[k].intent = v; });
+Object.entries(ARCHETYPE_VARIATIONS).forEach(([k, v])=>{ if (ARCHETYPES[k]) ARCHETYPES[k].variations = v; });
+
+/* The preset as it will actually be applied: the base numbers with the chosen
+   variation's deltas folded in, the profile hints overridden where the variation says
+   so, and — carried along — the intent so the blend can honour the `must` axes. Every
+   consumer (the build, the preview, the fidelity meter) reads THIS, so a variation
+   cannot be visible in one place and absent in another. */
+function effectiveArchetype(key, variationId){
+  const base = ARCHETYPES[key] || CUSTOM_ARCHETYPES[key];
+  if (!base) return null;
+  const out = Object.assign({}, base, {pers: Object.assign({}, base.pers || {}), profile: Object.assign({}, base.profile || {})});
+  out.variation = null;
+  if (variationId && variationId !== 'base' && Array.isArray(base.variations)){
+    const v = base.variations.find(x=>x.id === variationId);
+    if (v){
+      out.variation = v;
+      Object.entries(v.pers || {}).forEach(([axis, delta])=>{
+        out.pers[axis] = Math.round(clamp((out.pers[axis] || 0) + delta, -100, 100));
+      });
+      Object.assign(out.profile, v.profile || {});
+      out.label = base.label + " — " + v.label;
+    }
+  }
+  return out;
+}
+/* How much of the preset survives the blend with the user's own sliders. Was a fixed
+   0.65 with no control. The `must` axes never drop below MUST_FLOOR, so turning the
+   blend down makes a preset a lighter starting point without making it unrecognisable
+   — the con artist stays dishonest at 20% blend; their manners are up to you. */
+const ARCHETYPE_MUST_FLOOR = 0.85;
+function archetypeBlendLevel(){
+  const el = document.getElementById('archetypeBlend');
+  return el ? clamp(parseFloat(el.value) || 0, 0, 1) : 0.65;
+}
+function archetypeAxisBlend(arch, axisId){
+  const w = archetypeBlendLevel();
+  const must = arch && arch.intent && Array.isArray(arch.intent.must) && arch.intent.must.includes(axisId);
+  return must ? Math.max(w, ARCHETYPE_MUST_FLOOR) : w;
+}
 
 // user-defined archetypes loaded from storage
 let CUSTOM_ARCHETYPES = {};
@@ -1100,9 +1542,13 @@ function rememberGeneration(st){
   if (!ids.size) return;
   recentTraitIds.push(ids);
   while (recentTraitIds.length > RECENT_WINDOW) recentTraitIds.shift();
+  const fams = new Set();
+  Object.values(st || {}).forEach(s=>{ if (s && s.trait && s.trait.conceptFamily) fams.add(s.trait.conceptFamily); });
+  recentFamilies.push(fams);
+  while (recentFamilies.length > RECENT_WINDOW) recentFamilies.shift();
   rememberSlotDraws(st);
 }
-function forgetRecentTraits(){ recentTraitIds = []; }
+function forgetRecentTraits(){ recentTraitIds = []; recentFamilies = []; }
 /* Which traits keep coming back across the session's recent window. recentTraitIds has
    held this the whole time and nothing ever showed it to anyone. */
 function recurringTraits(minCount){
@@ -1122,12 +1568,152 @@ function avoidRecentEnabled(){
   return el ? !!el.checked : true;   // default-on; see RECENT_WINDOW above
 }
 let _avoidRecentActive = false;   // resolved once per build, not per draw
+/* DECAY, and SEMANTIC repetition. The penalty used to be flat across the window: a
+   trait from twelve characters ago was penalised exactly as hard as one from the last
+   character, so the window behaved like a twelve-character ban list and then an
+   amnesty. It now decays with age, so the last character's traits are what the next
+   one actively avoids and the tail of the window only nudges.
+
+   And it used to track IDS only, so "different wording, same narrative function" — a
+   paraphrase of the trait you just had — sailed through the novelty check. Entries
+   that declare a conceptFamily are remembered by family too, at a softer penalty,
+   which is what the audit means by distinguishing exact from semantic repetition. */
+const RECENT_DECAY = 0.82;            // per character of age
+const RECENT_FAMILY_PENALTY = 0.7;    // same concept family as a recent trait
+let recentFamilies = [];              // array of Sets of conceptFamily, newest last
 function recentPenalty(t){
-  if (!_avoidRecentActive || !recentTraitIds.length) return 1;
-  for (let i = recentTraitIds.length - 1; i >= 0; i--){
-    if (recentTraitIds[i].has(t.id)) return RECENT_PENALTY;
+  let m = avoidPenalty(t);
+  if (!_avoidRecentActive || !recentTraitIds.length) return m;
+  const n = recentTraitIds.length;
+  for (let i = n - 1; i >= 0; i--){
+    const age = n - 1 - i;
+    if (recentTraitIds[i].has(t.id)){
+      // penalty strength fades toward 1 with age: 1 - (1-P)*decay^age
+      m *= 1 - (1 - RECENT_PENALTY) * Math.pow(RECENT_DECAY, age);
+      break;
+    }
   }
+  if (t.conceptFamily && recentFamilies.length){
+    for (let i = recentFamilies.length - 1; i >= 0; i--){
+      const age = recentFamilies.length - 1 - i;
+      if (recentFamilies[i].has(t.conceptFamily)){
+        m *= 1 - (1 - RECENT_FAMILY_PENALTY) * Math.pow(RECENT_DECAY, age);
+        break;
+      }
+    }
+  }
+  return m;
+}
+
+/* ================= "SAME WORLD, DIFFERENT PERSON" =================
+   An explicit avoid set: the trait ids, concept families and resolved categories of a
+   character the next build must NOT resemble. Unlike the recent-history window this is
+   a stated choice, so it is not gated on the avoid-recent toggle and it survives replay
+   mode (a "different person from X" is reproducible given X). Set by
+   generateSameWorld(), cleared after the build. */
+let AVOID_SET = null;   // {ids:Set, families:Set, cats:Set}
+function setAvoidSet(v){ AVOID_SET = v || null; }
+function avoidPenalty(t){
+  if (!AVOID_SET || !t) return 1;
+  if (AVOID_SET.ids.has(t.id)) return 0.08;
+  if (t.conceptFamily && AVOID_SET.families.has(t.conceptFamily)) return 0.35;
   return 1;
+}
+function avoidCategoryMultiplier(cat){
+  return (AVOID_SET && AVOID_SET.cats.has(cat)) ? 0.3 : 1;
+}
+function avoidSetFrom(st){
+  const ids = new Set(), families = new Set(), cats = new Set();
+  Object.values(st || {}).forEach(sl=>{
+    const t = sl && sl.trait; if (!t) return;
+    ids.add(t.id); if (t.conceptFamily) families.add(t.conceptFamily);
+  });
+  PROFILE_SECTIONS.forEach(ps=>{ const c = slotCat((st||{})['prof_'+ps.id+'_0']); if (c) cats.add(c); });
+  return {ids, families, cats};
+}
+
+/* ================= THE PROJECT ARCHIVE =================
+   The recent window is a session thing and forgets. A project's ACCEPTED characters —
+   saved, kept from a batch, added to a cast — are what a new one should be measured
+   against for real, and they persist with the project (Feature F). The archive holds
+   signatures, not sheets. */
+let PROJECT_ARCHIVE = [];   // [{id, name, ids:Set, families:Set, cats:Set, defining:Set, prof}]
+function archiveCharacter(st, meta){
+  if (!st || !Object.keys(st).length) return;
+  const sig = avoidSetFrom(st);
+  const all = Object.values(st).filter(x=>x && x.trait);
+  const score = t => (RTIER_SCORE[t.rtier || rarityTier(t)] || 0) * 10 + (t.intensity || 0);
+  const defining = new Set(all.slice().sort((a,b)=>score(b.trait)-score(a.trait)).slice(0, 5).map(x=>x.trait.id));
+  let prof = {};
+  try { prof = (typeof axisProfile === 'function') ? axisProfile(st) : {}; } catch(e){}
+  PROJECT_ARCHIVE.push({id: (meta && meta.id) || null, name: (meta && meta.name) || '', ids: sig.ids, families: sig.families,
+    cats: sig.cats, defining, prof, at: Date.now()});
+  while (PROJECT_ARCHIVE.length > 200) PROJECT_ARCHIVE.shift();
+}
+function forgetArchive(){ PROJECT_ARCHIVE = []; }
+function getArchive(){ return PROJECT_ARCHIVE; }
+// Serialisable form for a project file; Sets do not survive JSON.
+function exportArchive(){ return PROJECT_ARCHIVE.map(a=>({id:a.id, name:a.name, ids:[...a.ids], families:[...a.families], cats:[...a.cats], defining:[...a.defining], prof:a.prof, at:a.at})); }
+function importArchive(list){
+  PROJECT_ARCHIVE = (list || []).map(a=>({id:a.id||null, name:a.name||'', ids:new Set(a.ids||[]), families:new Set(a.families||[]),
+    cats:new Set(a.cats||[]), defining:new Set(a.defining||[]), prof:a.prof||{}, at:a.at||0}));
+}
+
+/* ================= THE DIVERSITY OBJECTIVE =================
+   "Produce a bounded candidate batch and choose a set that balances user intent, hard
+   validity, semantic diversity, and narrative utility ... treat the weights as tunable
+   hypotheses, not a universal formula." Scores a candidate sheet's DISTANCE from a set
+   of references (the current character, the archive): higher is more distinct. Every
+   term is a plain overlap or distance so the weights mean something; they live in one
+   table so they can be argued with. */
+const DIVERSITY_OBJECTIVE_WEIGHTS = {
+  traitOverlap: 1.0,      // share of trait ids in common
+  familyOverlap: 0.6,     // share of concept families in common (semantic repetition)
+  categoryOverlap: 0.8,   // share of resolved profile categories in common
+  definingOverlap: 1.5,   // the reference's five defining traits appearing here at all
+  profileDistance: 0.5,   // axis-profile distance (0..~2), as a bonus
+};
+function _overlapShare(a, b){
+  if (!a.size || !b.size) return 0;
+  let n = 0; a.forEach(v=>{ if (b.has(v)) n++; });
+  return n / Math.min(a.size, b.size);
+}
+function _profDist(a, b){
+  const keys = new Set([...Object.keys(a||{}), ...Object.keys(b||{})]);
+  let s = 0, k = 0; keys.forEach(ax=>{ const d = (a[ax]||0) - (b[ax]||0); s += d*d; k++; });
+  return k ? Math.sqrt(s / k) : 0;
+}
+function diversityScore(candidateState, references){
+  const sig = avoidSetFrom(candidateState);
+  const ids = new Set(); Object.values(candidateState).forEach(x=>{ if (x && x.trait) ids.add(x.trait.id); });
+  let prof = {}; try { prof = axisProfile(candidateState); } catch(e){}
+  const W = DIVERSITY_OBJECTIVE_WEIGHTS;
+  if (!references || !references.length) return {score: 0, terms: {}, worst: null};
+  // Distance to the NEAREST reference is what matters: a candidate that is far from
+  // most of the archive but a twin of one member is a twin.
+  let worst = null;
+  references.forEach(ref=>{
+    const t = {
+      traitOverlap: _overlapShare(ids, ref.ids),
+      familyOverlap: _overlapShare(sig.families, ref.families),
+      categoryOverlap: _overlapShare(sig.cats, ref.cats),
+      definingOverlap: ref.defining ? [...ref.defining].filter(id=>ids.has(id)).length / Math.max(1, ref.defining.size) : 0,
+      profileDistance: _profDist(prof, ref.prof || {}),
+    };
+    const score = -W.traitOverlap*t.traitOverlap - W.familyOverlap*t.familyOverlap - W.categoryOverlap*t.categoryOverlap
+                  - W.definingOverlap*t.definingOverlap + W.profileDistance*Math.min(2, t.profileDistance);
+    if (!worst || score < worst.score) worst = {score, terms: t, ref};
+  });
+  return worst;
+}
+function referenceFromState(st, name){
+  const sig = avoidSetFrom(st);
+  const ids = new Set(); Object.values(st||{}).forEach(x=>{ if (x && x.trait) ids.add(x.trait.id); });
+  const all = Object.values(st||{}).filter(x=>x && x.trait);
+  const score = t => (RTIER_SCORE[t.rtier || rarityTier(t)] || 0) * 10 + (t.intensity || 0);
+  const defining = new Set(all.slice().sort((a,b)=>score(b.trait)-score(a.trait)).slice(0,5).map(x=>x.trait.id));
+  let prof = {}; try { prof = axisProfile(st); } catch(e){}
+  return {name: name || '', ids, families: sig.families, cats: sig.cats, defining, prof};
 }
 
 // Returns the eligible slice around `target`, widening only if the pool is too
@@ -1602,7 +2188,39 @@ const WEIGHT_MATRIX = {
   // character actually resolved to one of them, that fact fed nothing forward into
   // vocab/grammar/manner or any other profile section, unlike every original category.
   "role:Connector": { vocab:{"Pragmatic Focus & Speech Functions":TIER_WEAK}, humor:{"Warm & Playful":TIER_WEAK} },
-  "values:Idealistic & Visionary": { vocab:{"Directness & Literalness":TIER_WEAK}, grammar:{"Structural Shifts":TIER_WEAK}, humor:{"Warm & Playful":TIER_WEAK} },
+  "values:Idealistic & Visionary": { vocab:{"Directness & Literalness":TIER_WEAK}, grammar:{"Structural Shifts":TIER_WEAK}, humor:{"Warm & Playful":TIER_WEAK},
+                                     goals:{"The Longer Aim":TIER_WEAK} },
+  /* ---- Links INTO the §6 sections, so a competence, an origin or a repair style is
+     nudged by the facts already resolved rather than rolled blind. Deliberately light
+     (mostly WEAK): the point of these sections is to widen who a character can be,
+     and a strong cascade would just re-derive the wound from the other side. */
+  "attachment:Secure":        { origins:{"Stable Care":TIER_MODERATE,"Learned Trust":TIER_WEAK}, repair:{"Apology":TIER_WEAK},
+                                texture:{"Preferences & Small Pleasures":TIER_WEAK} },
+  "attachment:Avoidant":      { repair:{"Avoidance & Humour":TIER_MODERATE,"Restitution & Practical Care":TIER_WEAK},
+                                contradiction:{"Exceptions & Detachment":TIER_WEAK} },
+  "attachment:Anxious":       { repair:{"Apology":TIER_MODERATE}, origins:{"Repaired Conflict":TIER_WEAK} },
+  "attachment:Disorganized":  { repair:{"Changed Boundaries & Failed Repair":TIER_MODERATE} },
+  "stress:Fight (attack the threat)":   { repair:{"Changed Boundaries & Failed Repair":TIER_WEAK}, competence:{"Hands & Materials":TIER_WEAK} },
+  "stress:Fawn (appease the threat)":   { repair:{"Apology":TIER_MODERATE,"Restitution & Practical Care":TIER_WEAK},
+                                          contradiction:{"Protective Hypocrisy":TIER_WEAK} },
+  "stress:Flight (remove yourself)":    { repair:{"Avoidance & Humour":TIER_MODERATE} },
+  "stress:Freeze (shut down)":          { repair:{"Avoidance & Humour":TIER_WEAK} },
+  "role:Leader":       { competence:{"Systems & Logistics":TIER_MODERATE,"People & Rooms":TIER_WEAK}, origins:{"Earned Success":TIER_WEAK} },
+  "role:Caretaker":    { competence:{"People & Rooms":TIER_MODERATE}, origins:{"Stable Care":TIER_WEAK}, repair:{"Restitution & Practical Care":TIER_MODERATE} },
+  "role:Skeptic":      { competence:{"Craft & Knowledge":TIER_WEAK}, contradiction:{"Aspirational Values":TIER_WEAK} },
+  "role:Connector":    { competence:{"People & Rooms":TIER_MODERATE} },
+  "role:Outsider":     { competence:{"Craft & Knowledge":TIER_WEAK,"Hands & Materials":TIER_WEAK} },
+  "vices:Restraint & Discipline": { competence:{"Systems & Logistics":TIER_MODERATE}, contradiction:{"Aspirational Values":TIER_WEAK} },
+  "vices:Compulsion & Ritual":    { texture:{"Routines":TIER_MODERATE} },
+  "vices:Avoidance & Procrastination": { repair:{"Avoidance & Humour":TIER_MODERATE}, texture:{"Practised Badly":TIER_WEAK} },
+  "humor:Warm & Playful":         { texture:{"Affiliations":TIER_WEAK}, repair:{"Avoidance & Humour":TIER_WEAK} },
+  "humor:Absurd & Chaotic":       { texture:{"Practised Badly":TIER_WEAK} },
+  "vices:Substance & Consumption": { texture:{"Preferences & Small Pleasures":TIER_WEAK} },
+  "vices:Risk & Escape":          { texture:{"Practised Badly":TIER_WEAK}, origins:{"Earned Success":TIER_WEAK} },
+  "humor:Self-Deprecating":       { repair:{"Avoidance & Humour":TIER_WEAK}, contradiction:{"Aspirational Values":TIER_WEAK} },
+  "values:Loyalty-Bound":         { contradiction:{"Protective Hypocrisy":TIER_MODERATE}, texture:{"Affiliations":TIER_WEAK} },
+  "values:Rigid & Principled":    { contradiction:{"Exceptions & Detachment":TIER_WEAK}, repair:{"Changed Boundaries & Failed Repair":TIER_WEAK} },
+  "values:Self-Interested":       { goals:{"The Price & The Competing Claim":TIER_WEAK} },
   "humor:Intellectual & Wordplay": { vocab:{"Morphological & Structural Lexicon":TIER_WEAK,"Precision & Specificity Level":TIER_WEAK} },
   "vices:Avoidance & Procrastination": { grammar:{"Disfluencies & Flow":TIER_WEAK}, stress:{"Flight":TIER_WEAK} },
 
@@ -2307,15 +2925,17 @@ function withReplayMode(on, fn){
   const prev = REPLAY_MODE;
   REPLAY_MODE = !!on;
   if (!on) { try { return fn(); } finally { REPLAY_MODE = prev; } }
-  const savedRecent = recentTraitIds, savedSlots = lastBySlot;
+  const savedRecent = recentTraitIds, savedSlots = lastBySlot, savedFams = recentFamilies;
   const savedUse = new Map(CATEGORY_USE);
   recentTraitIds = [];
+  recentFamilies = [];
   lastBySlot = {};
   CATEGORY_USE.clear();
   try { return fn(); }
   finally {
     REPLAY_MODE = prev;
     recentTraitIds = savedRecent;
+    recentFamilies = savedFams;
     lastBySlot = savedSlots;
     CATEGORY_USE.clear();
     savedUse.forEach((v,k)=>CATEGORY_USE.set(k,v));
@@ -2332,7 +2952,7 @@ const CATEGORY_BASELINE = 0.4;
 function categoryWeights(cats, boostMap){
   const boost = AFFINITY();
   return cats.map(c => (CATEGORY_BASELINE + boost * ((boostMap && boostMap.get(c)) || 0))
-                       * tierMultiplier(c) * contextMultiplier(c));
+                       * tierMultiplier(c) * contextMultiplier(c) * avoidCategoryMultiplier(c));
 }
 /* A category whose pool is empty under the active bans (or the character's
    presentation lock) is not a candidate. Category resolution used to consider every
@@ -2391,7 +3011,7 @@ function pickCategoryWeighted(catsIn, boostMap){
     const b = (boostMap && boostMap.get(c)) || 0;
     return BASELINE + boost * (invert ? Math.max(0, peak - b) : b);
   };
-  const weights = cats.map(c => weightOf(c) * tierMultiplier(c) * contextMultiplier(c));
+  const weights = cats.map(c => weightOf(c) * tierMultiplier(c) * contextMultiplier(c) * avoidCategoryMultiplier(c));
   // (Deliberately not categoryWeights() below: this path also has to express the two
   // divergence branches, which are a per-draw coin and have no meaning in a prediction.)
   const total = weights.reduce((a,b)=>a+b,0);
@@ -2648,6 +3268,15 @@ let POL_NORM = {};
 function polNormalise(ax, raw){
   const d = POL_NORM[ax];
   return d ? raw / d : raw;
+}
+/* The bank's expected value per tagged draw on an axis, in -1..1. This is the "prior"
+   axisProfile subtracts so that a sheet is read relative to what the bank hands out by
+   default rather than in absolute tag counts — see the note there. Calibrated from the
+   bank once at load; it is a property of the CONTENT, not of any character. */
+function polarityPrior(ax){
+  const c = POL_COUNTS[ax];
+  if (!c || !(c.pos + c.neg)) return 0;
+  return (c.pos - c.neg) / (c.pos + c.neg);
 }
 
 /* ================= CONTRADICTION AS CONTENT =================
@@ -3101,8 +3730,38 @@ const PROFILE_SECTIONS = [
    blurb:"What they find funny, and how it lands."},
   {id:"vices", section:"Habits & Vices", label:"Habits & Vices", drawAll:false,
    blurb:"The standing patterns that fill their days."},
+  /* ---- The 2026 audit's §6 sections (js/data/traits-life.js) ----------------
+     `defaultOn:false` ships a section switched off: it exists, has a toggle, a type
+     selector and a weight, and is drawn the moment the user wants it — but a default
+     sheet does not grow by twenty cards. The three that ship ON are the ones that
+     answer the audit's central complaint about the default sheet: that it explained
+     every character through injury and never through competence, intent, or what
+     went right. */
+  {id:"competence", section:"Competence & Method", label:"Competence & Method", drawAll:false, defaultOn:true,
+   blurb:"What they can actually do, how they think about doing it, and the limit that comes with it."},
+  {id:"origins", section:"Positive Origins", label:"Positive Origins", drawAll:false, defaultOn:true,
+   blurb:"What went right — the trust learned, the care that held, the thing repaired — that explains behaviour without a wound."},
+  {id:"goals", section:"Goals & Stakes", label:"Goals & Stakes", drawAll:true, defaultOn:true,
+   blurb:"The immediate objective, the longer aim, and what it costs or competes with."},
+  {id:"texture", section:"Ordinary Texture", label:"Ordinary Texture", drawAll:false, defaultOn:false,
+   blurb:"Preferences, routines, affiliations, a thing practised badly — texture that does not need a rare slot."},
+  {id:"repair", section:"Recovery & Repair", label:"Recovery & Repair", drawAll:false, defaultOn:false,
+   blurb:"What they do after a conflict, which the pressure sheet's aftermath reads from."},
+  {id:"contradiction", section:"Contradiction Functions", label:"Contradiction Functions", drawAll:false, defaultOn:false,
+   blurb:"What the contradiction is for — protective hypocrisy, aspirational values, the exceptions they make."},
+  {id:"contextrole", section:"Role by Context", label:"Role by Context", drawAll:true, defaultOn:false,
+   blurb:"The seat they take among peers, under authority, and with dependents — not one seat in every room."},
 ];
 
+
+/* Is this section drawn? A missing toggle (a trimmed page, the test harness) used to
+   read as ON, which was fine when every section shipped on. The §6 sections ship off
+   by default, so an absent control has to mean "the shipped default", not "yes". */
+function profileSectionEnabled(ps){
+  const tog = document.getElementById('sec_'+ps.id);
+  if (tog) return !!tog.checked;
+  return ps.defaultOn !== false;
+}
 
 // Resolves which TYPE each profile section lands on, one section at a time, in the order
 // PROFILE_SECTIONS is defined — so a later section (say, Values) can be biased by an
@@ -3123,13 +3782,12 @@ function predictProfileCategories(withConfidence){
   // The preview has to see the same signals the build will, archetype hints included,
   // or selecting an archetype changes the result without changing the preview.
   const archKey = (document.getElementById('archetypeSelect')||{}).value || '';
-  const arch = ARCHETYPES[archKey] || CUSTOM_ARCHETYPES[archKey];
+  const arch = effectiveArchetype(archKey, (document.getElementById('archetypeVariation')||{}).value);
   return withArchetypeProfile(arch && arch.profile, ()=>{
   const chosen = {}, conf = {};
   PROFILE_SECTIONS.forEach(ps=>{
     if (ps.drawAll) return;
-    const tog = document.getElementById('sec_'+ps.id);
-    if (tog && !tog.checked) return;
+    if (!profileSectionEnabled(ps)) return;
     const sel = document.getElementById('type_'+ps.id);
     if (sel && sel.value){ chosen[ps.id] = sel.value; conf[ps.id] = 1; return; }
     const cats = catsOf(ps.section);
@@ -3152,8 +3810,7 @@ function resolveProfileCategories(rarityPref, overrides, forcedCats){
   const chosen = {};
   PROFILE_SECTIONS.forEach(ps=>{
     if (ps.drawAll) return; // Motivation & Wound always draws every category; nothing to "resolve"
-    const tog = document.getElementById('sec_'+ps.id);
-    if (tog && !tog.checked) return;
+    if (!profileSectionEnabled(ps)) return;
     if (forcedCats && forcedCats[ps.id]) { chosen[ps.id] = forcedCats[ps.id]; return; }
     const sel = document.getElementById('type_'+ps.id);
     const manual = (sel && sel.value) ? sel.value : null;
@@ -3210,8 +3867,7 @@ function pickProfileSlots(rarityPref, resolvedCats, onlySectionId, skipSectionId
     ? PROFILE_SECTIONS.filter(ps=>ps.id === onlySectionId)
     : PROFILE_SECTIONS.filter(ps=>ps.id !== skipSectionId);
   sections.forEach(ps=>{
-    const tog = document.getElementById('sec_'+ps.id);
-    if (tog && !tog.checked) return;
+    if (!profileSectionEnabled(ps)) return;
     const target = profileTarget(ps.id);
 
     if (ps.drawAll){
@@ -3960,8 +4616,7 @@ function deriveDepthCategories(){
   lastDepthMotivation = motivTraits;
   PROFILE_SECTIONS.forEach(ps=>{
     if (ps.drawAll) return;
-    const tog = document.getElementById('sec_'+ps.id);
-    if (tog && !tog.checked) return;
+    if (!profileSectionEnabled(ps)) return;
     const sel = document.getElementById('type_'+ps.id);
     // A value depth-first itself wrote on a PREVIOUS run is not a user choice. Without
     // this the second run treated the first run's automatic pick as a fixed manual
@@ -4751,14 +5406,48 @@ function wildcardCount(){
   const el = document.getElementById('wildcardCount');
   return el ? clamp(parseInt(el.value, 10) || 0, 0, 3) : 1;
 }
-function pickWildcardSlot(rarityPref, index){
+/* Which axis the partial sheet leans on hardest, and which way — read straight off
+   the polarity tags already seated. The wildcard uses it to pick something that
+   actually cuts against the person being built, rather than a random tail trait that
+   is merely labelled as not fitting. */
+function strongestLean(partial){
+  const sums = {};
+  Object.values(partial || {}).forEach(sl=>{
+    const t = sl && sl.trait; if (!t || !t.pol) return;
+    Object.entries(t.pol).forEach(([ax,v])=>{ if (v && AXIS_LABELS[ax]) sums[ax] = (sums[ax]||0) + v; });
+  });
+  let best = null;
+  Object.entries(sums).forEach(([ax,v])=>{ if (!best || Math.abs(v) > Math.abs(best.v)) best = {ax, v}; });
+  return best && Math.abs(best.v) >= 2 ? best : null;
+}
+const EXCEPTION_SURVIVES = {
+  protect: "it survives because it protects something the rest of them would not know how to",
+  soothe:  "it survives because it is how they calm down, and nothing else on the sheet does that job",
+  connect: "it survives because it is the one door they leave open",
+  avoid:   "it survives because it is where they go when the rest of this is too much",
+  perform: "it survives because it is a performance, and they know it is",
+  control: "it survives because it is the one place they insist on holding the reins",
+  provide: "it survives because somebody depends on it",
+  repair:  "it survives because it is what they reach for after the damage",
+  default: "it survives because a person is not a theorem — this is the exception that proves they are one",
+};
+function pickWildcardSlot(rarityPref, index, partial){
   /* Picking a uniform SECTION and then a uniform CATEGORY within it weighted the draw
      by how finely a section happens to be subdivided, not by how much content it holds:
      a Mannerism category came up at 1/84 while a Verbosity one came up at 1/35, for no
      reason anyone chose. Flatten to a single uniform draw over all eligible categories. */
-  const pairs = [];
+  const lean = strongestLean(partial);
+  const opposes = t => lean && t.pol && Math.sign(t.pol[lean.ax] || 0) === -Math.sign(lean.v) && !_buildUsedIds.has(t.id);
+  let pairs = [];
   WILDCARD_SECTIONS.forEach(s=> catsOf(s).forEach(c=>{ if (byFilter(s, c).length) pairs.push([s, c]); }));
   if (!pairs.length) return null;
+  /* When the sheet leans, draw the category uniformly among those that can actually
+     answer it — many categories hold nothing on the leaning axis at all, and picking
+     one of those first meant the "exception" was usually just a tail draw. */
+  if (lean){
+    const able = pairs.filter(([s, c]) => byFilter(s, c).some(opposes));
+    if (able.length) pairs = able;
+  }
   const [section, cat] = pairs[Math.floor(rand()*pairs.length)];
   const pool = byFilter(section, cat);
   /* Far tail, either end — an outlier can be a startlingly quiet thing as easily as a
@@ -4781,13 +5470,29 @@ function pickWildcardSlot(rarityPref, index){
   const prior = CURRENT_AFFINITY_VEC;
   CURRENT_AFFINITY_VEC = null;
   let trait;
-  try { trait = _drawUnique(()=>pickInRange(pool, rarityPref, target, 3)); }
+  /* MEANINGFUL EXCEPTION. A tail draw with affinity suppressed was "labelled as not
+     fitting without checking actual mismatch": most of the time it neither agreed nor
+     disagreed with anything. If the partial sheet leans hard on an axis, prefer a
+     candidate that pulls the other way on THAT axis — a real contradiction — and say
+     which axis and why it survives. If nothing in the category opposes the lean, the
+     old tail draw stands, honestly labelled. */
+  let opposing = null;
+  if (lean) opposing = pool.filter(opposes);
+  try {
+    if (opposing && opposing.length) trait = _drawUnique(()=>pickInRange(opposing, rarityPref, target, 3));
+    if (!trait) trait = _drawUnique(()=>pickInRange(pool, rarityPref, target, 3));
+  }
   finally { CURRENT_AFFINITY_VEC = prior; }
   if (!trait) return null;
   _markUsed(trait);
   const slotId = "wild_" + (index || 0);
+  const contradicts = lean && trait.pol && Math.sign(trait.pol[lean.ax] || 0) === -Math.sign(lean.v);
+  const why = contradicts
+    ? `Cuts against the sheet's strongest lean (${AXIS_LABELS[lean.ax]}, ${lean.v > 0 ? 'high' : 'low'}) — ` + (EXCEPTION_SURVIVES[trait.behaviorFunction] || EXCEPTION_SURVIVES.default) + '.'
+    : `A far-tail draw from ${cat}; nothing in that category opposes the sheet's strongest lean, so this is texture rather than a contradiction.`;
   return {slotId, locked:false, wildcard:true, target,
-          label:"Doesn't fit the rest — " + cat, trait};
+          label: (contradicts ? "The exception — " : "Doesn't fit the rest — ") + cat, trait,
+          exceptionAxis: contradicts ? lean.ax : null, exceptionWhy: why};
 }
 function wildcardEnabled(){
   const el = document.getElementById('wildcardToggle');
@@ -4883,7 +5588,7 @@ function buildCharacterState(opts){
   // just seated (see the wound → distinguishing-marks link) and the resolved vice.
   if (on('genAppearance')) Object.assign(obj, pickAppearanceSlots(rarityPref, fullOverrides, resolvedCats, obj));
   for (let w = 0; w < wildcardCount(); w++){
-    const wild = pickWildcardSlot(rarityPref, w);
+    const wild = pickWildcardSlot(rarityPref, w, obj);
     if (wild) obj[wild.slotId] = wild;
   }
   return obj;
@@ -4950,6 +5655,867 @@ function pressureRecovery(st){
   const catOf = id => { const s2 = (st||{})["prof_"+id+"_0"]; return s2 && s2.trait ? s2.trait.category : null; };
   const bits = [RECOVERY_BY_STRESS[catOf('stress')], RECOVERY_BY_ATTACHMENT[catOf('attachment')]].filter(Boolean);
   return bits.length ? bits.join(" ") : null;
+}
+
+// ================= MECHANICS: CHAINS, STRUCTURED CONTRADICTION, DIMENSIONS =================
+/* The deep sections were drawn independently and read independently: a Want, a Lie,
+   a Wound and a Need on four separate cards with nothing saying how one produced the
+   next. The chain below is pure composition of slots already on the sheet, so it is
+   deterministic per character and costs nothing to rebuild — but it is the difference
+   between a list of psychological nouns and a mechanism a writer can push on. Every
+   link names the trait it reads from, so the explanation can be checked against the
+   cards rather than taken on trust. */
+function _profTrait(st, sectionId, catRe){
+  const id = Object.keys(st || {}).find(k => k.startsWith("prof_" + sectionId + "_") && st[k] && st[k].trait
+    && (!catRe || catRe.test(st[k].trait.category)));
+  return id ? st[id].trait : null;
+}
+const STRATEGY_BY_STRESS = {
+  "Fight (attack the threat)": "meets it head-on before it can land",
+  "Flight (remove yourself)": "leaves before it can land",
+  "Freeze (shut down)": "goes still and waits for it to pass",
+  "Fawn (appease the threat)": "makes themselves useful to it until it stops being a threat",
+};
+const STRATEGY_BY_VALUES = {
+  "Rigid & Principled": "a rule they will not bend",
+  "Pragmatic & Flexible": "whatever works this time",
+  "Loyalty-Bound": "the people they have decided are theirs",
+  "Self-Interested": "their own position first",
+  "Idealistic & Visionary": "a picture of how it ought to be",
+};
+function motivationChain(st){
+  const want = _profTrait(st, "motivation", /Core Want/i);
+  const fear = _profTrait(st, "motivation", /Core Fear/i);
+  const wound = _profTrait(st, "motivation", /Core Wound/i);
+  const lie = _profTrait(st, "motivation", /The Lie/i);
+  const need = _profTrait(st, "motivation", /The Need/i);
+  const ghost = _profTrait(st, "motivation", /The Ghost/i);
+  const defence = _profTrait(st, "motivation", /The Defence/i);
+  const origin = _profTrait(st, "origins");
+  const stress = _profTrait(st, "stress");
+  const values = _profTrait(st, "values");
+  const aim = _profTrait(st, "goals", /Longer Aim/i);
+  const price = _profTrait(st, "goals", /Price/i);
+  if (!want && !need && !wound) return null;
+  const links = [];
+  const add = (key, text, from) => links.push({key, text, from: from.filter(Boolean).map(t => t.trait)});
+  if (want) add("want", `The conscious goal is ${want.trait}${want.desc ? ` — ${want.desc}` : ``}`, [want]);
+  if (lie && want) add("belief", `They chase it because they believe ${lie.trait}: the want is what that belief makes look like the answer.`, [lie, want]);
+  else if (lie) add("belief", `Underneath, they believe ${lie.trait}.`, [lie]);
+  if (wound) add("origin", `The belief was learned from ${wound.trait}${ghost ? `, and it is still attached to ${ghost.trait}` : ``}.`, [wound, ghost]);
+  if (need) add("need", `What would actually help is ${need.trait}${want ? ` — which the want stands in front of rather than delivering` : ``}.`, [need, want]);
+  if (defence) add("strategy", `The strategy built on top is ${defence.trait}: it keeps the wound covered and keeps the need unmet.`, [defence]);
+  if (stress || values){
+    const s = stress ? STRATEGY_BY_STRESS[stress.category] : null;
+    const v = values ? STRATEGY_BY_VALUES[values.category] : null;
+    add("method", `When the strategy is tested they ${s || "fall back on habit"}${v ? `, and justify it by ${v}` : ``}.`, [stress, values]);
+  }
+  if (fear) add("fear", `The thing they organise their life to avoid is ${fear.trait}${wound ? ` — the wound happening again` : ``}.`, [fear]);
+  if (origin) add("counterweight", `The one place the belief does not hold: ${origin.trait}. ${origin.desc || ""}`.trim(), [origin]);
+  if (aim || price) add("stakes", `${aim ? `Right now it points at ${aim.trait}.` : ``}${price ? ` The cost they are already paying: ${price.trait}.` : ``}`.trim(), [aim, price]);
+  return {want, fear, wound, lie, need, ghost, defence, origin, stress, values, links};
+}
+
+/* The pressure sheet had a trigger and an aftermath but no middle: nothing said how the
+   trigger was READ, what the first move was, how far it has to go before the sheet's
+   shifts happen, or what the repair looks like. Each stage names the base trait it is
+   grounded in; a stage with nothing to ground it is omitted rather than invented. */
+const APPRAISAL_BY_ATTACHMENT = {
+  "Secure": "reads it as a problem to solve, not a verdict on them",
+  "Anxious": "reads it as the first sign of being left",
+  "Avoidant": "reads it as a demand, and demands are the thing to get away from",
+  "Disorganized": "reads it two ways at once and acts on whichever arrives first",
+};
+const THRESHOLD_BY_VALUES = {
+  "Rigid & Principled": "when a rule is broken in front of them",
+  "Pragmatic & Flexible": "only once the workaround has also failed",
+  "Loyalty-Bound": "the moment one of their people is touched",
+  "Self-Interested": "when it starts to cost them personally",
+  "Idealistic & Visionary": "when the picture of how it should be is mocked",
+};
+function pressureChain(st, pst){
+  const fear = _profTrait(st, "motivation", /Core Fear/i);
+  const wound = _profTrait(st, "motivation", /Core Wound/i);
+  const lie = _profTrait(st, "motivation", /The Lie/i);
+  const attach = _profTrait(st, "attachment");
+  const stress = _profTrait(st, "stress");
+  const values = _profTrait(st, "values");
+  const repair = _profTrait(st, "repair");
+  const level = pst && pst.__pressure ? pst.__pressure.level : 1;
+  const stages = [];
+  const add = (key, title, text, from) => stages.push({key, title, text, from: from.filter(Boolean).map(t => t.trait)});
+  if (fear || wound) add("trigger", "Trigger", fear
+    ? `Anything that looks like ${fear.trait}${wound ? `, especially when it rhymes with ${wound.trait}` : ``}.`
+    : `Anything that reopens ${wound.trait}.`, [fear, wound]);
+  if (attach || lie){
+    const a = attach ? APPRAISAL_BY_ATTACHMENT[attach.category] : null;
+    add("appraisal", "How they read it", `${a ? `They ${a}` : `They read it through the belief`}${lie ? `, because underneath they still hold that ${lie.trait}` : ``}.`, [attach, lie]);
+  }
+  if (stress){
+    const shifted = pst ? Object.values(pst).filter(s => s && s.shifted).map(s => `${s.fromCat} → ${s.toCat}`) : [];
+    add("tactic", "First move", `${stress.trait}: ${stress.desc || STRATEGY_BY_STRESS[stress.category] || ""}${shifted.length ? ` Under load the profile shifts: ${shifted.join("; ")}.` : ``}`.trim(), [stress]);
+  }
+  if (values || level !== undefined){
+    const v = values ? THRESHOLD_BY_VALUES[values.category] : null;
+    add("threshold", "Where it tips", `${v ? `It tips ${v}` : `It tips when the pressure passes their composure`}${level < 0.99 ? ` — the sheet shows them at ${Math.round(level*100)}%, short of that` : ` — the sheet shows them past it`}.`, [values]);
+  }
+  const rec = pressureRecovery(st);
+  if (rec) add("aftermath", "Afterwards", rec, [stress, attach]);
+  if (repair) add("repair", "How they repair it", `${repair.trait}: ${repair.desc || ""}${repair.example ? ` — “${repair.example}”` : ``}`.trim(), [repair]);
+  return stages.length ? {level, stages} : null;
+}
+
+/* A contradiction was an axis, two trait names and one question. What a scene needs is
+   the four things the audit names: when the second face appears, with whom, what
+   actually changes, and what it costs. Derived from the traits' own conditions and
+   the sheet's context roles where the data exists, and left as a prompt the author
+   answers where it does not. Answers live in charMeta.contradictionAnswers so they
+   save, export and survive a re-render. */
+const CONTEXT_WORDS = {public:"in public", private:"in private", authority:"in front of authority", threat:"under threat",
+  intimacy:"with someone close", fatigue:"when tired", work:"at work", home:"at home", stranger:"with strangers", peer:"among peers", dependent:"with someone who depends on them"};
+function structuredContradiction(st, meta){
+  const base = contradictionFor(st);
+  if (!base) return null;
+  const fn = _profTrait(st, "contradiction");
+  const condsOf = t => (t.conditions || []).map(c => CONTEXT_WORDS[c] || c);
+  const hiWhen = condsOf(base.hi), loWhen = condsOf(base.lo);
+  const roles = ["Among Peers","Under Authority","With Dependents"].map(c => _profTrait(st, "contextrole", new RegExp("^" + c + "$"))).filter(Boolean);
+  const attach = _profTrait(st, "attachment");
+  const derived = {
+    when: hiWhen.length || loWhen.length
+      ? `${base.hi.trait} ${hiWhen.length ? hiWhen.join(" or ") : "by default"}; ${base.lo.trait} ${loWhen.length ? loWhen.join(" or ") : "the rest of the time"}.`
+      : null,
+    who: roles.length ? `The context roles give the likely split: ${roles.map(r => `${r.category.toLowerCase()} they are ${r.trait}`).join("; ")}.` : (attach ? `${attach.category} attachment decides who gets which face.` : null),
+    change: `On ${base.axisLabel.toLowerCase()} they move from ${base.hi.trait} to ${base.lo.trait} — a ${base.tier.toLowerCase()} swing.`,
+    cost: fn ? `${fn.trait}: ${fn.desc || ""}`.trim() : null,
+    fn,
+  };
+  const prompts = {
+    when: "When does the second face appear?",
+    who: "With whom?",
+    change: "What actually changes?",
+    cost: "What does it cost them?",
+  };
+  const answers = (meta && meta.contradictionAnswers) || {};
+  const fields = Object.keys(prompts).map(k => ({key:k, prompt:prompts[k], derived: derived[k], answer: answers[k] || ""}));
+  return Object.assign({}, base, {fields, fn});
+}
+
+/* Intensity was doing four jobs. A trait can be constant but invisible (a private
+   ritual), rare but unmissable (a scar), or loud and gone in a scene (a flare of
+   temper). Where the bank carries the four dimensions they are used as written;
+   elsewhere they are inferred from what the section is, so every card can show them
+   and the export can carry them — with the inference flagged so nobody mistakes a
+   default for an authored judgment. */
+const DIM_DEFAULTS_BY_SECTION = {
+  "Appearance":            {visibility:5, persistence:5},
+  "Mannerisms":            {visibility:4, persistence:4},
+  "Habits & Vices":        {visibility:3, persistence:4},
+  "Verbosity Traits":      {visibility:4, persistence:4},
+  "Vocabulary Traits":     {visibility:4, persistence:4},
+  "Dialogue Grammar Traits": {visibility:4, persistence:4},
+  "Personality Traits":    {visibility:3, persistence:4},
+  "Humor Style":           {visibility:4, persistence:4},
+  "Social Role in a Group": {visibility:3, persistence:4},
+  "Role by Context":       {visibility:3, persistence:3},
+  "Motivation & Wound":    {visibility:1, persistence:5},
+  "Positive Origins":      {visibility:1, persistence:5},
+  "Goals & Stakes":        {visibility:2, persistence:3},
+  "Attachment & Intimacy Style": {visibility:2, persistence:5},
+  "Conflict & Stress Response":  {visibility:3, persistence:4},
+  "Values & Moral Line":   {visibility:3, persistence:5},
+  "Contradiction Functions": {visibility:2, persistence:4},
+  "Recovery & Repair":     {visibility:3, persistence:4},
+  "Ordinary Texture":      {visibility:3, persistence:3},
+  "Competence & Method":   {visibility:3, persistence:5},
+};
+const DIM_LABELS = {frequency:"how often it shows", visibility:"how easily others see it", persistence:"how long it lasts", narrativeSalience:"how much weight it carries"};
+function traitDimensions(t){
+  if (!t) return null;
+  const def = DIM_DEFAULTS_BY_SECTION[t.section] || {visibility:3, persistence:3};
+  const inferred = [];
+  const pick = (key, fallback) => {
+    const v = t[key];
+    if (Number.isInteger(v) && v >= 1 && v <= 5) return v;
+    inferred.push(key);
+    return fallback;
+  };
+  const rt = RTIER_ORDER.indexOf(rarityTier(t));
+  return {
+    frequency: pick("frequency", clamp(t.intensity || 3, 1, 5)),
+    visibility: pick("visibility", def.visibility),
+    persistence: pick("persistence", def.persistence),
+    narrativeSalience: pick("narrativeSalience", clamp(Math.round((rt + 1 + (t.intensity || 3)) / 2), 1, 5)),
+    inferred,
+  };
+}
+
+/* The emergent label is a first draft. Once the author has a better name for what
+   the sheet adds up to, it should be theirs — and should outlive the next re-render,
+   the save and the export. */
+function characterLabel(st, meta){
+  if (meta && meta.label) return {name: meta.label, exact: true, authored: true};
+  const em = emergentArchetypeName(st);
+  return em ? Object.assign({authored:false}, em) : null;
+}
+
+// ================= CONTEXTUAL CHARACTER ENGINE (MVP) =================
+/* The sheet was one static list: the same 40 cards whether the character is alone,
+   in a crowd, in front of their boss or being threatened. Real behaviour is a
+   baseline plus per-context activation and suppression. This is the first pass at
+   that, kept deterministic and explainable: for a chosen context every seated card is
+   classed active, amplified, suppressed or exception, with the rule that decided it
+   written out. Rules read, in order of authority: the trait's own `conditions` and
+   `exceptions` (authored intent), the trait's section (what kind of thing it is), its
+   dimensions (how visible and persistent it is), the character's internal dimensions
+   (who they are), and the trait's polarity on the axes the context tests. Nothing
+   here draws a trait: the baseline sheet is the truth and a context is a lens on it. */
+const CONTEXT_MODES = [
+  {id:"baseline",  label:"Baseline",      tags:[],                     blurb:"The sheet as generated — no room, no audience."},
+  {id:"public",    label:"In public",     tags:["public","stranger"],  blurb:"Strangers present. Surface shows; the interior goes quiet."},
+  {id:"private",   label:"In private",    tags:["private","home","intimacy"], blurb:"Alone or with someone close. The interior shows; the performance drops."},
+  {id:"authority", label:"Under authority", tags:["authority","work"], blurb:"Someone with power over them is in the room."},
+  {id:"threat",    label:"Under threat",  tags:["threat","fatigue"],   blurb:"Something has gone wrong. The stress response takes the wheel."},
+];
+const CONTEXT_MODE_IDS = CONTEXT_MODES.map(m => m.id);
+function contextMode(id){ return CONTEXT_MODES.find(m => m.id === id) || CONTEXT_MODES[0]; }
+
+/* Per-context rules on section and polarity. Each entry is {test, status, why}; the
+   first matching rule after the authored ones wins, so the order is the priority. */
+const _SURFACE_SECTIONS = new Set(["Appearance","Mannerisms","Verbosity Traits","Vocabulary Traits","Dialogue Grammar Traits","Humor Style"]);
+const _INTERIOR_SECTIONS = new Set(["Motivation & Wound","Positive Origins","Attachment & Intimacy Style","Contradiction Functions"]);
+const CONTEXT_LENS_RULES = {
+  public: [
+    {test:(t,d)=> t.category === "Among Peers", status:"amplified", why:"the peer-room role is on show"},
+    {test:(t,d)=> t.category === "With Dependents" || t.category === "Under Authority", status:"suppressed", why:"a role for a different room"},
+    {test:(t,d)=> _INTERIOR_SECTIONS.has(t.section), status:"suppressed", why:"interior material — it drives them, but nobody in the room sees it"},
+    {test:(t,d)=> d.visibility <= 2, status:"suppressed", why:"low visibility — strangers would not catch it"},
+    {test:(t,d,dim)=> dim.selfPresent > 0.3 && t.pol && t.pol.ego === 1, status:"amplified", why:"self-presentation runs high, so the confident face comes forward with an audience"},
+    {test:(t,d,dim)=> dim.emoExpress < -0.3 && t.pol && t.pol.emo === 1, status:"suppressed", why:"emotional expression runs guarded — the open version stays home"},
+    {test:(t,d)=> _SURFACE_SECTIONS.has(t.section), status:"amplified", why:"surface behaviour is what an audience gets"},
+  ],
+  private: [
+    {test:(t,d)=> t.category === "With Dependents", status:"amplified", why:"the people who depend on them are the private room"},
+    {test:(t,d)=> t.category === "Among Peers" || t.category === "Under Authority", status:"suppressed", why:"a role for a different room"},
+    {test:(t,d)=> _INTERIOR_SECTIONS.has(t.section), status:"amplified", why:"interior material — this is where it is allowed out"},
+    {test:(t,d,dim)=> dim.selfPresent > 0.3 && t.pol && t.pol.ego === 1, status:"suppressed", why:"the grandiose face is a performance, and there is no audience"},
+    {test:(t,d,dim)=> dim.emoDepth > 0.3 && t.pol && t.pol.emo === 1, status:"amplified", why:"emotional depth runs high; in private the guard comes down"},
+    {test:(t,d)=> t.section === "Ordinary Texture" || t.section === "Habits & Vices", status:"amplified", why:"habits and small pleasures belong to unwatched time"},
+    {test:(t,d)=> t.section === "Appearance" && d.visibility >= 5, status:"active", why:"still there; nobody is looking"},
+  ],
+  authority: [
+    {test:(t,d)=> t.category === "Under Authority", status:"amplified", why:"exactly the room this role is for"},
+    {test:(t,d)=> t.category === "Among Peers" || t.category === "With Dependents", status:"suppressed", why:"a role for a different room"},
+    {test:(t,d,dim)=> dim.obedience > 0.3 && t.pol && t.pol.rebel === 1, status:"suppressed", why:"institutional obedience runs high — the defiance waits until the boss has left"},
+    {test:(t,d,dim)=> dim.obedience < -0.3 && t.pol && t.pol.rebel === 1, status:"amplified", why:"institutional obedience runs low — authority is what the defiance is for"},
+    {test:(t,d,dim)=> dim.obedience > 0.3 && t.pol && t.pol.asrt === 1, status:"suppressed", why:"assertion is dialled down in front of rank"},
+    {test:(t,d)=> t.pol && t.pol.form === 1, status:"amplified", why:"formality rises with rank in the room"},
+    {test:(t,d)=> t.pol && t.pol.form === -1, status:"suppressed", why:"the casual register is withheld from rank"},
+    {test:(t,d)=> t.section === "Motivation & Wound" && /Core Want|The Lie/.test(t.category), status:"active", why:"still driving, still hidden"},
+    {test:(t,d)=> _INTERIOR_SECTIONS.has(t.section), status:"suppressed", why:"interior material stays interior in front of power"},
+  ],
+  threat: [
+    {test:(t,d)=> t.section === "Conflict & Stress Response", status:"amplified", why:"the stress response takes the wheel"},
+    {test:(t,d)=> /Core Fear|The Defence|The Lie/.test(t.category), status:"amplified", why:"fear, defence and the lie are what a threat is made of"},
+    {test:(t,d)=> t.section === "Recovery & Repair", status:"suppressed", why:"repair comes after, not during"},
+    {test:(t,d)=> t.section === "Humor Style" && t.category !== "Dry & Deadpan" && t.category !== "Cruel & Barbed", status:"suppressed", why:"the jokes stop; only the dry and the barbed kinds survive a threat"},
+    {test:(t,d)=> t.section === "Humor Style", status:"amplified", why:"the kind of humour that is a weapon comes out under threat"},
+    {test:(t,d)=> t.section === "Ordinary Texture" || t.section === "Positive Origins", status:"suppressed", why:"ordinary texture and good history are the first things a threat switches off"},
+    {test:(t,d,dim)=> dim.trust < -0.3 && t.pol && t.pol.warm === 1, status:"suppressed", why:"trust runs guarded — warmth is withdrawn when it might be used against them"},
+    {test:(t,d)=> t.pol && t.pol.agr === -1, status:"amplified", why:"the hard edge shows"},
+    {test:(t,d)=> d.persistence <= 2 && t.pol && t.pol.warm === 1, status:"suppressed", why:"a passing warmth is the first thing to go"},
+    {test:(t,d)=> t.section === "Values & Moral Line", status:"active", why:"what they will and will not do is being tested, not changed"},
+  ],
+};
+
+function _exceptionHits(t, mode){
+  const ex = t.exceptions || [];
+  if (!ex.length) return null;
+  const words = mode.tags.concat(mode.id === "private" ? ["family","partner","friends","close"] : mode.id === "authority" ? ["boss","rank","superiors"] : []);
+  const hit = ex.find(e => words.some(w => String(e).toLowerCase().includes(w)));
+  return hit || null;
+}
+
+function contextualView(st, contextId){
+  const mode = contextMode(contextId);
+  const dim = internalDimensions(st);
+  const slots = [];
+  Object.keys(st || {}).forEach(id => {
+    const s = st[id]; const t = s && s.trait; if (!t) return;
+    const d = traitDimensions(t);
+    let status = "active", why = mode.id === "baseline" ? "baseline" : "no rule moves it here", rule = "none";
+    if (mode.id !== "baseline"){
+      const ex = _exceptionHits(t, mode);
+      const conds = t.conditions || [];
+      if (ex){ status = "exception"; why = `authored exception: "${ex}"`; rule = "exceptions"; }
+      else if (conds.length && conds.some(c => mode.tags.includes(c))){ status = "amplified"; why = `authored for ${conds.join("/")}`; rule = "conditions"; }
+      else if (conds.length){ status = "suppressed"; why = `authored for ${conds.join("/")} only`; rule = "conditions"; }
+      else {
+        const r = (CONTEXT_LENS_RULES[mode.id] || []).find(r => r.test(t, d, dim));
+        if (r){ status = r.status; why = r.why; rule = "section/polarity"; }
+      }
+    }
+    slots.push({slotId:id, trait:t, status, why, rule});
+  });
+  const counts = {active:0, amplified:0, suppressed:0, exception:0};
+  slots.forEach(s => counts[s.status]++);
+  const headline = mode.id === "baseline" ? mode.blurb
+    : `${mode.blurb} ${counts.amplified} come forward, ${counts.suppressed} go quiet${counts.exception ? `, ${counts.exception} authored exception${counts.exception>1?"s":""}` : ``}.`;
+  return {context: mode.id, label: mode.label, counts, headline, slots, byId: Object.fromEntries(slots.map(s => [s.slotId, s]))};
+}
+
+/* Every context at once, for the comparison export and the test suite. */
+function contextualViews(st){
+  return CONTEXT_MODE_IDS.map(id => contextualView(st, id));
+}
+
+// ================= RELATIONSHIP WORKSPACE (MVP) =================
+/* Relationships were a pairwise axis comparison: two profiles, the axes where they
+   differ, a verdict. Nothing was stored, nothing was directed, and nothing said what
+   either party wanted from the other. The workspace adds directed edges between cast
+   members — {from, to, trust, dependence, status, obligation, knows, wants, conceals}
+   — with defaults derived from the sheets so an edge starts populated rather than
+   blank, and roles that can generate a new member to fill a seat opposite someone.
+   Everything here is pure; the cast array and the edge list live in app.js. */
+const RELATIONSHIP_ROLES = [
+  {id:"rival",      label:"Rival",      blurb:"Wants the same thing, from the other side.", oppose:["assertiveness","honesty"], align:["ambition","intelligence"], status:"equal", trust:2, dependence:2},
+  {id:"mentor",     label:"Mentor",     blurb:"Has been where they are going.",            oppose:["activeness","rebelliousness"], align:["intelligence"], profile:{role:"Leader", attachment:"Secure"}, status:"above", trust:4, dependence:2},
+  {id:"protege",    label:"Protégé",    blurb:"Is where they used to be.",                  oppose:["confidence"], align:["curiosity"], profile:{role:"Outsider"}, status:"below", trust:3, dependence:4},
+  {id:"confidant",  label:"Confidant",  blurb:"Knows the version nobody else sees.",       oppose:[], align:["honesty","friendliness"], profile:{attachment:"Secure", role:"Connector"}, status:"equal", trust:5, dependence:3},
+  {id:"dependant",  label:"Dependant",  blurb:"Needs them, and they know it.",             oppose:["assertiveness","discipline"], align:[], profile:{attachment:"Anxious"}, status:"below", trust:3, dependence:5},
+  {id:"antagonist", label:"Antagonist", blurb:"Stands in the way on purpose.",             oppose:["friendliness","agreeableness","honesty"], align:["assertiveness"], profile:{values:"Self-Interested"}, status:"equal", trust:1, dependence:1},
+  {id:"ally",       label:"Ally",       blurb:"On the same side, for now.",                oppose:["emotion"], align:["ambition","positivity"], profile:{values:"Loyalty-Bound"}, status:"equal", trust:4, dependence:3},
+  {id:"ex",         label:"The ex",     blurb:"Knows too much and still cares, or says not.", oppose:["friendliness","discipline"], align:["emotion"], profile:{attachment:"Avoidant"}, status:"equal", trust:2, dependence:2},
+];
+const RELATIONSHIP_STATUS = ["above","equal","below"];
+function relationshipRole(id){ return RELATIONSHIP_ROLES.find(r => r.id === id) || null; }
+
+/* Personality overrides for a member generated INTO a role opposite an anchor: the
+   role's opposed axes flip against the anchor, its aligned axes copy the anchor, and
+   the rest are a fresh roll — the same recipe as the foil finder, with the role
+   choosing the axes instead of the dice. */
+function roleOverridesFor(anchorOverrides, roleId, rng){
+  const role = relationshipRole(roleId);
+  const out = {};
+  PERSONALITY_AXES.forEach(a=>{
+    const src = anchorOverrides[a.id] || 0;
+    if (role && role.oppose.includes(a.id)){
+      const mag = Math.max(35, Math.abs(src));
+      out[a.id] = src > 0 ? -mag : src < 0 ? mag : (rng() < 0.5 ? -mag : mag);
+    } else if (role && role.align.includes(a.id)){
+      out[a.id] = Math.abs(src) >= 15 ? src : Math.round((rng()*2-1)*40);
+    } else out[a.id] = Math.round((rng()*2-1)*45);
+  });
+  return out;
+}
+
+/* A directed edge's defaults, read off the two sheets. Every number comes with its
+   reason so the author can see what to overrule. */
+function edgeDefaults(fromState, toState, roleId){
+  const role = relationshipRole(roleId);
+  const dim = internalDimensions(fromState);
+  const pa = axisProfile(fromState), pb = axisProfile(toState);
+  const why = [];
+  let trust = role ? role.trust : 3;
+  if (dim.trust > 0.3){ trust = Math.min(5, trust + 1); why.push("trust runs high in them"); }
+  if (dim.trust < -0.3){ trust = Math.max(1, trust - 1); why.push("trust runs guarded in them"); }
+  const honB = (pb.hon || 0), honA = (pa.hon || 0);
+  if (honB < -0.4 && honA > 0.2){ trust = Math.max(1, trust - 1); why.push("the other deals crooked and they deal straight"); }
+  let dependence = role ? role.dependence : 3;
+  const attach = _profTrait(fromState, "attachment");
+  if (attach && attach.category === "Anxious"){ dependence = Math.min(5, dependence + 1); why.push("anxious attachment leans in"); }
+  if (attach && attach.category === "Avoidant"){ dependence = Math.max(1, dependence - 1); why.push("avoidant attachment holds back"); }
+  const roleA = _profTrait(fromState, "role");
+  if (roleA && roleA.category === "Caretaker"){ dependence = Math.max(1, dependence - 1); why.push("a caretaker is depended on, not dependent"); }
+  let status = role ? role.status : "equal";
+  if (!role){
+    const d = (pa.asrt || 0) - (pb.asrt || 0);
+    status = d > 0.6 ? "above" : d < -0.6 ? "below" : "equal";
+    if (status !== "equal") why.push(`assertiveness gap of ${d.toFixed(1)}`);
+  }
+  const want = _profTrait(fromState, "motivation", /Core Want/i);
+  const lie = _profTrait(fromState, "motivation", /The Lie/i);
+  const defence = _profTrait(fromState, "motivation", /The Defence/i);
+  const contraB = contradictionFor(toState);
+  const woundB = _profTrait(toState, "motivation", /Core Wound/i);
+  const sharp = (pa.intel || 0) > 0.2 || (pa.cur || 0) > 0.2;
+  const knows = contraB ? (sharp ? `Has noticed that they are ${contraB.hi.trait} and also ${contraB.lo.trait}.` : `Has not noticed the contradiction the reader can see.`)
+              : woundB ? (sharp ? `Suspects ${woundB.trait}.` : `Knows nothing of ${woundB.trait}.`) : "";
+  const wants = want ? `${want.trait} — and this person is in the way of it, or the route to it.` : "";
+  const conceals = lie ? `That underneath it they believe ${lie.trait}.` : defence ? `${defence.trait}.` : "";
+  const obligation = role ? ({mentor:"To make them ready and then let go.", protege:"To become worth the time.", confidant:"To keep what they were told.", dependant:"To be there when it counts.", ally:"To hold the line when it costs.", ex:"None that either will admit to.", rival:"Only to fight fair, and only if watched.", antagonist:"None."})[role.id] || "" : "";
+  return {trust, dependence, status, obligation, knows, wants, conceals, why};
+}
+
+function makeEdge(fromId, toId, roleId, defaults, extra){
+  return Object.assign({id: "e_" + fromId + "_" + toId + "_" + (roleId || "x"), from: fromId, to: toId, role: roleId || null,
+    trust: 3, dependence: 3, status: "equal", obligation: "", knows: "", wants: "", conceals: "", notes: ""}, defaults || {}, extra || {});
+}
+/* Edges that name a member no longer in the cast are dropped, not repaired: a
+   dangling edge is a lie about the ensemble. */
+function pruneEdges(edges, members){
+  const ids = new Set((members || []).map(m => m.id));
+  return (edges || []).filter(e => e && ids.has(e.from) && ids.has(e.to) && e.from !== e.to);
+}
+function validateEdge(e){
+  const problems = [];
+  if (!e || typeof e !== 'object') return ["edge is not an object"];
+  ["from","to"].forEach(k => { if (typeof e[k] !== 'string' || !e[k]) problems.push(`edge.${k} must be a member id`); });
+  ["trust","dependence"].forEach(k => { if (!Number.isInteger(e[k]) || e[k] < 1 || e[k] > 5) problems.push(`edge.${k} must be 1..5`); });
+  if (!RELATIONSHIP_STATUS.includes(e.status)) problems.push("edge.status must be above/equal/below");
+  if (e.role && !relationshipRole(e.role)) problems.push(`edge.role "${e.role}" is not a known role`);
+  ["obligation","knows","wants","conceals","notes"].forEach(k => { if (e[k] !== undefined && typeof e[k] !== 'string') problems.push(`edge.${k} must be text`); });
+  return problems;
+}
+function edgesToMarkdown(edges, members){
+  const name = id => { const m = (members || []).find(x => x.id === id); return m ? (m.meta && m.meta.name) || id : id; };
+  return (edges || []).map(e => {
+    const role = relationshipRole(e.role);
+    const L = [`- **${name(e.from)} → ${name(e.to)}**${role ? ` (${role.label})` : ``}: trust ${e.trust}/5 · dependence ${e.dependence}/5 · stands ${e.status}`];
+    if (e.obligation) L.push(`  - owes: ${e.obligation}`);
+    if (e.knows) L.push(`  - knows: ${e.knows}`);
+    if (e.wants) L.push(`  - wants: ${e.wants}`);
+    if (e.conceals) L.push(`  - conceals: ${e.conceals}`);
+    if (e.notes) L.push(`  - notes: ${e.notes}`);
+    return L.join("\n");
+  }).join("\n");
+}
+
+// ================= ARCS AND VERSIONED EVENTS (MVP) =================
+/* A character was a single frozen sheet: the tool could say who someone is and had no
+   way to say who they became. An arc is an ordered log of events, each carrying the
+   belief it challenged, the choice made, the cost paid, and a shape — and each
+   proposing a small set of trait changes the author accepts or declines one at a time.
+   Nothing is applied behind the author's back, every event stores the before and after
+   for the slots it touched, and the whole arc replays from the baseline sheet, so
+   undoing an event is exact rather than approximate. */
+const ARC_SHAPES = [
+  {id:"growth",        label:"Growth",        blurb:"The belief loosened. They move toward the thing they were avoiding.", dir:1},
+  {id:"deterioration", label:"Deterioration", blurb:"The belief won. They move further into the defence.", dir:-1},
+  {id:"steadfast",     label:"Steadfast",     blurb:"It cost them and they did not move. Nothing on the sheet changes; the cost is the record.", dir:0},
+  {id:"cyclical",      label:"Cyclical",      blurb:"They have been here before. This undoes the last change of the opposite kind.", dir:0},
+];
+const ARC_SHAPE_IDS = ARC_SHAPES.map(s => s.id);
+function arcShape(id){ return ARC_SHAPES.find(s => s.id === id) || null; }
+
+function newEventId(seq){ return "ev_" + String(seq).padStart(3, "0"); }
+function makeArcEvent(seq, fields){
+  return Object.assign({
+    id: newEventId(seq), seq, title: "", beliefChallenged: "", choice: "", cost: "",
+    shape: "growth", changes: [], at: null,
+  }, fields || {});
+}
+function validateArcEvent(e){
+  const problems = [];
+  if (!e || typeof e !== 'object') return ["event is not an object"];
+  if (typeof e.id !== 'string' || !e.id) problems.push("event.id is missing");
+  if (!Number.isInteger(e.seq) || e.seq < 1) problems.push("event.seq must be a positive integer");
+  if (!ARC_SHAPE_IDS.includes(e.shape)) problems.push(`event.shape "${e.shape}" is not a known shape`);
+  ["title","beliefChallenged","choice","cost"].forEach(k => { if (e[k] !== undefined && typeof e[k] !== 'string') problems.push(`event.${k} must be text`); });
+  if (!Array.isArray(e.changes)) problems.push("event.changes must be a list");
+  else e.changes.forEach((c, i) => {
+    if (!c || typeof c.slotId !== 'string') problems.push(`change ${i} has no slotId`);
+    if (c && c.toId !== null && !Number.isInteger(c.toId)) problems.push(`change ${i} has a bad toId`);
+    if (c && typeof c.accepted !== 'boolean') problems.push(`change ${i} has no accepted flag`);
+  });
+  return problems;
+}
+
+/* The proposal. Deterministic in the event id, so the same event always proposes the
+   same changes and an arc can be rebuilt on another machine. Growth moves the loudest
+   negative personality card toward its positive pole and retires the Lie; deterioration
+   does the reverse and hardens the Defence; steadfast proposes nothing; cyclical
+   reverses the most recent accepted change of the opposite direction. */
+function _oppositeCategory(t, dir){
+  const ax = PERSONALITY_AXES.find(a => a.pos === t.category || a.neg === t.category || a.mid === t.category);
+  if (!ax) return null;
+  return dir > 0 ? ax.pos : ax.neg;
+}
+function proposeArcChanges(st, event, priorEvents){
+  const shape = arcShape(event.shape);
+  if (!shape) return [];
+  const out = [];
+  const push = (slotId, trait, why) => {
+    const cur = st[slotId] && st[slotId].trait;
+    if (!trait || !cur || trait.id === cur.id) return;
+    out.push({slotId, fromId: cur.id, toId: trait.id, why, accepted: false});
+  };
+  if (shape.id === "cyclical"){
+    // Walk backwards for an accepted change and put that slot back where it was.
+    for (let i = (priorEvents || []).length - 1; i >= 0 && out.length < 2; i--){
+      (priorEvents[i].changes || []).forEach(c => {
+        if (!c.accepted || out.some(o => o.slotId === c.slotId)) return;
+        const back = TRAITS_BY_ID.get(c.fromId);
+        if (back && st[c.slotId] && st[c.slotId].trait && st[c.slotId].trait.id !== c.fromId){
+          out.push({slotId: c.slotId, fromId: st[c.slotId].trait.id, toId: c.fromId,
+                    why: `back to where event ${priorEvents[i].seq} found them — this has happened before`, accepted: false});
+        }
+      });
+    }
+    return out;
+  }
+  if (shape.dir === 0) return out;   // steadfast: the cost is the record
+  withRng(mulberry32(hashSeedString(event.id + "|" + event.shape)), ()=>{
+    // 1. The loudest personality card pointing the wrong way for this shape.
+    const pers = Object.keys(st).filter(k => k.startsWith("pers_") && st[k] && st[k].trait)
+      .map(k => ({k, t: st[k].trait}))
+      .filter(x => {
+        const ax = PERSONALITY_AXES.find(a => a.pos === x.t.category || a.neg === x.t.category || a.mid === x.t.category);
+        if (!ax) return false;
+        return shape.dir > 0 ? x.t.category !== ax.pos : x.t.category !== ax.neg;
+      })
+      .sort((a, b) => (b.t.intensity || 3) - (a.t.intensity || 3));
+    if (pers.length){
+      const chosen = pers[0];
+      const cat = _oppositeCategory(chosen.t, shape.dir);
+      const pool = cat ? byFilter(SECTION_OF_CATEGORY.get(cat) || chosen.t.section, cat) : [];
+      push(chosen.k, pickInRange(pool, "balanced", clamp((chosen.t.intensity || 3) - 0.5, 1, 5), 3),
+        `${shape.label.toLowerCase()} on ${chosen.t.category.split("—")[0].trim()}: they move from "${chosen.t.trait}" toward the other pole`);
+    }
+    // 2. The Lie loosens on growth; the Defence hardens on deterioration.
+    const targetCat = shape.dir > 0 ? /The Lie/i : /The Defence/i;
+    const slotId = Object.keys(st).find(k => k.startsWith("prof_motivation_") && st[k] && st[k].trait && targetCat.test(st[k].trait.category));
+    if (slotId){
+      const cur = st[slotId].trait;
+      const pool = byFilter(cur.section, cur.category).filter(t => t.id !== cur.id);
+      const want = shape.dir > 0 ? clamp((cur.intensity || 3) - 1, 1, 5) : clamp((cur.intensity || 3) + 1, 1, 5);
+      push(slotId, pickInRange(pool, "balanced", want, 3),
+        shape.dir > 0 ? `the lie they believe loosens its grip` : `the defence they built gets thicker`);
+    }
+    // 3. Attachment moves one step on a strong event.
+    const att = Object.keys(st).find(k => k.startsWith("prof_attachment_") && st[k] && st[k].trait);
+    if (att && (event.cost || "").length > 20){
+      const ladder = ["Disorganized", "Avoidant", "Anxious", "Secure"];
+      const at = ladder.indexOf(st[att].trait.category);
+      const next = at >= 0 ? ladder[clamp(at + shape.dir, 0, ladder.length - 1)] : null;
+      if (next && next !== st[att].trait.category){
+        push(att, pickInRange(byFilter("Attachment & Intimacy Style", next), "balanced", 3, 3),
+          `a cost that size moves them from ${st[att].trait.category} toward ${next}`);
+      }
+    }
+  });
+  return out;
+}
+
+/* Applying an event is applying only its ACCEPTED changes, and never mutating the
+   state handed in: an arc is a chain of snapshots, not an edit in place. */
+function applyArcEvent(st, event){
+  const next = {};
+  Object.keys(st || {}).forEach(k => { next[k] = Object.assign({}, st[k]); });
+  (event.changes || []).forEach(c => {
+    if (!c.accepted) return;
+    const t = TRAITS_BY_ID.get(c.toId);
+    if (t && next[c.slotId]) next[c.slotId] = Object.assign({}, next[c.slotId], {trait: t, arcEvent: event.id});
+  });
+  return next;
+}
+function replayArc(baseState, events){
+  return (events || []).slice().sort((a, b) => a.seq - b.seq).reduce((st, e) => applyArcEvent(st, e), baseState || {});
+}
+/* What the arc adds up to, for the header and the export. */
+function arcSummary(events){
+  const kept = (events || []).filter(e => (e.changes || []).some(c => c.accepted));
+  const counts = {};
+  ARC_SHAPE_IDS.forEach(id => { counts[id] = (events || []).filter(e => e.shape === id).length; });
+  const dominant = ARC_SHAPE_IDS.slice().sort((a, b) => counts[b] - counts[a])[0];
+  const changes = (events || []).reduce((n, e) => n + (e.changes || []).filter(c => c.accepted).length, 0);
+  return {events: (events || []).length, eventsWithChanges: kept.length, changes, counts,
+    shape: (events || []).length ? dominant : null,
+    line: (events || []).length
+      ? `${events.length} event${events.length===1?'':'s'}, ${changes} accepted change${changes===1?'':'s'} — mostly ${arcShape(dominant).label.toLowerCase()}.`
+      : "No events yet. The sheet is where they start."};
+}
+function arcToMarkdown(events){
+  return (events || []).slice().sort((a,b)=>a.seq-b.seq).map(e => {
+    const L = [`### ${e.seq}. ${e.title || "Untitled event"} — _${(arcShape(e.shape)||{}).label || e.shape}_`];
+    if (e.beliefChallenged) L.push(`- **Belief challenged:** ${e.beliefChallenged}`);
+    if (e.choice) L.push(`- **Choice:** ${e.choice}`);
+    if (e.cost) L.push(`- **Cost:** ${e.cost}`);
+    (e.changes || []).forEach(c => {
+      const from = TRAITS_BY_ID.get(c.fromId), to = TRAITS_BY_ID.get(c.toId);
+      L.push(`- ${c.accepted ? "**Changed**" : "Proposed (declined)"}: ${from ? from.trait : c.fromId} → ${to ? to.trait : c.toId} — ${c.why}`);
+    });
+    return L.join("\n");
+  }).join("\n\n");
+}
+
+// ================= VOICE LABORATORY (MVP) =================
+/* The fingerprint pasted four authored examples together: real sentences, but sentences
+   about four unrelated moments. The lab asks the question a writer actually has —
+   "what does this person say when they have to refuse?" — and composes an answer out
+   of the sheet's own voice rules, naming every rule that shaped it. Composition is
+   deterministic (seeded on the sheet, the prompt and the mode), so the same character
+   always says the same thing and two characters can be compared honestly.
+
+   These are not meant to be publishable prose. They are a demonstration of shape:
+   length, directness, hedging, register, and which devices the character reaches for. */
+const VOICE_PROMPTS = [
+  {id:"refuse",   label:"Refusing",          setup:"Someone they can't simply dismiss asks them for something they will not give."},
+  {id:"apologise",label:"Apologising",       setup:"They were wrong, it was noticed, and the room is waiting."},
+  {id:"persuade", label:"Persuading",        setup:"They need someone to do something that person does not want to do."},
+  {id:"conceal",  label:"Concealing",        setup:"A direct question about the one thing they are not going to say."},
+  {id:"request",  label:"Making a request",  setup:"They want something small from someone they do not know well."},
+  {id:"askhelp",  label:"Asking for help",   setup:"They cannot do it alone, and the person who can help is right there."},
+  {id:"lie",      label:"Lying",             setup:"The truth costs too much, and they have about a second to decide."},
+];
+const VOICE_PROMPT_IDS = VOICE_PROMPTS.map(p => p.id);
+const VOICE_MODES = ["baseline", "pressure"];
+
+/* The rules, read off the sheet once. Everything the composer uses comes from here, so
+   the "which rules shaped this" list can never drift from what actually shaped it. */
+function voiceRules(st){
+  const slot = id => st && st[id] && st[id].trait ? st[id].trait : null;
+  const many = pre => Object.keys(st || {}).filter(k => k.startsWith(pre) && st[k] && st[k].trait).map(k => st[k].trait);
+  const p = axisProfile(st);
+  const rules = [];
+  const verbosity = slot("verbosity"), register = slot("register"), grammar = slot("grammar");
+  const vocab = many("vocab"), manner = many("manner");
+  if (verbosity) rules.push({key:"verbosity", label:verbosity.trait, why:"how much they say"});
+  if (register) rules.push({key:"register", label:register.trait, why:"how formal they are"});
+  if (grammar) rules.push({key:"grammar", label:grammar.trait, why:"how they build a sentence"});
+  vocab.slice(0,2).forEach(t => rules.push({key:"vocab", label:t.trait, why:"the words they reach for"}));
+  const lean = ax => (p[ax] || 0);
+  return {
+    verbosity, register, grammar, vocab, manner, rules, profile:p,
+    long: lean("vol") > 0.2, terse: lean("vol") < -0.2,
+    formal: lean("form") > 0.2, casual: lean("form") < -0.2,
+    direct: lean("asrt") > 0.2, yielding: lean("asrt") < -0.2,
+    warm: lean("warm") > 0.2, cold: lean("warm") < -0.2,
+    straight: lean("hon") > 0.2, slippery: lean("hon") < -0.2,
+    open: lean("emo") > 0.2, guarded: lean("emo") < -0.2,
+    mannered: lean("man") > 0.2, blunt: lean("man") < -0.2,
+    stress: slot("prof_stress_0"), values: slot("prof_values_0"),
+  };
+}
+
+/* Fragment tables. Each fragment carries the rule that justifies it, so a composed
+   line can be traced clause by clause. */
+const _VF = (text, rule) => ({text, rule});
+const VOICE_FRAGMENTS = {
+  opener: {
+    formal:  [_VF("If I may.", "formal register"), _VF("Forgive me.", "formal register"), _VF("With respect.", "formal register")],
+    casual:  [_VF("Look.", "casual register"), _VF("Right.", "casual register"), _VF("Yeah, so.", "casual register")],
+    neutral: [_VF("", "no opener — nothing in the sheet reaches for one")],
+    mannered:[_VF("Thank you for asking me properly.", "high manners"), _VF("You've been decent about this, so I'll be plain.", "high manners")],
+  },
+  refuse: {
+    direct:  [_VF("No.", "high assertiveness — the refusal is the whole sentence"), _VF("I'm not going to do that.", "high assertiveness")],
+    yielding:[_VF("I don't think I can, I'm sorry — it's not that I don't want to.", "low assertiveness — the refusal arrives wrapped"), _VF("I'd rather not, if that's all right.", "low assertiveness")],
+    mid:     [_VF("I'm going to say no to that.", "no strong assertiveness lean")],
+  },
+  apologise: {
+    straight:[_VF("I was wrong. That's all it is.", "high honesty — the apology concedes the point")],
+    slippery:[_VF("I'm sorry you took it that way.", "low honesty — the apology moves the fault")],
+    open:    [_VF("I've been sick about it since.", "high emotional expression")],
+    guarded: [_VF("It won't happen again.", "guarded emotion — the feeling stays off the page")],
+  },
+  persuade: {
+    direct:  [_VF("Here's what you're going to do, and here's why you'll want to.", "high assertiveness")],
+    warm:    [_VF("I wouldn't ask if there were another way to do it.", "high warmth")],
+    cold:    [_VF("You can do it now or you can do it later with more paperwork.", "low warmth")],
+    mid:     [_VF("I think this is the better road. Let me show you why.", "no strong lean")],
+  },
+  conceal: {
+    slippery:[_VF("That's a long story, and not a very interesting one.", "low honesty — deflection by boredom")],
+    straight:[_VF("I'm not going to answer that.", "high honesty — refuses rather than lies")],
+    guarded: [_VF("Nothing worth the telling.", "guarded emotion")],
+    mid:     [_VF("Ask me another time.", "no strong lean")],
+  },
+  request: {
+    mannered:[_VF("When you have a moment — and only then — could I trouble you?", "high manners")],
+    blunt:   [_VF("Give me a hand with this.", "low manners")],
+    terse:   [_VF("Need a minute.", "low verbosity")],
+    mid:     [_VF("Could you help me with something?", "no strong lean")],
+  },
+  askhelp: {
+    open:    [_VF("I can't do this on my own and I've stopped pretending otherwise.", "high emotional expression")],
+    guarded: [_VF("There's a piece of this that's outside my remit. That's all.", "guarded emotion — the ask is reframed as logistics")],
+    yielding:[_VF("Only if you've got time. Really, only if you have.", "low assertiveness")],
+    mid:     [_VF("I need help with this part.", "no strong lean")],
+  },
+  lie: {
+    slippery:[_VF("I was with Marcus. All evening.", "low honesty — a specific, checkable lie, told smoothly")],
+    straight:[_VF("...Yes. Yes, that's right.", "high honesty — the lie comes out badly because lying is not what they do")],
+    mid:     [_VF("Something like that.", "no strong lean")],
+  },
+  tail: {
+    long:    [_VF("I know that's more words than it needed.", "high verbosity"), _VF("And there's a whole other half to it, but you've had enough of me.", "high verbosity")],
+    terse:   [_VF("", "low verbosity — nothing follows")],
+    warm:    [_VF("We're all right, though. You and me.", "high warmth")],
+    cold:    [_VF("", "low warmth — no softening")],
+  },
+};
+const PRESSURE_TAIL = {
+  "Fight (attack the threat)": _VF("And if you want to make something of it, make it.", "stress response: fight"),
+  "Flight (remove yourself)":  _VF("I need some air. We'll do this another time.", "stress response: flight"),
+  "Freeze (shut down)":        _VF("...", "stress response: freeze"),
+  "Fawn (appease the threat)": _VF("Whatever's easiest for you. Honestly. Whatever's easiest.", "stress response: fawn"),
+};
+
+function _pickFrag(list, rng){ return list && list.length ? list[Math.floor(rng() * list.length)] : null; }
+function composeVoiceLine(st, promptId, mode){
+  const prompt = VOICE_PROMPTS.find(p => p.id === promptId);
+  if (!prompt) return null;
+  const r = voiceRules(st);
+  const underPressure = mode === "pressure";
+  let seed = 11;
+  Object.values(st || {}).forEach(s => { if (s && s.trait) seed = (seed * 31 + s.trait.id) >>> 0; });
+  const rng = mulberry32(hashSeedString(String(seed) + "|" + promptId + "|" + (mode || "baseline")));
+  const parts = [], used = [];
+  const take = frag => { if (!frag) return; if (frag.text) parts.push(frag.text); used.push(frag.rule); };
+  const table = VOICE_FRAGMENTS[promptId];
+  /* Pressure strips the politeness layer first — the opener and the manners are the
+     first things to go when someone is holding themselves together. */
+  if (!underPressure){
+    // The mannered openers thank someone for asking, so they only belong where someone
+    // has actually asked — otherwise an apology opens by thanking the injured party.
+    const asked = promptId === "refuse" || promptId === "request" || promptId === "askhelp";
+    if (r.mannered && asked) take(_pickFrag(VOICE_FRAGMENTS.opener.mannered, rng));
+    else if (r.formal) take(_pickFrag(VOICE_FRAGMENTS.opener.formal, rng));
+    else if (r.casual) take(_pickFrag(VOICE_FRAGMENTS.opener.casual, rng));
+  }
+  const pick = (...keys) => { for (const k of keys){ if (r[k] && table[k]) return _pickFrag(table[k], rng); } return _pickFrag(table.mid || table.straight || Object.values(table)[0], rng); };
+  take(pick("direct","yielding","slippery","straight","open","guarded","warm","cold","mannered","blunt","terse"));
+  if (!underPressure && r.long) take(_pickFrag(VOICE_FRAGMENTS.tail.long, rng));
+  if (!underPressure && r.warm) take(_pickFrag(VOICE_FRAGMENTS.tail.warm, rng));
+  if (underPressure && r.stress) take(PRESSURE_TAIL[r.stress.category]);
+  /* A vocabulary trait's own example is the one genuinely authored thing available, so
+     it rides along as the character's habitual device rather than being paraphrased. */
+  const device = r.vocab.filter(t => t.example)[0] || r.grammar;
+  const text = parts.join(" ").replace(/\s+/g, " ").trim();
+  return {
+    prompt: prompt.label, promptId, setup: prompt.setup, mode: underPressure ? "pressure" : "baseline",
+    text: text || "(this sheet has no voice traits to compose from)",
+    rules: used.filter(Boolean),
+    device: device ? {label: device.trait, example: device.example || ""} : null,
+  };
+}
+function voiceLab(st, mode){
+  return VOICE_PROMPT_IDS.map(id => composeVoiceLine(st, id, mode)).filter(Boolean);
+}
+/* Cast comparison. Two characters who reach for the same device are the failure this
+   panel exists to catch, so a rule or device used by more than one member is marked. */
+function voiceComparison(members, promptId, mode){
+  const rows = (members || []).map(m => ({
+    name: (m.meta && m.meta.name) || "Unnamed",
+    line: composeVoiceLine(m.state, promptId, mode),
+  })).filter(r => r.line);
+  const counts = {};
+  rows.forEach(r => {
+    const keys = r.line.rules.concat(r.line.device ? ["device: " + r.line.device.label] : []);
+    new Set(keys).forEach(k => { counts[k] = (counts[k] || 0) + 1; });
+  });
+  const repeated = Object.keys(counts).filter(k => counts[k] > 1).sort((a, b) => counts[b] - counts[a]);
+  rows.forEach(r => {
+    r.shared = r.line.rules.concat(r.line.device ? ["device: " + r.line.device.label] : []).filter(k => repeated.includes(k));
+  });
+  return {promptId, mode: mode === "pressure" ? "pressure" : "baseline", rows, repeated,
+    note: repeated.length
+      ? `${repeated.length} device${repeated.length===1?'':'s'} shared by more than one character — if these are the ones you can hear, the cast has one voice with different hats on.`
+      : "No shared devices in this prompt. Every character reaches for something different."};
+}
+function voiceLabToMarkdown(st, mode){
+  return voiceLab(st, mode).map(l =>
+    `### ${l.prompt}\n\n_${l.setup}_\n\n> ${l.text}\n\n- Rules: ${l.rules.join("; ") || "none"}${l.device ? `\n- Habitual device: ${l.device.label}` : ""}`
+  ).join("\n\n");
+}
+
+// ================= PROJECT LIBRARY AND BACKUP BUNDLE (MVP) =================
+/* Saved characters were a flat list of names in one browser's storage, with no way to
+   say "these six belong to the same book" and no way to get the lot onto another
+   machine. A project groups characters, casts, relationship edges, arc events, the
+   settings that produced them and the diversity archive; a backup bundle is every
+   project plus the loose saves, with a merge preview on the way back in so an import
+   can never quietly overwrite work. Everything here is pure — the storage calls live
+   in app.js — so the merge logic is testable without a browser. */
+const PROJECT_FORMAT = "character-voice-project";
+const BACKUP_FORMAT = "character-voice-backup";
+const BACKUP_VERSION = 1;
+function newProjectId(){ return "pj_" + Date.now().toString(36) + "_" + Math.floor(Math.random() * 1e6).toString(36); }
+function makeProject(name, fields){
+  return Object.assign({
+    format: PROJECT_FORMAT, id: newProjectId(), name: name || "Untitled project", tags: [],
+    characters: [], casts: [], edges: [], events: [], settings: null, archive: [],
+    created: new Date().toISOString(), updated: new Date().toISOString(),
+  }, fields || {});
+}
+function validateProject(p){
+  const problems = [];
+  if (!p || typeof p !== 'object') return ["project is not an object"];
+  if (typeof p.id !== 'string' || !p.id) problems.push("project.id is missing");
+  if (typeof p.name !== 'string' || !p.name) problems.push("project.name is missing");
+  ["characters","casts","edges","events","archive","tags"].forEach(k => {
+    if (!Array.isArray(p[k])) problems.push(`project.${k} must be a list`);
+  });
+  if (Array.isArray(p.tags) && p.tags.some(t => typeof t !== 'string')) problems.push("project.tags must be text");
+  if (Array.isArray(p.edges)) p.edges.forEach((e, i) => { const bad = validateEdge(e); if (bad.length) problems.push(`edge ${i}: ${bad[0]}`); });
+  if (Array.isArray(p.events)) p.events.forEach((e, i) => { const bad = validateArcEvent(e); if (bad.length) problems.push(`event ${i}: ${bad[0]}`); });
+  return problems;
+}
+function projectSummary(p){
+  return `${p.characters.length} character${p.characters.length===1?'':'s'} · ${p.casts.length} cast${p.casts.length===1?'':'s'} · ${p.edges.length} edge${p.edges.length===1?'':'s'} · ${p.events.length} event${p.events.length===1?'':'s'}`;
+}
+function makeBackupBundle(projects, loose, meta){
+  return Object.assign({
+    format: BACKUP_FORMAT, version: BACKUP_VERSION, exported: new Date().toISOString(),
+    projects: (projects || []).slice(), characters: (loose || []).slice(),
+  }, meta || {});
+}
+function validateBackupBundle(b){
+  const problems = [];
+  if (!b || typeof b !== 'object') return ["the file is not a backup bundle"];
+  if (b.format !== BACKUP_FORMAT) return [`this is not a backup bundle (format "${b.format}")`];
+  if (!Number.isInteger(b.version) || b.version > BACKUP_VERSION) problems.push(`version ${b.version} is newer than this build understands (${BACKUP_VERSION})`);
+  if (!Array.isArray(b.projects)) problems.push("the `projects` block is not a list");
+  else b.projects.forEach((p, i) => { const bad = validateProject(p); if (bad.length) problems.push(`project ${i} (${(p && p.name) || "?"}): ${bad[0]}`); });
+  if (!Array.isArray(b.characters)) problems.push("the `characters` block is not a list");
+  else b.characters.forEach((c, i) => { if (!c || typeof c.name !== 'string' || !c.record) problems.push(`character ${i} has no name/record`); });
+  return problems;
+}
+
+/* The preview. Nothing is written until the author has seen this: for both collections,
+   which entries are new, which already exist unchanged, and which would be overwritten
+   — the last group named one by one, because that is the group a person regrets. */
+function _stamp(v){ return v && (v.updated || v.savedAt) ? String(v.updated || v.savedAt) : null; }
+function mergePreview(existing, incoming){
+  const keyOf = x => x.id || x.name;
+  const have = new Map((existing || []).map(x => [keyOf(x), x]));
+  const out = {add: [], same: [], conflict: []};
+  (incoming || []).forEach(x => {
+    const k = keyOf(x), mine = have.get(k);
+    if (!mine){ out.add.push(x); return; }
+    if (JSON.stringify(mine) === JSON.stringify(x)){ out.same.push(x); return; }
+    const a = _stamp(mine), b = _stamp(x);
+    out.conflict.push({key: k, name: x.name || k, mine, theirs: x,
+      newer: a && b ? (b > a ? "theirs" : a > b ? "mine" : "same age") : "unknown"});
+  });
+  return out;
+}
+function backupPreview(bundle, existingProjects, existingCharacters){
+  return {
+    projects: mergePreview(existingProjects, bundle.projects || []),
+    characters: mergePreview(existingCharacters, bundle.characters || []),
+  };
+}
+/* `choices` maps a conflict key to "theirs" (overwrite) or "mine" (keep). Anything not
+   named is kept, because the safe default for work already on this machine is to leave
+   it alone. */
+function applyMerge(existing, preview, choices){
+  const out = (existing || []).slice();
+  const keyOf = x => x.id || x.name;
+  const idx = new Map(out.map((x, i) => [keyOf(x), i]));
+  preview.add.forEach(x => { idx.set(keyOf(x), out.push(x) - 1); });
+  preview.conflict.forEach(c => {
+    if ((choices || {})[c.key] !== "theirs") return;
+    const at = idx.get(c.key);
+    if (at === undefined) idx.set(c.key, out.push(c.theirs) - 1);
+    else out[at] = c.theirs;
+  });
+  return out;
+}
+function mergeSummaryLine(preview){
+  const n = (p) => `${p.add.length} new, ${p.conflict.length} already here and different, ${p.same.length} identical`;
+  return `Projects: ${n(preview.projects)}. Characters: ${n(preview.characters)}.`;
 }
 
 function buildStressVariant(baseVerbLevel, baseRegLevel, mannerCount, rarityPref, sourceState){
@@ -5148,8 +6714,7 @@ function activeRuleChips(){
   }).length;
   if (manual) n('fixed profile types', manual);
   const off = (typeof PROFILE_SECTIONS !== 'undefined' ? PROFILE_SECTIONS : []).filter(ps=>{
-    const tog = document.getElementById('sec_'+ps.id);
-    return tog && !tog.checked;
+    return !profileSectionEnabled(ps);
   }).length;
   if (off) n('sections off', off);
   const seedEl = document.getElementById('seedInput');

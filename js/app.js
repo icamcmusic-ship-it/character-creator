@@ -131,6 +131,28 @@ function announceStorageMode(){
   el.textContent = "This browser is not allowing local storage (private mode, or site data is blocked). Saves will last only until you close this tab — export to a file to keep anything.";
 }
 
+/* The emergent label is the generator's first guess; the author's edit replaces it in
+   the summary, the save and the export. An empty answer clears the override. */
+async function editCharacterLabel(){
+  if (!Object.keys(state).length){ toast("Generate a character first.", "warn"); return; }
+  const current = (typeof characterLabel === 'function' && characterLabel(state, charMeta)) || {};
+  const next = await askForName("Label this character:", charMeta.label || current.name || "");
+  if (next === null) return;
+  charMeta.label = next;
+  renderSheet();
+}
+function clearCharacterLabel(){ delete charMeta.label; renderSheet(); }
+async function answerContradiction(key, clear){
+  const contra = (typeof structuredContradiction === 'function') ? structuredContradiction(state, charMeta) : null;
+  const field = contra && contra.fields.find(f => f.key === key);
+  if (!field) return;
+  charMeta.contradictionAnswers = Object.assign({}, charMeta.contradictionAnswers || {});
+  if (clear){ delete charMeta.contradictionAnswers[key]; renderSheet(); return; }
+  const next = await askForName(field.prompt, field.answer || "");
+  if (next === null) return;
+  charMeta.contradictionAnswers[key] = next;
+  renderSheet();
+}
 async function saveCharacter(btnEl){
   if(!Object.keys(state).length){ toast("Generate a character first.", "warn"); return; }
   if (!storageIsDurable()){
@@ -173,9 +195,16 @@ async function saveCharacter(btnEl){
       state: compressSlots(state), charMeta,
       pressureState: compressSlots(pressureState),
       pinnedTargets, charVariants, traitNotes,
+      /* The arc is the character's history, so a save without it loses the difference
+         between who they are and who they started as. The base sheet is compressed the
+         same way the live one is; the events are ids and text already. */
+      arcBase: arcBase ? compressSlots(arcBase) : null, arcEvents,
       settings: captureSettings(), savedAt: new Date().toISOString(),
     }));
     await loadSavedList();
+    // A saved character is an accepted one: the diversity objective measures the next
+    // batch against it, and "same world" avoids it.
+    if (typeof archiveCharacter === 'function') archiveCharacter(state, {name});
     toast(storageIsDurable()
       ? 'Saved "' + name + '"'
       : 'Saved "' + name + '" to this session only — this browser is not storing data, so export it to a file to keep it.',
@@ -291,6 +320,10 @@ async function loadSavedCharacter(name){
        an older save carrying full embedded trait copies rather than {__id} stubs. Both
        shapes arrive here the same way, so a save written by any build still loads. */
     state = rec.state; charMeta = rec.charMeta || {name, age:"", context:"", archetypeLabel:"Loaded"};
+    if (typeof viewContext !== 'undefined') viewContext = CONTEXT_MODE_IDS.includes(charMeta.viewContext) ? charMeta.viewContext : 'baseline';
+    if (typeof resetArc === 'function'){
+      arcEvents = (Array.isArray(rec.arcEvents) ? rec.arcEvents : []).filter(e=>!validateArcEvent(e).length);
+      arcBase = rec.arcBase ? expandSlots(rec.arcBase) : JSON.parse(JSON.stringify(state)); if (arcEvents.length) arcReplay(); else renderArc(); }
     pressureState = rec.pressureState || null;
     pinnedTargets = rec.pinnedTargets || {};
     charVariants = rec.charVariants || {};
@@ -449,7 +482,10 @@ function newCharacterId(){
   return 'ch_' + Date.now().toString(36) + '_' + _castIdSeq.toString(36);
 }
 function castEntry(state, variants, meta, extra){
-  return Object.assign({id: newCharacterId(), state, variants, meta}, extra || {});
+  const entry = Object.assign({id: newCharacterId(), state, variants, meta}, extra || {});
+  // Joining the cast is acceptance, for the diversity objective's purposes.
+  if (typeof archiveCharacter === 'function') archiveCharacter(state, {id: entry.id, name: meta && meta.name});
+  return entry;
 }
 let castStates = [];
 let lastCastSeed = null;
@@ -473,6 +509,7 @@ function generateCast(){
   const seedNum = castSeed.num;
   lastCastSeed = castSeed.label;
   castStates = [];
+  relationshipEdges = [];
   // withoutContextBias: the cast is not "six more of the character you just made" —
   // see the note on the helper in engine.js.
   // withSavedVariants: each cast member rolls its own presentation locks, and the
@@ -638,13 +675,18 @@ async function removeCastMember(i){
   if (!await askForConfirm(`Remove "${c.meta.name}" from the cast?`, "Remove")) return;
   const name = c.meta.name;
   castStates.splice(i, 1);
+  // An edge naming a member who has left is a lie about the ensemble — see pruneEdges.
+  const before = relationshipEdges.length;
+  relationshipEdges = pruneEdges(relationshipEdges, castStates);
   renderCast();
   refreshRelSelectors();
+  if (before !== relationshipEdges.length) toast(`${before - relationshipEdges.length} relationship edge(s) went with them.`, "warn", 5000);
   toast(`Removed "${name}" from the cast.`);
 }
 function castToMarkdown(){
   const head = `# Character Cast\n\n_${castStates.length} characters_\n`;
-  return head + castStates.map(c=>sheetToText(c.state, c.meta, null)).join("\n");
+  const edges = relationshipEdges.length ? `\n## Relationships\n\n${edgesToMarkdown(relationshipEdges, castStates)}\n` : "";
+  return head + edges + castStates.map(c=>sheetToText(c.state, c.meta, null)).join("\n");
 }
 function copyCast(btnEl){
   copyText(castToMarkdown(), btnEl);
@@ -659,12 +701,7 @@ function downloadCast(){
 const CAST_FORMAT_VERSION = 1;
 function exportCastJSON(){
   if (!castStates.length){ toast("Generate a cast first.", "warn"); return; }
-  downloadText(JSON.stringify({
-    format: "character-voice-cast", version: CAST_FORMAT_VERSION,
-    exported: new Date().toISOString(),
-    seed: lastCastSeed || null,
-    members: castStates.map(c=>({state: c.state, meta: c.meta, variants: c.variants || null})),
-  }, null, 2), "character_cast.json");
+  downloadText(JSON.stringify(castBundle(), null, 2), "character_cast.json");
   toast(`Exported ${castStates.length} cast member${castStates.length===1?'':'s'}.`);
 }
 function importCastJSON(fileInput){
@@ -674,31 +711,516 @@ function importCastJSON(fileInput){
   reader.onload = ()=>{
     try {
       const p = JSON.parse(reader.result);
-      if (p.format !== "character-voice-cast") throw new Error("Not a cast file.");
-      if (!Array.isArray(p.members)) throw new Error("The `members` block is not a list.");
       // Same structural validation and id re-linking the single-character import does —
       // a malformed member must not get as far as renderCast and throw there.
-      let orphans = 0;
-      const relink = st => { if (!st) return st;
-        Object.values(st).forEach(s2=>{
-          if (s2 && s2.trait){ const live = TRAITS_BY_ID.get(s2.trait.id); if (live) s2.trait = live; else orphans++; }
-        }); return st; };
-      const next = p.members.map((m, i)=>{
-        validateSheetPayload({state: m.state, charMeta: m.meta});
-        return {state: relink(m.state || {}), variants: m.variants || null,
-                meta: m.meta || {name: "Character " + (i+1), age:"", context:"", archetypeLabel:"Imported"}};
-      });
-      castStates = next;
-      lastCastSeed = p.seed || lastCastSeed;
+      const {orphans, dropped} = applyCastBundle(p);
       renderCast();
       refreshRelSelectors();
+      renderEdges();
       switchTab('cast');
-      toast(`Imported ${next.length} cast member${next.length===1?'':'s'}.`);
+      toast(`Imported ${castStates.length} cast member${castStates.length===1?'':'s'}${relationshipEdges.length ? ` and ${relationshipEdges.length} edge${relationshipEdges.length===1?'':'s'}` : ``}.`);
       if (orphans) toast(orphans + " trait(s) in this file no longer exist in the pool; their saved text was kept as-is.", "warn", 6000);
+      if (dropped) toast(dropped + " edge(s) named members not in this file and were dropped.", "warn", 6000);
     } catch(e){ toast("Could not import cast: " + e.message, "warn", 6000); }
     fileInput.value = "";
   };
   reader.readAsText(file);
+}
+
+// ================= RELATIONSHIP WORKSPACE =================
+/* Directed edges between cast members. Lives beside castStates, travels in the cast
+   file, and is pruned whenever a member leaves. See RELATIONSHIP_ROLES in engine.js. */
+let relationshipEdges = [];
+function castMemberById(id){ return castStates.find(c => c.id === id) || null; }
+function _relPartyId(key){
+  if (key === "__single__") return null;
+  const c = getCharByKey(key);
+  return c ? c.id : null;
+}
+function refreshRoleSelect(){
+  const sel = document.getElementById('relRole');
+  if (!sel || sel.options.length) return;
+  sel.innerHTML = `<option value="">No named role</option>` +
+    RELATIONSHIP_ROLES.map(r => `<option value="${escHTML(r.id)}" title="${escAttr(r.blurb)}">${escHTML(r.label)}</option>`).join("");
+}
+function addRelationshipEdge(){
+  const ka = strVal('relA', ''), kb = strVal('relB', '');
+  const from = _relPartyId(ka), to = _relPartyId(kb);
+  if (!from || !to){ toast("Edges join cast members. Add the current character to the cast first (Cast tab → Add current).", "warn", 5000); return; }
+  if (from === to){ toast("Pick two different characters.", "warn"); return; }
+  const roleId = strVal('relRole', '') || null;
+  const A = castMemberById(from), B = castMemberById(to);
+  const d = edgeDefaults(A.state, B.state, roleId);
+  const edge = makeEdge(from, to, roleId, d);
+  if (relationshipEdges.some(e => e.id === edge.id)){ toast("That edge already exists — edit it below.", "warn"); return; }
+  relationshipEdges.push(edge);
+  renderEdges();
+  toast(`Added ${A.meta.name} → ${B.meta.name}${d.why.length ? ` (${d.why.join("; ")})` : ``}.`, "ok", 5000);
+}
+function removeRelationshipEdge(id){
+  relationshipEdges = relationshipEdges.filter(e => e.id !== id);
+  renderEdges();
+}
+function editRelationshipEdge(id, field, el){
+  const e = relationshipEdges.find(x => x.id === id);
+  if (!e || !el) return;
+  if (field === 'trust' || field === 'dependence') e[field] = clamp(parseInt(el.value, 10) || 3, 1, 5);
+  else if (field === 'status') e.status = RELATIONSHIP_STATUS.includes(el.value) ? el.value : 'equal';
+  else e[field] = String(el.value || "").slice(0, 600);
+  // No re-render: the field being typed into is the field being stored.
+  const stamp = document.getElementById('edgeStamp');
+  if (stamp) stamp.textContent = `${relationshipEdges.length} edge${relationshipEdges.length===1?'':'s'} · saved with the cast`;
+}
+function renderEdges(){
+  const host = document.getElementById('relEdges');
+  if (!host) return;
+  refreshRoleSelect();
+  relationshipEdges = pruneEdges(relationshipEdges, castStates);
+  const stamp = document.getElementById('edgeStamp');
+  if (stamp) stamp.textContent = relationshipEdges.length ? `${relationshipEdges.length} edge${relationshipEdges.length===1?'':'s'} · saved with the cast` : "No edges yet.";
+  const name = id => { const m = castMemberById(id); return m ? m.meta.name : id; };
+  const text = (e, k, ph) => `<label class="edgeField"><span>${k}</span><input type="text" value="${escAttr(e[k] || "")}" placeholder="${escAttr(ph)}" ${actAttr('change', 'editRelationshipEdge', e.id, k, "$el")}></label>`;
+  host.innerHTML = relationshipEdges.map(e => {
+    const role = relationshipRole(e.role);
+    return `<div class="edgeCard" data-edge="${escAttr(e.id)}">
+      <div class="edgeHead"><b>${escHTML(name(e.from))}</b> → <b>${escHTML(name(e.to))}</b>${role ? ` <span class="edgeRole">${escHTML(role.label)}</span>` : ``}
+        <button class="savedAct savedDel" ${actAttr('click', 'removeRelationshipEdge', e.id)} aria-label="Remove this edge">remove</button></div>
+      <div class="edgeNums">
+        <label>trust <input type="range" min="1" max="5" step="1" value="${e.trust}" ${actAttr('input', 'editRelationshipEdge', e.id, 'trust', "$el")} aria-label="trust"></label>
+        <label>dependence <input type="range" min="1" max="5" step="1" value="${e.dependence}" ${actAttr('input', 'editRelationshipEdge', e.id, 'dependence', "$el")} aria-label="dependence"></label>
+        <label>stands <select ${actAttr('change', 'editRelationshipEdge', e.id, 'status', "$el")} aria-label="status">${RELATIONSHIP_STATUS.map(s => `<option value="${s}"${s===e.status?' selected':''}>${s}</option>`).join("")}</select></label>
+      </div>
+      ${text(e, 'obligation', 'What they owe the other')}
+      ${text(e, 'knows', 'What they know about the other')}
+      ${text(e, 'wants', 'What they want from the other')}
+      ${text(e, 'conceals', 'What they hide from the other')}
+      ${text(e, 'notes', 'Anything else')}
+    </div>`;
+  }).join("");
+}
+/* Generate a cast member INTO a role opposite the character in selector A. */
+function generateForRole(){
+  const ka = strVal('relA', '');
+  const anchor = getCharByKey(ka);
+  if (!anchor){ toast("Pick a character in the A slot first.", "warn"); return; }
+  const roleId = strVal('relRole', '');
+  const role = relationshipRole(roleId);
+  if (!role){ toast("Pick a role for the new member.", "warn"); return; }
+  const anchorId = anchor.id || null;
+  const seed = resolveSeed("");
+  const src = {};
+  /* A slot carries an unsigned target (1..5) and the resolved category carries the
+     sign, so the slider value is recovered from the pair rather than from `target`
+     alone — which would have read every axis as leaning high. */
+  PERSONALITY_AXES.forEach(a=>{
+    const s2 = anchor.state["pers_"+a.id];
+    const cat = s2 && s2.trait ? s2.trait.category : null;
+    const mag = Math.round(clamp((s2 && s2.target) || 0, 0, 5) * 20);
+    src[a.id] = cat === a.pos ? mag : cat === a.neg ? -mag : 0;
+  });
+  let variants = null, st;
+  withRng(mulberry32(seed.num), ()=>{
+    const overrides = roleOverridesFor(src, roleId, rand);
+    const forcedProfileCats = Object.assign({}, role.profile || {});
+    st = withoutContextBias(()=> withSpeculativeGeneration(()=> withCharacterVariants(()=> {
+      const built = finalizeSheet(buildCharacterState({
+        verbLevel: (rand()*4)-2, regLevel: (rand()*4)-2, compLevel: (rand()*4)-2,
+        mannerCount: intVal('mannerCount', 3), vocabCount: intVal('vocabCount', 2),
+        rarityPref: rarityPrefVal(), vocabPref:null, personalityOverrides: overrides, forcedProfileCats,
+      }), {rarityPref: rarityPrefVal(), applyPins:false});
+      variants = Object.assign({}, charVariants);
+      return built;
+    })));
+  });
+  const entry = castEntry(st, variants, {name: `${role.label} of ${anchor.meta.name || "the character"}`, age:"", context:`Generated as the ${role.label.toLowerCase()} of ${anchor.meta.name || "the character"}`, archetypeLabel:"Cast member (" + role.label + ")", seed: seed.label});
+  castStates.push(entry);
+  if (anchorId){
+    const d = edgeDefaults(entry.state, anchor.state, roleId);
+    relationshipEdges.push(makeEdge(entry.id, anchorId, roleId, d));
+  }
+  renderCast();
+  refreshRelSelectors();
+  renderEdges();
+  toast(`Added ${entry.meta.name}${anchorId ? " with an edge back to " + anchor.meta.name : " (add the anchor to the cast to record the edge)"}.`, "ok", 5000);
+}
+/* The cast file, as an object: exportCastJSON writes it, importCastJSON reads it, and
+   the test suite round-trips it without a browser. */
+function castBundle(){
+  return {
+    format: "character-voice-cast", version: CAST_FORMAT_VERSION,
+    exported: new Date().toISOString(),
+    seed: lastCastSeed || null,
+    members: castStates.map(c=>({id: c.id, state: c.state, meta: c.meta, variants: c.variants || null})),
+    edges: pruneEdges(relationshipEdges, castStates),
+  };
+}
+function applyCastBundle(p){
+  if (p.format !== "character-voice-cast") throw new Error("Not a cast file.");
+  if (!Array.isArray(p.members)) throw new Error("The `members` block is not a list.");
+  let orphans = 0;
+  const relink = st => { if (!st) return st;
+    Object.values(st).forEach(s2=>{
+      if (s2 && s2.trait){ const live = TRAITS_BY_ID.get(s2.trait.id); if (live) s2.trait = live; else orphans++; }
+    }); return st; };
+  const next = p.members.map((m, i)=>{
+    validateSheetPayload({state: m.state, charMeta: m.meta});
+    return {id: (typeof m.id === 'string' && m.id) ? m.id : newCharacterId(),
+            state: relink(m.state || {}), variants: m.variants || null,
+            meta: m.meta || {name: "Character " + (i+1), age:"", context:"", archetypeLabel:"Imported"}};
+  });
+  const edges = Array.isArray(p.edges) ? p.edges : [];
+  const bad = edges.map(validateEdge).filter(x => x.length);
+  if (bad.length) throw new Error("Bad edge: " + bad[0][0]);
+  castStates = next;
+  relationshipEdges = pruneEdges(edges.map(e => makeEdge(e.from, e.to, e.role, e)), next);
+  lastCastSeed = p.seed || lastCastSeed;
+  return {orphans, dropped: edges.length - relationshipEdges.length};
+}
+
+// ================= ARC PANEL =================
+/* `arcBase` is the sheet as generated; `state` is always the replayed result, so the
+   cards on screen are the character as of the last accepted change. Declining a change
+   or removing an event replays from the base rather than trying to invert an edit. */
+let arcBase = null;
+let arcEvents = [];
+function arcReplay(){
+  if (!arcBase) return;
+  state = replayArc(arcBase, arcEvents);
+  charMeta.arc = arcSummary(arcEvents);
+  renderSheet();
+  renderArc();
+}
+function resetArc(keepBase){
+  arcEvents = [];
+  arcBase = keepBase ? arcBase : (Object.keys(state).length ? JSON.parse(JSON.stringify(state)) : null);
+  if (charMeta) delete charMeta.arc;
+}
+async function addArcEvent(){
+  if (!Object.keys(state).length){ toast("Generate a character first — an arc happens to someone.", "warn"); return; }
+  if (!arcBase) arcBase = JSON.parse(JSON.stringify(state));
+  const title = await askForName("What happened?", "");
+  if (title === null) return;
+  const shape = strVal('arcShape', 'growth');
+  const ev = makeArcEvent(arcEvents.length + 1, {title, shape, at: new Date().toISOString()});
+  ev.changes = proposeArcChanges(state, ev, arcEvents);
+  arcEvents.push(ev);
+  renderArc();
+  toast(ev.changes.length
+    ? `Event added with ${ev.changes.length} proposed change${ev.changes.length===1?'':'s'} — accept the ones you want.`
+    : `Event added. ${shape === 'steadfast' ? "Steadfast: the cost is the record, nothing on the sheet moves." : "Nothing on this sheet moved for it."}`, "ok", 6000);
+}
+function editArcEvent(id, field, el){
+  const e = arcEvents.find(x => x.id === id);
+  if (!e || !el) return;
+  if (field === 'shape'){
+    e.shape = ARC_SHAPE_IDS.includes(el.value) ? el.value : 'growth';
+    // A new shape is a different proposal, and only unaccepted changes are re-proposed:
+    // a change the author has already taken is theirs, not the shape's.
+    const kept = (e.changes || []).filter(c => c.accepted);
+    e.changes = kept.concat(proposeArcChanges(replayArc(arcBase, arcEvents.filter(x => x.seq < e.seq)), e, arcEvents.filter(x => x.seq < e.seq))
+      .filter(c => !kept.some(k => k.slotId === c.slotId)));
+    arcReplay();
+    return;
+  }
+  e[field] = String(el.value || "").slice(0, 600);
+  const s = document.getElementById('arcStamp');
+  if (s) s.textContent = arcSummary(arcEvents).line;
+}
+function setArcChange(eventId, slotId, accepted){
+  const e = arcEvents.find(x => x.id === eventId);
+  const c = e && (e.changes || []).find(x => x.slotId === slotId);
+  if (!c) return;
+  c.accepted = !!accepted;
+  arcReplay();
+}
+async function removeArcEvent(id){
+  const e = arcEvents.find(x => x.id === id);
+  if (!e) return;
+  if (!await askForConfirm(`Undo "${e.title || 'event ' + e.seq}"? The arc replays from the original sheet without it.`, "Undo")) return;
+  arcEvents = arcEvents.filter(x => x.id !== id);
+  arcEvents.forEach((x, i) => { x.seq = i + 1; });
+  arcReplay();
+  toast("Event undone; the arc was replayed without it.");
+}
+function renderArc(){
+  const host = document.getElementById('arcBody');
+  if (!host) return;
+  const panel = document.getElementById('arcPanel');
+  if (panel) panel.style.display = Object.keys(state).length ? "block" : "none";
+  const stamp = document.getElementById('arcStamp');
+  if (stamp) stamp.textContent = arcSummary(arcEvents).line;
+  const sel = document.getElementById('arcShape');
+  if (sel && !sel.options.length){
+    sel.innerHTML = ARC_SHAPES.map(s => `<option value="${escHTML(s.id)}" title="${escAttr(s.blurb)}">${escHTML(s.label)}</option>`).join("");
+  }
+  const field = (e, k, label, ph) => `<label class="edgeField"><span>${label}</span><input type="text" value="${escAttr(e[k] || "")}" placeholder="${escAttr(ph)}" ${actAttr('change', 'editArcEvent', e.id, k, "$el")}></label>`;
+  host.innerHTML = arcEvents.slice().sort((a,b)=>a.seq-b.seq).map(e => {
+    const changes = (e.changes || []).map(c => {
+      const from = TRAITS_BY_ID.get(c.fromId), to = TRAITS_BY_ID.get(c.toId);
+      return `<div class="arcChange${c.accepted ? ' accepted' : ''}">
+        <div><b>${escHTML(from ? from.trait : String(c.fromId))}</b> → <b>${escHTML(to ? to.trait : String(c.toId))}</b></div>
+        <div class="sub">${escHTML(c.why)}</div>
+        <div class="actionRow">
+          <button class="btn-secondary" ${actAttr('click', 'setArcChange', e.id, c.slotId, true)} aria-pressed="${c.accepted}">${c.accepted ? 'accepted' : 'accept'}</button>
+          <button class="btn-secondary" ${actAttr('click', 'setArcChange', e.id, c.slotId, false)} aria-pressed="${!c.accepted}">${c.accepted ? 'undo' : 'declined'}</button>
+        </div>
+      </div>`;
+    }).join("");
+    return `<div class="arcEvent">
+      <div class="arcHead"><span class="arcSeq">${e.seq}</span> <b>${escHTML(e.title || "Untitled event")}</b>
+        <select ${actAttr('change', 'editArcEvent', e.id, 'shape', "$el")} aria-label="Arc shape">${ARC_SHAPES.map(s=>`<option value="${s.id}"${s.id===e.shape?' selected':''}>${escHTML(s.label)}</option>`).join("")}</select>
+        <button class="savedAct savedDel" ${actAttr('click', 'removeArcEvent', e.id)} aria-label="Undo this event">undo</button></div>
+      ${field(e, 'beliefChallenged', 'belief', 'Which belief this tested')}
+      ${field(e, 'choice', 'choice', 'What they chose to do')}
+      ${field(e, 'cost', 'cost', 'What it cost them')}
+      ${changes || `<div class="sub">${e.shape === 'steadfast' ? "Steadfast — nothing on the sheet moves; the cost is the record." : "No changes proposed."}</div>`}
+    </div>`;
+  }).join("") || `<div class="sub">No events yet.</div>`;
+}
+
+// ================= VOICE LAB PANEL =================
+/* Seven prompts, composed from the sheet's own voice rules — see composeVoiceLine.
+   The cast view gets the same prompt across every member so a shared device is
+   visible as a shared device rather than as a coincidence. */
+let voiceLabMode = 'baseline';
+function setVoiceLabMode(mode){
+  voiceLabMode = VOICE_MODES.includes(mode) ? mode : 'baseline';
+  renderVoiceLab();
+  renderVoiceCompare();
+}
+function renderVoiceLab(){
+  const host = document.getElementById('voiceLabBody');
+  if (!host) return;
+  const panel = document.getElementById('voiceLabPanel');
+  const has = Object.keys(state).length > 0;
+  if (panel) panel.style.display = has ? "block" : "none";
+  if (!has){ host.innerHTML = ""; return; }
+  ['baseline','pressure'].forEach(m=>{
+    const btn = document.getElementById('vlMode_' + m);
+    if (btn){ btn.classList.toggle('active', voiceLabMode === m); btn.setAttribute('aria-pressed', voiceLabMode === m); }
+  });
+  host.innerHTML = voiceLab(state, voiceLabMode).map(l => `
+    <div class="voiceCard">
+      <div class="voiceHead"><b>${escHTML(l.prompt)}</b> <span class="sub">${escHTML(l.setup)}</span></div>
+      <blockquote class="voiceLine">${escHTML(l.text)}</blockquote>
+      <div class="sub">Shaped by: ${escHTML(l.rules.join("; ") || "nothing on this sheet")}${l.device ? ` · habitual device: <b>${escHTML(l.device.label)}</b>` : ``}</div>
+    </div>`).join("");
+}
+function renderVoiceCompare(){
+  const host = document.getElementById('voiceCompareBody');
+  if (!host) return;
+  const sel = document.getElementById('voiceComparePrompt');
+  if (sel && !sel.options.length){
+    sel.innerHTML = VOICE_PROMPTS.map(p => `<option value="${escHTML(p.id)}">${escHTML(p.label)}</option>`).join("");
+  }
+  if (!castStates.length){ host.innerHTML = `<div class="sub">Generate a cast to compare voices.</div>`; return; }
+  const cmp = voiceComparison(castStates, strVal('voiceComparePrompt', 'refuse'), voiceLabMode);
+  host.innerHTML = `<div class="sub" style="margin-bottom:8px;">${escHTML(cmp.note)}</div>` + cmp.rows.map(r => `
+    <div class="voiceCard">
+      <div class="voiceHead"><b>${escHTML(r.name)}</b></div>
+      <blockquote class="voiceLine">${escHTML(r.line.text)}</blockquote>
+      <div class="sub">${r.line.rules.map(rule => r.shared.includes(rule)
+        ? `<span class="sharedDevice" title="More than one character in this cast reaches for this">${escHTML(rule)}</span>`
+        : escHTML(rule)).join("; ") || "nothing"}</div>
+    </div>`).join("");
+}
+function copyVoiceLab(btnEl){
+  if (!Object.keys(state).length){ toast("Generate a character first.", "warn"); return; }
+  copyText(`# Voice lab — ${charMeta.name || "Unnamed Character"} (${voiceLabMode})\n\n` + voiceLabToMarkdown(state, voiceLabMode), btnEl);
+}
+
+// ================= CONTENT PACKS =================
+/* The manifests have been in the engine since the schema pass; this is the control.
+   Core can never be turned off — it is the bank, not a pack — and a pack that would
+   empty the draw entirely is refused rather than silently producing blank slots. */
+function refreshPackUI(){
+  const grid = document.getElementById('packGrid');
+  if (!grid || typeof TRAIT_PACKS === 'undefined') return;
+  const off = new Set(getDisabledPacks());
+  grid.innerHTML = TRAIT_PACKS.map(p=>{
+    const n = TRAITS.filter(t=>t.pack === p.id).length;
+    const core = p.id === 'core';
+    return `<label class="packRow"><input type="checkbox" ${off.has(p.id) ? '' : 'checked'} ${core ? 'disabled' : ''}
+      ${actAttr('change', 'onPackToggle', p.id, "$el")}> <b>${escHTML(p.id)}</b>
+      <span class="sub">${n.toLocaleString()} traits${core ? ' · always on' : ''}</span></label>`;
+  }).join("");
+}
+function onPackToggle(id, el){
+  if (id === 'core'){ if (el) el.checked = true; return; }
+  setPackEnabled(id, !!(el && el.checked));
+  const left = TRAITS.filter(t=>isPackEnabled(t.pack)).length;
+  if (!left){ setPackEnabled(id, true); if (el) el.checked = true; toast("That would leave nothing to draw from.", "warn"); return; }
+  toast(`${el && el.checked ? "Enabled" : "Disabled"} pack "${id}" — ${left.toLocaleString()} traits in play. Generate again to see it.`, "ok", 5000);
+  refreshPackUI();
+}
+function setAllPacks(on){
+  TRAIT_PACKS.forEach(p=>{ if (p.id !== 'core') setPackEnabled(p.id, on); });
+  refreshPackUI();
+  toast(on ? "All packs enabled." : "Core pack only. Generate again to see it.");
+}
+
+// ================= PROJECT LIBRARY =================
+/* Projects live under `project:<id>` beside the `character:<name>` saves. The current
+   project is the one new saves, casts, edges and arc events are filed under; the loose
+   saves stay exactly where they were, so nothing here breaks an existing library. */
+let projects = [];
+let currentProjectId = null;
+const PROJECT_KEY = id => 'project:' + id;
+function currentProject(){ return projects.find(p => p.id === currentProjectId) || null; }
+async function loadProjects(){
+  try {
+    const res = await storage.list('project:');
+    const keys = (res && res.keys) || [];
+    const rows = await Promise.all(keys.map(async k => {
+      try { return JSON.parse((await storage.get(k)).value); } catch(e){ return null; }
+    }));
+    projects = rows.filter(p => p && !validateProject(p).length);
+    if (!projects.some(p => p.id === currentProjectId)) currentProjectId = projects.length ? projects[0].id : null;
+  } catch(e){ projects = []; }
+  renderProjects();
+}
+async function saveProject(p){
+  p.updated = new Date().toISOString();
+  await storage.set(PROJECT_KEY(p.id), JSON.stringify(p));
+}
+async function newProject(){
+  const name = await askForName("Name this project:", "");
+  if (!name) return;
+  const p = makeProject(name);
+  projects.push(p); currentProjectId = p.id;
+  await saveProject(p);
+  renderProjects();
+  toast(`Project "${name}" created. Saves, casts and arcs now file under it.`, "ok", 5000);
+}
+async function switchProject(id){
+  currentProjectId = id || null;
+  renderProjects();
+  const p = currentProject();
+  if (p) toast(`Working in "${p.name}" — ${projectSummary(p)}.`, "ok", 5000);
+}
+async function renameProject(id){
+  const p = projects.find(x => x.id === id);
+  if (!p) return;
+  const name = await askForName("Rename this project:", p.name);
+  if (!name) return;
+  p.name = name; await saveProject(p); renderProjects();
+}
+async function deleteProject(id){
+  const p = projects.find(x => x.id === id);
+  if (!p) return;
+  if (!await askForConfirm(`Delete the project "${p.name}"? Its ${projectSummary(p)} go with it. The characters saved separately are untouched.`, "Delete")) return;
+  await storage.delete(PROJECT_KEY(id));
+  projects = projects.filter(x => x.id !== id);
+  if (currentProjectId === id) currentProjectId = projects.length ? projects[0].id : null;
+  renderProjects();
+  toast(`Deleted "${p.name}".`);
+}
+/* File the work in front of you into the current project: the sheet, the cast, the
+   edges, the arc, the settings that produced them and the diversity archive. */
+async function fileIntoProject(){
+  const p = currentProject();
+  if (!p){ toast("Create a project first.", "warn"); return; }
+  if (!Object.keys(state).length){ toast("Generate or load a character first.", "warn"); return; }
+  const name = charMeta.name && charMeta.name !== "Unnamed Character" ? charMeta.name : "Character " + (p.characters.length + 1);
+  const record = {name, state: compressSlots(state), charMeta,
+    arcBase: arcBase ? compressSlots(arcBase) : null, arcEvents,
+    savedAt: new Date().toISOString()};
+  const at = p.characters.findIndex(c => c.name === name);
+  if (at >= 0){
+    if (!await askForConfirm(`"${name}" is already in this project. Replace it with what is on screen?`, "Replace")) return;
+    p.characters[at] = record;
+  } else p.characters.push(record);
+  if (castStates.length) p.casts = [{name: "Cast", members: castStates.map(c => ({id: c.id, name: c.meta.name, state: compressSlots(c.state), meta: c.meta}))}];
+  p.edges = pruneEdges(relationshipEdges, castStates);
+  p.events = arcEvents;
+  p.settings = captureSettings();
+  if (typeof exportArchive === 'function') p.archive = exportArchive();
+  await saveProject(p);
+  renderProjects();
+  toast(`Filed "${name}" into "${p.name}" — ${projectSummary(p)}.`, "ok", 6000);
+}
+function renderProjects(){
+  const host = document.getElementById('projectList');
+  if (!host) return;
+  host.innerHTML = projects.length ? projects.map(p => `
+    <div class="projectRow${p.id === currentProjectId ? ' current' : ''}">
+      <button class="savedOpen" ${actAttr('click', 'switchProject', p.id)} title="Work in this project">
+        <b>${escHTML(p.name)}</b><span>${escHTML(projectSummary(p))}${p.id === currentProjectId ? ' · current' : ''}</span></button>
+      <button class="savedAct" ${actAttr('click', 'renameProject', p.id)}>rename</button>
+      <button class="savedAct savedDel" ${actAttr('click', 'deleteProject', p.id)}>delete</button>
+    </div>`).join("") : `<div class="sub">No projects yet. A project groups the characters, cast, relationships and arcs of one book or campaign, and is what a backup bundle carries.</div>`;
+}
+
+/* ---- Backup bundles ---- */
+async function _looseCharacters(){
+  const res = await storage.list('character:');
+  const keys = (res && res.keys) || [];
+  return (await Promise.all(keys.map(async k => {
+    try { return {name: k.replace('character:', ''), record: JSON.parse((await storage.get(k)).value)}; }
+    catch(e){ return null; }
+  }))).filter(Boolean);
+}
+async function exportBackupBundle(){
+  const loose = await _looseCharacters();
+  const bundle = makeBackupBundle(projects, loose, {archive: (typeof exportArchive === 'function') ? exportArchive() : []});
+  downloadText(JSON.stringify(bundle, null, 2), "character_backup.json");
+  toast(`Backed up ${projects.length} project${projects.length===1?'':'s'} and ${loose.length} saved character${loose.length===1?'':'s'}.`, "ok", 6000);
+}
+let _pendingBackup = null;
+function importBackupBundle(fileInput){
+  const file = fileInput.files && fileInput.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = async ()=>{
+    try {
+      const bundle = JSON.parse(reader.result);
+      const problems = validateBackupBundle(bundle);
+      if (problems.length) throw new Error(problems[0]);
+      const loose = await _looseCharacters();
+      const preview = backupPreview(bundle, projects, loose);
+      _pendingBackup = {bundle, preview};
+      renderBackupPreview();
+    } catch(e){ toast("Could not read that backup: " + e.message, "warn", 7000); }
+    fileInput.value = "";
+  };
+  reader.readAsText(file);
+}
+function renderBackupPreview(){
+  const host = document.getElementById('backupPreview');
+  if (!host) return;
+  if (!_pendingBackup){ host.innerHTML = ""; host.style.display = "none"; return; }
+  const {preview} = _pendingBackup;
+  const conflicts = preview.projects.conflict.concat(preview.characters.conflict);
+  host.style.display = "block";
+  host.innerHTML = `<div class="tensionTitle">Before anything is written</div>
+    <div class="sub" style="margin:4px 0 8px;">${escHTML(mergeSummaryLine(preview))}</div>` +
+    (conflicts.length ? `<div class="sub" style="margin-bottom:6px;">These already exist here and differ. Ticked means take the version in the file; unticked keeps what is on this machine.</div>` +
+      conflicts.map(c => `<label class="packRow"><input type="checkbox" data-conflict="${escAttr(c.key)}"> <b>${escHTML(c.name)}</b> <span class="sub">the file's copy is ${escHTML(c.newer)}</span></label>`).join("")
+      : `<div class="sub">Nothing here would be overwritten.</div>`) +
+    `<div class="actionRow" style="margin-top:8px;">
+      <button class="btn-primary" ${actAttr('click', 'applyBackupImport')}>Import</button>
+      <button class="btn-secondary" ${actAttr('click', 'cancelBackupImport')}>Cancel</button>
+    </div>`;
+}
+function cancelBackupImport(){ _pendingBackup = null; renderBackupPreview(); toast("Import cancelled; nothing was written."); }
+async function applyBackupImport(){
+  if (!_pendingBackup) return;
+  const {preview} = _pendingBackup;
+  const choices = {};
+  document.querySelectorAll('#backupPreview [data-conflict]').forEach(el => {
+    if (el.checked) choices[el.getAttribute('data-conflict')] = "theirs";
+  });
+  const loose = await _looseCharacters();
+  const nextProjects = applyMerge(projects, preview.projects, choices);
+  const nextChars = applyMerge(loose, preview.characters, choices);
+  for (const p of nextProjects) await saveProject(p);
+  for (const c of nextChars) await storage.set('character:' + c.name, JSON.stringify(c.record));
+  if (Array.isArray(_pendingBackup.bundle.archive) && typeof importArchive === 'function') importArchive(_pendingBackup.bundle.archive);
+  _pendingBackup = null;
+  await loadProjects();
+  await loadSavedList();
+  renderBackupPreview();
+  toast(`Imported. ${nextProjects.length} project(s) and ${nextChars.length} saved character(s) are now here.`, "ok", 6000);
 }
 
 const TABS = [
@@ -1213,7 +1735,8 @@ async function resetAllToDefaults(){
   Object.entries(DEFAULTS.toggles).forEach(([id, v])=>{ const el = document.getElementById(id); if (el) el.checked = v; });
   PERSONALITY_AXES.forEach(a=>{ const el = document.getElementById('pers_'+a.id); if (el) el.value = 0; });
   PROFILE_SECTIONS.forEach(ps=>{
-    const tog = document.getElementById('sec_'+ps.id); if (tog) tog.checked = true;
+    // A section's shipped default, not "on": the §6 sections that ship off stay off.
+    const tog = document.getElementById('sec_'+ps.id); if (tog) tog.checked = ps.defaultOn !== false;
     const sel = document.getElementById('type_'+ps.id); if (sel) sel.value = "";
     clearAutoProfileType(ps.id);
   });
@@ -1455,6 +1978,54 @@ async function deleteCustomArchetype(){
   } catch(e){ console.error(e); toast("Could not delete — try again.", "warn"); }
 }
 
+/* Built-in presets used to be a hand-maintained <option> list in index.html; a preset
+   added to ARCHETYPES did not exist in the UI until someone remembered. Fill the list
+   from the table, and fill the variation list for whichever preset is chosen. */
+function populateArchetypeSelect(){
+  const sel = document.getElementById('archetypeSelect');
+  if (!sel) return;
+  const current = sel.value;
+  [...sel.querySelectorAll('option')].forEach(o=>{ if (o.value && !o.value.startsWith('custom_')) o.remove(); });
+  Object.entries(ARCHETYPES).forEach(([key, arch])=>{
+    const opt = document.createElement('option');
+    opt.value = key; opt.textContent = arch.label;
+    // Insert before any custom entries so the two groups stay together.
+    const firstCustom = [...sel.options].find(o=>o.value.startsWith('custom_'));
+    if (firstCustom) sel.insertBefore(opt, firstCustom); else sel.appendChild(opt);
+  });
+  if ([...sel.options].some(o=>o.value===current)) sel.value = current;
+  onArchetypeChange(false);
+}
+function onArchetypeChange(andSlider){
+  const key = strVal('archetypeSelect', '');
+  const arch = ARCHETYPES[key] || CUSTOM_ARCHETYPES[key];
+  const box = document.getElementById('archetypeTuning');
+  const vsel = document.getElementById('archetypeVariation');
+  if (box) box.style.display = arch ? 'block' : 'none';
+  if (vsel){
+    const prev = vsel.value;
+    vsel.innerHTML = '<option value="base">As written</option>';
+    (arch && arch.variations || []).forEach(v=>{
+      const o = document.createElement('option'); o.value = v.id; o.textContent = v.label; vsel.appendChild(o);
+    });
+    if ([...vsel.options].some(o=>o.value===prev)) vsel.value = prev;
+  }
+  const note = document.getElementById('archetypeIntentNote');
+  if (note){
+    if (arch && arch.intent){
+      const ax = id => { const a = PERSONALITY_AXES.find(x=>x.id===id); return a ? a.label : id; };
+      const secs = ids => ids.map(id=>{ const ps = PROFILE_SECTIONS.find(p=>p.id===id); return ps ? ps.label : id; });
+      note.innerHTML = `<b>Must hold:</b> ${escHTML(arch.intent.must.map(ax).join(', '))} · <b>nudged:</b> ${escHTML(secs(arch.intent.nudge).join(', '))} · <b>left open:</b> ${escHTML(secs(arch.intent.open).join(', '))}`;
+    } else note.textContent = arch ? "A custom preset: blended evenly, nothing pinned." : "";
+  }
+  if (andSlider !== false) onSliderChange();
+}
+function onArchetypeBlendInput(){
+  const v = floatVal('archetypeBlend', 0.65);
+  setText('archetypeBlendVal', Math.round(v*100) + '%');
+  onSliderChange();
+}
+
 async function loadCustomArchetypes(){
   try {
     const res = await storage.list('archetype:');
@@ -1482,7 +2053,7 @@ async function loadCustomArchetypes(){
   if ([...sel.options].some(o=>o.value===current)) sel.value = current;
   const list = document.getElementById('customArchList');
   const names = Object.values(CUSTOM_ARCHETYPES).map(a=>a.label);
-  list.textContent = names.length ? "Saved archetypes: " + names.join(", ") : "";
+  if (list) list.textContent = names.length ? "Saved archetypes: " + names.join(", ") : "";
 }
 
 /* ================= WORKSPACE EXPORT =================
@@ -1548,6 +2119,8 @@ async function importWorkspaceJSON(fileInput){
 
 // ================= RELATIONSHIP GENERATOR =================
 function refreshRelSelectors(){
+  if (typeof renderEdges === 'function') renderEdges();
+  if (typeof renderVoiceCompare === 'function') renderVoiceCompare();
   const a = document.getElementById('relA'), b = document.getElementById('relB');
   const opts = [];
   if (Object.keys(state).length) opts.push({key:"__single__", label:(charMeta.name||"Current character")});
@@ -1604,7 +2177,7 @@ function axisProfile(st){
   // more predictive data for how two characters clash) were invisible to Relationship
   // and Ensemble analysis. Voice traits carry pol too but are deliberately excluded here:
   // this profile is about who the character IS, not how they happen to phrase things.
-  const prof = {}, raw = {};
+  const prof = {}, raw = {}, counts = {};
   Object.keys(st).filter(k=>k.startsWith("pers_") || k.startsWith("prof_")).forEach(id=>{
     // BUG FIX: slots can legitimately hold a null trait (exhausted pool, disabled
     // section on a loaded save); dereferencing .trait.pol here crashed the whole
@@ -1612,16 +2185,31 @@ function axisProfile(st){
     const t = st[id] && st[id].trait;
     if (!t || !t.pol) return;
     Object.entries(t.pol).forEach(([ax,v])=>{
-      if (!AXIS_LABELS[ax]) return;
+      if (!AXIS_LABELS[ax] || !v) return;
       raw[ax] = (raw[ax]||0) + v;
+      counts[ax] = (counts[ax]||0) + 1;
     });
   });
-  // Normalised per axis by how much tagged material that axis actually has — see the
-  // POLARITY COVERAGE NORMALISATION note in engine.js. Without this the radar reads
-  // "analytical and rebellious, in a bad mood" for practically every character,
-  // because those are the axes with the most lopsided tagging, not because the
-  // character is any of those things.
-  Object.entries(raw).forEach(([ax, v])=>{ prof[ax] = polNormalise(ax, v); });
+  /* CHARACTER-RELATIVE, WITH A BANK PRIOR. This used to divide the raw sum by the
+     square root of the whole bank's tag count for the axis (polNormalise). Two things
+     were wrong with that. It did not remove the sign imbalance at all — the same
+     divisor scales both poles, so an axis tagged 7:1 positive still read positive for
+     nearly everyone. And it made a SAVED character's numbers depend on the size of the
+     bank: adding content moved every existing sheet's radar, fidelity and relationship
+     read without the sheet changing.
+
+     Each axis is now scored against the sheet's own tagged evidence. `prior` is the
+     bank's expected value per tagged draw ((pos - neg) / (pos + neg)), so a character
+     is measured by how far their traits lean RELATIVE to what the bank hands out by
+     default — an axis everyone would read positive on reads neutral unless this person
+     actually leans further than that. The divisor is the sheet's own count, so the
+     number no longer moves when the bank grows. Units: roughly a z-like score, with
+     ±2 meaning "every tagged trait on the sheet leans this way". */
+  Object.entries(raw).forEach(([ax, v])=>{
+    const n = counts[ax] || 1;
+    const prior = polarityPrior(ax);
+    prof[ax] = (v - n * prior) / Math.sqrt(n);
+  });
   return prof;
 }
 // Category-pair interpretive notes for the two-character Relationship view — the same
@@ -2199,7 +2787,7 @@ function buildProfileSectionUI(){
          </select>`;
     div.innerHTML = `
       <div class="head">
-        <input type="checkbox" id="sec_${ps.id}" checked>
+        <input type="checkbox" id="sec_${ps.id}" ${ps.defaultOn === false ? '' : 'checked'}>
         <label for="sec_${ps.id}">${escHTML(ps.label)}</label>
       </div>
       <div class="blurb">${escHTML(ps.blurb)}</div>
@@ -2565,6 +3153,9 @@ function updateStickyBar(){
 }
 
 buildProfileSectionUI();
+refreshPackUI();
+loadProjects();
+populateArchetypeSelect();
 buildSeedPicker();
 buildPersonalitySliders();
 loadSavedList();
