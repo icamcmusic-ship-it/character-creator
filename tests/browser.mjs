@@ -32,6 +32,7 @@ if (process.env.CSP){
     })});
   });
 }
+const VOICE_PROMPT_COUNT = 7;   // VOICE_PROMPTS in js/engine.js
 page.on('console', m => { if (/Content Security Policy/i.test(m.text())) csp.push(m.text()); });
 await page.goto(base + '/index.html', {waitUntil:'networkidle'});
 
@@ -100,10 +101,73 @@ await step('surprise me generates', async ()=>{
   const n = await page.locator('.traitCard').count();
   if (n < 10) throw new Error('only ' + n + ' cards after surprise');
 });
+/* The features added in the 2026 content pass are all live-DOM: the lens repaints the
+   cards, the voice lab composes on render, and the arc rewrites `state` in place. A
+   DOM stub cannot say whether any of that reaches the page. */
+await step('the context lens repaints the cards and names the room', async ()=>{
+  await page.locator('.ctxModeBtn').nth(1).click({timeout:8000});
+  await page.waitForTimeout(300);
+  const state = await page.evaluate(()=>({
+    mode: viewContext,
+    headline: (document.querySelector('.ctxHeadline')||{}).textContent || '',
+    marked: document.querySelectorAll('.traitCard.ctx-suppressed, .traitCard.ctx-amplified, .traitCard.ctx-exception').length,
+    notes: document.querySelectorAll('.ctxNote').length,
+  }));
+  if (state.mode === 'baseline') throw new Error('the lens did not switch');
+  if (!state.marked) throw new Error('no card was marked for ' + state.mode);
+  if (!state.notes) throw new Error('no card says why it moved');
+  if (!/come forward|go quiet/.test(state.headline)) throw new Error('no headline: ' + state.headline);
+  await page.locator('.ctxModeBtn').first().click();
+  await page.waitForTimeout(200);
+});
+await step('the voice lab composes a line per prompt, and pressure changes them', async ()=>{
+  const base = await page.evaluate(()=> [...document.querySelectorAll('#voiceLabBody .voiceLine')].map(e=>e.textContent));
+  if (base.length !== VOICE_PROMPT_COUNT) throw new Error(base.length + ' lines rendered');
+  if (base.some(t=>!t || t.length < 3)) throw new Error('an empty line');
+  await page.locator('#vlMode_pressure').click();
+  await page.waitForTimeout(250);
+  const pres = await page.evaluate(()=> [...document.querySelectorAll('#voiceLabBody .voiceLine')].map(e=>e.textContent));
+  if (!pres.some((t,i)=> t !== base[i])) throw new Error('pressure changed nothing');
+  await page.locator('#vlMode_baseline').click();
+});
+await step('an accepted arc change rewrites the sheet, and undo puts it back', async ()=>{
+  const res = await page.evaluate(()=>{
+    arcBase = JSON.parse(JSON.stringify(state));
+    const ev = makeArcEvent(1, {title:'The letter', shape:'growth', cost:'More than she will say out loud to anyone'});
+    ev.changes = proposeArcChanges(state, ev, []);
+    if (!ev.changes.length) return {skipped:true};
+    arcEvents = [ev];
+    const slot = ev.changes[0].slotId, was = state[slot].trait.id;
+    setArcChange(ev.id, slot, true);
+    const now = state[slot].trait.id;
+    arcEvents = [];
+    arcReplay();
+    return {was, now, back: state[slot].trait.id, cards: document.querySelectorAll('.arcEvent').length};
+  });
+  if (res.skipped) return;
+  if (res.was === res.now) throw new Error('accepting a change did not alter the sheet');
+  if (res.back !== res.was) throw new Error('undoing the event did not restore the sheet');
+});
 await step('cast tab generates a cast', async ()=>{
   await page.locator('[data-act="switchTab"][data-args*="cast"]:visible').first().click({timeout:8000});
   await page.locator('[data-act="generateCast"]:visible').first().click({timeout:8000});
   await page.waitForSelector('.castCard', {timeout:10000});
+});
+await step('the relationship workspace adds an edge and the voice comparison fills', async ()=>{
+  await page.locator('[data-act="switchTab"][data-args*="rel"]:visible').first().click({timeout:8000});
+  await page.waitForTimeout(300);
+  const rows = await page.evaluate(()=> document.querySelectorAll('#voiceCompareBody .voiceCard').length);
+  if (!rows) throw new Error('the voice comparison rendered no cast rows');
+  const edges = await page.evaluate(()=>{
+    const [a, b] = castStates;
+    if (!a || !b) return null;
+    relationshipEdges = [makeEdge(a.id, b.id, 'rival', edgeDefaults(a.state, b.state, 'rival'))];
+    renderEdges();
+    return {cards: document.querySelectorAll('.edgeCard').length, fields: document.querySelectorAll('.edgeField').length};
+  });
+  if (!edges || !edges.cards) throw new Error('no edge card rendered');
+  if (edges.fields < 5) throw new Error('an edge card is missing its text fields');
+  await page.evaluate(()=>{ relationshipEdges = []; renderEdges(); });
 });
 await step('export produces markdown', async ()=>{
   await page.locator('[data-act="switchTab"][data-args*="single"]:visible').first().click({timeout:8000});
