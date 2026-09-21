@@ -491,7 +491,8 @@ function _runGeneration(){
   const wantDepthFirst = !!(depthFirstEl && depthFirstEl.checked);
 
   const archKey = strVal('archetypeSelect', '');
-  const arch = ARCHETYPES[archKey] || CUSTOM_ARCHETYPES[archKey];
+  // The preset with its chosen variation folded in — see effectiveArchetype.
+  const arch = effectiveArchetype(archKey, strVal('archetypeVariation', ''));
   // BUG FIX: this used to WRITE the blended value back into the slider elements.
   // Because the blend reads the slider it just wrote, pressing Generate repeatedly
   // with an archetype selected pulled the sliders further toward the archetype each
@@ -504,8 +505,12 @@ function _runGeneration(){
     PERSONALITY_AXES.forEach(a=>{
       const el = document.getElementById('pers_'+a.id);
       const current = intVal(el, 0);
+      /* Blend weight is the user's (archetypeBlend), except on the preset's `must`
+         axes, which are held at a floor so the preset stays recognisable at any
+         setting — see ARCHETYPE_INTENT. */
+      const w = archetypeAxisBlend(arch, a.id);
       archOverrides[a.id] = (arch.pers[a.id] !== undefined)
-        ? Math.round(clamp(current*0.35 + arch.pers[a.id]*0.65, -100, 100))
+        ? Math.round(clamp(current*(1-w) + arch.pers[a.id]*w, -100, 100))
         : current;
     });
   }
@@ -522,9 +527,10 @@ function _runGeneration(){
     // custom archetype behaved unlike a built-in with the same numbers. Both are now a
     // position on the same -2..2 scale, blended the same way, and the built-in tables
     // read as absolute postures (which is how they were written).
-    verbLevel = clamp(verbLevel*0.35 + arch.verbosity*0.65, -2, 2);
-    regLevel  = clamp(regLevel*0.35  + arch.register*0.65,  -2, 2);
-    compLevel = clamp(compLevel*0.35 + arch.composure*0.65, -2, 2);
+    const wv = archetypeBlendLevel();
+    verbLevel = clamp(verbLevel*(1-wv) + arch.verbosity*wv, -2, 2);
+    regLevel  = clamp(regLevel*(1-wv)  + arch.register*wv,  -2, 2);
+    compLevel = clamp(compLevel*(1-wv) + arch.composure*wv, -2, 2);
   }
   const mannerCount = intVal('mannerCount', 3);
   const vocabCount = intVal('vocabCount', 2);
@@ -634,7 +640,10 @@ function _runGeneration(){
     name: strVal('charName', '') || "Unnamed Character",
     age: strVal('charAge', ''),
     context: strVal('charContext', ''),
-    archetypeLabel: archKey ? document.getElementById('archetypeSelect').selectedOptions[0].textContent : "Custom random",
+    archetypeLabel: archKey ? (arch && arch.label) || document.getElementById('archetypeSelect').selectedOptions[0].textContent : "Custom random",
+    archetypeKey: archKey || null,
+    archetypeVariation: (arch && arch.variation) ? arch.variation.id : null,
+    archetypeBlend: archKey ? archetypeBlendLevel() : null,
     seed: charMetaSeed
   };
   charMeta.archFidelity = arch ? archetypeFidelity(state, arch) : null;

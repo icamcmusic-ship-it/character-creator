@@ -869,6 +869,35 @@ let ARCHETYPES = {
              pers:{discipline:-55, curiosity:65, intelligence:-25, activeness:-35, positivity:35, emotionalcapacity:40, assertiveness:-30}},
   stubbornCraftsman:   {label:"Stubborn Craftsman", verbosity:-2, register:-1, composure:-2, vocabPref:["Precision & Specificity Level","Directness & Literalness"],
              pers:{intelligence:-30, discipline:70, rebelliousness:-35, assertiveness:40, curiosity:-25, manners:-15, emotionalcapacity:-25}},
+
+  /* ---- THE 2026 AUDIT'S INPUT-BALANCE PASS (§4.5) -------------------------------
+     Measured over the 34 presets above: discipline set positive in 20 and negative
+     in 5; emotional capacity negative in 15 and positive in 9; honesty 13:5,
+     curiosity 11:4, positivity 11:5 — all leaning positive when specified. And
+     the profile hints: Secure attachment eleven times, Restraint & Discipline six,
+     Dry & Deadpan five, against one each for Substance, Compulsion, Risk & Escape,
+     Intellectual & Wordplay and Humorless. A user reaching for "random preset"
+     inherits that taste.
+
+     Eight presets, chosen as people first. Between them: six lean undisciplined,
+     five lean emotionally open, three are dishonest, three are incurious, three are
+     pessimists, and their hints go to the under-used categories. */
+  openHeartedShambles: {label:"Open-Hearted Shambles", verbosity:1, register:-1, composure:0, vocabPref:["Affective & Emotional Intensity","Abstractness & Sensory Modality"],
+             pers:{emotionalcapacity:75, discipline:-60, friendliness:55, honesty:50, agreeableness:35, positivity:20, curiosity:40}},
+  weepingBrawler:      {label:"Weeping Brawler", verbosity:0, register:-2, composure:2, vocabPref:["Directness & Literalness","Phonetic & Auditory Qualities"],
+             pers:{emotionalcapacity:70, assertiveness:60, discipline:-45, agreeableness:-40, manners:-45, positivity:-20, honesty:30, friendliness:-15}},
+  lovableLiar:         {label:"Lovable Liar", verbosity:1, register:-1, composure:-1, vocabPref:["Pragmatic Focus & Speech Functions","Affective & Emotional Intensity"],
+             pers:{honesty:-65, friendliness:70, emotionalcapacity:45, discipline:-40, positivity:45, confidence:30, curiosity:-20}},
+  incuriousContent:    {label:"Incurious and Content", verbosity:-1, register:-1, composure:-2, vocabPref:["Directness & Literalness","Pragmatic Focus & Speech Functions"],
+             pers:{curiosity:-70, positivity:40, discipline:-20, agreeableness:50, friendliness:35, activeness:-30, intelligence:-20}},
+  gloomyRomantic:      {label:"Gloomy Romantic", verbosity:0, register:1, composure:-1, vocabPref:["Affective & Emotional Intensity","Temporal Orientation & Tense Usage"],
+             pers:{emotionalcapacity:70, positivity:-60, discipline:-35, curiosity:30, friendliness:20, confidence:-25, activeness:-30}},
+  scatteredGenius:     {label:"Scattered Genius", verbosity:1, register:0, composure:1, vocabPref:["Conceptual Framework & Loanwords","Morphological & Structural Lexicon"],
+             pers:{intelligence:80, discipline:-75, curiosity:75, honesty:-15, manners:-30, activeness:35, agreeableness:-15, friendliness:-20}},
+  jadedFixer:          {label:"Jaded Fixer", verbosity:-1, register:0, composure:-1, vocabPref:["Pragmatic Focus & Speech Functions","Precision & Specificity Level"],
+             pers:{honesty:-50, positivity:-45, discipline:35, emotionalcapacity:-30, curiosity:-35, intelligence:40, assertiveness:35, friendliness:-30}},
+  bigHeartedBoss:      {label:"Big-Hearted Boss", verbosity:1, register:0, composure:0, vocabPref:["Directness & Literalness","Affective & Emotional Intensity"],
+             pers:{emotionalcapacity:60, assertiveness:65, friendliness:60, discipline:-25, manners:-20, positivity:40, confidence:55}},
 };
 
 /* Optional profile hints, per archetype. See ARCHETYPE PROFILE HINTS in accumulateBoost:
@@ -912,17 +941,348 @@ const ARCHETYPE_PROFILE_HINTS = {
   trueZealot:          {values:"Idealistic & Visionary", role:"Instigator", stress:"Fight (attack the threat)"},
   alienLogic:          {role:"Outsider", humor:"Intellectual & Wordplay", attachment:"Avoidant"},
   unbotheredYoung:     {attachment:"Secure", humor:"Dry & Deadpan", values:"Pragmatic & Flexible"},
-  steadyOrganiser:     {attachment:"Secure", role:"Leader", vices:"Restraint & Discipline"},
+  steadyOrganiser:     {attachment:"Anxious", role:"Leader", vices:"Restraint & Discipline"},
   cheerfulMess:        {attachment:"Disorganized", humor:"Absurd & Chaotic", vices:"Risk & Escape"},
   plainSpoken:         {attachment:"Secure", values:"Pragmatic & Flexible", humor:"Dry & Deadpan"},
   softSpokenSecond:    {role:"Peacemaker", stress:"Fawn (appease the threat)", attachment:"Anxious"},
   bluntForeman:        {role:"Leader", stress:"Fight (attack the threat)", attachment:"Secure"},
   dreamyDrifter:       {role:"Outsider", vices:"Avoidance & Procrastination", attachment:"Secure"},
   stubbornCraftsman:   {values:"Rigid & Principled", vices:"Restraint & Discipline", attachment:"Secure"},
+  // The balance pass: hints to the categories the table above barely reached.
+  openHeartedShambles: {attachment:"Anxious", vices:"Substance & Consumption", humor:"Warm & Playful"},
+  weepingBrawler:      {stress:"Fight (attack the threat)", vices:"Risk & Escape", attachment:"Disorganized"},
+  lovableLiar:         {values:"Self-Interested", humor:"Absurd & Chaotic", role:"Connector"},
+  incuriousContent:    {humor:"Humorless & Absent", values:"Pragmatic & Flexible", role:"Peacemaker"},
+  gloomyRomantic:      {attachment:"Anxious", humor:"Self-Deprecating", vices:"Substance & Consumption"},
+  scatteredGenius:     {humor:"Intellectual & Wordplay", vices:"Compulsion & Ritual", role:"Outsider"},
+  jadedFixer:          {values:"Pragmatic & Flexible", humor:"Cruel & Barbed", stress:"Flight (remove yourself)"},
+  bigHeartedBoss:      {role:"Leader", humor:"Warm & Playful", vices:"Risk & Escape"},
 };
 Object.entries(ARCHETYPE_PROFILE_HINTS).forEach(([k, profile])=>{
   if (ARCHETYPES[k]) ARCHETYPES[k].profile = profile;
 });
+
+/* ================= INTERNAL DIMENSIONS =================
+   The audit's model issue (§4.5): several sliders conflate two things. Insecurity and
+   grandiosity are not one opposite of confidence; guarded expression and shallow
+   feeling are not the same; intuition and low competence are not the same; energy and
+   initiative are not the same; friendliness and intimacy are not the same; personal
+   discipline and obedience to institutions are not the same. The fix the audit asks
+   for is to introduce the separated dimensions INTERNALLY first — derived from what is
+   on the sheet — rather than as a dozen new sliders.
+
+   Each dimension is scored from the sheet's traits by category, presentation variant,
+   concept family and behaviour function; -1..1, with 0 = no evidence. They are shown
+   as a compact readout on the summary card and consumed by the contextual engine,
+   which needs "expression" and "depth" separately to decide what a private room
+   changes. They are NOT generation inputs; nothing here changes what is drawn. */
+const INTERNAL_DIMENSIONS = [
+  {id:"selfWorth",     label:"Self-worth",         low:"self-doubting", high:"self-assured"},
+  {id:"selfPresent",   label:"Self-presentation",  low:"understated",   high:"grandiose"},
+  {id:"emoDepth",      label:"Emotional depth",    low:"shallow",       high:"deep"},
+  {id:"emoExpress",    label:"Emotional expression",low:"guarded",      high:"expressive"},
+  {id:"analytic",      label:"Analytical preference",low:"intuitive",   high:"analytical"},
+  {id:"competence",    label:"Practical competence",low:"unproven",     high:"capable"},
+  {id:"activation",    label:"Activation",         low:"slow to start", high:"quick to start"},
+  {id:"endurance",     label:"Endurance",          low:"burns out",     high:"keeps going"},
+  {id:"warmth",        label:"Social warmth",      low:"cool",          high:"warm"},
+  {id:"trust",         label:"Trust",              low:"guarded",       high:"trusting"},
+  {id:"selfDiscipline",label:"Personal discipline",low:"loose",         high:"strict"},
+  {id:"obedience",     label:"Institutional obedience", low:"defiant",  high:"compliant"},
+];
+function internalDimensions(st){
+  const acc = {}, n = {};
+  const add = (id, v) => { acc[id] = (acc[id]||0) + v; n[id] = (n[id]||0) + 1; };
+  const cats = new Set(), fams = new Set(), funcs = new Set();
+  Object.values(st || {}).forEach(sl=>{
+    const t = sl && sl.trait; if (!t) return;
+    cats.add(t.category);
+    if (t.conceptFamily) fams.add(t.conceptFamily);
+    if (t.behaviorFunction) funcs.add(t.behaviorFunction);
+    const c = t.category, v = t.variant, p = t.pol || {};
+    // self-worth vs self-presentation: the Confidence axis split by presentation variant
+    if (c === "Confidence — Self-Assured"){ add("selfWorth", 1); }
+    if (c === "Confidence — Insecure or Egotistical"){
+      if (v === "a") add("selfWorth", -1); else if (v === "b") add("selfPresent", 1); else { add("selfWorth", -0.5); add("selfPresent", 0.5); }
+    }
+    if (c === "Confidence — Situational") add("selfPresent", -0.3);
+    // depth vs expression: Emotional Capacity split by variant
+    if (c === "Emotional Capacity — Expressive & Deep"){ add("emoDepth", 1); add("emoExpress", 1); }
+    if (c === "Emotional Capacity — Guarded & Shallow"){
+      if (v === "a"){ add("emoDepth", 0.5); add("emoExpress", -1); } else if (v === "b"){ add("emoDepth", -1); add("emoExpress", -0.3); } else { add("emoDepth", -0.3); add("emoExpress", -0.6); }
+    }
+    // analytical preference vs practical competence
+    if (c === "Intelligence — Sharp & Analytical") add("analytic", 1);
+    if (c === "Intelligence — Instinctive & Unanalytical"){ add("analytic", -1); if (v === "a") add("competence", 0.5); else if (v === "b") add("competence", -0.5); }
+    if (t.section === "Competence & Method") add("competence", 1);
+    // activation vs endurance: the Activeness axis, plus discipline for endurance
+    if (c === "Activeness — Energetic & Active") add("activation", 1);
+    if (c === "Activeness — Sedentary & Low-Energy") add("activation", -1);
+    if (c === "Discipline — Self-Controlled") add("endurance", 0.6);
+    if (c === "Discipline — Impulsive & Unrestrained") add("endurance", -0.6);
+    if (c === "Restraint & Discipline") add("endurance", 0.5);
+    if (c === "Risk & Escape" || c === "Avoidance & Procrastination") add("endurance", -0.5);
+    // social warmth vs trust: Friendliness vs Attachment
+    if (c === "Friendliness — Warm & Approachable") add("warmth", 1);
+    if (c === "Friendliness — Cold & Aloof") add("warmth", -1);
+    if (c === "Secure") add("trust", 1);
+    if (c === "Avoidant" || c === "Disorganized") add("trust", -1);
+    if (c === "Anxious") add("trust", -0.4);
+    if (t.section === "Positive Origins" && c === "Learned Trust") add("trust", 1);
+    // personal discipline vs institutional obedience
+    if (c === "Discipline — Self-Controlled") add("selfDiscipline", 1);
+    if (c === "Discipline — Impulsive & Unrestrained") add("selfDiscipline", -1);
+    if (c === "Rebelliousness — Defiant") add("obedience", -1);
+    if (c === "Rebelliousness — Conforming & Compliant") add("obedience", 1);
+    if (c === "Under Authority" && t.conceptFamily){
+      if (/mutineer|arguer|truth-teller|rep|ask-not-tell/.test(t.conceptFamily)) add("obedience", -0.5);
+      if (/pet|chair-loyal|silent|invisible/.test(t.conceptFamily)) add("obedience", 0.5);
+    }
+    // behaviour functions as weak evidence
+    if (t.behaviorFunction === "protect") add("trust", -0.2);
+    if (t.behaviorFunction === "connect") add("warmth", 0.2);
+    if (t.behaviorFunction === "perform") add("selfPresent", 0.3);
+  });
+  const out = {};
+  INTERNAL_DIMENSIONS.forEach(d=>{
+    const k = n[d.id] || 0;
+    out[d.id] = k ? clamp(acc[d.id] / Math.max(1, Math.sqrt(k) * 1.2), -1, 1) : 0;
+  });
+  return out;
+}
+// The pairs the audit says the sliders conflate, for the readout: where the two halves
+// disagree is exactly where a single slider would have lied.
+const INTERNAL_DIMENSION_PAIRS = [["selfWorth","selfPresent"],["emoDepth","emoExpress"],["analytic","competence"],
+  ["activation","endurance"],["warmth","trust"],["selfDiscipline","obedience"]];
+
+/* ================= ARCHETYPE INTENT =================
+   The audit's §4.6: "presets need explicit intent specifications — what must be
+   recognizable, what should merely be nudged, and what should remain open." A preset
+   used to be a bag of numbers blended 35/65 with the sliders, with every axis treated
+   the same; a Smug Con Artist whose honesty came out neutral was still labelled a con
+   artist. `must` names the axes without which the preset is not recognisable — they
+   are blended at a floor (see effectiveArchetype) whatever the user's blend setting.
+   `nudge` is the profile hint set. `open` is stated so it is visibly a decision. Every
+   built-in preset has an entry; the test suite refuses one that does not. */
+const ARCHETYPE_INTENT = {
+  soldier:             {must:["discipline","emotionalcapacity"], nudge:["attachment","stress","values"], open:["humor","vices","role"]},
+  conartist:           {must:["honesty","confidence"], nudge:["values","humor","role"], open:["attachment","stress","vices"]},
+  intern:              {must:["confidence","assertiveness"], nudge:["attachment","stress","humor"], open:["values","vices","role"]},
+  scholar:             {must:["intelligence","activeness"], nudge:["role","humor","vices"], open:["attachment","stress","values"]},
+  noble:               {must:["manners","friendliness"], nudge:["attachment","values","role"], open:["humor","stress","vices"]},
+  child:               {must:["curiosity","positivity"], nudge:["attachment","humor","role"], open:["values","stress","vices"]},
+  burntIdealist:       {must:["positivity","honesty"], nudge:["values","vices","stress"], open:["attachment","humor","role"]},
+  charmingManipulator: {must:["honesty","friendliness"], nudge:["attachment","values","role"], open:["humor","stress","vices"]},
+  grievingParent:      {must:["positivity","emotionalcapacity"], nudge:["attachment","stress","humor"], open:["values","vices","role"]},
+  reluctantSecond:     {must:["assertiveness","discipline"], nudge:["role","values","attachment"], open:["humor","stress","vices"]},
+  cheerfulSociopath:   {must:["emotionalcapacity","positivity"], nudge:["attachment","values","humor"], open:["stress","vices","role"]},
+  furiousCaretaker:    {must:["agreeableness","discipline"], nudge:["role","stress","vices"], open:["attachment","humor","values"]},
+  washedUpProdigy:     {must:["intelligence","confidence"], nudge:["vices","humor","values"], open:["attachment","stress","role"]},
+  companyLoyalist:     {must:["rebelliousness","discipline"], nudge:["values","role","vices"], open:["attachment","humor","stress"]},
+  blackSheep:          {must:["rebelliousness","honesty"], nudge:["role","attachment","values"], open:["humor","stress","vices"]},
+  compulsiveFixer:     {must:["discipline","activeness"], nudge:["vices","role","stress"], open:["attachment","humor","values"]},
+  undiscussedSurvivor: {must:["emotionalcapacity"], nudge:["attachment","stress","humor"], open:["values","vices","role"]},
+  workaholicAvoiding:  {must:["discipline","activeness"], nudge:["vices","attachment","stress"], open:["humor","values","role"]},
+  formerTrueBeliever:  {must:["honesty","positivity"], nudge:["values","role","attachment"], open:["humor","stress","vices"]},
+  goldenChild:         {must:["confidence","positivity"], nudge:["attachment","role","values"], open:["humor","stress","vices"]},
+  competentProfessional:{must:["discipline","intelligence"], nudge:["attachment","vices","role"], open:["humor","stress","values"]},
+  contentedElder:      {must:["positivity","activeness"], nudge:["attachment","humor","values"], open:["stress","vices","role"]},
+  genuinelyFunny:      {must:["friendliness","intelligence"], nudge:["humor","role","attachment"], open:["values","stress","vices"]},
+  careerBureaucrat:    {must:["rebelliousness","manners"], nudge:["values","vices","humor"], open:["attachment","stress","role"]},
+  trueZealot:          {must:["positivity","emotionalcapacity"], nudge:["values","role","stress"], open:["attachment","humor","vices"]},
+  alienLogic:          {must:["curiosity","honesty"], nudge:["role","humor","attachment"], open:["values","stress","vices"]},
+  unbotheredYoung:     {must:["manners","confidence"], nudge:["attachment","humor","values"], open:["stress","vices","role"]},
+  steadyOrganiser:     {must:["discipline","agreeableness"], nudge:["attachment","role","vices"], open:["humor","stress","values"]},
+  cheerfulMess:        {must:["discipline","friendliness"], nudge:["attachment","humor","vices"], open:["values","stress","role"]},
+  plainSpoken:         {must:["intelligence","honesty"], nudge:["attachment","values","humor"], open:["stress","vices","role"]},
+  softSpokenSecond:    {must:["assertiveness","agreeableness"], nudge:["role","stress","attachment"], open:["humor","values","vices"]},
+  bluntForeman:        {must:["assertiveness","manners"], nudge:["role","stress","attachment"], open:["humor","values","vices"]},
+  dreamyDrifter:       {must:["discipline","curiosity"], nudge:["role","vices","attachment"], open:["humor","stress","values"]},
+  stubbornCraftsman:   {must:["discipline","rebelliousness"], nudge:["values","vices","attachment"], open:["humor","stress","role"]},
+  openHeartedShambles: {must:["emotionalcapacity","discipline"], nudge:["attachment","vices","humor"], open:["values","stress","role"]},
+  weepingBrawler:      {must:["emotionalcapacity","assertiveness"], nudge:["stress","vices","attachment"], open:["humor","values","role"]},
+  lovableLiar:         {must:["honesty","friendliness"], nudge:["values","humor","role"], open:["attachment","stress","vices"]},
+  incuriousContent:    {must:["curiosity","positivity"], nudge:["humor","values","role"], open:["attachment","stress","vices"]},
+  gloomyRomantic:      {must:["emotionalcapacity","positivity"], nudge:["attachment","humor","vices"], open:["values","stress","role"]},
+  scatteredGenius:     {must:["intelligence","discipline"], nudge:["humor","vices","role"], open:["attachment","stress","values"]},
+  jadedFixer:          {must:["honesty","positivity"], nudge:["values","humor","stress"], open:["attachment","vices","role"]},
+  bigHeartedBoss:      {must:["emotionalcapacity","assertiveness"], nudge:["role","humor","vices"], open:["attachment","stress","values"]},
+};
+
+/* ================= NAMED VARIATIONS =================
+   "Show 2–3 named variations per preset, such as socially smooth / abrasive / quiet,
+   rather than allowing a single profile hint to dominate all variations." A variation
+   is a delta on the personality numbers and an optional profile-hint override; the
+   `must` axes are never in a delta, so every variation is still recognisably its
+   preset. `base` is always present and is the unmodified preset. */
+const ARCHETYPE_VARIATIONS = {
+  soldier:  [{id:"quiet", label:"Quiet", pers:{friendliness:-45, assertiveness:10}, profile:{stress:"Freeze (shut down)"}},
+             {id:"bitter", label:"Bitter", pers:{positivity:-50, agreeableness:-40}, profile:{humor:"Cruel & Barbed", stress:"Fight (attack the threat)"}},
+             {id:"steady", label:"Steady", pers:{friendliness:20, positivity:15}, profile:{attachment:"Secure", role:"Caretaker"}}],
+  conartist:[{id:"smooth", label:"Socially smooth", pers:{manners:60, agreeableness:10}, profile:{humor:"Warm & Playful"}},
+             {id:"abrasive", label:"Abrasive", pers:{manners:-40, agreeableness:-55}, profile:{humor:"Cruel & Barbed", role:"Instigator"}},
+             {id:"quiet", label:"Quiet operator", pers:{friendliness:-10, assertiveness:-30}, profile:{humor:"Dry & Deadpan", role:"Outsider"}}],
+  intern:   [{id:"eager", label:"Eager", pers:{activeness:50, positivity:40}, profile:{role:"Connector"}},
+             {id:"frozen", label:"Frozen", pers:{activeness:-30, emotionalcapacity:-30}, profile:{stress:"Freeze (shut down)"}},
+             {id:"secretly-sharp", label:"Secretly sharp", pers:{intelligence:60, honesty:30}, profile:{role:"Skeptic"}}],
+  scholar:  [{id:"kindly", label:"Kindly", pers:{friendliness:45, positivity:10}, profile:{role:"Caretaker", humor:"Warm & Playful"}},
+             {id:"acid", label:"Acid", pers:{friendliness:-45, agreeableness:-40}, profile:{humor:"Cruel & Barbed"}},
+             {id:"distracted", label:"Distracted", pers:{discipline:-40, curiosity:80}, profile:{vices:"Compulsion & Ritual"}}],
+  noble:    [{id:"dutiful", label:"Dutiful", pers:{discipline:50, honesty:30}, profile:{values:"Loyalty-Bound"}},
+             {id:"decadent", label:"Decadent", pers:{discipline:-45, positivity:25}, profile:{vices:"Substance & Consumption", values:"Self-Interested"}},
+             {id:"melancholy", label:"Melancholy", pers:{positivity:-50, emotionalcapacity:10}, profile:{humor:"Humorless & Absent"}}],
+  child:    [{id:"bold", label:"Bold", pers:{assertiveness:50, confidence:40}, profile:{role:"Instigator"}},
+             {id:"shy", label:"Shy", pers:{assertiveness:-50, friendliness:-10}, profile:{attachment:"Anxious", role:"Outsider"}},
+             {id:"old-soul", label:"Old soul", pers:{discipline:20, emotionalcapacity:30}, profile:{humor:"Dry & Deadpan"}}],
+  burntIdealist:[{id:"quiet", label:"Quiet", pers:{friendliness:-20, assertiveness:-30}, profile:{stress:"Flight (remove yourself)"}},
+             {id:"angry", label:"Angry", pers:{agreeableness:-50, assertiveness:40}, profile:{stress:"Fight (attack the threat)", humor:"Cruel & Barbed"}},
+             {id:"wry", label:"Wry", pers:{friendliness:25}, profile:{humor:"Dry & Deadpan"}}],
+  charmingManipulator:[{id:"warm", label:"Warm", pers:{emotionalcapacity:30}, profile:{humor:"Warm & Playful"}},
+             {id:"cold", label:"Cold", pers:{emotionalcapacity:-50, agreeableness:-20}, profile:{humor:"Dry & Deadpan", attachment:"Avoidant"}},
+             {id:"needy", label:"Needy", pers:{confidence:-40}, profile:{attachment:"Anxious"}}],
+  grievingParent:[{id:"withdrawn", label:"Withdrawn", pers:{friendliness:-40, activeness:-30}, profile:{stress:"Flight (remove yourself)"}},
+             {id:"raging", label:"Raging", pers:{agreeableness:-50, assertiveness:40}, profile:{stress:"Fight (attack the threat)"}},
+             {id:"busy", label:"Busy", pers:{activeness:50, discipline:40}, profile:{vices:"Compulsion & Ritual"}}],
+  reluctantSecond:[{id:"loyal", label:"Loyal", pers:{agreeableness:20}, profile:{values:"Loyalty-Bound"}},
+             {id:"resentful", label:"Resentful", pers:{agreeableness:-40, positivity:-30}, profile:{humor:"Dry & Deadpan", attachment:"Avoidant"}},
+             {id:"secretly-ready", label:"Secretly ready", pers:{confidence:40, intelligence:30}, profile:{role:"Leader"}}],
+  cheerfulSociopath:[{id:"charming", label:"Charming", pers:{manners:50}, profile:{role:"Connector"}},
+             {id:"crude", label:"Crude", pers:{manners:-50}, profile:{humor:"Absurd & Chaotic"}},
+             {id:"quiet", label:"Quiet", pers:{friendliness:-30, assertiveness:-20}, profile:{role:"Outsider", humor:"Dry & Deadpan"}}],
+  furiousCaretaker:[{id:"martyr", label:"Martyr", pers:{emotionalcapacity:20}, profile:{humor:"Self-Deprecating"}},
+             {id:"sharp", label:"Sharp", pers:{manners:-30, honesty:40}, profile:{humor:"Cruel & Barbed"}},
+             {id:"leaving", label:"Halfway out the door", pers:{rebelliousness:50}, profile:{stress:"Flight (remove yourself)"}}],
+  washedUpProdigy:[{id:"bitter", label:"Bitter", pers:{agreeableness:-40}, profile:{humor:"Cruel & Barbed"}},
+             {id:"sweet", label:"Sweet", pers:{friendliness:40, agreeableness:30}, profile:{humor:"Warm & Playful", attachment:"Anxious"}},
+             {id:"rebuilding", label:"Rebuilding", pers:{discipline:40, positivity:20}, profile:{vices:"Restraint & Discipline"}}],
+  companyLoyalist:[{id:"true", label:"True believer", pers:{positivity:40}, profile:{values:"Idealistic & Visionary"}},
+             {id:"weary", label:"Weary", pers:{positivity:-40, activeness:-20}, profile:{humor:"Dry & Deadpan"}},
+             {id:"enforcer", label:"Enforcer", pers:{assertiveness:50, agreeableness:-30}, profile:{role:"Leader", stress:"Fight (attack the threat)"}}],
+  blackSheep:[{id:"charming", label:"Charming", pers:{friendliness:40}, profile:{humor:"Warm & Playful", role:"Connector"}},
+             {id:"sullen", label:"Sullen", pers:{friendliness:-40, positivity:-30}, profile:{humor:"Humorless & Absent"}},
+             {id:"changed", label:"Genuinely changed", pers:{discipline:40, positivity:30}, profile:{attachment:"Secure"}}],
+  compulsiveFixer:[{id:"warm", label:"Warm", pers:{friendliness:40}, profile:{role:"Caretaker"}},
+             {id:"bossy", label:"Bossy", pers:{agreeableness:-40, manners:-20}, profile:{role:"Leader"}},
+             {id:"anxious", label:"Anxious", pers:{confidence:-40}, profile:{attachment:"Anxious", stress:"Fawn (appease the threat)"}}],
+  undiscussedSurvivor:[{id:"gentle", label:"Gentle", pers:{friendliness:30, agreeableness:30}, profile:{role:"Caretaker"}},
+             {id:"hard", label:"Hard", pers:{agreeableness:-40, manners:-30}, profile:{stress:"Fight (attack the threat)"}},
+             {id:"funny", label:"Funny about it", pers:{positivity:20}, profile:{humor:"Dry & Deadpan"}}],
+  workaholicAvoiding:[{id:"cheerful", label:"Cheerful", pers:{positivity:40, friendliness:30}, profile:{humor:"Warm & Playful"}},
+             {id:"brittle", label:"Brittle", pers:{agreeableness:-40}, profile:{stress:"Fight (attack the threat)"}},
+             {id:"quiet", label:"Quiet", pers:{friendliness:-30}, profile:{attachment:"Avoidant", humor:"Humorless & Absent"}}],
+  formerTrueBeliever:[{id:"grieving", label:"Grieving", pers:{emotionalcapacity:40, activeness:-20}, profile:{stress:"Freeze (shut down)"}},
+             {id:"crusading", label:"Crusading", pers:{assertiveness:50, agreeableness:-30}, profile:{role:"Instigator", stress:"Fight (attack the threat)"}},
+             {id:"wry", label:"Wry", pers:{friendliness:20}, profile:{humor:"Dry & Deadpan"}}],
+  goldenChild:[{id:"gracious", label:"Gracious", pers:{agreeableness:30, manners:40}, profile:{role:"Peacemaker"}},
+             {id:"brittle", label:"Brittle", pers:{emotionalcapacity:-30}, profile:{attachment:"Anxious", stress:"Fawn (appease the threat)"}},
+             {id:"entitled", label:"Entitled", pers:{agreeableness:-40, manners:-20}, profile:{values:"Self-Interested"}}],
+  competentProfessional:[{id:"warm", label:"Warm", pers:{friendliness:40}, profile:{role:"Caretaker", humor:"Warm & Playful"}},
+             {id:"cool", label:"Cool", pers:{friendliness:-30, emotionalcapacity:-30}, profile:{attachment:"Avoidant"}},
+             {id:"restless", label:"Restless", pers:{curiosity:50, rebelliousness:30}, profile:{vices:"Risk & Escape"}}],
+  contentedElder:[{id:"talkative", label:"Talkative", pers:{friendliness:20}, profile:{role:"Connector"}},
+             {id:"quiet", label:"Quiet", pers:{friendliness:-20}, profile:{humor:"Dry & Deadpan"}},
+             {id:"sharp", label:"Still sharp", pers:{intelligence:50, curiosity:40}, profile:{role:"Skeptic"}}],
+  genuinelyFunny:[{id:"kind", label:"Kind", pers:{agreeableness:30}, profile:{humor:"Warm & Playful"}},
+             {id:"savage", label:"Savage", pers:{agreeableness:-40}, profile:{humor:"Cruel & Barbed"}},
+             {id:"surreal", label:"Surreal", pers:{discipline:-40}, profile:{humor:"Absurd & Chaotic"}}],
+  careerBureaucrat:[{id:"kindly", label:"Kindly", pers:{friendliness:40, agreeableness:30}, profile:{role:"Caretaker"}},
+             {id:"petty", label:"Petty", pers:{agreeableness:-40}, profile:{values:"Self-Interested", humor:"Cruel & Barbed"}},
+             {id:"secretly-anarchic", label:"Secretly anarchic", pers:{curiosity:40, discipline:-20}, profile:{humor:"Absurd & Chaotic"}}],
+  trueZealot:[{id:"gentle", label:"Gentle", pers:{agreeableness:40, friendliness:40}, profile:{role:"Caretaker"}},
+             {id:"fierce", label:"Fierce", pers:{agreeableness:-50, assertiveness:50}, profile:{role:"Leader", stress:"Fight (attack the threat)"}},
+             {id:"doubting", label:"Beginning to doubt", pers:{intelligence:30, curiosity:40}, profile:{role:"Skeptic"}}],
+  alienLogic:[{id:"gentle", label:"Gentle", pers:{friendliness:20, agreeableness:20}, profile:{humor:"Absurd & Chaotic"}},
+             {id:"cold", label:"Cold", pers:{friendliness:-30, emotionalcapacity:-30}, profile:{humor:"Dry & Deadpan"}},
+             {id:"delighted", label:"Delighted by everything", pers:{positivity:50, activeness:30}, profile:{humor:"Intellectual & Wordplay"}}],
+  unbotheredYoung:[{id:"sweet", label:"Sweet", pers:{friendliness:40, agreeableness:30}, profile:{humor:"Warm & Playful"}},
+             {id:"sullen", label:"Sullen", pers:{friendliness:-30, positivity:-30}, profile:{humor:"Humorless & Absent"}},
+             {id:"sharp", label:"Sharper than they let on", pers:{intelligence:50}, profile:{role:"Skeptic", humor:"Dry & Deadpan"}}],
+  steadyOrganiser:[{id:"warm", label:"Warm", pers:{friendliness:20}, profile:{role:"Caretaker"}},
+             {id:"brisk", label:"Brisk", pers:{assertiveness:30, manners:-20}, profile:{role:"Leader"}},
+             {id:"quiet", label:"Quiet", pers:{assertiveness:-30}, profile:{role:"Peacemaker"}}],
+  cheerfulMess:[{id:"loud", label:"Loud", pers:{assertiveness:40}, profile:{role:"Instigator"}},
+             {id:"gentle", label:"Gentle", pers:{assertiveness:-30}, profile:{role:"Peacemaker"}},
+             {id:"secretly-sad", label:"Secretly sad", pers:{positivity:-30}, profile:{humor:"Self-Deprecating", attachment:"Anxious"}}],
+  plainSpoken:[{id:"kind", label:"Kind", pers:{friendliness:40}, profile:{role:"Caretaker"}},
+             {id:"gruff", label:"Gruff", pers:{friendliness:-40}, profile:{humor:"Dry & Deadpan"}},
+             {id:"stubborn", label:"Stubborn", pers:{agreeableness:-40, rebelliousness:30}, profile:{values:"Rigid & Principled"}}],
+  softSpokenSecond:[{id:"devoted", label:"Devoted", pers:{friendliness:30}, profile:{values:"Loyalty-Bound"}},
+             {id:"resentful", label:"Quietly resentful", pers:{positivity:-30, honesty:-20}, profile:{humor:"Dry & Deadpan"}},
+             {id:"secretly-capable", label:"Secretly capable", pers:{intelligence:50, discipline:40}, profile:{role:"Skeptic"}}],
+  bluntForeman:[{id:"fair", label:"Fair", pers:{honesty:30, agreeableness:10}, profile:{values:"Rigid & Principled"}},
+             {id:"bully", label:"Bully", pers:{agreeableness:-60, emotionalcapacity:-30}, profile:{humor:"Cruel & Barbed"}},
+             {id:"soft-centred", label:"Soft-centred", pers:{emotionalcapacity:40, friendliness:30}, profile:{role:"Caretaker"}}],
+  dreamyDrifter:[{id:"sunny", label:"Sunny", pers:{positivity:40, friendliness:30}, profile:{humor:"Warm & Playful"}},
+             {id:"melancholy", label:"Melancholy", pers:{positivity:-40}, profile:{humor:"Self-Deprecating"}},
+             {id:"prickly", label:"Prickly", pers:{agreeableness:-40, rebelliousness:40}, profile:{humor:"Cruel & Barbed"}}],
+  stubbornCraftsman:[{id:"kindly", label:"Kindly", pers:{friendliness:40}, profile:{role:"Caretaker"}},
+             {id:"sour", label:"Sour", pers:{friendliness:-40, positivity:-30}, profile:{humor:"Cruel & Barbed"}},
+             {id:"proud", label:"Proud", pers:{confidence:50}, profile:{role:"Leader"}}],
+  openHeartedShambles:[{id:"sunny", label:"Sunny", pers:{positivity:40}, profile:{humor:"Warm & Playful"}},
+             {id:"tearful", label:"Tearful", pers:{positivity:-30, confidence:-30}, profile:{humor:"Self-Deprecating"}},
+             {id:"loud", label:"Loud", pers:{assertiveness:40, manners:-30}, profile:{role:"Instigator"}}],
+  weepingBrawler:[{id:"loyal", label:"Loyal", pers:{friendliness:30}, profile:{values:"Loyalty-Bound"}},
+             {id:"lost", label:"Lost", pers:{positivity:-40, confidence:-30}, profile:{humor:"Self-Deprecating"}},
+             {id:"funny", label:"Funny", pers:{positivity:20, intelligence:20}, profile:{humor:"Absurd & Chaotic"}}],
+  lovableLiar:[{id:"harmless", label:"Harmless", pers:{agreeableness:40}, profile:{humor:"Warm & Playful"}},
+             {id:"dangerous", label:"Dangerous", pers:{agreeableness:-40, emotionalcapacity:-40}, profile:{humor:"Cruel & Barbed", attachment:"Avoidant"}},
+             {id:"sad", label:"Sad underneath", pers:{positivity:-40}, profile:{attachment:"Anxious"}}],
+  incuriousContent:[{id:"warm", label:"Warm", pers:{friendliness:40}, profile:{role:"Caretaker"}},
+             {id:"gruff", label:"Gruff", pers:{friendliness:-30, manners:-30}, profile:{humor:"Dry & Deadpan"}},
+             {id:"pious", label:"Pious", pers:{discipline:40, rebelliousness:-40}, profile:{values:"Rigid & Principled"}}],
+  gloomyRomantic:[{id:"tender", label:"Tender", pers:{friendliness:40, agreeableness:30}, profile:{role:"Caretaker"}},
+             {id:"theatrical", label:"Theatrical", pers:{assertiveness:30, confidence:20}, profile:{role:"Instigator"}},
+             {id:"withdrawn", label:"Withdrawn", pers:{friendliness:-40}, profile:{attachment:"Avoidant"}}],
+  scatteredGenius:[{id:"charming", label:"Charming", pers:{friendliness:50}, profile:{role:"Connector"}},
+             {id:"prickly", label:"Prickly", pers:{friendliness:-40, agreeableness:-40}, profile:{humor:"Cruel & Barbed"}},
+             {id:"anxious", label:"Anxious", pers:{confidence:-40}, profile:{attachment:"Anxious"}}],
+  jadedFixer:[{id:"soft", label:"Soft underneath", pers:{emotionalcapacity:30, friendliness:20}, profile:{role:"Caretaker"}},
+             {id:"cruel", label:"Cruel", pers:{agreeableness:-50}, profile:{humor:"Cruel & Barbed"}},
+             {id:"tired", label:"Tired", pers:{activeness:-40}, profile:{humor:"Dry & Deadpan"}}],
+  bigHeartedBoss:[{id:"gruff", label:"Gruff", pers:{manners:-40}, profile:{humor:"Dry & Deadpan"}},
+             {id:"sentimental", label:"Sentimental", pers:{positivity:30}, profile:{humor:"Warm & Playful"}},
+             {id:"volatile", label:"Volatile", pers:{agreeableness:-40}, profile:{stress:"Fight (attack the threat)"}}],
+};
+Object.entries(ARCHETYPE_INTENT).forEach(([k, v])=>{ if (ARCHETYPES[k]) ARCHETYPES[k].intent = v; });
+Object.entries(ARCHETYPE_VARIATIONS).forEach(([k, v])=>{ if (ARCHETYPES[k]) ARCHETYPES[k].variations = v; });
+
+/* The preset as it will actually be applied: the base numbers with the chosen
+   variation's deltas folded in, the profile hints overridden where the variation says
+   so, and — carried along — the intent so the blend can honour the `must` axes. Every
+   consumer (the build, the preview, the fidelity meter) reads THIS, so a variation
+   cannot be visible in one place and absent in another. */
+function effectiveArchetype(key, variationId){
+  const base = ARCHETYPES[key] || CUSTOM_ARCHETYPES[key];
+  if (!base) return null;
+  const out = Object.assign({}, base, {pers: Object.assign({}, base.pers || {}), profile: Object.assign({}, base.profile || {})});
+  out.variation = null;
+  if (variationId && variationId !== 'base' && Array.isArray(base.variations)){
+    const v = base.variations.find(x=>x.id === variationId);
+    if (v){
+      out.variation = v;
+      Object.entries(v.pers || {}).forEach(([axis, delta])=>{
+        out.pers[axis] = Math.round(clamp((out.pers[axis] || 0) + delta, -100, 100));
+      });
+      Object.assign(out.profile, v.profile || {});
+      out.label = base.label + " — " + v.label;
+    }
+  }
+  return out;
+}
+/* How much of the preset survives the blend with the user's own sliders. Was a fixed
+   0.65 with no control. The `must` axes never drop below MUST_FLOOR, so turning the
+   blend down makes a preset a lighter starting point without making it unrecognisable
+   — the con artist stays dishonest at 20% blend; their manners are up to you. */
+const ARCHETYPE_MUST_FLOOR = 0.85;
+function archetypeBlendLevel(){
+  const el = document.getElementById('archetypeBlend');
+  return el ? clamp(parseFloat(el.value) || 0, 0, 1) : 0.65;
+}
+function archetypeAxisBlend(arch, axisId){
+  const w = archetypeBlendLevel();
+  const must = arch && arch.intent && Array.isArray(arch.intent.must) && arch.intent.must.includes(axisId);
+  return must ? Math.max(w, ARCHETYPE_MUST_FLOOR) : w;
+}
 
 // user-defined archetypes loaded from storage
 let CUSTOM_ARCHETYPES = {};
@@ -3274,7 +3634,7 @@ function predictProfileCategories(withConfidence){
   // The preview has to see the same signals the build will, archetype hints included,
   // or selecting an archetype changes the result without changing the preview.
   const archKey = (document.getElementById('archetypeSelect')||{}).value || '';
-  const arch = ARCHETYPES[archKey] || CUSTOM_ARCHETYPES[archKey];
+  const arch = effectiveArchetype(archKey, (document.getElementById('archetypeVariation')||{}).value);
   return withArchetypeProfile(arch && arch.profile, ()=>{
   const chosen = {}, conf = {};
   PROFILE_SECTIONS.forEach(ps=>{

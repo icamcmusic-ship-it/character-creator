@@ -60,6 +60,8 @@ const ctx = loadEngine([
   // §4–7 build: schema, packs, character-relative profile
   'assertTraitShape','TRAIT_PACKS','setPackEnabled','isPackEnabled','getDisabledPacks','setDisabledPacks',
   'polarityPrior','TRAIT_CONTEXTS','TRAIT_WORLD_TAGS','TRAIT_REVIEW_STATES',
+  'ARCHETYPE_INTENT','ARCHETYPE_VARIATIONS','effectiveArchetype','archetypeAxisBlend','ARCHETYPE_MUST_FLOOR',
+  'internalDimensions','INTERNAL_DIMENSIONS','profileSectionEnabled',
 ]);
 const A = ctx.api;
 const T = A.TRAITS;
@@ -2088,6 +2090,91 @@ check('the axis profile is a property of the sheet, read against the bank prior'
   const mixed = A.axisProfile(mk(plus.slice(0, nPlus).concat(minus.slice(0, nMinus))));
   assert(Math.abs(mixed[ax]) < 0.6, `a bank-proportioned mix read ${mixed[ax].toFixed(2)}, not ~0`);
   return `+${p1[ax].toFixed(2)} / ${pm[ax].toFixed(2)} / mixed ${mixed[ax].toFixed(2)} (prior ${prior.toFixed(2)})`;
+});
+
+group('Archetype intent and balance');
+
+check('every built-in preset declares an intent, and its must-axes are axes it sets', ()=>{
+  const bad = [];
+  Object.entries(A.ARCHETYPES).forEach(([k, arch])=>{
+    const it = A.ARCHETYPE_INTENT[k];
+    if (!it) return bad.push(k + ': no intent');
+    it.must.forEach(ax=>{ if (arch.pers[ax] === undefined) bad.push(`${k}: must-axis ${ax} is not set by the preset`); });
+    ['must','nudge','open'].forEach(f=>{ if (!Array.isArray(it[f])) bad.push(`${k}: ${f} is not a list`); });
+    it.nudge.concat(it.open).forEach(id=>{ if (!A.PROFILE_SECTIONS.some(p=>p.id===id)) bad.push(`${k}: unknown section ${id}`); });
+  });
+  assert(!bad.length, bad.slice(0,5).join('; '));
+  return Object.keys(A.ARCHETYPES).length + ' presets, all with intent';
+});
+
+check('every built-in preset has at least two named variations that leave its must-axes alone', ()=>{
+  const bad = [];
+  Object.entries(A.ARCHETYPES).forEach(([k, arch])=>{
+    const vs = A.ARCHETYPE_VARIATIONS[k];
+    if (!vs || vs.length < 2) return bad.push(k + ': fewer than two variations');
+    const must = new Set(A.ARCHETYPE_INTENT[k].must);
+    vs.forEach(v=>{
+      Object.keys(v.pers || {}).forEach(ax=>{ if (must.has(ax)) bad.push(`${k}/${v.id}: touches must-axis ${ax}`); });
+      Object.entries(v.profile || {}).forEach(([sec, cat])=>{
+        const ps = A.PROFILE_SECTIONS.find(p=>p.id===sec);
+        if (!ps) return bad.push(`${k}/${v.id}: unknown section ${sec}`);
+        if (!A.catsOf(ps.section).includes(cat)) bad.push(`${k}/${v.id}: ${sec} has no category "${cat}"`);
+      });
+    });
+  });
+  assert(!bad.length, bad.slice(0,5).join('; '));
+  return 'variations valid';
+});
+
+check('a variation changes the effective preset; the must-axes hold at the blend floor', ()=>{
+  const base = A.effectiveArchetype('conartist', 'base');
+  const abr = A.effectiveArchetype('conartist', 'abrasive');
+  assert(abr.pers.manners < base.pers.manners, 'the abrasive variation did not lower manners');
+  assert(abr.pers.honesty === base.pers.honesty, 'a variation moved a must-axis');
+  assert(abr.profile.humor === 'Cruel & Barbed', 'the variation profile override was not applied');
+  ctx.evalIn("(function(){ const el = document._set('archetypeBlend', {value:'0.3'}); })()");
+  const wMust = A.archetypeAxisBlend(base, 'honesty'), wOther = A.archetypeAxisBlend(base, 'manners');
+  ctx.evalIn("document._els.delete('archetypeBlend')");
+  assert(wMust >= A.ARCHETYPE_MUST_FLOOR, 'must-axis blend fell below the floor at 30%');
+  assert(Math.abs(wOther - 0.3) < 1e-9, 'a non-must axis did not follow the blend control');
+  return `honesty held at ${wMust}, manners at ${wOther}`;
+});
+
+check('preset input balance: no axis is set in one direction more than 2.5x the other', ()=>{
+  /* The audit measured discipline 20:5 and emotional capacity 9:15 across 34 presets.
+     Eight presets were added for the thin sides; this keeps the catalogue from
+     drifting back. */
+  const bad = [];
+  A.PERSONALITY_AXES.forEach(a=>{
+    let p=0,n=0;
+    Object.values(A.ARCHETYPES).forEach(x=>{ const v=x.pers&&x.pers[a.id]; if (v>0) p++; else if (v<0) n++; });
+    if (p && n && (p/n > 2.5 || n/p > 2.5)) bad.push(`${a.id} ${p}:${n}`);
+    if ((p && !n) || (n && !p)) bad.push(`${a.id} ${p}:${n} one-sided`);
+  });
+  assert(!bad.length, 'lopsided: ' + bad.join(', '));
+  return 'every axis within 2.5:1';
+});
+
+check('profile hints: no single category is hinted by more than a quarter of presets', ()=>{
+  const counts = {}; const total = Object.keys(A.ARCHETYPES).length;
+  Object.values(A.ARCHETYPES).forEach(x=>Object.entries(x.profile||{}).forEach(([k,v])=>{ counts[k+':'+v]=(counts[k+':'+v]||0)+1; }));
+  const over = Object.entries(counts).filter(([,n])=>n/total > 0.25);
+  assert(!over.length, 'over-used hints: ' + over.map(([k,n])=>`${k} (${n}/${total})`).join(', '));
+  const top = Object.entries(counts).sort((a,b)=>b[1]-a[1])[0];
+  return `most-used hint ${top[0]} in ${top[1]}/${total}`;
+});
+
+check('internal dimensions separate what one slider conflates', ()=>{
+  // A guarded-but-deep sheet and a shallow sheet score the same on the old axis and
+  // differently here.
+  const guarded = T.filter(t=>t.category==="Emotional Capacity — Guarded & Shallow" && t.variant==='a').slice(0,4);
+  const shallow = T.filter(t=>t.category==="Emotional Capacity — Guarded & Shallow" && t.variant==='b').slice(0,4);
+  assert(guarded.length >= 3 && shallow.length >= 3, 'not enough variant-tagged material to test');
+  const mk = list => Object.fromEntries(list.map((t,i)=>['pers_'+i, {slotId:'pers_'+i, trait:t}]));
+  const g = A.internalDimensions(mk(guarded)), sh = A.internalDimensions(mk(shallow));
+  assert(g.emoDepth > sh.emoDepth, `guarded depth ${g.emoDepth.toFixed(2)} should exceed shallow ${sh.emoDepth.toFixed(2)}`);
+  assert(g.emoExpress < 0 && sh.emoExpress <= 0, 'both should read as unexpressive');
+  return `guarded: depth ${g.emoDepth.toFixed(2)} / expression ${g.emoExpress.toFixed(2)}; shallow: depth ${sh.emoDepth.toFixed(2)}`;
 });
 
 /* Bank figures, printed every run. Comments across the codebase cited the bank size as

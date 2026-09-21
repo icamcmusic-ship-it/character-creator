@@ -1012,6 +1012,24 @@ function renderSheet(){
         <div class="coherenceBar"><span style="width:${f}%; background:${col};"></span></div>
       </div>${strengthRow}<div class="coherenceNote">Of the axes this archetype takes a position on and the sheet actually expresses, ${f}% lean the way the archetype asked. The second bar is how strongly they lean, measured against the strongest expression this trait bank produces — not against the archetype's own numbers, which are in different units. Drift is legitimate: this is a compass reading, not a grade.${(af.total && af.silent) ? ` The sheet says nothing either way on ${af.silent} of the ${af.total} axes this archetype takes a position on; those are excluded rather than scored as disagreement. They are usually silent because their section is switched off, or because the traits drawn there carry no polarity on that axis.` : ``}</div>`;
     }
+    /* Internal dimensions — the pairs a single slider conflates, read separately from
+       the sheet. Only the pairs with evidence on BOTH halves are shown, and a pair is
+       flagged when its halves disagree, which is exactly where the slider would have
+       lied about this person. */
+    try {
+      const dims = internalDimensions(state);
+      const word = (d, v) => Math.abs(v) < 0.2 ? 'middling' : (v > 0 ? d.high : d.low);
+      const rows = INTERNAL_DIMENSION_PAIRS.map(([a,b])=>{
+        const da = INTERNAL_DIMENSIONS.find(d=>d.id===a), db = INTERNAL_DIMENSIONS.find(d=>d.id===b);
+        const va = dims[a], vb = dims[b];
+        if (!va && !vb) return null;
+        const split = (va > 0.2 && vb < -0.2) || (va < -0.2 && vb > 0.2);
+        return `<div class="dimRow${split ? ' dimSplit' : ''}"><span>${escHTML(da.label)}: <b>${escHTML(word(da, va))}</b></span><span>${escHTML(db.label)}: <b>${escHTML(word(db, vb))}</b></span>${split ? '<span class="dimFlag" title="These two usually travel together on one slider; here they part company.">split</span>' : ''}</div>`;
+      }).filter(Boolean);
+      if (rows.length){
+        h += `<div class="tensionBlock" style="border-left-color:var(--accent-violet); margin-top:10px;"><div class="tensionTitle" style="color:var(--accent-violet);">Two things the sliders treat as one</div>${rows.join('')}<div class="sub" style="margin:6px 0 0;">Read from the sheet, not from the controls: self-worth against self-presentation, depth against expression, and so on. A <b>split</b> is where one slider would have lied about this person.</div></div>`;
+      }
+    } catch(e){}
     // Voice fingerprint — assembled from the character's own example lines.
     const fp = voiceFingerprint(state, charMeta);
     if (fp){
@@ -1414,7 +1432,7 @@ const CHAR_FORMAT_VERSION = 2;
 // Every control that changes what a generation produces.
 const SETTING_FIELDS = ['mannerCount','vocabCount','personalityCount','profileDepth',
   'rarityPref','affinityBoost','rangeFocus','profileWeight','divergence',
-  'app_stature','app_upkeep','app_presence','archetypeSelect','seedInput','sheetDensity','wildcardCount','pressureLevel',
+  'app_stature','app_upkeep','app_presence','archetypeSelect','archetypeVariation','archetypeBlend','seedInput','sheetDensity','wildcardCount','pressureLevel',
   /* The cast and foil controls were the one part of the workspace that no capture
      covered, so "export my setup" and Undo both silently dropped them and a cast was
      unreproducible from a settings file even though it now has a seed. A workspace is
@@ -1474,6 +1492,16 @@ function restoreSettings(s){
     if (el.tagName === 'SELECT'){ if ([...el.options].some(o=>o.value===v)) el.value = v; }
     else el.value = v;
   });
+  // The variation list depends on which preset is selected; rebuild it before the
+  // saved variation value is applied below, or the value has no option to land on.
+  if (typeof onArchetypeChange === 'function'){
+    onArchetypeChange(false);
+    const vsel = document.getElementById('archetypeVariation');
+    const want = s.fields && s.fields.archetypeVariation;
+    if (vsel && want && [...vsel.options].some(o=>o.value===want)) vsel.value = want;
+    const bl = document.getElementById('archetypeBlendVal'), be = document.getElementById('archetypeBlend');
+    if (bl && be) bl.textContent = Math.round(parseFloat(be.value)*100) + '%';
+  }
   Object.entries(s.toggles||{}).forEach(([id,v])=>{ const el=document.getElementById(id); if (el) el.checked = !!v; });
   Object.entries(s.sections||{}).forEach(([id,cfg])=>{
     const tog = document.getElementById('sec_'+id); if (tog) tog.checked = !!cfg.on;

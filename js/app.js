@@ -1456,6 +1456,54 @@ async function deleteCustomArchetype(){
   } catch(e){ console.error(e); toast("Could not delete — try again.", "warn"); }
 }
 
+/* Built-in presets used to be a hand-maintained <option> list in index.html; a preset
+   added to ARCHETYPES did not exist in the UI until someone remembered. Fill the list
+   from the table, and fill the variation list for whichever preset is chosen. */
+function populateArchetypeSelect(){
+  const sel = document.getElementById('archetypeSelect');
+  if (!sel) return;
+  const current = sel.value;
+  [...sel.querySelectorAll('option')].forEach(o=>{ if (o.value && !o.value.startsWith('custom_')) o.remove(); });
+  Object.entries(ARCHETYPES).forEach(([key, arch])=>{
+    const opt = document.createElement('option');
+    opt.value = key; opt.textContent = arch.label;
+    // Insert before any custom entries so the two groups stay together.
+    const firstCustom = [...sel.options].find(o=>o.value.startsWith('custom_'));
+    if (firstCustom) sel.insertBefore(opt, firstCustom); else sel.appendChild(opt);
+  });
+  if ([...sel.options].some(o=>o.value===current)) sel.value = current;
+  onArchetypeChange(false);
+}
+function onArchetypeChange(andSlider){
+  const key = strVal('archetypeSelect', '');
+  const arch = ARCHETYPES[key] || CUSTOM_ARCHETYPES[key];
+  const box = document.getElementById('archetypeTuning');
+  const vsel = document.getElementById('archetypeVariation');
+  if (box) box.style.display = arch ? 'block' : 'none';
+  if (vsel){
+    const prev = vsel.value;
+    vsel.innerHTML = '<option value="base">As written</option>';
+    (arch && arch.variations || []).forEach(v=>{
+      const o = document.createElement('option'); o.value = v.id; o.textContent = v.label; vsel.appendChild(o);
+    });
+    if ([...vsel.options].some(o=>o.value===prev)) vsel.value = prev;
+  }
+  const note = document.getElementById('archetypeIntentNote');
+  if (note){
+    if (arch && arch.intent){
+      const ax = id => { const a = PERSONALITY_AXES.find(x=>x.id===id); return a ? a.label : id; };
+      const secs = ids => ids.map(id=>{ const ps = PROFILE_SECTIONS.find(p=>p.id===id); return ps ? ps.label : id; });
+      note.innerHTML = `<b>Must hold:</b> ${escHTML(arch.intent.must.map(ax).join(', '))} · <b>nudged:</b> ${escHTML(secs(arch.intent.nudge).join(', '))} · <b>left open:</b> ${escHTML(secs(arch.intent.open).join(', '))}`;
+    } else note.textContent = arch ? "A custom preset: blended evenly, nothing pinned." : "";
+  }
+  if (andSlider !== false) onSliderChange();
+}
+function onArchetypeBlendInput(){
+  const v = floatVal('archetypeBlend', 0.65);
+  setText('archetypeBlendVal', Math.round(v*100) + '%');
+  onSliderChange();
+}
+
 async function loadCustomArchetypes(){
   try {
     const res = await storage.list('archetype:');
@@ -1483,7 +1531,7 @@ async function loadCustomArchetypes(){
   if ([...sel.options].some(o=>o.value===current)) sel.value = current;
   const list = document.getElementById('customArchList');
   const names = Object.values(CUSTOM_ARCHETYPES).map(a=>a.label);
-  list.textContent = names.length ? "Saved archetypes: " + names.join(", ") : "";
+  if (list) list.textContent = names.length ? "Saved archetypes: " + names.join(", ") : "";
 }
 
 /* ================= WORKSPACE EXPORT =================
@@ -2581,6 +2629,7 @@ function updateStickyBar(){
 }
 
 buildProfileSectionUI();
+populateArchetypeSelect();
 buildSeedPicker();
 buildPersonalitySliders();
 loadSavedList();

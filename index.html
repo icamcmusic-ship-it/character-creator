@@ -298,37 +298,21 @@
       <div class="row">
         <div class="field">
           <label for="archetypeSelect">Archetype seed (optional)</label>
-          <select id="archetypeSelect">
+          <select id="archetypeSelect" data-on="change" data-act="onArchetypeChange" data-args="[]">
             <option value="">None &mdash; fully random</option>
-            <option value="soldier">Wounded Soldier</option>
-            <option value="conartist">Smug Con Artist</option>
-            <option value="intern">Anxious Intern</option>
-            <option value="scholar">Weary Scholar</option>
-            <option value="noble">Cold Noble</option>
-            <option value="child">Wide-eyed Child</option>
-            <option value="burntIdealist">Burnt-Out Idealist</option>
-            <option value="charmingManipulator">Charming Manipulator</option>
-            <option value="grievingParent">Grieving Parent</option>
-            <option value="reluctantSecond">Reluctant Second-in-Command</option>
-            <option value="cheerfulSociopath">Cheerful Sociopath</option>
-            <option value="furiousCaretaker">Quietly Furious Caretaker</option>
-            <option value="washedUpProdigy">Washed-Up Prodigy</option>
-            <option value="companyLoyalist">Company Loyalist</option>
-            <option value="blackSheep">Black-Sheep Returnee</option>
-            <option value="compulsiveFixer">Compulsive Fixer</option>
-            <option value="undiscussedSurvivor">Survivor Who Won't Discuss It</option>
-            <option value="workaholicAvoiding">Workaholic Avoiding a Diagnosis</option>
-            <option value="formerTrueBeliever">Former True Believer</option>
-            <option value="goldenChild">Golden Child</option>
-            <option value="competentProfessional">Quietly Excellent Professional</option>
-            <option value="contentedElder">Contented Elder</option>
-            <option value="genuinelyFunny">Genuinely Funny One</option>
-            <option value="careerBureaucrat">Career Bureaucrat</option>
-            <option value="trueZealot">Ecstatic True Believer</option>
-            <option value="alienLogic">Alien-Logic Outsider</option>
-            <option value="unbotheredYoung">Unbothered Young Person</option>
-            <option value="steadyOrganiser">Steady Organiser</option>
+            <!-- Built-in presets are filled from ARCHETYPES at boot (populateArchetypeSelect),
+                 so a preset added to the engine appears here without an HTML edit. -->
           </select>
+          <!-- A preset's named variations (ARCHETYPE_VARIATIONS) and how much of it
+               survives the blend with your own sliders. The `must` axes of a preset are
+               held at a floor whatever the blend, so it stays recognisable. -->
+          <div id="archetypeTuning" style="display:none; margin-top:8px;">
+            <label for="archetypeVariation" class="sub" style="margin:0 0 2px;">Variation</label>
+            <select id="archetypeVariation" data-on="change" data-act="onSliderChange" data-args="[]"></select>
+            <label for="archetypeBlend" class="sub" style="margin:8px 0 2px;">How much of the preset to keep <span id="archetypeBlendVal">65%</span></label>
+            <input type="range" id="archetypeBlend" min="0.2" max="1" step="0.05" value="0.65" data-on="input" data-act="onArchetypeBlendInput" data-args="[]">
+            <div class="sub" id="archetypeIntentNote" style="margin:4px 0 0;"></div>
+          </div>
         </div>
         <div class="field advOnly">
           <label for="mannerCount"># of Mannerisms</label>
