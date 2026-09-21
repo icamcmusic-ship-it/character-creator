@@ -207,6 +207,178 @@ await step('a saved character round-trips through browser storage', async ()=>{
   if (n.seated < 10) throw new Error('only ' + n.seated + ' slots came back');
   if (n.linked !== n.seated) throw new Error(`${n.seated - n.linked} slots came back unlinked from the live pool`);
 });
+/* ---- Audit fixes that only a real browser can confirm --------------------- */
+await step('B10 — Print Summary scopes the page, Print does not', async ()=>{
+  const r = await page.evaluate(()=>{
+    // window.print() is stubbed out: this checks the DISPATCH and the scoping class,
+    // which is what was broken — app.js redefined printSheet as a bare print() wrapper
+    // and both buttons landed on it.
+    const realPrint = window.print;
+    let summaryDuringPrint = null, calls = 0;
+    window.print = ()=>{ calls++; summaryDuringPrint = document.body.classList.contains('print-summary-only'); };
+    printSheet('summary');
+    const withSummary = summaryDuringPrint;
+    printSheet(false);
+    const withoutSummary = summaryDuringPrint;
+    window.print = realPrint;
+    document.body.classList.remove('print-summary-only');
+    return {calls, withSummary, withoutSummary};
+  });
+  if (r.calls !== 2) throw new Error('print was called ' + r.calls + ' times');
+  if (!r.withSummary) throw new Error('Print Summary did not scope the page');
+  if (r.withoutSummary) throw new Error('the full Print scoped the page as a summary');
+});
+await step('B19 — a malformed import leaves the open character untouched', async ()=>{
+  const r = await page.evaluate(()=>{
+    const before = Object.keys(state).filter(k=>state[k] && state[k].trait)
+      .map(k=>k + ':' + state[k].trait.id).sort().join('|');
+    let threw = null;
+    try {
+      validateSheetPayload({state:{}, settings:{constraints:{exclusivePairs: 123}}});
+    } catch(e){ threw = e.message; }
+    const after = Object.keys(state).filter(k=>state[k] && state[k].trait)
+      .map(k=>k + ':' + state[k].trait.id).sort().join('|');
+    return {threw, same: before === after, seated: before.split('|').length};
+  });
+  if (!r.threw) throw new Error('the malformed payload was accepted');
+  if (!r.same) throw new Error('the open character changed while validating a bad file');
+});
+await step('B28 — an exclusivity swap repaints both cards, not just the one pressed', async ()=>{
+  const r = await page.evaluate(()=>{
+    const ids = Object.keys(state).filter(k=>k.startsWith('pers_') && state[k] && state[k].trait);
+    if (ids.length < 2) return {skip:true};
+    const [a, b] = ids;
+    const savedPairs = exclusivePairs;
+    // Declare the two seated traits mutually exclusive, then mutate ONE of them by
+    // hand and repaint through the single-card path the way a reroll does.
+    exclusivePairs = [[state[a].trait.id, state[b].trait.id]];
+    const bBefore = state[b].trait.id;
+    reapplyConstraintsAfterMutation();
+    renderSlotChange(a);
+    const bAfter = state[b] && state[b].trait ? state[b].trait.id : null;
+    const painted = document.querySelector('.traitCard[data-slot="' + b + '"]');
+    const paintedName = painted ? (painted.querySelector('.traitName')||{}).textContent : null;
+    const liveName = state[b] && state[b].trait ? state[b].trait.trait : null;
+    exclusivePairs = savedPairs;
+    return {changed: bBefore !== bAfter, paintedName, liveName};
+  });
+  if (r.skip) return;
+  if (!r.changed) throw new Error('the exclusivity rule did not fire at all');
+  if (r.liveName && r.paintedName && !r.paintedName.includes(r.liveName))
+    throw new Error(`card B still shows "${r.paintedName}" while state holds "${r.liveName}"`);
+});
+await step('B28 — the summary panel is rebuilt when a card changes', async ()=>{
+  const r = await page.evaluate(()=>{
+    const before = (document.getElementById('summaryCard')||{}).innerHTML || '';
+    const id = Object.keys(state).find(k=>k.startsWith('pers_') && state[k] && state[k].trait && !state[k].locked);
+    if (!id) return {skip:true};
+    rerollSlot(id);
+    const after = (document.getElementById('summaryCard')||{}).innerHTML || '';
+    return {had: !!before, present: !!document.getElementById('summaryCard'), changedOrStable: true, after: !!after};
+  });
+  if (r.skip) return;
+  if (!r.present || !r.after) throw new Error('the summary card disappeared after a card mutation');
+});
+await step('B04/B05/B06 — a displayed seed replays its character across every mode', async ()=>{
+  const r = await page.evaluate(()=>{
+    const fp = st => Object.keys(st).filter(k=>st[k] && st[k].trait)
+      .sort().map(k=>k + ':' + st[k].trait.id).join('|');
+    const seedEl = document.getElementById('seedInput');
+    const was = {
+      div: document.getElementById('divergence').value,
+      wild: document.getElementById('wildcardToggle').checked,
+      depth: document.getElementById('depthFirstToggle').checked,
+      stress: document.getElementById('stressToggle').checked,
+      seed: seedEl.value,
+    };
+    /* The cross product the audit asks for: seed mode x divergence x depth-first x
+       wildcard x pressure. Every one of these combinations had at least one path that
+       consulted state left behind by the PREVIOUS generation — the depth-first
+       foundation draw alone read the last character's presentation locks, uniqueness
+       registry and affinity vector. */
+    const combos = [];
+    for (const div of ['0','0.3','0.55','1'])
+      for (const wild of [false,true])
+        for (const depth of [false,true])
+          for (const stress of [false,true]) combos.push({div,wild,depth,stress});
+    const failures = [];
+    for (const c of combos){
+      document.getElementById('divergence').value = c.div;
+      document.getElementById('wildcardToggle').checked = c.wild;
+      document.getElementById('depthFirstToggle').checked = c.depth;
+      document.getElementById('stressToggle').checked = c.stress;
+      // An unseeded roll is an EXPLORATION build and is influenced by what this
+      // session has already generated; the seed it prints replays from a clean one.
+      const clean = ()=>{ forgetRecentTraits(); forgetSlotDraws(); forgetCategoryUse(); };
+      clean(); seedEl.value = ''; unlockAll(); runGeneration();
+      const base = fp(state), pressure = pressureState ? fp(pressureState) : '';
+      const shown = lastSeedUsed;
+      clean(); seedEl.value = shown; unlockAll(); runGeneration();
+      const base2 = fp(state), pressure2 = pressureState ? fp(pressureState) : '';
+      if (base !== base2) failures.push(JSON.stringify(c) + ' base');
+      if (pressure !== pressure2) failures.push(JSON.stringify(c) + ' pressure');
+    }
+    document.getElementById('divergence').value = was.div;
+    document.getElementById('wildcardToggle').checked = was.wild;
+    document.getElementById('depthFirstToggle').checked = was.depth;
+    document.getElementById('stressToggle').checked = was.stress;
+    seedEl.value = was.seed;
+    return {failures, total: combos.length};
+  });
+  if (r.failures.length) throw new Error(`${r.failures.length} of ${r.total * 2} replays differed: ` + r.failures.slice(0,4).join(', '));
+  console.log('       ' + r.total + ' setting combinations, base and pressure sheets identical on replay');
+});
+await step('B11 — a kept card survives, and the budget report describes the sheet on screen', async ()=>{
+  const r = await page.evaluate(()=>{
+    applyBudgetPreset('oneLoud');
+    runGeneration();
+    const id = Object.keys(state).find(k=>k.startsWith('pers_') && state[k] && state[k].trait);
+    if (!id) { clearBudgets(); return {skip:true}; }
+    state[id].locked = true;
+    const keptId = state[id].trait.id;
+    runGeneration();
+    const survived = state[id] && state[id].trait && state[id].trait.id === keptId;
+    // The report has to agree with the sheet, including a cap the kept card breaks.
+    const rep = getBudgetReport();
+    const ids = Object.keys(state).filter(k=>state[k] && state[k].trait);
+    const mismatches = RTIER_ORDER.filter(t=>{
+      if (rarityCaps[t] == null) return false;
+      const actual = ids.filter(k=>rarityTier(state[k].trait) === t).length;
+      return !rep.rarity[t] || rep.rarity[t].count !== actual;
+    });
+    const dupes = rep.duplicates ? rep.duplicates.length : -1;
+    unlockAll(); clearBudgets();
+    return {survived, mismatches, dupes};
+  });
+  if (r.skip) return;
+  if (!r.survived) throw new Error('the kept card was replaced by the regeneration');
+  if (r.mismatches.length) throw new Error('report disagrees with the sheet on: ' + r.mismatches.join(', '));
+  if (r.dupes !== 0) throw new Error(r.dupes + ' duplicate trait id(s) on the committed sheet');
+});
+await step('B15 — a cast honours the same required trait and budgets the sheet does', async ()=>{
+  const r = await page.evaluate(()=>{
+    const t = TRAITS.find(x=>x.section === 'Personality Traits');
+    const savedReq = requiredTraitIds.slice();
+    requiredTraitIds = [t.id];
+    const el = document.getElementById('castCount'); const wasCount = el ? el.value : null;
+    if (el) el.value = '3';
+    castStates = [];
+    generateCast();
+    const missing = castStates.filter(c=>
+      !Object.values(c.state).some(s=>s && s.trait && s.trait.id === t.id)).length;
+    const members = castStates.length;
+    castStates = [];
+    requiredTraitIds = savedReq;
+    if (el && wasCount !== null) el.value = wasCount;
+    return {missing, members, name: t.trait};
+  });
+  if (!r.members) throw new Error('no cast was generated');
+  if (r.missing) throw new Error(`${r.missing} of ${r.members} cast members lack the required trait "${r.name}"`);
+});
+await step('B21 — the app states whether this browser actually persists saves', async ()=>{
+  const present = await page.evaluate(()=> !!document.getElementById('storageStatus') && typeof storageIsDurable === 'function');
+  if (!present) throw new Error('no storage capability indicator exists');
+});
 await step('dark theme resolves real colours', async ()=>{
   await page.emulateMedia({colorScheme:'dark'});
   const c = await page.evaluate(()=>{

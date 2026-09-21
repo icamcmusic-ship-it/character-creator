@@ -11,6 +11,8 @@ const storage = (function(){
   if (typeof window !== 'undefined' && window.storage &&
       typeof window.storage.get === 'function' && typeof window.storage.set === 'function' &&
       typeof window.storage.list === 'function' && typeof window.storage.delete === 'function'){
+    // The host's own API; assume it persists unless it says otherwise.
+    if (window.storage.durable === undefined) try { window.storage.durable = true; } catch(e){}
     return window.storage;
   }
   const PREFIX = 'cc_storage:';
@@ -18,12 +20,18 @@ const storage = (function(){
   // disabled) — fall back to an in-memory Map so the app still runs, it just
   // won't persist across reloads.
   let backend;
+  /* A failed probe fell back to an in-memory Map and said nothing, so `saveCharacter`
+     reported an ordinary success and the user closed the tab believing their work was
+     on disk. Record the capability so the UI can say "this session only" BEFORE a save
+     rather than never. */
+  let durable = true;
   try {
     const probeKey = '__cc_storage_probe__';
     window.localStorage.setItem(probeKey, '1');
     window.localStorage.removeItem(probeKey);
     backend = window.localStorage;
   } catch(e){
+    durable = false;
     const mem = new Map();
     backend = {
       getItem: k => mem.has(k) ? mem.get(k) : null,
@@ -34,6 +42,7 @@ const storage = (function(){
     };
   }
   return {
+    durable,
     async get(key){
       const v = backend.getItem(PREFIX + key);
       return v === null ? null : { value: v };
@@ -110,8 +119,23 @@ async function savedCharacterExists(name){
   try { const r = await storage.get('character:'+name); return !!(r && r.value); }
   catch(e){ return false; }
 }
+/* Is this browser going to keep what we write? Everything that reports a save, lists
+   saves, or offers persistence asks here rather than assuming. */
+function storageIsDurable(){ return storage.durable !== false; }
+function announceStorageMode(){
+  const el = document.getElementById('storageStatus');
+  if (!el) return;
+  if (storageIsDurable()){ el.style.display = 'none'; el.textContent = ''; return; }
+  el.style.display = 'block';
+  el.className = 'storageStatus warn';
+  el.textContent = "This browser is not allowing local storage (private mode, or site data is blocked). Saves will last only until you close this tab — export to a file to keep anything.";
+}
+
 async function saveCharacter(btnEl){
   if(!Object.keys(state).length){ toast("Generate a character first.", "warn"); return; }
+  if (!storageIsDurable()){
+    if (!await askForConfirm("This browser is not allowing local storage, so this save will be lost when the tab closes. Save it to this session anyway? (Export to a file to keep it.)", "Save anyway")) return;
+  }
   /* BUG FIX: this was `charMeta.name || await askForName(...)`, and _runGeneration sets
      charMeta.name to "Unnamed Character" when the name box is empty — so charMeta.name
      is never falsy after a generation and the prompt never fired. Every unnamed save
@@ -152,7 +176,10 @@ async function saveCharacter(btnEl){
       settings: captureSettings(), savedAt: new Date().toISOString(),
     }));
     await loadSavedList();
-    toast('Saved "' + name + '"');
+    toast(storageIsDurable()
+      ? 'Saved "' + name + '"'
+      : 'Saved "' + name + '" to this session only — this browser is not storing data, so export it to a file to keep it.',
+      storageIsDurable() ? undefined : "warn", storageIsDurable() ? undefined : 8000);
   } catch(e){
     console.error(e);
     /* A saved character is a full state dump with every trait object embedded — 80-150KB
@@ -189,6 +216,49 @@ async function renameSavedCharacter(name){
     toast('Renamed to "'+next+'"');
   } catch(e){ console.error(e); toast("Could not rename — try again.", "warn"); }
 }
+/* ================= ONE DECODER FOR EVERY SAVED RECORD =================
+   Every consumer of a saved character re-implemented expand -> validate -> relink, and
+   each one got a different subset. `loadSavedCharacter` expanded both sheets;
+   `addSavedToCast` expanded only `state`, so validation of a save made with Under
+   Pressure on threw `pressureState slot "verbosity" has a trait with no id` and the
+   cast gained nothing — with the load path's own test passing the whole time, because
+   it exercised the other copy of the sequence.
+
+   One function, used by all of them. It returns a decoded record and never touches a
+   global, so a caller can decide whether to commit after seeing whether it worked. */
+function decodeSavedRecord(parsed, label){
+  if (!parsed || typeof parsed !== 'object') throw new Error("that save is not a character record.");
+  const rec = Object.assign({}, parsed);
+  rec.state = expandSlots(rec.state);
+  rec.pressureState = expandSlots(rec.pressureState);
+  // Validate the EXPANDED shape, which is what the render path will dereference —
+  // validating the compressed {__id} form fails on every save this build has written.
+  validateSheetPayload(rec);
+  let orphans = 0, lost = 0;
+  const relink = st => {
+    if (!st) return st;
+    Object.values(st).forEach(sl=>{
+      if (!sl) return;
+      if (sl.removedTraitId !== undefined && !sl.trait){ lost++; return; }
+      if (!sl.trait) return;
+      const live = TRAITS_BY_ID.get(sl.trait.id);
+      if (live) sl.trait = live; else orphans++;
+    });
+    return st;
+  };
+  rec.state = relink(rec.state);
+  rec.pressureState = relink(rec.pressureState);
+  rec.__orphans = orphans;
+  rec.__lost = lost;
+  rec.__label = label;
+  return rec;
+}
+// The two messages every consumer of decodeSavedRecord owes the user.
+function reportDecodeLosses(rec){
+  if (rec.__orphans) toast(rec.__orphans + " trait(s) in this save no longer exist in the pool; their saved text was kept as-is.", "warn", 6000);
+  if (rec.__lost) toast(rec.__lost + " trait(s) were written by an older build and have since been removed from the pool — those cards could not be recovered.", "warn", 8000);
+}
+
 async function loadSavedCharacter(name){
   try {
     const r = await storage.get('character:'+name);
@@ -211,31 +281,27 @@ async function loadSavedCharacter(name){
        ever saved: `state slot "verbosity" has a trait with no id`. Expand first, so the
        validator sees the same shape the file-import path shows it — which is why file
        export/import never had this bug and the one validation test never caught it. */
-    parsed.state = expandSlots(parsed.state);
-    parsed.pressureState = expandSlots(parsed.pressureState);
-    validateSheetPayload(parsed);
+    const rec = decodeSavedRecord(parsed, name);
     /* Also missing here: relink(). Without it a loaded character keeps the stale trait
        objects embedded at save time, so why?/reroll/pin operate on detached copies —
        the identity comparisons they rely on are against objects that are no longer in
        TRAITS. Re-link by id, exactly as importCharacterJSON does. */
-    let orphans = 0;
-    const relink = st => { if (!st) return st;
-      Object.values(st).forEach(s2=>{
-        if (s2 && s2.trait){ const live = TRAITS_BY_ID.get(s2.trait.id); if (live) s2.trait = live; else orphans++; }
-      }); return st; };
     snapshotHistory();
     /* Already expanded above; relink now reconnects anything expandSlots left alone —
        an older save carrying full embedded trait copies rather than {__id} stubs. Both
        shapes arrive here the same way, so a save written by any build still loads. */
-    parsed.state = relink(parsed.state);
-    parsed.pressureState = relink(parsed.pressureState);
-    state = parsed.state; charMeta = parsed.charMeta || {name, age:"", context:"", archetypeLabel:"Loaded"};
-    pressureState = parsed.pressureState || null;
-    pinnedTargets = parsed.pinnedTargets || {};
-    charVariants = parsed.charVariants || {};
-    traitNotes = parsed.traitNotes || {};
+    state = rec.state; charMeta = rec.charMeta || {name, age:"", context:"", archetypeLabel:"Loaded"};
+    pressureState = rec.pressureState || null;
+    pinnedTargets = rec.pinnedTargets || {};
+    charVariants = rec.charVariants || {};
+    traitNotes = rec.traitNotes || {};
     diffLog = {}; rerollExclusions = {}; rerollHistory = {}; whyOpen = {}; OPEN_CARD_CONTROLS.clear();
-    if (parsed.settings) restoreSettings(parsed.settings);
+    if (rec.settings) restoreSettings(rec.settings);
+    /* The file-import path sets this and the load path did not, so a later Undo could
+       pair the loaded sheet with the sliders of whatever was generated before it. The
+       loaded character's own settings block is the right answer; live controls are the
+       fallback for a save written before settings were captured. */
+    lastGeneratedSliders = (rec.settings && rec.settings.sliders) || rec.sliders || captureSliders();
     setVal('charName', charMeta.name || "");
     setVal('charAge', charMeta.age || "");
     setVal('charContext', charMeta.context || "");
@@ -244,7 +310,7 @@ async function loadSavedCharacter(name){
     lastSheetTraits = null;
     onSliderChange(); renderSheet(); checkConflicts();
     toast('Loaded "'+name+'"');
-    if (orphans) toast(orphans + " trait(s) in this save no longer exist in the pool; their saved text was kept as-is.", "warn", 6000);
+    reportDecodeLosses(rec);
   } catch(e){ console.error(e); toast("Could not load that character: " + e.message, "warn", 6000); }
 }
 // The saved list used to be a bare row of names with no preview, no rename, and no
@@ -348,19 +414,21 @@ async function addSavedToCast(name){
        threw, see loadSavedCharacter) and it never called expandSlots at all, so even
        past the validator every cast member would have been a sheet of {__id} stubs.
        Same order as the load path — expand, validate, relink. */
-    parsed.state = expandSlots(parsed.state);
-    validateSheetPayload(parsed);
-    const st = parsed.state || {};
-    Object.values(st).forEach(s2=>{
-      if (s2 && s2.trait){ const live = TRAITS_BY_ID.get(s2.trait.id); if (live) s2.trait = live; }
-    });
+    // Same decoder as the load path — see decodeSavedRecord. This used to expand only
+    // `state`, which is why a save carrying a pressure variant could never join a cast.
+    const rec = decodeSavedRecord(parsed, name);
+    const st = rec.state || {};
     if (castStates.some(c=>c.meta.name === name)){
       toast(`"${name}" is already on the Cast tab.`, "warn");
       switchTab('cast');
       return;
     }
-    castStates.push({state: st, variants: parsed.charVariants || null,
-      meta: (parsed.charMeta && Object.assign({}, parsed.charMeta, {name})) || {name, age:"", context:"", archetypeLabel:"Saved"}});
+    castStates.push(castEntry(st, rec.charVariants || null,
+      (rec.charMeta && Object.assign({}, rec.charMeta, {name})) || {name, age:"", context:"", archetypeLabel:"Saved"},
+      // A cast member keeps its own pressure sheet, so it is still the same character
+      // once it is over there.
+      {pressureState: rec.pressureState || null, traitNotes: rec.traitNotes || {}}));
+    reportDecodeLosses(rec);
     renderCast();
     refreshRelSelectors();
     switchTab('cast');
@@ -369,6 +437,20 @@ async function addSavedToCast(name){
 }
 
 // ================= CAST COMPARISON =================
+/* Names are not identity. Foil generation removed every cast member CALLED "Foil" or
+   matching the source character's display name before appending its own pair, so a
+   renamed member, an imported unrelated character, or a second character the user had
+   deliberately named "Foil" was deleted by an operation that had nothing to do with
+   it. Every cast entry now carries an opaque id, and generated members carry the
+   relationship that produced them, so replacement targets the thing it created. */
+let _castIdSeq = 0;
+function newCharacterId(){
+  _castIdSeq++;
+  return 'ch_' + Date.now().toString(36) + '_' + _castIdSeq.toString(36);
+}
+function castEntry(state, variants, meta, extra){
+  return Object.assign({id: newCharacterId(), state, variants, meta}, extra || {});
+}
 let castStates = [];
 let lastCastSeed = null;
 function randomAxisLevel(){ return (rand()*4) - 2; }
@@ -385,9 +467,11 @@ function generateCast(){
   // so an ensemble you liked could never be recovered or shared. Same seeded-block
   // pattern as the single character, on its own stream.
   const seedInput = document.getElementById('castSeed');
-  const seedStr = seedInput ? seedInput.value.trim() : "";
-  const seedNum = seedStr ? hashSeedString(seedStr) : entropySeed();
-  lastCastSeed = seedStr || seedNum.toString(36);
+  // One seed codec for every generator — see resolveSeed in generate.js. The cast
+  // label used to be `seedNum.toString(36)`, which could not be pasted back.
+  const castSeed = resolveSeed(seedInput ? seedInput.value : "");
+  const seedNum = castSeed.num;
+  lastCastSeed = castSeed.label;
   castStates = [];
   // withoutContextBias: the cast is not "six more of the character you just made" —
   // see the note on the helper in engine.js.
@@ -441,8 +525,13 @@ function generateCast(){
             : Math.round(randomAxisLevel()*50);
         });
         rollCharacterVariants();
-        const cand = buildCharacterState({verbLevel, regLevel, compLevel, mannerCount, vocabCount,
-          rarityPref, vocabPref:null, personalityOverrides});
+        /* Cast members used to call buildCharacterState and stop there — no required
+           traits, no budgets, no exclusivity — so a cast generated with a named
+           required trait and every rarity cap at zero honoured none of them, while the
+           chips on screen said otherwise. Same finalizer as everything else; pins are
+           the single-character sheet's and deliberately do not travel. */
+        const cand = finalizeSheet(buildCharacterState({verbLevel, regLevel, compLevel, mannerCount, vocabCount,
+          rarityPref, vocabPref:null, personalityOverrides}), {rarityPref, applyPins:false});
         st = cand; variants = Object.assign({}, charVariants);
         if (overlapWith(cand) <= 1) break;
         rerolled++;
@@ -451,9 +540,9 @@ function generateCast(){
       // Carried on the cast entry rather than left in the global, so a cast member's
       // own locks travel with it (relationship analysis, cast export) instead of
       // whichever member happened to be generated last.
-      castStates.push({state: st, variants,
-        meta: {name:"Character " + (i+1), age:"", context:"",
-               archetypeLabel: anchored ? "Cast member (around your character)" : "Cast member"}});
+      castStates.push(castEntry(st, variants,
+        {name:"Character " + (i+1), age:"", context:"",
+         archetypeLabel: anchored ? "Cast member (around your character)" : "Cast member"}));
     }
   })));
   if (rerolled) console.info(`[cast] re-rolled ${rerolled} time(s) to keep members distinct`);
@@ -661,6 +750,9 @@ function switchTab(which){
 // trailing run ~80ms after the drag pauses.
 let _previewTimer = null;
 function onSliderChange(){
+  // The active-rules strip reads the archetype, the seed field, the section toggles
+  // and the profile-type selects, all of which change through this path.
+  if (typeof refreshActiveRuleStrip === 'function') { try { refreshActiveRuleStrip(); } catch(e){} }
   invalidateSliderCache();
   updateSliderReadouts();
   if (_previewTimer) clearTimeout(_previewTimer);
@@ -859,7 +951,7 @@ function updateHeavyPreview(){
       const pct = Math.round((conf[ps.id]||0)*100);
       return `${ps.label} → most likely <b>${chosen[ps.id]}</b> <span style="opacity:.65">(~${pct}%)</span>`;
     });
-    if (parts.length) profLine = `<div style="margin-top:6px; padding-top:6px; border-top:1px dashed var(--border);"><b>Character Profile (predicted):</b><br>${parts.join("<br>")}<div class="sub" style="margin:6px 0 0;">Deterministic prediction, not a draw — generation still rolls against these odds.</div></div>`;
+    if (parts.length) profLine = `<div style="margin-top:6px; padding-top:6px; border-top:1px dashed var(--border);"><b>Character Profile (predicted):</b><br>${parts.join("<br>")}<div class="sub" style="margin:6px 0 0;">A simplified conditional preview, not the generator's own probabilities: it takes the most likely category at each step and conditions the next on it, and it does not model the divergence dial's mixture or the archetype slider blend. Treat it as "where the settings point", not "how often this comes out".</div></div>`;
   } catch(e){}
   setHTML('affinityPreview',
     fmt(gBoost,"Grammar") + fmt(vBoost,"Vocabulary") + fmt(mBoost,"Mannerisms") + profLine);
@@ -1123,6 +1215,7 @@ async function resetAllToDefaults(){
   PROFILE_SECTIONS.forEach(ps=>{
     const tog = document.getElementById('sec_'+ps.id); if (tog) tog.checked = true;
     const sel = document.getElementById('type_'+ps.id); if (sel) sel.value = "";
+    clearAutoProfileType(ps.id);
   });
   PROFILE_SECTIONS.forEach(ps=>{ const el = document.getElementById('pw_'+ps.id); if (el) el.value = ""; });
   clearConstraints();
@@ -1188,8 +1281,23 @@ function _runAction(el, ev){
   const name = el.getAttribute('data-act');
   const fn = name && globalThis[name];
   if (typeof fn !== 'function'){ console.error('[action] no such action:', name); return; }
-  try { fn.apply(null, _actionArgs(el, ev)); }
-  catch (err){ console.error('[action] ' + name + ' threw', err); }
+  /* Roughly a third of the actions dispatched here are `async`, and a synchronous
+     try/catch cannot contain a rejected promise: a save, an import or a cast build
+     that threw after its first `await` produced an unhandled rejection in the console
+     and nothing at all on screen. Catch the returned promise too. */
+  try {
+    const out = fn.apply(null, _actionArgs(el, ev));
+    if (out && typeof out.catch === 'function'){
+      out.catch(err=>{
+        console.error('[action] ' + name + ' rejected', err);
+        if (typeof toast === 'function') toast("That didn't finish: " + (err && err.message || err), "warn", 6000);
+      });
+    }
+  }
+  catch (err){
+    console.error('[action] ' + name + ' threw', err);
+    if (typeof toast === 'function') toast("That didn't finish: " + (err && err.message || err), "warn", 6000);
+  }
 }
 ACTION_EVENTS.forEach(type=>{
   document.addEventListener(type, (ev)=>{
@@ -1232,7 +1340,12 @@ function toggleCardControls(el){
   el.title = (open ? 'Hide' : 'Show') + ' the controls for this card';
 }
 function randomizeAndGenerate(){ randomizeSliders('all'); generateCharacter(); }
-function printSheet(){ if (typeof print === 'function') print(); }
+/* `printSheet` was DEFINED TWICE — render.js has the real one with summary scoping,
+   and this file redefined it below it in load order as a bare print() wrapper, so both
+   Print and Print Summary dispatched to the same unscoped implementation and the
+   summary mode had never once run. Removed; render.js owns printing. tests/run.js now
+   fails the build on a duplicate top-level function declaration so the next one is
+   caught at the source rather than by reading two files side by side. */
 
 function surpriseMe(){
   const keys = Object.keys(ARCHETYPES);
@@ -1459,17 +1572,27 @@ function getCharByKey(key){
    no way to fork: the only way to keep a version you liked was to save it to storage and
    load it back, losing whatever you were in the middle of. Duplicating into the Cast tab
    keeps both side by side, which is also where you can then compare them. */
+/* A copy has to be a copy. `{...state}` is one level deep, so the copy's slot OBJECTS
+   were the originals: locking a card on the source flipped the lock on the duplicate,
+   and any in-place edit (pin, note, lock, target) leaked between the two. Reroll
+   replaces whole slot objects, which is why this only showed up on in-place mutations
+   and never in the tests. Clone the slot records; trait definitions are immutable and
+   are deliberately still shared. */
+function cloneSheet(st){
+  const out = {};
+  Object.keys(st || {}).forEach(k=>{ out[k] = st[k] ? Object.assign({}, st[k]) : st[k]; });
+  return out;
+}
 function duplicateCharacter(){
   if (!Object.keys(state).length){ toast("Generate a character first.", "warn"); return; }
   const base = charMeta.name || "Character";
   let name = base + " (copy)";
   for (let n = 2; castStates.some(c=>c.meta.name === name); n++) name = `${base} (copy ${n})`;
-  castStates.push({
-    state: {...state},
-    variants: Object.assign({}, getCharVariants()),
-    meta: {name, age: charMeta.age || "", context: charMeta.context || "",
-           archetypeLabel: charMeta.archetypeLabel || "Duplicate"},
-  });
+  castStates.push(castEntry(
+    cloneSheet(state),
+    Object.assign({}, getCharVariants()),
+    {name, age: charMeta.age || "", context: charMeta.context || "",
+     archetypeLabel: charMeta.archetypeLabel || "Duplicate"}));
   renderCast();
   refreshRelSelectors();
   toast(`Copied to the Cast tab as "${name}" — this sheet is untouched, so tweak away.`);
@@ -1575,14 +1698,23 @@ function analyseRelationship(){
   if (bothHigh('rebel')) notes.push("Both push against authority — expect either fast alliance or a contest over who leads the rebellion.");
   if (bothHigh('asrt')) notes.push("Two people used to running the room. Every shared decision becomes a negotiation.");
   if (bothLow('asrt')) notes.push("Neither will make the first move. Conversations stall in mutual deference.");
-  if ((pa['hon']||0) * (pb['hon']||0) < 0) notes.push("One deals straight, the other doesn't. This is the fault line the relationship eventually breaks along.");
+  /* These rules are symmetric in meaning, so they have to be symmetric in code. The
+     warmth rule tested A-warm-and-B-cold ONLY, so swapping which character sat in the
+     A selector made the finding vanish — for a pattern whose own text ("one reaches,
+     the other retreats") says nothing about which one is which. `opposed` covers both
+     orientations; a genuinely directional fact would be stated with the names in it. */
+  const opposed = (ax) => (pa[ax]||0) * (pb[ax]||0) < 0;
+  /* Also: this was phrased as a prediction of the relationship's ending, from two
+     polarity sums and no shared history, goals or stakes at all. Inferred dynamics are
+     scene possibilities, and the copy now says so. */
+  if (opposed('hon')) notes.push("One deals straight, the other doesn't. That gap is the obvious fault line to put weight on — a scene where one of them needs the other to lie, or not to.");
   if (bothLow('warm')) notes.push("Two cold fronts. Mutual respect is possible; intimacy isn't, without something forcing it.");
-  if ((pa['warm']||0) > 0 && (pb['warm']||0) < 0) notes.push("One keeps reaching, the other keeps stepping back. Reads as pursuit and retreat.");
-  if ((pa['emo']||0) * (pb['emo']||0) < 0) notes.push("One processes out loud, the other shuts down. Each reads the other's coping as a personal rejection.");
+  if (opposed('warm')) notes.push("One keeps reaching, the other keeps stepping back. Can be played as pursuit and retreat.");
+  if (opposed('emo')) notes.push("One processes out loud, the other shuts down. Each reads the other's coping as a personal rejection.");
   if (bothHigh('ego')) notes.push("Two secure egos — surprisingly stable, provided their goals don't overlap.");
-  if ((pa['disc']||0) * (pb['disc']||0) < 0) notes.push("One plans, the other improvises. Productive in a crisis, corrosive over a long campaign.");
-  if ((pa['pos']||0) * (pb['pos']||0) < 0) notes.push("Optimist and pessimist. Each thinks the other is being wilfully unhelpful.");
-  if ((pa['act']||0) * (pb['act']||0) < 0) notes.push("Mismatched tempo — one is always waiting, the other always being rushed.");
+  if (opposed('disc')) notes.push("One plans, the other improvises. Productive in a crisis, corrosive over a long campaign.");
+  if (opposed('pos')) notes.push("Optimist and pessimist. Each thinks the other is being wilfully unhelpful.");
+  if (opposed('act')) notes.push("Mismatched tempo — one is always waiting, the other always being rushed.");
   if (bothHigh('intel')) notes.push("Both sharp. Conversation runs fast and competitive; neither explains themselves.");
   if ((pa['mood']||0) < 0 && (pb['mood']||0) < 0) notes.push("Both currently in a bad place. Whatever happens between them now isn't representative.");
   // Manners ('man') previously had zero interpretive notes here despite being one of
@@ -1590,7 +1722,7 @@ function analyseRelationship(){
   // uncouth) — every other personality axis had at least one.
   if (bothHigh('man')) notes.push("Both scrupulously mannered. Pleasant on the surface — but a real breach of etiquette between them will land as a genuine violation, not a quirk to shrug off.");
   if (bothLow('man')) notes.push("Neither minds their manners. Blunt and efficient with each other; occasionally, accidentally cruel to anyone who expected softening.");
-  if ((pa['man']||0) * (pb['man']||0) < 0) notes.push("One minds their manners, the other doesn't bother. Every interaction becomes a small, usually unspoken referendum on how much decorum the room requires.");
+  if (opposed('man')) notes.push("One minds their manners, the other doesn't bother. Every interaction becomes a small, usually unspoken referendum on how much decorum the room requires.");
 
   notes.push(...categoryPairNotesFor(A.state, B.state));
 
@@ -1757,11 +1889,11 @@ const FOIL_PREMISES_BY_SECTION = {
 function generateFoil(){
   if (!Object.keys(state).length){ toast("Generate a character first — the foil is built against them.", "warn"); return; }
   const seedInput = document.getElementById('foilSeed');
-  const seedStr = seedInput ? seedInput.value.trim() : "";
-  const seedNum = seedStr ? hashSeedString(seedStr) : entropySeed();
+  // Same codec as the single character and the cast — see resolveSeed in generate.js.
+  const foilSeed = resolveSeed(seedInput ? seedInput.value : "");
   // Foils were the other unreproducible generator: unseeded draws throughout, so a
   // foil you liked could not be recovered, shared, or regenerated after a tweak.
-  withRng(mulberry32(seedNum), ()=> _generateFoilInner(seedStr || seedNum.toString(36)));
+  withRng(mulberry32(foilSeed.num), ()=> _generateFoilInner(foilSeed.label));
 }
 function _generateFoilInner(seedLabel){
   const src = {};
@@ -1830,12 +1962,13 @@ function _generateFoilInner(seedLabel){
   // context bias — that bias pulls toward the same categories the oppositions above
   // just spent effort pushing away from.
   const foilState = withoutContextBias(()=> withSpeculativeGeneration(()=> withCharacterVariants(()=> {
-    const built = buildCharacterState({
+    // Through the shared finalizer, like every other generation path — see B15.
+    const built = finalizeSheet(buildCharacterState({
     verbLevel: -rawToLevel(intVal('verbositySlider', 0)),
     regLevel:  -rawToLevel(intVal('registerSlider', 0)),
     compLevel: opposeComposure ? -composureRaw : composureRaw,
     mannerCount, rarityPref, vocabPref:null, personalityOverrides: overrides, vocabCount, forcedProfileCats
-    });
+    }), {rarityPref, applyPins:false});
     foilVariants = Object.assign({}, charVariants);
     return built;
   })));
@@ -1854,11 +1987,18 @@ function _generateFoilInner(seedLabel){
   // character the user can't actually see next to it. Add the current character
   // alongside the foil (guarding against a duplicate name already in the cast).
   const srcName = charMeta.name || "Current character";
-  castStates = castStates.filter(c=>c.meta.name !== "Foil" && c.meta.name !== srcName);
-  castStates.push({state: {...state}, variants: Object.assign({}, charVariants),
-    meta:{name: srcName, age: charMeta.age||"", context: charMeta.context||"", archetypeLabel: charMeta.archetypeLabel||"Source"}});
-  castStates.push({state: foilState, variants: foilVariants,
-    meta:{name:"Foil", age:"", context:premise, archetypeLabel:"Foil"}});
+  /* Was: remove every member whose DISPLAY NAME is "Foil" or matches the source
+     character. That deleted a renamed member, an imported stranger, or a character the
+     user had deliberately called Foil. Remove only the pair a previous run of THIS
+     command created, identified by the marks it left. */
+  castStates = castStates.filter(c=> !c.generatedBy || c.generatedBy !== 'foil');
+  const sourceCopy = castEntry(cloneSheet(state), Object.assign({}, charVariants),
+    {name: srcName, age: charMeta.age||"", context: charMeta.context||"", archetypeLabel: charMeta.archetypeLabel||"Source"},
+    {generatedBy: 'foil', foilRole: 'source'});
+  castStates.push(sourceCopy);
+  castStates.push(castEntry(foilState, foilVariants,
+    {name:"Foil", age:"", context:premise, archetypeLabel:"Foil"},
+    {generatedBy: 'foil', foilRole: 'foil', foilOf: sourceCopy.id}));
   renderCast();
   switchTab('cast');
 
@@ -1928,12 +2068,25 @@ function checkEnsembleBalance(){
   profClustered.sort((a,b)=>b.ratio-a.ratio);
 
   let h = "";
-  const verdict = clustered.length >= 5
-    ? "Heavily clustered — this cast risks sounding like one person in several coats."
-    : clustered.length >= 3
-      ? "Somewhat clustered — a few axes where everyone agrees. Worth breaking one or two."
-      : "Well spread — the cast covers meaningfully different ground.";
-  h += `<div class="charMeta">${verdict}</div>`;
+  /* The headline used to read only the personality-axis clusters, so a cast where
+     every member had the same Social Role, values, humour and vice could still be
+     announced "well spread" while the profile clustering it had already computed sat
+     two paragraphs below. Both dimensions now feed the verdict, and a cast with too
+     few usable axes says so rather than defaulting to praise. */
+  const measured = Object.values(axisVals).filter(v=>v.length >= 3).length;
+  const pressure = clustered.length + profClustered.length;
+  const verdict = measured === 0 && !profClustered.length
+    ? "Not enough comparable traits across this cast to judge spread — generate fuller sheets, or add members."
+    : pressure >= 5
+      ? "Heavily clustered — this cast risks sounding like one person in several coats."
+      : pressure >= 3
+        ? "Somewhat clustered — a few dimensions where everyone agrees. Worth breaking one or two."
+        : profClustered.length
+          ? "Mixed — personality is reasonably spread, but the cast shares a narrative dimension below."
+          : measured < 4
+            ? `Spread looks fine on the ${measured} axis${measured===1?'':'es'} with enough data, but that is a thin sample.`
+            : "Well spread — the cast covers meaningfully different ground.";
+  h += `<div class="charMeta">${escHTML(verdict)}</div>`;
 
   if (profClustered.length){
     h += `<div class="axisGroup"><div class="axisTitle">Everyone plays the same part</div>`;
@@ -1948,8 +2101,8 @@ function checkEnsembleBalance(){
     profClustered.forEach(c=>{
       const callout = SECTION_CALLOUTS[c.section] || "Same personality contrast doesn't help if everyone's playing the same narrative role.";
       h += `<div class="traitCard"><div class="traitMain">
-        <div class="traitName">${c.section}</div>
-        <div class="traitDesc">${c.count} of ${c.total} cast members resolved to <b>${c.cat}</b>. ${callout}</div>
+        <div class="traitName">${escHTML(c.section)}</div>
+        <div class="traitDesc">${c.count} of ${c.total} cast members resolved to <b>${escHTML(c.cat)}</b>. ${escHTML(callout)}</div>
       </div></div>`;
     });
     h += `</div>`;
@@ -1958,8 +2111,8 @@ function checkEnsembleBalance(){
     h += `<div class="axisGroup"><div class="axisTitle">Everyone lands the same way here</div>`;
     clustered.forEach(c=>{
       h += `<div class="traitCard"><div class="traitMain">
-        <div class="traitName">${c.axis.label}</div>
-        <div class="traitDesc">All (or nearly all) of the cast sit on the <b>${c.dir}</b> side. Consider flipping one character to create contrast.</div>
+        <div class="traitName">${escHTML(c.axis.label)}</div>
+        <div class="traitDesc">All (or nearly all) of the cast sit on the <b>${escHTML(c.dir)}</b> side. Consider flipping one character to create contrast.</div>
       </div></div>`;
     });
     h += `</div>`;
@@ -1967,7 +2120,7 @@ function checkEnsembleBalance(){
   if (spread.length){
     h += `<div class="axisGroup"><div class="axisTitle">Healthy contrast already</div>`;
     spread.forEach(s=>{
-      h += `<div class="traitCard"><div class="traitMain"><div class="traitName">${s.axis.label}</div>
+      h += `<div class="traitCard"><div class="traitMain"><div class="traitName">${escHTML(s.axis.label)}</div>
         <div class="traitDesc">The cast is genuinely split on this axis.</div></div></div>`;
     });
     h += `</div>`;
@@ -2011,15 +2164,17 @@ function generateGapFiller(){
   // locks are its own and are restored afterwards for the same reason.
   let gapVariants = null;
   const st = withoutContextBias(()=> withSpeculativeGeneration(()=> withCharacterVariants(()=> {
-    const built = buildCharacterState({
+    // Shared finalizer — see B15. Without it the gap-filler ignored required traits,
+    // budgets and exclusivity that every chip on screen said were active.
+    const built = finalizeSheet(buildCharacterState({
       verbLevel: (rand()*4)-2, regLevel: (rand()*4)-2, compLevel: (rand()*4)-2,
       mannerCount: intVal('mannerCount', 3), vocabCount: intVal('vocabCount', 2),
       rarityPref, vocabPref:null, personalityOverrides: overrides, forcedProfileCats,
-    });
+    }), {rarityPref, applyPins:false});
     gapVariants = Object.assign({}, charVariants);
     return built;
   })));
-  castStates.push({state: st, variants: gapVariants, meta:{name:"Character " + (castStates.length+1), age:"", context:"Built to fill the ensemble's gaps", archetypeLabel:"Gap-filler"}});
+  castStates.push(castEntry(st, gapVariants, {name:"Character " + (castStates.length+1), age:"", context:"Built to fill the ensemble's gaps", archetypeLabel:"Gap-filler"}));
   renderCast();
   refreshRelSelectors();
   checkEnsembleBalance();
@@ -2061,6 +2216,10 @@ function buildProfileSectionUI(){
       </div>
     `;
     grid.appendChild(div);
+    // A change made HERE is a user choice, so it clears the "we wrote this" mark that
+    // depth-first leaves behind (see AUTO_PROFILE_TYPES in engine.js).
+    const typeSel = div.querySelector('#type_' + ps.id);
+    if (typeSel) typeSel.addEventListener('change', ()=> clearAutoProfileType(ps.id));
   });
 }
 function setAllProfileSections(on){
@@ -2072,6 +2231,8 @@ function randomizeProfileTypes(){
     if (!sel) return;
     const opts = [...sel.options].filter(o=>o.value);
     sel.value = rand() < 0.25 ? "" : opts[Math.floor(rand()*opts.length)].value;
+    // Randomize IS a deliberate user act: these are choices, not depth-first guesses.
+    clearAutoProfileType(ps.id);
   });
 }
 
@@ -2407,6 +2568,8 @@ buildProfileSectionUI();
 buildSeedPicker();
 buildPersonalitySliders();
 loadSavedList();
+// Say whether this browser will actually keep anything BEFORE the first save (B21).
+announceStorageMode();
 loadCustomArchetypes();
 populateBanCategorySelect();
 refreshConstraintChips();

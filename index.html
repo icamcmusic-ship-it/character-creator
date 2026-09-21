@@ -40,7 +40,7 @@
     <div style="margin-top:11px; font-size:.85rem; line-height:1.75; color:var(--muted);">
       <p style="margin:0 0 8px;"><b style="color:var(--text);">The 30-second version.</b> Set a few sliders (or none), press <b>Build &amp; Roll</b>, and read the sheet. Every card is one trait; <b>toss</b> any card you don't like, <b>keep</b> the ones you love, then build again — kept cards survive. That loop (generate → lock the keepers → regenerate the rest) is the intended way to work, not getting a perfect sheet on roll one.</p>
       <p style="margin:0 0 8px;"><b style="color:var(--text);">Sliders.</b> The centre of each personality slider is a real <b>neutral band</b>, not a hair-trigger between two poles. Below about 14 you get genuinely balanced or <i>situational</i> traits — "warm one-to-one, flat in groups," "honest about facts, evasive about feelings" — and ±5 draws from the same middle pool, so small settings either side of zero aren't different people. From roughly 14 to 42 the middle fades gradually into the leaning side; past that you're committed. Direction picks which side; <b>distance from centre picks intensity</b>, on an eased curve that keeps the bottom of the dial quiet. Honesty at −20 gives small, deniable evasions; −90 gives someone who lies about the weather. The three voice sliders (Verbosity / Register / Composure) don't just shape speech — they also pull the deep sections: high volatility drags Attachment toward Disorganized, high verbosity favours the Connector role, and so on.</p>
-      <p style="margin:0 0 8px;"><b style="color:var(--text);">Per-card controls.</b> <b>lock</b> = keep this exact trait. <b>pin</b> = keep this <i>intensity level</i> while letting the trait vary (use +/− to nudge it). <b>reroll</b> = redraw, never repeating something you already rejected. <b>why?</b> = exactly which sliders and resolved traits caused this pick — the generator never hides its reasoning.</p>
+      <p style="margin:0 0 8px;"><b style="color:var(--text);">Per-card controls.</b> <b>lock</b> = keep this exact trait. <b>pin</b> = keep this <i>intensity level</i> while letting the trait vary (use +/− to nudge it). <b>reroll</b> = redraw, skipping what you already rejected here (until the pool runs out, when it says so rather than silently doing nothing). <b>why?</b> = exactly which sliders and resolved traits caused this pick — the generator never hides its reasoning.</p>
       <p style="margin:0 0 8px;"><b style="color:var(--text);">Deeper tools.</b> <b>Archetypes</b> blend a preset posture with your sliders (they nudge, never overwrite). <b>Depth-first</b> flips the whole flow: roll the wound/values/attachment first and derive personality from them. <b>Seed from a trait</b> builds a character around one trait you've picked by hand. <b>Under pressure</b> adds a second sheet showing how the voice degrades under stress. The <b>Cast</b> and <b>Relationships</b> tabs generate ensembles and analyse how any two characters clash or align. <b>Export .json</b> round-trips everything — traits, pins, sliders, pressure sheet, constraints, counts and toggles — so re-importing and pressing Generate reproduces the same character, not just the same sheet.</p>
       <p style="margin:0;"><b style="color:var(--text);">Reading the sheet.</b> <b>Coherence</b> is how much the picks reinforce each other <i>versus chance</i> — the lift over baseline is the real number. <b>Uncommon combinations</b> are flagged tensions, not errors; they're often the most interesting thing on the sheet. The <b>Use:</b> line under each trait is a frequency budget — how often the trait should actually appear on the page before it tips into caricature.</p>
       <hr style="border:none;border-top:1px dashed var(--border-strong);margin:14px 0;">
@@ -161,7 +161,7 @@
         </div>
         <div class="field advOnly">
           <label>&nbsp;</label>
-          <div class="sub" style="margin:0;">Same seed + same settings = the exact same character, pressure sheet included, shareable as text. Every generation shows the seed it used — paste one back in to replay it. Two deliberate exceptions: rerolls are un-seeded (a reroll is you overriding the dice), and <b>Avoid recent traits</b> takes your last few characters as an input, so a seed only replays exactly with it switched off.</div>
+          <div class="sub" style="margin:0;">Same seed + same settings = the exact same character, pressure sheet included, shareable as text. Every generation shows the seed it used — paste that seed back in to replay it, including the one the app generates for you when this box is blank. Pasting a seed puts the build in <b>replay mode</b>: it runs against an empty session history, so <b>Avoid recent traits</b> and the history-aware side of <b>Surprise me</b> have nothing to remember and the result is the same in any session. A blank box is <b>exploration</b> — it does take your recent characters into account, which is what stops a session converging on one person. One deliberate exception either way: rerolls are un-seeded, because a reroll is you overriding the dice.</div>
         </div>
       </div>
 
@@ -224,6 +224,9 @@
           </div>
         </div>
         <div id="constraintChips" style="margin-top:10px; display:flex; flex-wrap:wrap; gap:6px;"></div>
+        <!-- Contradictions between hard rules, stated before a generation rather than
+             arbitrated silently inside one. See detectConstraintConflicts. -->
+        <div class="ruleConflicts" id="constraintConflicts" role="alert" style="display:none;"></div>
         <div class="sub" style="margin:8px 0 0;">Bans are hard filters — banned content can never appear, even where sliders point straight at it. "Always include" traits arrive locked on every generation; "at least one" only spends a slot when the build didn't already land in that category. If a trait is both banned and required, required wins: an explicit always is the stronger statement.</div>
       </details>
 
@@ -246,6 +249,14 @@
               <option value="redraw" selected>Redraw quieter</option>
               <option value="drop">Drop the loudest</option>
               <option value="warn">Warn only</option>
+            </select>
+            <!-- Budgets used to silently stop applying the moment you tossed a card;
+                 the meter then described a sheet that no longer existed. Enforcement
+                 after an edit is now a stated choice. See B14 / reapplyConstraintsAfterMutation. -->
+            <label for="mutationBudgetMode" style="margin-top:10px;">After you edit a card</label>
+            <select id="mutationBudgetMode" data-on="change" data-act="onMutationBudgetModeChange" data-args="[]">
+              <option value="enforce" selected>Keep budgets enforced</option>
+              <option value="report">Let me exceed them (just report)</option>
             </select>
             <label style="margin-top:10px;">Presets</label>
             <div class="actionRow" id="budgetPresetRow"></div>
@@ -486,6 +497,9 @@
 
       <!-- Thirteen buttons in one undifferentiated row (with a stray checkbox in the
            middle of them) made the primary action hard to find. Four labelled groups. -->
+      <!-- Every rule currently steering the build, including ones set behind the
+           Advanced disclosure that Quick mode hides. See refreshActiveRuleStrip. -->
+      <div class="activeRules" id="activeRules" role="status" style="display:none;"></div>
       <div class="buildRow">
         <button class="btn-primary btn-build" data-on="click" data-act="generateCharacter" data-args="[]"><span aria-hidden="true">✦</span> Build &amp; Roll</button>
         <button class="btn-secondary" data-on="click" data-act="generateBatch" data-args="[5]" title="Generate five complete characters at once and pick the one you want — the rest are discarded">Roll 5, pick one</button>
@@ -539,7 +553,8 @@
           </div>
         </div>
       </div>
-      <div class="savedList" id="savedList"></div>
+      <div class="storageStatus" id="storageStatus" role="status" style="display:none;"></div>
+            <div class="savedList" id="savedList"></div>
     </div>
 
     <div class="warnBox" id="warnBox" role="status"></div>
@@ -586,6 +601,8 @@
         <div class="archetypeTag" id="archetypeTag"></div>
       </div>
       <div class="charMeta" id="charMetaLine"></div>
+      <!-- What the one-line context was read as, as chips the user can switch off. -->
+      <div class="contextTags" id="contextTags" style="display:none;"></div>
       <div id="noveltyReadout" style="display:none;"></div>
       <!-- "Give me five and let me pick one" is how people actually use a generator,
            and every roll used to overwrite the last one. -->
@@ -623,6 +640,9 @@
 
       <div class="pressureSheet" id="pressureSheet" style="display:none;">
         <div class="pressureTitle">Under Pressure</div>
+        <!-- Shown when the base sheet has been edited since this variant was derived
+             from it (see markPressureOutdated in render.js). -->
+        <div class="pressureOutdated" id="pressureOutdated" role="status" style="display:none;"></div>
         <div class="field" style="max-width:240px; margin:0 0 12px;">
           <label for="pressureLevel">How much pressure</label>
           <input type="range" id="pressureLevel" min="0" max="100" value="100" step="5" data-on="input" data-act="onSliderChange" data-args="[]">

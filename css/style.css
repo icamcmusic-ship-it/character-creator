@@ -1174,3 +1174,56 @@
      and the tabs only moved the highlight. */
   .viewSection { display:none; }
   .viewSection.active { display:block; }
+
+/* ---- Pressure-sheet staleness and storage capability notices ---------------
+   Both exist because the app used to state something it could not back up: a
+   pressure variant derived from a sheet that has since been edited, and a
+   "Saved" toast in a browser that is not storing anything. */
+.pressureOutdated{
+  margin: 0 0 12px; padding: 8px 10px; border-radius: 6px;
+  border-left: 3px solid var(--golden, #b8860b);
+  background: rgba(184,134,11,.10); font-size: .82rem; line-height: 1.5;
+}
+.pressureSheet.outdated .pressureTitle{ opacity: .75; }
+.storageStatus{
+  margin: 0 0 10px; padding: 8px 10px; border-radius: 6px;
+  border-left: 3px solid var(--bubblegum, #c2185b);
+  background: rgba(194,24,91,.08); font-size: .82rem; line-height: 1.5;
+}
+
+/* ---- Context readings as removable chips ----------------------------------
+   The one-line context steers category weights; these say how it was read and
+   let the user disagree, instead of the bias being invisible. */
+.contextTags{ display:flex; flex-wrap:wrap; align-items:center; gap:6px; margin:6px 0 0; }
+.contextTags .ctxLabel{ font-size:.72rem; opacity:.7; margin-right:2px; }
+.contextTags .ctxLabel + .ctxLabel{ margin-left:8px; }
+.ctxTag{
+  font: inherit; font-size:.72rem; line-height:1.4; padding:2px 8px; border-radius:999px;
+  cursor:pointer; border:1px solid var(--border);
+}
+.ctxTag.ctxOn{ background: rgba(46,125,50,.12); border-color: var(--emerald, #2e7d32); }
+.ctxTag.ctxOff{ background: transparent; opacity:.65; }
+.ctxTag:focus-visible{ outline:2px solid var(--dusk-blue, #4a6fa5); outline-offset:2px; }
+
+/* ---- Active rules, rule conflicts, and saved-trait chips -------------------
+   Quick mode hides the Advanced panel but not its effects, so the strip states
+   every rule currently steering the build; the conflict box says when two hard
+   rules cannot both hold. */
+.activeRules{
+  display:flex; flex-wrap:wrap; align-items:center; gap:6px;
+  margin: 0 0 8px; font-size:.72rem;
+}
+.activeRules .ruleStripLabel{ opacity:.7; }
+.ruleChip{
+  padding:2px 8px; border-radius:999px; border:1px solid var(--border);
+  background: var(--card, transparent); white-space:nowrap;
+}
+.ruleChip b{ font-weight:600; }
+.ruleConflicts{
+  margin-top:10px; padding:8px 10px; border-radius:6px;
+  border-left:3px solid var(--bubblegum, #c2185b);
+  background: rgba(194,24,91,.08); font-size:.8rem; line-height:1.5;
+}
+.ruleConflictTitle{ font-weight:600; margin-bottom:4px; }
+.ruleConflictItem + .ruleConflictItem{ margin-top:4px; }
+.chip-fav{ background: rgba(74,111,165,.12); border-color: var(--dusk-blue, #4a6fa5); }

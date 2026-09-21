@@ -42,13 +42,27 @@ const ASSETS = [
   './js/app.js',
 ];
 
+/* Everything this app owns lives under one name prefix, and ONLY caches under that
+   prefix are ever deleted. CacheStorage is origin-wide: on GitHub Pages this app can
+   share an origin with every other project the same account publishes, and the old
+   activate handler deleted every cache whose name was not this one — wiping a sibling
+   app's offline data even though its service worker has a different path scope. */
+const CACHE_PREFIX = 'character-voice-';
+
+/* Install must be all-or-nothing. It used to `.catch(()=>{})` a failed precache and
+   then resolve, so the worker activated claiming to hold a complete shell while
+   holding a partial one — and a cold offline load found the trait bank short. Let the
+   rejection propagate: a failed install means no activation, the previous worker stays
+   in charge, and the next visit tries again. */
 self.addEventListener('install', (e)=>{
-  e.waitUntil(caches.open(CACHE).then(c=>c.addAll(ASSETS)).then(()=>self.skipWaiting()).catch(()=>{}));
+  e.waitUntil(caches.open(CACHE).then(c=>c.addAll(ASSETS)).then(()=>self.skipWaiting()));
 });
 
 self.addEventListener('activate', (e)=>{
   e.waitUntil(caches.keys().then(keys=>
-    Promise.all(keys.filter(k=>k !== CACHE).map(k=>caches.delete(k)))
+    Promise.all(keys
+      .filter(k => k.startsWith(CACHE_PREFIX) && k !== CACHE)   // OURS, and obsolete
+      .map(k => caches.delete(k)))
   ).then(()=>self.clients.claim()));
 });
 
@@ -59,20 +73,40 @@ self.addEventListener('fetch', (e)=>{
   e.respondWith(
     caches.match(e.request).then(hit=>{
       if (hit){
-        // Refresh in the background so a deploy is picked up on the next load
-        // rather than requiring a hard reload.
-        fetch(e.request).then(res=>{
-          if (res && res.ok) caches.open(CACHE).then(c=>c.put(e.request, res.clone()));
+        /* Refresh in the background so a deploy is picked up on the next load rather
+           than requiring a hard reload — but keep the event alive while it happens.
+           Without waitUntil the browser is free to kill the worker mid-write, which is
+           how a cache ends up holding half of one build and half of the next. */
+        const refresh = fetch(e.request).then(res=>{
+          if (res && res.ok) return caches.open(CACHE).then(c=>c.put(e.request, res.clone()));
         }).catch(()=>{});
+        if (e.waitUntil) e.waitUntil(refresh);
         return hit;
       }
       return fetch(e.request).then(res=>{
         if (res && res.ok && url.pathname.match(/\.(html|css|js)$/)){
           const copy = res.clone();
-          caches.open(CACHE).then(c=>c.put(e.request, copy));
+          const write = caches.open(CACHE).then(c=>c.put(e.request, copy));
+          if (e.waitUntil) e.waitUntil(write.catch(()=>{}));
         }
         return res;
       });
-    }).catch(()=> caches.match('./index.html'))
+    }).catch(()=> {
+      /* The index.html fallback is for NAVIGATIONS only. Applied to everything, a
+         failed script or stylesheet fetch was answered with a page of HTML — which the
+         browser then tried to parse as JavaScript or CSS, producing a syntax error
+         that says nothing about the real problem (the network). Anything else fails as
+         what it is. */
+      if (e.request.mode === 'navigate' || (e.request.headers.get('accept')||'').includes('text/html')){
+        return caches.match('./index.html');
+      }
+      return Response.error();
+    })
   );
+});
+
+/* Let the page ask for the waiting worker to take over, so an update can be an
+   explicit "reload for the new version" rather than a silent swap mid-session. */
+self.addEventListener('message', (e)=>{
+  if (e.data && e.data.type === 'SKIP_WAITING') self.skipWaiting();
 });
