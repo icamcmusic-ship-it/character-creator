@@ -159,14 +159,28 @@ const RTIER_GLYPH = {common:"·", uncommon:"∶", distinctive:"⁘", signature:"
    Counts what a reroll could ACTUALLY return — the category, minus what is banned,
    minus what you have already tossed here, minus what is seated elsewhere on the sheet
    — rather than the raw category size, which is the number that made this invisible. */
+/* Two counts, because there are two different true answers and reporting one as the
+   other was the bug: `total` is the whole category minus bans, which is what a WIDER
+   precision setting could reach, and `left` is what a reroll can return RIGHT NOW —
+   inside the slot's own intensity window, minus what is tossed and what is seated. The
+   headroom badge used to print the wide number against the words "at these settings",
+   so it could promise 40 alternatives where the picker could reach four. */
 function slotHeadroom(id, t){
   if (!t || typeof byFilter !== 'function') return null;
   const full = byFilter(t.section, t.category);
   if (!full.length) return null;
   const tossed = rerollExclusions[id] || new Set();
   const seated = (typeof seatedTraitIds === 'function') ? seatedTraitIds(id) : new Set();
-  const left = full.filter(x => !tossed.has(x.id) && !seated.has(x.id) && x.id !== t.id).length;
-  return {left, total: full.length, tossed: tossed.size};
+  const usable = full.filter(x => !tossed.has(x.id) && !seated.has(x.id) && x.id !== t.id);
+  // The eligibility window the picker actually draws through at this slot's target.
+  let eligible = usable.length;
+  try {
+    const slot = state[id];
+    const target = (slot && typeof slot.target === 'number') ? slot.target : traitPos(t);
+    const half = bandHalf();
+    eligible = usable.filter(x => Math.abs(traitPos(x) - target) <= half).length;
+  } catch(e){ /* fall back to the wide count rather than reporting nothing */ }
+  return {left: eligible, wider: usable.length, total: full.length, tossed: tossed.size};
 }
 function slotDepthHTML(id, t){
   const h = slotHeadroom(id, t);
@@ -174,9 +188,10 @@ function slotDepthHTML(id, t){
   const frac = h.left / h.total;
   if (frac > 0.5) return '';                       // plenty left; saying so is noise
   const cls = h.left === 0 ? 'depthOut' : frac <= 0.2 ? 'depthLow' : 'depthMid';
+  const widerNote = h.wider > h.left ? ` ${h.wider - h.left} more become reachable if you loosen the precision slider.` : ``;
   const msg = h.left === 0
-    ? `Nothing left to draw here — you have passed on all ${h.total}. Undo a toss, widen the precision slider, or ease a constraint.`
-    : `${h.left} of ${h.total} still available in ${t.category} at these settings — you have tossed ${h.tossed}.`;
+    ? `Nothing left inside this slot's intensity window — you have tossed ${h.tossed} of ${h.total} in ${t.category}.${widerNote || ' Undo a toss, widen the precision slider, or ease a constraint.'}`
+    : `${h.left} of ${h.total} in ${t.category} are reachable at this slot's current intensity window; you have tossed ${h.tossed}.${widerNote}`;
   return `<span class="slotDepth ${cls}" title="${escAttr(msg)}">${h.left === 0 ? 'pool empty' : h.left + ' left'}</span>`;
 }
 /* "8 kept, 29 will reroll" — the single most decision-relevant fact about a sheet you
@@ -272,10 +287,89 @@ function sheetSlotSetChanged(){
   const live = Object.keys(state);
   return live.length !== rendered.size || live.some(k=>!rendered.has(k));
 }
-/* The entry point every per-card action uses: replace the one card if that is all that
-   moved, otherwise rebuild — but never lose the caret either way. */
+/* Does the sheet's CONTENT still match what is on screen, slot for slot? The slot-set
+   check above catches a slot appearing or disappearing, but an exclusive-pair swap
+   replaces the TRAIT in a slot that already existed — same keys, different sheet — so
+   a reroll of card A could silently change card B and only A would be repainted.
+   Keeping the last-rendered trait id per slot is cheap and catches exactly that. */
+let LAST_RENDERED_TRAITS = null;
+function noteRenderedTraits(){
+  LAST_RENDERED_TRAITS = {};
+  Object.keys(state).forEach(k=>{
+    LAST_RENDERED_TRAITS[k] = state[k] && state[k].trait ? state[k].trait.id : null;
+  });
+}
+// Every slot whose trait differs from what was last painted.
+function slotsChangedSinceRender(){
+  if (!LAST_RENDERED_TRAITS) return null;          // nothing painted yet
+  const out = [];
+  Object.keys(state).forEach(k=>{
+    const now = state[k] && state[k].trait ? state[k].trait.id : null;
+    if (LAST_RENDERED_TRAITS[k] !== now) out.push(k);
+  });
+  return out;
+}
+
+/* The entry point every per-card action uses. A mutation is not "one card": a reroll
+   can trigger an exclusive-pair replacement elsewhere, a required top-up, or a budget
+   redraw, and the summaries, fingerprint and pressure sheet all read the whole sheet.
+   Repaint every slot that actually moved and refresh the derived views, rather than
+   assuming the caller named the only thing that changed. */
 function renderSlotChange(slotId){
-  if (sheetSlotSetChanged() || !refreshCard(slotId)) withPreservedFocus(()=>{ renderSheet(); });
+  const alsoChanged = slotsChangedSinceRender();
+  if (sheetSlotSetChanged() || alsoChanged === null){
+    withPreservedFocus(()=>{ renderSheet(); });
+    return;
+  }
+  const ids = new Set(alsoChanged);
+  ids.add(slotId);
+  let allPainted = true;
+  ids.forEach(id=>{ if (!refreshCard(id)) allPainted = false; });
+  if (!allPainted){ withPreservedFocus(()=>{ renderSheet(); }); return; }
+  noteRenderedTraits();
+  refreshDerivedViews(ids.size > 1 ? [...ids] : null);
+}
+
+/* Everything downstream of the cards: the summary/diagnostics panel, the novelty
+   fingerprint, the budget meter, and the pressure sheet — none of which the
+   single-card path used to touch, so a curated sheet could carry a summary describing
+   the character it had been half an hour earlier. The pressure sheet is DERIVED from
+   the base and cannot be recomputed without re-running the build, so it is marked
+   outdated rather than silently left wrong. */
+function refreshDerivedViews(alsoChanged){
+  try { refreshSummaryCard(); } catch(e){ console.error(e); }
+  try { if (typeof refreshBudgetChips === 'function') refreshBudgetChips(); } catch(e){}
+  try { if (typeof refreshHandStrip === 'function') refreshHandStrip(); } catch(e){}
+  markPressureOutdated();
+  if (alsoChanged && alsoChanged.length > 1 && typeof srAnnounce === 'function'){
+    srAnnounce(`${alsoChanged.length} cards changed — a rule affected more than the one you pressed.`);
+  }
+}
+/* Repaint the summary/diagnostics card in place. It carries the coherence score, the
+   tensions, the archetype meter, the voice fingerprint and the radar — all of which are
+   whole-sheet reads that a single-card repaint used to leave describing the sheet as it
+   was before the mutation. */
+function refreshSummaryCard(){
+  if (typeof document === 'undefined') return;
+  const host = document.getElementById('summaryCard');
+  if (!host || !host.replaceWith) return;
+  const holder = document.createElement('div');
+  holder.innerHTML = summaryCardHTML();
+  const next = holder.firstElementChild;
+  if (next) host.replaceWith(next);
+}
+
+/* The pressure sheet is built from the base sheet at generation time. Once a card has
+   been rerolled, pinned or swapped, it describes a character that no longer exists. */
+function markPressureOutdated(){
+  const host = document.getElementById('pressureSheet');
+  if (!host || !pressureState) return;
+  if (host.classList) host.classList.add('outdated');
+  const note = document.getElementById('pressureOutdated');
+  if (note){
+    note.style.display = 'block';
+    note.textContent = "The base sheet has changed since this pressure variant was built, so it describes an earlier version of this character. Generate again to rebuild it.";
+  }
 }
 
 /* A card change can move two numbers outside the card: its section's "N · M kept"
@@ -354,7 +448,7 @@ function traitCardHTML(id, s, includeControls, showDiff, accent, tagLabel){
              nothing for a reroll to draw, so the control says what would actually
              change it rather than rendering a button that cannot work. */
           ? `<span class="slotNote" title="This trait is here because you required it by name. Remove the constraint to change it.">required by name</span>`
-          : `<button class="rerollBtn" ${actAttr('click', 'rerollSlot', id)} title="Draw a different trait for this slot (never repeats one you've already rejected here)"><span aria-hidden="true">✕</span> Toss</button>`}
+          : `<button class="rerollBtn" ${actAttr('click', 'rerollSlot', id)} title="Draw a different trait for this slot. Traits you have already rejected here are excluded — unless the pool runs out, in which case one can come back rather than the button doing nothing, and the card says how little is left."><span aria-hidden="true">✕</span> Toss</button>`}
         <button class="lockBtn ${lockedClass}" ${actAttr('click', 'toggleLock', id)} title="Keep this trait through rerolls and regeneration" aria-pressed="${s.locked?'true':'false'}"><span aria-hidden="true">📌</span> ${s.locked ? "Kept" : "Keep"}</button>
         <div class="pinRow">
           <button class="pinBtn ${pinnedTargets[id]!==undefined ? "pinned" : ""}" ${actAttr('click', 'togglePin', id)} title="Pin this slot's intensity target (not the exact trait) so future generations/rerolls stay near this level even as sliders move elsewhere" aria-pressed="${pinnedTargets[id]!==undefined?'true':'false'}">${pinnedTargets[id]!==undefined ? "pinned "+pinnedTargets[id].toFixed(1) : "pin"}</button>
@@ -365,10 +459,19 @@ function traitCardHTML(id, s, includeControls, showDiff, accent, tagLabel){
         <button class="whyBtn" ${actAttr('click', 'toggleWhy', id)} title="Why did I get this trait?" aria-expanded="${whyOpen[id]?'true':'false'}">why?</button>
         <!-- Favouriting and banning previously meant leaving the sheet, opening
              Constraints, and finding the trait by name in a search box — for a trait
-             that is right there on the card in front of you. -->
-        <button class="markBtn ${requiredTraitIds.includes(t.id) ? 'on' : ''}" ${actAttr('click', 'favouriteTrait', t.id)}
+             that is right there on the card in front of you.
+
+             The star used to BE the "always include" constraint, which is far stronger
+             than what a star means anywhere else: a user bookmarking six traits they
+             liked silently pinned all six onto every character they generated
+             afterwards. The two are now separate actions with separate wording — the
+             star saves it to a list, the pin-to-every-character button states a rule. -->
+        <button class="markBtn ${isFavouriteTrait(t.id) ? 'on' : ''}" ${actAttr('click', 'favouriteTrait', t.id)}
+                aria-pressed="${isFavouriteTrait(t.id) ? 'true' : 'false'}"
+                title="${isFavouriteTrait(t.id) ? 'Remove from your saved traits' : 'Save this trait to your list (does not change generation)'}"><span aria-hidden="true">★</span><span class="srOnly">${isFavouriteTrait(t.id) ? 'remove from saved traits' : 'save this trait'}</span></button>
+        <button class="markBtn ${requiredTraitIds.includes(t.id) ? 'on' : ''}" ${actAttr('click', 'requireTrait', t.id)}
                 aria-pressed="${requiredTraitIds.includes(t.id) ? 'true' : 'false'}"
-                title="${requiredTraitIds.includes(t.id) ? 'Stop requiring this trait on every character' : 'Require this trait on every character from now on'}"><span aria-hidden="true">★</span><span class="srOnly">favourite</span></button>
+                title="${requiredTraitIds.includes(t.id) ? 'Stop requiring this trait on every character' : 'Require this trait on EVERY character from now on — a generation rule, not a bookmark'}"><span aria-hidden="true">📌</span><span class="srOnly">${requiredTraitIds.includes(t.id) ? 'stop requiring this on every character' : 'require this on every character'}</span></button>
         <button class="markBtn ${bannedTraitIds.has(t.id) ? 'on' : ''}" ${actAttr('click', 'banTrait', t.id)}
                 aria-pressed="${bannedTraitIds.has(t.id) ? 'true' : 'false'}"
                 title="${bannedTraitIds.has(t.id) ? 'Allow this trait again' : 'Never draw this trait again'}"><span aria-hidden="true">🚫</span><span class="srOnly">never draw this again</span></button>
@@ -511,7 +614,7 @@ function summaryCardHTML(){
                || (weightOfSection(b.trait.section) - weightOfSection(a.trait.section)))
     .slice(0, 3);
 
-  let h = `<div class="summaryCard">
+  let h = `<div class="summaryCard" id="summaryCard">
     <div class="summaryHead">
       <div class="summaryName">${escHTML(title)}</div>
       ${sub ? `<div class="summarySub">${escHTML(sub)}</div>` : ``}
@@ -675,6 +778,42 @@ function emptyGroupReason(title){
   return null;
 }
 
+/* The context parser's readings, as chips you can switch off. They used to be a
+   comma-separated string in the meta line with no way to disagree with them, so a
+   "court reporter" read as aristocratic (or a "not a soldier" read as military) bent
+   every category weight in the build with nothing to press. */
+function renderContextTags(){
+  const host = document.getElementById('contextTags');
+  if (!host) return;
+  const applied = (charMeta.contextNotes || []);
+  const rejected = (charMeta.contextRejected || []);
+  if (!applied.length && !rejected.length){ host.style.display = 'none'; host.innerHTML = ''; return; }
+  host.style.display = 'block';
+  let h = '';
+  if (applied.length){
+    h += `<span class="ctxLabel">Context read as</span>` + applied.map(l=>
+      `<button type="button" class="ctxTag ctxOn" ${actAttr('click','dropContextTag', l)} title="This reading is steering the build. Switch it off and generate again to build without it.">${escHTML(l)} <span aria-hidden="true">&times;</span><span class="srOnly"> — remove this context reading</span></button>`).join('');
+  }
+  if (rejected.length){
+    h += `<span class="ctxLabel">Not applied</span>` + rejected.map(r=>
+      `<button type="button" class="ctxTag ctxOff" ${actAttr('click','restoreContextTag', r.label)} title="${escAttr(r.why)}. Press to put it back, then generate again.">${escHTML(r.label)} <span aria-hidden="true">+</span></button>`).join('');
+  }
+  host.innerHTML = h;
+}
+function dropContextTag(label){
+  suppressContextTag(label);
+  toast(`"${label}" will not steer the next generation. Generate again to rebuild without it.`);
+  charMeta.contextNotes = (charMeta.contextNotes||[]).filter(l=>l!==label);
+  charMeta.contextRejected = (charMeta.contextRejected||[]).concat([{label, why:'you turned this one off'}]);
+  renderContextTags();
+}
+function restoreContextTag(label){
+  unsuppressContextTag(label);
+  toast(`"${label}" is back in play. Generate again to rebuild with it.`);
+  charMeta.contextRejected = (charMeta.contextRejected||[]).filter(r=>r.label!==label);
+  renderContextTags();
+}
+
 function renderSheet(){
   const sheet = document.getElementById('sheet');
   sheet.classList.add('show');
@@ -684,12 +823,14 @@ function renderSheet(){
   const metaBits = [];
   if (charMeta.age) metaBits.push("Age " + charMeta.age);
   if (charMeta.context) metaBits.push(charMeta.context);
-  if (charMeta.contextNotes && charMeta.contextNotes.length) metaBits.push("context bias: " + charMeta.contextNotes.join(", "));
   setText('charMetaLine', metaBits.join(" · "));
+  renderContextTags();
 
   const body = document.getElementById('sheetBody');
   body.innerHTML = "";
   body.innerHTML = summaryCardHTML();
+  // Baseline for the per-slot change detection in renderSlotChange.
+  noteRenderedTraits();
   /* Not filtered on ids.length any more: a profile section that produced nothing is
      exactly the case emptyGroupReason exists to explain, and filtering it out here
      removed it from the sheet before that could happen. */
@@ -842,7 +983,7 @@ function renderSheet(){
       // archetypeFidelity returns {pct, total, silent, expressed} now; older saved and
       // imported characters carry the bare number this used to be.
       const af = (typeof charMeta.archFidelity === 'number')
-        ? {pct: charMeta.archFidelity, total: null, silent: 0, expressed: null}
+        ? {pct: charMeta.archFidelity, total: null, silent: 0, expressed: null, strength: null}
         : charMeta.archFidelity;
       const f = af.pct;
       const col = f>=70?"var(--emerald)":f>=45?"var(--golden)":"var(--bubblegum)";
@@ -851,10 +992,18 @@ function renderSheet(){
       // user can act on; "38%" on its own was not.
       const coverage = (af.total && af.silent)
         ? ` <span style="opacity:.7;font-weight:400;">(${af.expressed} of ${af.total} axes expressed)</span>` : ``;
+      // Direction and strength are two different readings and are shown as two (see
+      // FIDELITY_REF_MAG): one is a clean proportion, the other is relative to how
+      // loudly this trait bank expresses an axis at all.
+      const strengthRow = (af.strength === null || af.strength === undefined) ? `` :
+        `<div class="coherenceRow" style="margin-top:6px;">
+          <div class="coherenceLabel">…and how loudly <b>${af.strength}%</b> <span style="opacity:.7;font-weight:400;">(of a fully-expressed axis)</span></div>
+          <div class="coherenceBar"><span style="width:${af.strength}%; background:var(--dusk-blue);"></span></div>
+        </div>`;
       h += `<div class="coherenceRow" style="margin-top:10px;">
-        <div class="coherenceLabel">Archetype fidelity <b>${f}%</b>${coverage}</div>
+        <div class="coherenceLabel">Archetype direction <b>${f}%</b>${coverage}</div>
         <div class="coherenceBar"><span style="width:${f}%; background:${col};"></span></div>
-      </div><div class="coherenceNote">How much of the archetype's intended shape survived your slider blend, the dice, and any rerolls. Drift is legitimate — this is a compass reading, not a grade.${(af.total && af.silent) ? ` The sheet says nothing either way on ${af.silent} of the ${af.total} axes this archetype takes a position on, which scores nothing rather than half — a silent sheet is not a partly-matching one. Those axes are usually silent because their section is switched off, or because the traits drawn there carry no polarity on that axis.` : ``}</div>`;
+      </div>${strengthRow}<div class="coherenceNote">Of the axes this archetype takes a position on and the sheet actually expresses, ${f}% lean the way the archetype asked. The second bar is how strongly they lean, measured against the strongest expression this trait bank produces — not against the archetype's own numbers, which are in different units. Drift is legitimate: this is a compass reading, not a grade.${(af.total && af.silent) ? ` The sheet says nothing either way on ${af.silent} of the ${af.total} axes this archetype takes a position on; those are excluded rather than scored as disagreement. They are usually silent because their section is switched off, or because the traits drawn there carry no polarity on that axis.` : ``}</div>`;
     }
     // Voice fingerprint — assembled from the character's own example lines.
     const fp = voiceFingerprint(state, charMeta);
@@ -1174,9 +1323,23 @@ function sheetToText(st, meta, pState){
     if (pm.level !== undefined && pm.level < 0.99) L.push(`_Shown at ${Math.round(pm.level*100)}% pressure._`, "");
     if (pm.trigger) L.push(`**What sets it off.** ${plainify(pm.trigger)}`, "");
     if (pm.recovery) L.push(`**Afterwards.** ${pm.recovery}`, "");
-    ["verbosity","register","grammar"].forEach(id=>{ if(pState[id]) L.push(fmt(pState[id])); });
-    Object.keys(pState).filter(k=>k.startsWith("p_manner")).forEach(id=> L.push(fmt(pState[id])));
-    const shifts = Object.keys(pState).filter(k=>k.startsWith("p_prof_"));
+    /* The base sheet's `block` helper filters slots whose TRAIT is null; the pressure
+       section checked only that the slot existed, so one blanked or banned-out pressure
+       slot threw `Cannot read properties of null (reading 'trait')` and aborted the
+       whole export. Same contract everywhere: a slot with no trait is skipped, and the
+       section says so rather than failing. */
+    const hasTrait = id => pState[id] && pState[id].trait;
+    let pressureSkipped = 0;
+    const countSkipped = ids => { pressureSkipped += ids.filter(id=>pState[id] && !pState[id].trait).length; };
+    const voiceIds = ["verbosity","register","grammar"];
+    countSkipped(voiceIds);
+    voiceIds.filter(hasTrait).forEach(id=> L.push(fmt(pState[id])));
+    const mannerIds = Object.keys(pState).filter(k=>k.startsWith("p_manner"));
+    countSkipped(mannerIds);
+    mannerIds.filter(hasTrait).forEach(id=> L.push(fmt(pState[id])));
+    const shiftIds = Object.keys(pState).filter(k=>k.startsWith("p_prof_"));
+    countSkipped(shiftIds);
+    const shifts = shiftIds.filter(hasTrait);
     if (shifts.length){
       L.push("", "### Where they stand under pressure", "");
       shifts.forEach(id=>{
@@ -1185,6 +1348,7 @@ function sheetToText(st, meta, pState){
         L.push(fmt(s2));
       });
     }
+    if (pressureSkipped) L.push("", `_${pressureSkipped} pressure slot${pressureSkipped===1?'':'s'} had no trait to draw (a constraint emptied its pool) and ${pressureSkipped===1?'is':'are'} omitted._`);
   }
 
   L.push("", "---", "");
@@ -1242,10 +1406,14 @@ const CHAR_FORMAT_VERSION = 2;
 const SETTING_FIELDS = ['mannerCount','vocabCount','personalityCount','profileDepth',
   'rarityPref','affinityBoost','rangeFocus','profileWeight','divergence',
   'app_stature','app_upkeep','app_presence','archetypeSelect','seedInput','sheetDensity','wildcardCount','pressureLevel',
-  'charName','charAge','charContext','castCount'];
+  /* The cast and foil controls were the one part of the workspace that no capture
+     covered, so "export my setup" and Undo both silently dropped them and a cast was
+     unreproducible from a settings file even though it now has a seed. A workspace is
+     everything that decides what the next generation produces. */
+  'charName','charAge','charContext','castCount','castSeed','castSpread','foilSeed'];
 const SETTING_TOGGLES = ['personalityToggle','depthFirstToggle','examplesToggle','stressToggle',
   'genPersonality','genSpeech','genVocab','genManner','genAppearance',
-  'avoidRecentToggle','wildcardToggle','foilOpposeComposure','compactToggle'];
+  'avoidRecentToggle','wildcardToggle','foilOpposeComposure','compactToggle','castAnchor'];
 
 function captureSettings(){
   const fields = {}, toggles = {}, sections = {};
@@ -1276,7 +1444,13 @@ function captureSettings(){
       rarityCaps: Object.assign({}, rarityCaps),
       intensityCaps: Object.assign({}, intensityCaps),
       budgetMode: getBudgetMode(),
+      // Whether budgets hold after a reroll or a pin nudge, or only at generation
+      // time — see reapplyConstraintsAfterMutation (B14).
+      mutationBudgetMode: (typeof getMutationBudgetMode === 'function') ? getMutationBudgetMode() : 'enforce',
     },
+    // Bookmarks. Deliberately NOT part of `constraints`: a favourite does not steer
+    // generation, which is the whole point of splitting it from "always include".
+    favouriteTraitIds: (typeof getFavouriteTraitIds === 'function') ? getFavouriteTraitIds() : [],
     rerollExclusions: excl,
   };
 }
@@ -1292,6 +1466,9 @@ function restoreSettings(s){
   Object.entries(s.sections||{}).forEach(([id,cfg])=>{
     const tog = document.getElementById('sec_'+id); if (tog) tog.checked = !!cfg.on;
     const sel = document.getElementById('type_'+id);
+    // A restored setting is the saved character's own explicit choice, not a leftover
+    // depth-first guess — see AUTO_PROFILE_TYPES.
+    if (typeof clearAutoProfileType === 'function') clearAutoProfileType(id);
     if (sel && [...sel.options].some(o=>o.value===cfg.type)) sel.value = cfg.type;
     const wgt = document.getElementById('pw_'+id); if (wgt) wgt.value = cfg.weight || "";
   });
@@ -1308,6 +1485,10 @@ function restoreSettings(s){
   Object.assign(rarityCaps, c.rarityCaps || {});
   Object.assign(intensityCaps, c.intensityCaps || {});
   setBudgetMode(c.budgetMode || 'redraw');
+  if (typeof setMutationBudgetMode === 'function') setMutationBudgetMode(c.mutationBudgetMode || 'enforce');
+  const mbm = document.getElementById('mutationBudgetMode');
+  if (mbm) mbm.value = c.mutationBudgetMode || 'enforce';
+  if (typeof setFavouriteTraitIds === 'function') setFavouriteTraitIds(s.favouriteTraitIds || []);
   if (typeof refreshBudgetUI === 'function') refreshBudgetUI();
   rerollExclusions = {};
   Object.entries(s.rerollExclusions || {}).forEach(([k,v])=>{ rerollExclusions[k] = new Set(v); });
@@ -1401,6 +1582,15 @@ function onIntensityCapChange(id){
   }
   refreshBudgetChips(); refreshBudgetMeters(); savePrefs();
 }
+function onMutationBudgetModeChange(){
+  const el = document.getElementById('mutationBudgetMode');
+  const mode = el ? el.value : 'enforce';
+  setMutationBudgetMode(mode);
+  toast(mode === 'enforce'
+    ? "Budgets will hold after a reroll or a pin nudge."
+    : "Budgets now apply at generation only — the meter will show when an edit takes the sheet over.");
+  if (typeof refreshBudgetChips === 'function') refreshBudgetChips();
+}
 function onBudgetModeChange(){
   const m = document.getElementById('budgetMode');
   if (m) setBudgetMode(m.value);
@@ -1485,13 +1675,20 @@ function budgetReportHTML(){
 /* Print scoping. window.print() is synchronous in every engine that matters, but the
    afterprint fallback covers the ones where it isn't, so the class can never be left
    stuck on the body. */
-function printSheet(summaryOnly){
+/* The ONE print dispatcher. `mode` is 'summary' (or legacy `true`) for the one-page
+   card, anything else for the full sheet; the cast and relationship tabs print
+   themselves through their own print stylesheets and pass nothing. */
+function printSheet(mode){
+  const summaryOnly = (mode === true || mode === 'summary');
   if (!Object.keys(state).length){ toast("Generate a character first.", "warn"); return; }
   const cls = 'print-summary-only';
   const off = ()=> document.body.classList.remove(cls);
-  if (summaryOnly) document.body.classList.add(cls);
-  window.addEventListener('afterprint', off, {once:true});
-  try { window.print(); } finally { if (summaryOnly) setTimeout(off, 0); }
+  /* Always set the class to match THIS call. Leaving it to a deferred cleanup meant a
+     full Print issued immediately after a Print Summary still printed as a summary,
+     because the timeout had not run yet. */
+  document.body.classList.toggle(cls, summaryOnly);
+  window.addEventListener('afterprint', off, {once:true});   // belt and braces
+  try { window.print(); } finally { off(); }
 }
 
 function exportCharacterJSON(){
@@ -1511,18 +1708,38 @@ function exportCharacterJSON(){
    does not know — unknown keys and missing optional blocks are fine, since files written
    by older and newer builds both have to import — and strict only about the shapes the
    render path will actually dereference. */
+/* Validation used to stop at the top-level block types and a few trait strings, so a
+   file could pass here and then blow up AFTER the globals had been replaced: an
+   `exclusivePairs: 123` threw inside restoreSettings, and an orphan trait carrying
+   `intensity: 99` threw `Invalid count value: -94` in the middle of rendering its card.
+   Either way the user lost the character they had open to a bad file.
+
+   This now checks every field the app will dereference, including the nested
+   constraint shapes and the numeric ranges, and NORMALIZES as it goes — the caller
+   commits the returned object, not the raw parse. Unknown keys are still tolerated:
+   files written by older and newer builds both have to import. */
+const MAX_IMPORT_SLOTS = 4000;      // a real sheet is ~40; this is a sanity bound
+const MAX_IMPORT_NOTE = 20000;
 function validateSheetPayload(p){
   const isPlainObject = v => v && typeof v === 'object' && !Array.isArray(v);
+  const isFiniteNum = v => typeof v === 'number' && Number.isFinite(v);
   if (!isPlainObject(p)) throw new Error("File does not contain a character object.");
   if (p.state !== undefined && !isPlainObject(p.state)) throw new Error("The `state` block is not an object.");
   if (p.pressureState != null && !isPlainObject(p.pressureState)) throw new Error("The `pressureState` block is not an object.");
   if (p.charMeta != null && !isPlainObject(p.charMeta)) throw new Error("The `charMeta` block is not an object.");
   if (p.settings != null && !isPlainObject(p.settings)) throw new Error("The `settings` block is not an object.");
+  if (p.pinnedTargets != null && !isPlainObject(p.pinnedTargets)) throw new Error("The `pinnedTargets` block is not an object.");
+  if (p.charVariants != null && !isPlainObject(p.charVariants)) throw new Error("The `charVariants` block is not an object.");
+  if (p.traitNotes != null && !isPlainObject(p.traitNotes)) throw new Error("The `traitNotes` block is not an object.");
+
   const checkSlots = (st, label) => {
     if (!isPlainObject(st)) return;
+    const n = Object.keys(st).length;
+    if (n > MAX_IMPORT_SLOTS) throw new Error(`the \`${label}\` block has ${n} slots, which is not a character sheet.`);
     Object.entries(st).forEach(([slotId, slot])=>{
       if (slot === null) return;                       // a legitimately empty slot
       if (!isPlainObject(slot)) throw new Error(`${label} slot "${slotId}" is not an object.`);
+      if (slot.target != null && !isFiniteNum(slot.target)) throw new Error(`${label} slot "${slotId}" has a non-numeric target.`);
       if (slot.trait == null) return;                  // trait:null is legitimate too
       if (!isPlainObject(slot.trait)) throw new Error(`${label} slot "${slotId}" has a malformed trait.`);
       if (slot.trait.id === undefined) throw new Error(`${label} slot "${slotId}" has a trait with no id.`);
@@ -1531,10 +1748,76 @@ function validateSheetPayload(p){
       ['trait','category','section'].forEach(k=>{
         if (typeof slot.trait[k] !== 'string') throw new Error(`${label} slot "${slotId}" has a trait with no ${k}.`);
       });
+      /* The card renders intensity as a dot count and as a FREQ_BUDGET lookup, both of
+         which assume 1..5. An orphan carrying 99 reached `"x".repeat(5 - 99)`. */
+      const t = slot.trait;
+      if (t.intensity !== undefined){
+        if (!isFiniteNum(t.intensity) || t.intensity < 1 || t.intensity > 5)
+          throw new Error(`${label} slot "${slotId}" has an out-of-range intensity (${t.intensity}); it must be 1-5.`);
+        t.intensity = Math.round(t.intensity);
+      } else t.intensity = 3;
+      if (typeof t.rarity !== 'string' || (typeof RTIER_ORDER !== 'undefined' && !RTIER_ORDER.includes(t.rarity)))
+        t.rarity = 'common';
+      if (t.pol !== undefined && !isPlainObject(t.pol)) throw new Error(`${label} slot "${slotId}" has a malformed polarity block.`);
+      if (isPlainObject(t.pol)){
+        Object.entries(t.pol).forEach(([ax,v])=>{
+          if (!isFiniteNum(v)) throw new Error(`${label} slot "${slotId}" has a non-numeric polarity on "${ax}".`);
+        });
+      }
+      if (t.variant !== undefined && t.variant !== 'a' && t.variant !== 'b') delete t.variant;
     });
   };
   checkSlots(p.state, "state");
   checkSlots(p.pressureState, "pressureState");
+
+  // Pins drive pickInRange targets; a string or an Infinity here is a crash later.
+  if (isPlainObject(p.pinnedTargets)){
+    Object.entries(p.pinnedTargets).forEach(([k,v])=>{
+      if (!isFiniteNum(v)) throw new Error(`pinnedTargets["${k}"] is not a number.`);
+      p.pinnedTargets[k] = Math.min(5, Math.max(1, v));
+    });
+  }
+  if (isPlainObject(p.charVariants)){
+    Object.entries(p.charVariants).forEach(([k,v])=>{
+      if (v !== 'a' && v !== 'b') throw new Error(`charVariants["${k}"] must be "a" or "b".`);
+    });
+  }
+  if (isPlainObject(p.traitNotes)){
+    Object.entries(p.traitNotes).forEach(([k,v])=>{
+      if (typeof v !== 'string') throw new Error(`traitNotes["${k}"] is not text.`);
+      if (v.length > MAX_IMPORT_NOTE) p.traitNotes[k] = v.slice(0, MAX_IMPORT_NOTE);
+    });
+  }
+  // The constraint block is handed straight to restoreSettings, which spreads it into
+  // Sets and Maps. `exclusivePairs: 123` used to pass here and throw in there, after
+  // the sheet had already been replaced.
+  const c = p.settings && p.settings.constraints;
+  if (c !== undefined && c !== null){
+    if (!isPlainObject(c)) throw new Error("The `settings.constraints` block is not an object.");
+    ['bannedCategories','bannedSections','bannedTraitIds','requiredTraitIds','requiredCategories'].forEach(k=>{
+      if (c[k] !== undefined && !Array.isArray(c[k])) throw new Error(`settings.constraints.${k} is not a list.`);
+    });
+    if (c.exclusivePairs !== undefined){
+      if (!Array.isArray(c.exclusivePairs)) throw new Error("settings.constraints.exclusivePairs is not a list.");
+      c.exclusivePairs.forEach((pair,i)=>{
+        if (!Array.isArray(pair) || pair.length !== 2)
+          throw new Error(`settings.constraints.exclusivePairs[${i}] is not a pair of trait ids.`);
+      });
+    }
+    if (c.categoryTiers !== undefined && !Array.isArray(c.categoryTiers))
+      throw new Error("settings.constraints.categoryTiers is not a list.");
+    ['rarityCaps','intensityCaps'].forEach(k=>{
+      if (c[k] === undefined) return;
+      if (!isPlainObject(c[k])) throw new Error(`settings.constraints.${k} is not an object.`);
+      Object.entries(c[k]).forEach(([g,v])=>{
+        if (v === null) return;
+        if (!isFiniteNum(v) || v < 0) throw new Error(`settings.constraints.${k}.${g} is not a cap.`);
+      });
+    });
+  }
+  if (p.settings && p.settings.sliders !== undefined && !isPlainObject(p.settings.sliders))
+    throw new Error("The `settings.sliders` block is not an object.");
+  return p;
 }
 
 function importCharacterJSON(fileInput){
@@ -1545,13 +1828,27 @@ function importCharacterJSON(fileInput){
     try {
       const p = JSON.parse(reader.result);
       if (p.format !== "character-voice-sheet") throw new Error("Not a character sheet file.");
+      /* Every exporter stamps a version and no importer read one, so a file from a
+         future build was parsed on the assumption it had this build's shape. Say so
+         instead. Older versions are explicitly migratable (version 1 has no `settings`
+         block, handled below); a newer one is not, because we cannot know what changed. */
+      const fileVersion = (p.version === undefined) ? 1 : p.version;
+      if (typeof fileVersion !== 'number' || !Number.isFinite(fileVersion))
+        throw new Error("that file's version stamp is not a number.");
+      if (fileVersion > CHAR_FORMAT_VERSION)
+        throw new Error(`that file was written by a newer version of this app (format ${fileVersion}; this build reads up to ${CHAR_FORMAT_VERSION}). Open it in the newer build, or export it again from there.`);
       /* The format string was the only check, so a file that said the right thing and
          then carried a malformed `state` — a string, an array, slots with no trait
          object — got all the way to renderSheet and threw there, AFTER snapshotHistory
          had run and the globals had been overwritten. The user lost their character to
          a bad file and got a crash instead of a message. Validate the shape first, while
          nothing has been touched yet. */
-      validateSheetPayload(p);
+      /* Validate and normalize into a STAGED object, then commit in one go. The
+         sequence used to be validate-lightly, snapshot, assign globals, restore
+         settings, render — with two of those steps able to throw after the user's
+         open character had already been replaced. Everything that can fail now
+         happens before `state` is touched. */
+      const staged = validateSheetPayload(p);
       // Re-link every imported trait to the live TRAITS pool by id, so imported
       // characters keep working with reroll/pin/why (which need live trait objects)
       // and quietly survive trait-text updates between app versions. Unmatched ids
@@ -1562,24 +1859,28 @@ function importCharacterJSON(fileInput){
         Object.values(st).forEach(s=>{
           if (s && s.trait){ const live = byId.get(s.trait.id); if (live) s.trait = live; else orphans++; }
         }); return st; };
+      // Resolve ids against the live bank while still staged.
+      const nextState = relink(staged.state || {});
+      const nextPressure = relink(staged.pressureState || null);
+      // Everything above could throw; nothing below can. Commit.
       snapshotHistory();
-      state = relink(p.state || {});
-      pressureState = relink(p.pressureState || null);
-      charMeta = p.charMeta || {name:"Imported", age:"", context:"", archetypeLabel:"Imported"};
-      pinnedTargets = p.pinnedTargets || {};
-      charVariants = p.charVariants || {};
-      traitNotes = p.traitNotes || {};
+      state = nextState;
+      pressureState = nextPressure;
+      charMeta = staged.charMeta || {name:"Imported", age:"", context:"", archetypeLabel:"Imported"};
+      pinnedTargets = staged.pinnedTargets || {};
+      charVariants = staged.charVariants || {};
+      traitNotes = staged.traitNotes || {};
       diffLog = {}; rerollExclusions = {}; rerollHistory = {}; whyOpen = {}; OPEN_CARD_CONTROLS.clear();
-      if (p.settings) restoreSettings(p.settings);
-      else if (p.sliders) restoreSliders(p.sliders);   // version 1 files
-      lastGeneratedSliders = (p.settings && p.settings.sliders) || p.sliders || null;
+      if (staged.settings) restoreSettings(staged.settings);
+      else if (staged.sliders) restoreSliders(staged.sliders);   // version 1 files
+      lastGeneratedSliders = (staged.settings && staged.settings.sliders) || staged.sliders || null;
       setVal('charName', charMeta.name || "");
       setVal('charAge', charMeta.age || "");
       setVal('charContext', charMeta.context || "");
       setText('archetypeTag', charMeta.archetypeLabel || "Imported");
       document.getElementById('pressureSheet').style.display = pressureState ? "block" : "none";
       onSliderChange(); renderSheet(); checkConflicts();
-      if (!p.settings) toast("Imported. This file predates full-settings export, so constraints and counts were left as they are.", "warn", 6000);
+      if (!staged.settings) toast("Imported. This file predates full-settings export, so constraints and counts were left as they are.", "warn", 6000);
       else toast("Imported " + (charMeta.name || "character") + " — settings restored too.");
       if (orphans) toast(orphans + " trait(s) in this file no longer exist in the pool; their saved text was kept as-is.", "warn", 6000);
     } catch(e){ toast("Could not import: " + e.message, "warn", 6000); }
@@ -1601,6 +1902,37 @@ function exportArchetypes(){
   }, null, 2), "archetypes.json");
   toast("Exported " + names.length + " archetype" + (names.length>1?"s":""));
 }
+/* What makes an archetype record unusable. Everything an archetype contributes to a
+   build is a number on a known scale; a string, a NaN or an out-of-range value here
+   reaches the slider blend in _runGeneration and poisons the character silently. */
+function archetypeProblem(a){
+  if (!a || typeof a !== 'object' || Array.isArray(a)) return "it is not an object";
+  if (typeof a.label !== 'string' || !a.label.trim()) return "it has no label";
+  if (a.label.length > 120) return `the label of "${a.label.slice(0,30)}…" is too long`;
+  const num = v => typeof v === 'number' && Number.isFinite(v);
+  for (const k of ['verbosity','register','composure']){
+    if (a[k] !== undefined && (!num(a[k]) || a[k] < -2 || a[k] > 2)) return `"${a.label}" has an out-of-range ${k}`;
+  }
+  if (a.pers !== undefined){
+    if (!a.pers || typeof a.pers !== 'object' || Array.isArray(a.pers)) return `"${a.label}" has a malformed personality block`;
+    for (const [axis, v] of Object.entries(a.pers)){
+      if (!num(v) || v < -100 || v > 100) return `"${a.label}" has an out-of-range value on ${axis}`;
+    }
+  }
+  if (a.profile !== undefined && (!a.profile || typeof a.profile !== 'object' || Array.isArray(a.profile)))
+    return `"${a.label}" has a malformed profile block`;
+  return null;
+}
+function normalizeArchetype(a){
+  const out = {label: a.label.trim()};
+  ['verbosity','register','composure'].forEach(k=>{ out[k] = typeof a[k] === 'number' ? a[k] : 0; });
+  if (a.pers) out.pers = Object.assign({}, a.pers);
+  if (a.profile) out.profile = Object.assign({}, a.profile);
+  if (typeof a.vocabPref === 'string') out.vocabPref = a.vocabPref;
+  if (typeof a.blurb === 'string') out.blurb = a.blurb;
+  if (a.settings && typeof a.settings === 'object' && !Array.isArray(a.settings)) out.settings = a.settings;
+  return out;
+}
 function importArchetypes(fileInput){
   const file = fileInput.files && fileInput.files[0];
   if (!file) return;
@@ -1609,14 +1941,47 @@ function importArchetypes(fileInput){
     try {
       const p = JSON.parse(reader.result);
       if (p.format !== "character-voice-archetypes") throw new Error("Not an archetype library file.");
+      const ARCH_FORMAT_VERSION = 1;
+      const av = (p.version === undefined) ? 1 : p.version;
+      if (typeof av !== 'number' || av > ARCH_FORMAT_VERSION)
+        throw new Error(`that archetype file is format ${av}; this build reads up to ${ARCH_FORMAT_VERSION}.`);
+      /* Was: write every record straight to `archetype:<label>`, validating nothing
+         beyond a truthy label. A preset you had tuned could be destroyed by a file you
+         opened to look at, a malformed numeric field propagated into generation, and a
+         failure halfway through left a half-imported library with no way back.
+         Validate everything first, show what will change, then write. */
+      const incoming = Object.values(p.archetypes || {});
+      const ok = [], rejected = [];
+      incoming.forEach((arch, i)=>{
+        const why = archetypeProblem(arch);
+        if (why) rejected.push({label: (arch && arch.label) || ('record ' + (i+1)), why});
+        else ok.push(normalizeArchetype(arch));
+      });
+      if (!ok.length) throw new Error(rejected.length
+        ? `none of the ${rejected.length} record(s) in that file are usable — ${rejected[0].why}`
+        : "that file contains no archetypes.");
+      const replacing = ok.filter(a=> CUSTOM_ARCHETYPES[a.label] !== undefined || ARCHETYPES[a.label] !== undefined);
+      const adding = ok.length - replacing.length;
+      const lines = [`${adding} new preset${adding===1?'':'s'}.`];
+      if (replacing.length) lines.push(`${replacing.length} will REPLACE existing preset${replacing.length===1?'':'s'}: ${replacing.map(a=>a.label).join(', ')}.`);
+      if (rejected.length) lines.push(`${rejected.length} malformed record${rejected.length===1?'':'s'} will be skipped.`);
+      if (!await askForConfirm("Import archetypes?\n\n" + lines.join("\n"), "Import")) { fileInput.value = ""; return; }
+      // Keep rollback data for the presets about to be overwritten.
+      const rollback = [];
+      for (const a of replacing){
+        try { const cur = await storage.get('archetype:'+a.label); if (cur && cur.value) rollback.push({label:a.label, value:cur.value}); } catch(e){}
+      }
       let n = 0;
-      for (const arch of Object.values(p.archetypes || {})){
-        if (!arch || !arch.label) continue;
-        await storage.set('archetype:'+arch.label, JSON.stringify(arch));
-        n++;
+      try {
+        for (const arch of ok){ await storage.set('archetype:'+arch.label, JSON.stringify(arch)); n++; }
+      } catch(e){
+        for (const r of rollback){ try { await storage.set('archetype:'+r.label, r.value); } catch(e2){} }
+        throw new Error("the import failed partway and the presets it had already replaced were put back: " + e.message);
       }
       await loadCustomArchetypes();
-      toast("Imported " + n + " archetype" + (n===1?"":"s"));
+      toast("Imported " + n + " archetype" + (n===1?"":"s")
+        + (rejected.length ? ` — ${rejected.length} malformed record(s) skipped.` : ""),
+        rejected.length ? "warn" : undefined, rejected.length ? 7000 : undefined);
     } catch(e){ toast("Could not import archetypes: " + e.message, "warn", 6000); }
     fileInput.value = "";
   };

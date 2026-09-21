@@ -1,0 +1,16 @@
+{
+  "name": "character-creator",
+  "version": "0.0.0",
+  "private": true,
+  "description": "A character voice generator. Plain static site, no build step — package.json exists only to pin the browser-test dependency.",
+  "scripts": {
+    "test": "node tests/run.js",
+    "test:browser": "node tests/browser.mjs http://localhost:8111",
+    "test:browser:csp": "CSP=1 node tests/browser.mjs http://localhost:8111",
+    "serve": "python3 -m http.server 8111"
+  },
+  "devDependencies": {
+    "playwright": "1.56.0"
+  },
+  "engines": { "node": ">=20" }
+}

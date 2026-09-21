@@ -32,8 +32,10 @@ jobs:
       # ...and the browser suite, which gated nothing until now: the CSP and dark-palette
       # assertions only exist in tests/browser.mjs, and neither workflow ran it. A deploy
       # could therefore ship a page whose buttons are dead under the site's own policy.
+      # Pinned in package.json rather than installed unversioned: an unpinned browser
+      # meant CI could break (or start passing) on a commit that changed nothing here.
       - name: Install a browser
-        run: npm install --no-save playwright && npx playwright install --with-deps chromium
+        run: npm install --no-save playwright@$(node -p "require('./package.json').devDependencies.playwright") && npx playwright install --with-deps chromium
       - name: Run browser tests
         run: |
           python3 -m http.server 8111 &
@@ -46,16 +48,34 @@ jobs:
       # JS indefinitely. Stamp the commit SHA in at deploy time.
       - name: Stamp service worker cache version
         run: sed -i "s/^const BUILD_ID = 'dev';/const BUILD_ID = '${GITHUB_SHA::12}';/" sw.js && grep -q "const BUILD_ID = '${GITHUB_SHA::12}';" sw.js
-      # Pages serves the repo root, so tests/, .github/ and LICENSE were all being
-      # published alongside the app. .nojekyll stops Pages ignoring underscore-prefixed
-      # paths.
+      # ALLOWLIST, not a denylist. This used to upload the repository root minus a few
+      # paths deleted just above — which publishes every new file by default, and by
+      # this point in the job the checkout also contains the node_modules/ that the
+      # browser-test step installed. Copy in what the app actually loads instead, so
+      # adding a file to the deployment is a deliberate edit to this list.
+      # .nojekyll stops Pages ignoring underscore-prefixed paths.
       - name: Prepare artifact
         run: |
-          rm -rf tests .github LICENSE
-          touch .nojekyll
+          set -eu
+          rm -rf _site && mkdir -p _site
+          cp index.html sw.js _site/
+          cp -r css js _site/
+          cp cast.png mobile.png tinker.png _site/
+          touch _site/.nojekyll
+          # Fail loudly if anything the page loads did not make it across.
+          node -e '
+            const fs=require("fs"),p=require("path");
+            const html=fs.readFileSync("index.html","utf8");
+            // Only real file references: skip data: URIs and bare query strings.
+            const refs=[...html.matchAll(/(?:src|href)="([^"]+)"/g)].map(m=>m[1])
+              .filter(r=>!/^(https?:|data:|mailto:|#|\?)/.test(r));
+            const missing=refs.filter(r=>!fs.existsSync(p.join("_site",r.replace(/^\.\//,""))));
+            if (missing.length){ console.error("not in the artifact: "+missing.join(", ")); process.exit(1); }
+            console.log(refs.length+" referenced files present");
+          '
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: .
+          path: ./_site
       - id: deployment
         uses: actions/deploy-pages@v4

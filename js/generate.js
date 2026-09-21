@@ -19,6 +19,35 @@ function mulberry32(a){
 }
 let lastSeedUsed = null;
 
+/* ================= SEED CODEC =================
+   An empty seed field took a NUMERIC entropy seed and displayed `seedNum.toString(36)`.
+   Pasting that string back in hashed the STRING — a completely different number — so
+   the one seed a user is most likely to copy (the one the app generated for them) was
+   the one that could not replay. The cast and foil labels had the same shape.
+
+   One format, one parser, both directions:
+     v1-<base36>   an app-generated seed; decodes straight back to its number
+     anything else a user's own text, hashed as before (old shares still work) */
+const SEED_PREFIX = 'v1-';
+function encodeSeed(num){ return SEED_PREFIX + (num >>> 0).toString(36); }
+function seedNumberFrom(str){
+  const t = String(str == null ? '' : str).trim();
+  if (!t) return null;
+  if (t.startsWith(SEED_PREFIX)){
+    const n = parseInt(t.slice(SEED_PREFIX.length), 36);
+    if (!Number.isNaN(n)) return n >>> 0;
+  }
+  return hashSeedString(t);
+}
+/* Resolve the seed for one build: returns {num, label} where label is exactly what the
+   user can paste back to reproduce `num`. */
+function resolveSeed(rawInput){
+  const raw = String(rawInput == null ? '' : rawInput).trim();
+  if (raw) return {num: seedNumberFrom(raw), label: raw, explicit: true};
+  const num = entropySeed();
+  return {num, label: encodeSeed(num), explicit: false};
+}
+
 /* ================= WEIGHTED CONSTRAINT TIER =================
    Between hard ban and neutral: per-category "prefer" (x3) and "rarely" (x0.25)
    multipliers. Applied inside pickCategoryWeighted — the one place category
@@ -83,7 +112,11 @@ function radarSVG(profiles, size){
      cast view builds a separate legend for that). Rather than delete it and lose the
      one thing it is genuinely good for, spend it on the accessible name: the SVG had
      none at all, so a screen reader met this chart as an unlabelled graphic. */
-  const esc = t => String(t == null ? '' : t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  /* Text-node escaping is NOT attribute escaping. This used to escape only & < >
+     and then drop the result into a double-quoted aria-label, so a character named
+     `A" data-audit="x` closed the attribute and added its own. Every interpolation
+     below now goes through escHTML, which also encodes quotes. */
+  const esc = t => escHTML(t);
   const named = profiles.filter(p=>p.label);
   const title = named.length > 1
     ? `Axis profile overlay — ${named.map(p=>esc(p.label)).join(', ')}`
@@ -99,11 +132,11 @@ function radarSVG(profiles, size){
     const ang = (Math.PI*2*i/axes.length) - Math.PI/2;
     s += `<line x1="${cx}" y1="${cy}" x2="${cx+R*Math.cos(ang)}" y2="${cy+R*Math.sin(ang)}" stroke="var(--border)" stroke-width="0.6"/>`;
     const lx = cx + (R+24)*Math.cos(ang), ly = cy + (R+24)*Math.sin(ang);
-    s += `<text x="${lx}" y="${ly}" font-size="8.5" text-anchor="middle" dominant-baseline="middle" fill="var(--muted)">${AXIS_LABELS[ax]}</text>`;
+    s += `<text x="${lx}" y="${ly}" font-size="8.5" text-anchor="middle" dominant-baseline="middle" fill="var(--muted)">${esc(AXIS_LABELS[ax])}</text>`;
   });
   profiles.forEach(p=>{
     const pts = axes.map((ax,i)=> pt(i, p.prof[ax]||0).join(",")).join(" ");
-    s += `<polygon points="${pts}" fill="${p.color}" fill-opacity="0.13" stroke="${p.color}" stroke-width="2">` +
+    s += `<polygon points="${pts}" fill="${esc(p.color)}" fill-opacity="0.13" stroke="${esc(p.color)}" stroke-width="2">` +
          (p.label ? `<title>${esc(p.label)}</title>` : '') + `</polygon>`;
   });
   s += `</svg>`;
@@ -199,10 +232,29 @@ function renderNovelty(prevSig, curSig){
    realised in the intended direction at proportional strength; drift comes from
    your slider blend, the dice, and rerolls — all legitimate, which is why this is
    a meter and not a warning. */
+/* Reference realised magnitude for a FULLY expressed archetype axis, measured from
+   the generator itself: 20 samples per built-in preset, generated at that preset's own
+   settings, give |axisProfile| values distributed roughly 0.04 (p10) to 0.40 (p99)
+   with a median near 0.09. The 90th percentile, 0.2, is the point at which an axis is
+   as loudly expressed as this bank realistically expresses one.
+
+   It has to be an empirical constant because axisProfile is already normalised against
+   the bank's own polarity coverage — its units mean nothing in the archetype's -100..100
+   units, which is precisely the mistake the old meter made: it divided the normalised
+   magnitude by 2 and reported it as "proportional realization of the archetype",
+   discarding the target magnitude entirely after taking its sign. Across 50 samples of
+   each of 34 presets that read 1.6-4.0% — a meter that could not reach its own top even
+   when generating the archetype it was measuring.
+
+   Direction and strength are now reported separately, because they answer different
+   questions and only one of them is well-conditioned. Direction ("did the sheet lean
+   the way the preset asked?") is a clean proportion. Strength is relative to the
+   reference above and is labelled as such. */
+const FIDELITY_REF_MAG = 0.2;
 function archetypeFidelity(st, arch){
   if (!arch || !arch.pers) return null;
   const prof = axisProfile(st);
-  let total = 0, score = 0, silent = 0;
+  let total = 0, matched = 0, silent = 0, strengthSum = 0;
   Object.entries(arch.pers).forEach(([axisId, target])=>{
     const code = AXIS_TO_POLCODE[axisId];
     if (!code || Math.abs(target) < 10) return;
@@ -210,9 +262,17 @@ function archetypeFidelity(st, arch){
     const got = prof[code] || 0;
     total++;
     if (got === 0){ silent++; return; }   // see below
-    if (Math.sign(got) === want) score += Math.min(1, Math.abs(got)/2); // direction right, credit scales with strength
+    if (Math.sign(got) === want){
+      matched++;
+      // How fully this axis came out, relative to how fully the bank expresses one,
+      // scaled by how hard the preset asked for it.
+      const asked = Math.min(1, Math.abs(target) / 100);
+      strengthSum += Math.min(1, Math.abs(got) / (FIDELITY_REF_MAG * Math.max(0.4, asked)));
+    }
   });
   if (!total) return null;
+  const expressed = total - silent;
+  const score = matched;   // direction agreement is the headline; see below
   /* THE METER'S FLOOR WAS A LIE. A silent axis — one the sheet expresses nothing on —
      used to score 0.35, "partial credit". Nine axes of silence therefore read as 35%
      fidelity, so a sheet that ignored the archetype completely still showed a third of
@@ -224,7 +284,15 @@ function archetypeFidelity(st, arch){
      a thin pool, traits with no polarity tag on that axis). So the silent count travels
      with the number and the meter says which it is, instead of splitting the difference
      inside a single figure and telling the user neither. */
-  return {pct: Math.round(100 * score / total), total, silent, expressed: total - silent};
+  /* Scored over the EXPRESSED axes, not all of them: an axis the sheet says nothing
+     about is absence of evidence, and folding it into the denominator made a preset
+     whose sections were switched off look like a preset the generator had ignored. The
+     silent count travels alongside so the meter can say which it is. */
+  return {
+    pct: expressed ? Math.round(100 * score / expressed) : 0,
+    strength: matched ? Math.round(100 * strengthSum / matched) : 0,
+    matched, total, silent, expressed,
+  };
 }
 
 /* Generation is synchronous over a 7,073-trait bank with per-trait position maths, and
@@ -232,11 +300,21 @@ function archetypeFidelity(st, arch){
    a skeleton first, then do the work on the next frame. The real build stays available
    as a plain synchronous call (runGeneration) for the paths that need to act on the
    result immediately — seed-from-trait, tests. */
+/* Deferring the build by two animation frames leaves a window in which a second press
+   (or a held Enter on the shortcut) queues a second build behind the first — two full
+   generations, two undo snapshots, and the second one's result silently replacing a
+   sheet the user saw for one frame. One in-flight guard; the extra presses are dropped
+   rather than queued, because "generate twice" is never what the second press meant. */
+let _generationInFlight = false;
 function generateCharacter(){
+  if (_generationInFlight) return;
   const sheetEl = document.getElementById('sheet');
   if (!sheetEl || typeof requestAnimationFrame !== 'function'){ runGeneration(); return; }
+  _generationInFlight = true;
   showSkeleton();
-  requestAnimationFrame(()=> requestAnimationFrame(()=>{ runGeneration(); }));
+  requestAnimationFrame(()=> requestAnimationFrame(()=>{
+    try { runGeneration(); } finally { _generationInFlight = false; }
+  }));
 }
 
 /* ================= BATCH GENERATION =================
@@ -255,7 +333,16 @@ function generateBatch(n){
   const host = document.getElementById('batchTray');
   if (!host) return;
   batchCandidates = [];
-  const before = {state, charMeta, pressureState, lastSheetTraits};
+  /* Discarding a batch left the workspace changed: withSpeculativeGeneration restored
+     its eight globals and generateBatch restored four more, but NOBODY restored
+     lastGeneratedSliders, the seed globals or the on-screen seed readout — so after
+     generating and discarding two candidates the sheet was the original one while its
+     recorded provenance belonged to a character the user never kept. Capture the whole
+     authoritative set in one place instead of a hand-maintained subset. */
+  const before = {state, charMeta, pressureState, lastSheetTraits,
+                  lastGeneratedSliders, lastSeedUsed, charMetaSeed,
+                  seedReadout: (document.getElementById('lastSeedReadout')||{}).textContent,
+                  budgetReport: getBudgetReport()};
   /* withSpeculativeGeneration: a batch runs `count` complete builds that the user has
      not accepted, and a complete build writes to the presentation locks, the undo and
      redo stacks, the anti-repetition window, lastBySlot, sessionProfiles, the novelty
@@ -275,6 +362,10 @@ function generateBatch(n){
            captured here and reinstated by chooseBatch, so picking #2 gets #2's locks. */
         batchCandidates.push({state, meta: Object.assign({}, charMeta), pressure: pressureState,
                               variants: Object.assign({}, charVariants),
+                              // A candidate owns its provenance, so picking #2 commits
+                              // #2's sliders and #2's budget report — not #5's.
+                              sliders: lastGeneratedSliders,
+                              budgetReport: getBudgetReport(),
                               signature: generationSignature(state)});
       } finally { if (seedEl) seedEl.value = userSeed; }
     }
@@ -283,6 +374,12 @@ function generateBatch(n){
     // until the user picks one.
     state = before.state; charMeta = before.charMeta;
     pressureState = before.pressureState; lastSheetTraits = before.lastSheetTraits;
+    lastGeneratedSliders = before.lastGeneratedSliders;
+    lastSeedUsed = before.lastSeedUsed; charMetaSeed = before.charMetaSeed;
+    const seedOut = document.getElementById('lastSeedReadout');
+    if (seedOut && before.seedReadout !== undefined) seedOut.textContent = before.seedReadout;
+    if (before.budgetReport && typeof setBudgetReport === 'function') setBudgetReport(before.budgetReport);
+    if (typeof updateStickyBar === 'function') updateStickyBar();
   }
   renderBatchTray();
   renderSheet();
@@ -337,6 +434,8 @@ function chooseBatch(i){
      belongs — on the one character the user kept, not on all five. The batch itself is
      isolated (see withSpeculativeGeneration); this is the deliberate commit. */
   if (pick.variants) charVariants = pick.variants;
+  if (pick.sliders) lastGeneratedSliders = pick.sliders;
+  if (pick.budgetReport && typeof setBudgetReport === 'function') setBudgetReport(pick.budgetReport);
   /* The seed readout was left showing the LAST candidate's seed, so "Seed: …" next to a
      kept character named a different one — and pasting it back reproduced the candidate
      you discarded. Each candidate carries its own seed in its meta; put that on screen. */
@@ -380,9 +479,13 @@ function _runGeneration(){
   whyOpen = {};
   OPEN_CARD_CONTROLS.clear();   // a new character means new cards; nothing is open on it
   lastDepthUntouched = [];
-  // Depth-first mode: resolve wound/values/attachment/stress first, derive sliders from them.
-  const depthFirst = document.getElementById('depthFirstToggle');
-  if (depthFirst && depthFirst.checked) applyDepthFirst();
+  /* Depth-first mode used to run HERE, outside the seeded block — so it drew its
+     foundational motivation traits off the unseeded stream, and the seeded build that
+     followed drew motivation all over again. Replaying a fixed seed therefore produced
+     different derived sliders and a different character. It is now planned inside the
+     seeded transaction below; this only records that it was asked for. */
+  const depthFirstEl = document.getElementById('depthFirstToggle');
+  const wantDepthFirst = !!(depthFirstEl && depthFirstEl.checked);
 
   const archKey = strVal('archetypeSelect', '');
   const arch = ARCHETYPES[archKey] || CUSTOM_ARCHETYPES[archKey];
@@ -444,25 +547,54 @@ function _runGeneration(){
   // Seeded build: point rand() at the seeded stream for exactly the build's duration
   // (withRng, engine.js) rather than reassigning Math.random globally.
   const seedInput = document.getElementById('seedInput');
-  const seedStr = seedInput ? seedInput.value.trim() : "";
-  const seedNum = seedStr ? hashSeedString(seedStr) : entropySeed();
-  lastSeedUsed = seedStr || seedNum.toString(36);
+  const seed = resolveSeed(seedInput ? seedInput.value : "");
+  const seedNum = seed.num;
+  lastSeedUsed = seed.label;
   const wantStress = !!(document.getElementById('stressToggle')||{}).checked;
+  // An explicit seed means "give me this character again", so it suppresses the
+  // session-history branch of divergence (see REPLAY_MODE in engine.js). An
+  // unseeded roll is exploration and keeps it.
+  const replay = seed.explicit;
   let newState0, newState, newPressure = null;
   // The archetype's profile hints are live for the whole build and nothing else — see
   // ARCHETYPE PROFILE HINTS in engine.js. Cast, foil and gap-filler deliberately do not
   // inherit them; they are not this archetype's character.
+  withReplayMode(replay, ()=>
   withArchetypeProfile(arch && arch.profile, ()=> withRng(mulberry32(seedNum), ()=>{
-    rollCharacterVariants(); // inside the seeded block, so seeds reproduce variants too
+    /* The character's presentation is committed BEFORE anything is drawn — including
+       before the depth-first foundation draw, which goes through byFilter and is
+       therefore filtered by the presentation lock. Rolling it afterwards meant
+       depth-first drew its motivation traits through the PREVIOUS character's locks,
+       which is one more way the same seed produced two different people.
+
+       The slots the user is keeping have a say in the roll: a kept variant-tagged
+       trait fixes its own category's lock rather than being contradicted by a coin. */
+    const protectedVariants = variantsFromProtected(state);
+    lastVariantConflicts = protectedVariants.conflicts;
+    rollCharacterVariants(protectedVariants.want); // inside the seeded block, so seeds reproduce variants too
+    // Depth-first draws motivation and derives the sliders from it. Inside the seeded
+    // stream, and after the presentation commitment, so the same seed plans the same
+    // foundations. (_avoidRecentActive is resolved per build by buildCharacterState;
+    // the depth-first draw runs before that, so it needs it set here too.)
+    if (wantDepthFirst){
+      _avoidRecentActive = avoidRecentEnabled();
+      const plan = applyDepthFirst();
+      if (plan){
+        verbLevel = rawToLevel(intVal('verbositySlider', 0));
+        regLevel  = rawToLevel(intVal('registerSlider', 0));
+        compLevel = rawToLevel(intVal('composureSlider', 0));
+        if (archOverrides){
+          PERSONALITY_AXES.forEach(a=>{ archOverrides[a.id] = intVal('pers_'+a.id, 0); });
+        }
+      }
+    }
     newState0 = buildCharacterState({verbLevel, regLevel, compLevel, mannerCount, rarityPref,
       vocabPref: arch?arch.vocabPref:null, vocabCount, personalityOverrides: archOverrides});
-    // Order matters and is stated once, here: pins are honoured first, then budgets
-    // constrain what the draw produced, then explicit "always include" constraints go
-    // in last so a named requirement can never be evicted by a quantity.
-    newState = applyExclusivePairs(
-      applyRequiredTraits(
-        applyBudgets(applyPinnedTargets(newState0, rarityPref), rarityPref)),
-      rarityPref);
+    /* One finalizer, one order — see finalizeSheet in engine.js. The locked slots the
+       user kept are seated HERE, before budgets, exclusivity and the pressure sheet,
+       rather than being merged back in afterwards over the top of everything those
+       stages had already decided. */
+    newState = finalizeSheet(newState0, {rarityPref, carryLocked: state});
     // BUG FIX: the pressure sheet used to be built AFTER the RNG was restored, so
     // "same seed + same settings = the exact same character" — which the UI states
     // outright — was false for every character generated with Under Pressure on. It
@@ -470,17 +602,18 @@ function _runGeneration(){
     // pressure sheet doesn't perturb the base character's draws either.
     if (wantStress){
       withRng(mulberry32((seedNum ^ 0x9e3779b9) >>> 0), ()=>{
+        // Derived from the COMMITTED base sheet (post-finalization), not from the raw
+        // draw — so the pressure variant describes the character on screen.
         newPressure = buildStressVariant(verbLevel, regLevel, mannerCount, rarityPref, newState);
       });
     }
-  }));
+  })));
   charMetaSeed = lastSeedUsed;
   const seedOut = document.getElementById('lastSeedReadout');
   if (seedOut) seedOut.textContent = "Seed: " + lastSeedUsed;
   if (typeof updateStickyBar === 'function') updateStickyBar();
-  Object.keys(state).forEach(id=>{
-    if (state[id] && state[id].locked && newState[id] !== undefined) newState[id] = state[id];
-  });
+  // (The locked-slot merge that used to live here now runs inside finalizeSheet,
+  //  before budgets, exclusivity and the pressure build — see B11.)
   // Slot-level diff against the outgoing sheet (see renderChangeList): "42% novel"
   // tells you how much moved, never what.
   lastSheetTraits = Object.keys(state).length ? snapshotSheetTraits(state) : null;
@@ -507,7 +640,12 @@ function _runGeneration(){
   setText('archetypeTag', charMeta.archetypeLabel);
 
   pressureState = newPressure;
-  document.getElementById('pressureSheet').style.display = pressureState ? "block" : "none";
+  const pSheet = document.getElementById('pressureSheet');
+  pSheet.style.display = pressureState ? "block" : "none";
+  // A freshly generated pressure variant is by definition current again.
+  if (pSheet.classList) pSheet.classList.remove('outdated');
+  const pStale = document.getElementById('pressureOutdated');
+  if (pStale){ pStale.style.display = 'none'; pStale.textContent = ''; }
 
   // Compare against the PREVIOUS generation before overwriting the stored signature,
   // so the readout answers "how different is this from the last one I made".
@@ -518,6 +656,9 @@ function _runGeneration(){
   rememberGeneration(state);
   try { rememberProfile(axisProfile(state)); } catch(e){}
   charMeta.contextNotes = ctxInfo && ctxInfo.notes.length ? ctxInfo.notes.slice() : null;
+  // What the context parser found but did NOT apply, and why — so a reading it got
+  // wrong (or one the user switched off) is visible rather than merely absent.
+  charMeta.contextRejected = ctxInfo && ctxInfo.rejected && ctxInfo.rejected.length ? ctxInfo.rejected.slice() : null;
 
   // A fresh generation is where the density preference applies; from then on the
   // sections are however the user has arranged them.
@@ -554,10 +695,28 @@ function seatedTraitIds(exceptSlotId){
    chip still read "never together" while both cards sat there — and tossing the only
    card in a required category left the constraint quietly unsatisfied. Re-running both
    after a mutation costs one pass over the sheet and keeps the chips honest. */
+/* Budgets used to be generation-only by omission rather than by decision: a reroll or
+   a pin nudge could walk a budget-compliant sheet straight out of its caps while the
+   meter carried on describing the sheet from two mutations ago. Route the mutation
+   through the same finalizer the build uses, so the meter is always about THIS sheet.
+
+   The mode switch is the honest part: users who want budgets to hold only at
+   generation time can say so, and then the meter reports the breach instead of
+   quietly correcting it. Locked, required and pinned slots are untouched either way. */
+let enforceBudgetsOnMutation = true;
+function getMutationBudgetMode(){ return enforceBudgetsOnMutation ? 'enforce' : 'report'; }
+function setMutationBudgetMode(m){ enforceBudgetsOnMutation = (m !== 'report'); }
 function reapplyConstraintsAfterMutation(){
   const rarityPref = rarityPrefVal();
   try {
-    state = applyExclusivePairs(applyRequiredTraits(state), rarityPref);
+    state = finalizeSheet(state, {rarityPref, applyPins:false,
+                                  applyBudgets: enforceBudgetsOnMutation});
+    // In report mode finalizeSheet skips the solver, so the meter still has to be told
+    // what the sheet now costs.
+    if (!enforceBudgetsOnMutation && typeof auditBudgets === 'function'){
+      auditBudgets(state, getBudgetReport() || {rarity:{}, intensity:{}, actions:[], active: budgetsActive()});
+    }
+    if (typeof refreshBudgetChips === 'function') refreshBudgetChips();
   } catch(e){ console.error(e); }
 }
 
@@ -750,19 +909,60 @@ function rerollBack(slotId){
 
 function toggleWhy(slotId){ whyOpen[slotId] = !whyOpen[slotId]; renderSlotChange(slotId); }
 
+/* THE UNDO MODEL, stated once. A snapshot is the whole workspace (see _snapshotNow in
+   engine.js), and everything that changes what the user would lose is undoable: a
+   generation, a reroll, a step-back, a load or import, a note, a pin, a lock sweep.
+   What is NOT undoable is deliberate: switching a single card's lock (its own button
+   toggles it straight back) and opening a why? panel. */
 async function editTraitNote(slotId){
   const s = state[slotId];
   if (!s || !s.trait) return;
   const note = await askForName(`Note on "${s.trait.trait}":`, traitNotes[slotId] || "");
   if (note === null) return;
+  if (note === (traitNotes[slotId] || "")) return;   // nothing changed; no snapshot
+  snapshotHistory();
   traitNotes[slotId] = note;
   renderSlotChange(slotId);
 }
-function clearTraitNote(slotId){ delete traitNotes[slotId]; renderSlotChange(slotId); }
+function clearTraitNote(slotId){
+  if (traitNotes[slotId] === undefined) return;
+  snapshotHistory();
+  delete traitNotes[slotId];
+  renderSlotChange(slotId);
+}
 
-// Favourite / never, straight off the card, writing into the same constraint sets the
-// Constraints panel edits — so a star here shows up as an "always" chip there.
+/* TWO DIFFERENT THINGS, which the star used to conflate.
+
+   A FAVOURITE is a bookmark: "I liked this, keep it where I can find it." It changes
+   nothing about generation. The star did the other thing — it pushed the trait into
+   requiredTraitIds, so bookmarking six traits you liked quietly put all six on every
+   character you generated from then on, with the only clue being a chip in a panel you
+   were not looking at. Nobody expects a star to do that.
+
+   A REQUIREMENT is a rule: "put this on every character." It keeps its own button and
+   says what it is.
+
+   Favourites persist alongside preferences and are listed in the Constraints panel, so
+   promoting one to a requirement is still a single press — just a deliberate one. */
+let favouriteTraitIds = new Set();
+function isFavouriteTrait(id){ return favouriteTraitIds.has(id); }
+function getFavouriteTraitIds(){ return [...favouriteTraitIds]; }
+function setFavouriteTraitIds(ids){ favouriteTraitIds = new Set(ids || []); }
 function favouriteTrait(id){
+  const t = TRAITS_BY_ID.get(id);
+  if (!t) return;
+  if (favouriteTraitIds.has(id)){
+    favouriteTraitIds.delete(id);
+    toast(`"${t.trait}" removed from your saved traits.`);
+  } else {
+    favouriteTraitIds.add(id);
+    toast(`"${t.trait}" saved. This does not change what gets generated — use the pin button for that.`);
+  }
+  refreshConstraintChips(); withPreservedFocus(()=>{ renderSheet(); });
+  if (typeof savePrefs === 'function') savePrefs();
+}
+// The generation rule, stated as one.
+function requireTrait(id){
   const t = TRAITS_BY_ID.get(id);
   if (!t) return;
   if (requiredTraitIds.includes(id)){
@@ -771,10 +971,10 @@ function favouriteTrait(id){
   } else {
     requiredTraitIds.push(id);
     bannedTraitIds.delete(id);     // required beats banned, as everywhere else
-    toast(`"${t.trait}" will now be included on every character.`);
+    toast(`"${t.trait}" will now be included on every character you generate.`);
   }
-  // Every card showing this trait's star/ban state can change, so this one stays a
-  // full render — but it no longer throws the caret away doing it.
+  // Every card showing this trait's state can change, so this one stays a full render
+  // — but it no longer throws the caret away doing it.
   refreshConstraintChips(); withPreservedFocus(()=>{ renderSheet(); });
   if (typeof savePrefs === 'function') savePrefs();
 }
@@ -802,11 +1002,14 @@ function dismissDiff(slotId){ delete diffLog[slotId]; renderSlotChange(slotId); 
 function toggleLock(slotId){
   if (state[slotId]) { state[slotId].locked = !state[slotId].locked; renderSlotChange(slotId); }
 }
+// Bulk lock changes ARE undoable (a single card's lock is not — see the note above).
 function lockAll(){
+  snapshotHistory();
   Object.values(state).forEach(s=>{ if (s && s.trait) s.locked = true; });
   withPreservedFocus(()=>{ renderSheet(); });
 }
 function unlockAll(){
+  snapshotHistory();
   Object.values(state).forEach(s=>{ if (s) s.locked = false; });
   withPreservedFocus(()=>{ renderSheet(); });
 }
@@ -820,6 +1023,7 @@ function unlockAll(){
 function togglePin(slotId){
   const s = state[slotId];
   if (!s || !s.trait) return;
+  snapshotHistory();
   if (pinnedTargets[slotId] !== undefined){
     delete pinnedTargets[slotId];
   } else {
@@ -829,6 +1033,8 @@ function togglePin(slotId){
 }
 function adjustPin(slotId, delta){
   if (pinnedTargets[slotId] === undefined) return;
+  // A nudge redraws the card, so it is a content change and belongs on the stack.
+  snapshotHistory();
   pinnedTargets[slotId] = clamp(pinnedTargets[slotId] + delta, 1, 5);
   setAffinityVec(null); // live DOM sliders — this always operates on the main character
   // Re-draw immediately so the pin control feels responsive rather than only
@@ -856,7 +1062,12 @@ function adjustPin(slotId, delta){
   }
   renderSlotChange(slotId);
 }
-function unpinAll(){ pinnedTargets = {}; withPreservedFocus(()=>{ renderSheet(); }); }
+function unpinAll(){
+  if (!Object.keys(pinnedTargets).length) return;
+  snapshotHistory();
+  pinnedTargets = {};
+  withPreservedFocus(()=>{ renderSheet(); });
+}
 
 // Applied after a fresh buildCharacterState (before lock-merge, so lock still wins):
 // for every slot with a pin, redraw within the SAME section/category the fresh build

@@ -183,9 +183,37 @@ let VARIANT_ODDS = {};
   });
 })();
 
-function rollCharacterVariants(){
+/* Which presentation locks a set of protected (locked / required / pinned) slots
+   ALREADY commits the character to. A kept `Approval-seeking` card is tagged variant
+   `a`; rolling Confidence to `b` afterwards left the sheet holding a trait its own
+   committed presentation excludes, and every later draw and explanation in that
+   category then contradicted the card the user had explicitly kept.
+   Returns {category: 'a'|'b'} plus the conflicts it could not honour, because two kept
+   traits from opposite variants of one category are the user's to resolve. */
+function variantsFromProtected(slots){
+  const want = {}, conflicts = [];
+  Object.values(slots || {}).forEach(sl=>{
+    if (!sl || !sl.trait || !sl.trait.variant) return;
+    const protectedSlot = sl.locked || sl.required || (sl.slotId && pinnedTargets[sl.slotId] !== undefined);
+    if (!protectedSlot) return;
+    const cat = sl.trait.category;
+    if (!PRESENTATION_VARIANTS[cat]) return;
+    if (want[cat] && want[cat] !== sl.trait.variant){
+      conflicts.push({cat, trait: sl.trait.trait, has: sl.trait.variant, committed: want[cat]});
+      return;   // first one wins; the conflict is reported rather than silently flipped
+    }
+    want[cat] = sl.trait.variant;
+  });
+  return {want, conflicts};
+}
+let lastVariantConflicts = [];
+function getVariantConflicts(){ return lastVariantConflicts; }
+/* `required` is a map of category -> variant that this character is already committed
+   to (see variantsFromProtected). Those categories are not rolled; the rest are. */
+function rollCharacterVariants(required){
   charVariants = {};
   Object.keys(PRESENTATION_VARIANTS).forEach(cat=>{
+    if (required && required[cat]){ charVariants[cat] = required[cat]; return; }
     const pA = VARIANT_ODDS[cat] === undefined ? 0.5 : VARIANT_ODDS[cat];
     charVariants[cat] = rand() < pA ? "a" : "b";
   });
@@ -991,12 +1019,22 @@ function bandHalf(){
   return (_bandHalfMemo = 1.35 - 1.0 * focus); // 1.35 (loose) .. 0.35 (tight)
 }
 
-// The slider span this trait can appear at, in raw magnitude terms.
+/* The slider span this trait can appear at, in raw magnitude terms.
+   The window is half-width `h` in POSITION units (1..5), and the map from slider
+   magnitude to position is targetFromMag — a power curve, not a line. Converting the
+   window with `h * 25` therefore only holds near the middle: at position 3.006 with
+   h = 0.73 it printed 49–86 where the true inverse gives 52–81, i.e. the card claimed
+   reachability at settings that cannot reach it. Invert the actual position bounds.
+
+   This is the NOMINAL band. Adaptive widening, jitter and pool floors can all seat a
+   trait outside it, which is why the card's own copy says "usually" rather than
+   "only" — see the tooltip in render.js. */
 function traitBand(t, half){
   const h = (half === undefined) ? bandHalf() : half;
-  const c = magFromPos(traitPos(t));
-  const w = h * 25; // 1 position unit == 25 slider points
-  return [Math.max(0, Math.round(c - w)), Math.min(100, Math.round(c + w))];
+  const pos = traitPos(t);
+  const lo = magFromPos(clamp(pos - h, 1, 5));
+  const hi = magFromPos(clamp(pos + h, 1, 5));
+  return [Math.max(0, Math.round(lo)), Math.min(100, Math.round(hi))];
 }
 
 /* ================= ANTI-REPETITION MEMORY =================
@@ -2246,6 +2284,43 @@ function divergenceLevel(){
   const el = document.getElementById('divergence');
   return el ? clamp(parseFloat(el.value) || 0, 0, 1) : 0;
 }
+/* REPLAY vs EXPLORE. Divergence's "freshen" branch below consults CATEGORY_USE, the
+   session's running tally of which categories have already been drawn — so at neutral
+   sliders the same seed produced different characters depending on what you had
+   generated earlier in the session, with no control anywhere saying so. ("Avoid recent
+   traits" is a different memory and gates a different penalty; switching it off did
+   not switch this off.)
+
+   Rather than delete the behaviour — a dial that refuses to land where it has already
+   landed is genuinely useful — name it. A build declared as a replay ignores session
+   history entirely, which is what "same seed + same settings = the same character"
+   has to mean; an ordinary interactive build still explores. */
+let REPLAY_MODE = false;
+function historyAwareGeneration(){ return !REPLAY_MODE; }
+/* A replay runs against an EMPTY history rather than with the history-aware mechanisms
+   switched off, and the difference matters: switching them off changes which code path
+   runs (divergence's freshen branch stops firing at all, and stops consuming its coin),
+   which produces a different character from the same seed. Swapping in empty history
+   leaves every branch exactly where it was and simply gives it nothing to remember —
+   so a seed replays the character that seed named, from any session. */
+function withReplayMode(on, fn){
+  const prev = REPLAY_MODE;
+  REPLAY_MODE = !!on;
+  if (!on) { try { return fn(); } finally { REPLAY_MODE = prev; } }
+  const savedRecent = recentTraitIds, savedSlots = lastBySlot;
+  const savedUse = new Map(CATEGORY_USE);
+  recentTraitIds = [];
+  lastBySlot = {};
+  CATEGORY_USE.clear();
+  try { return fn(); }
+  finally {
+    REPLAY_MODE = prev;
+    recentTraitIds = savedRecent;
+    lastBySlot = savedSlots;
+    CATEGORY_USE.clear();
+    savedUse.forEach((v,k)=>CATEGORY_USE.set(k,v));
+  }
+}
 /* THE ONE DEFINITION OF A CATEGORY'S WEIGHT.
    predictProfileCategories used to carry its own copy of this arithmetic — a hand-rolled
    `BASELINE + boost * w` that had drifted from the real picker in two ways: it applied
@@ -2259,9 +2334,28 @@ function categoryWeights(cats, boostMap){
   return cats.map(c => (CATEGORY_BASELINE + boost * ((boostMap && boostMap.get(c)) || 0))
                        * tierMultiplier(c) * contextMultiplier(c));
 }
-function pickCategoryWeighted(cats, boostMap){
+/* A category whose pool is empty under the active bans (or the character's
+   presentation lock) is not a candidate. Category resolution used to consider every
+   name in the section and only discover the emptiness at draw time, where the slot
+   simply vanished: banning six of seven Social Roles and leaving Leader permitted
+   produced NO role at all in 85 of 100 seeded builds, rather than Leader every time.
+   Filter first; the caller reports a genuinely empty section. */
+function eligibleCategories(cats){
+  if (!cats || !cats.length) return cats || [];
+  const usable = cats.filter(c=>{
+    const section = SECTION_OF_CATEGORY.get(c);
+    if (!section) return true;                 // unknown mapping: don't silently drop it
+    return byFilter(section, c).length > 0;
+  });
+  // Everything is banned out. Returning [] would make the caller draw from nothing;
+  // returning the original list preserves the old behaviour (an empty, explained slot).
+  return usable.length ? usable : [];
+}
+function pickCategoryWeighted(catsIn, boostMap){
   // categoryTiers: user prefer/rarely multipliers fold in here — the single point
   // where category selection happens — see WEIGHTED CONSTRAINT TIER above.
+  const cats = eligibleCategories(catsIn);
+  if (!cats.length) return null;
 
   const boost = AFFINITY();
   // Baseline weight lowered from 1 to 0.4: when a slider actually points somewhere,
@@ -2283,7 +2377,7 @@ function pickCategoryWeighted(cats, boostMap){
   const hasSignal = !!(boostMap && boostMap.size);
   const roll = div > 0 && rand() < div;
   const invert = roll && hasSignal;
-  const freshen = roll && !hasSignal;
+  const freshen = roll && !hasSignal;   // reads CATEGORY_USE, which a replay empties
   let peak = 0;
   if (invert) boostMap.forEach(v=>{ if (v > peak) peak = v; });
   let leastUsed = null;
@@ -2322,7 +2416,7 @@ const CONTEXT_RULES = [
   {re:/\b(ex-)?(military|soldier|army|navy|marine|veteran|officer|sergeant|combat|war)\b/i,
    up:["Discipline — Self-Controlled","Rigid & Principled","Fight (attack the threat)","Precision & Specificity Level","Leader"],
    down:["Absurd & Chaotic"], label:"military"},
-  {re:/\b(smuggler|thief|criminal|crook|con|fence|outlaw|bandit|pirate|gang)\b/i,
+  {re:/\b(smuggler|thief|criminal|crook|outlaw|bandit|pirate|gangster)\b/i,
    up:["Honesty — Deceptive & Evasive","Self-Interested","Pragmatic Focus & Speech Functions","Risk & Escape","Outsider"],
    down:["Manners — Polished & Courteous"], label:"criminal"},
   {re:/\b(medieval|ancient|victorian|regency|feudal|peasant|knight|monk|antiquity|bronze age|iron age|pre-?industrial)\b/i,
@@ -2332,18 +2426,21 @@ const CONTEXT_RULES = [
    up:["Conceptual Framework & Loanwords","Register & Formality Spectrum","Pragmatic Focus & Speech Functions"],
    down:[], label:"institutional"},
   {re:/\b(doctor|nurse|medic|surgeon|therapist|carer|caregiver|teacher|social worker)\b/i,
-   up:["Caretaker","Precision & Specificity Level","Fawn (appease the threat)"], down:[], label:"caring profession"},
+   // "Fawn" was a stress RESPONSE inferred from an occupation — a nurse is not thereby
+   // an appeaser. The occupation shapes vocabulary and role; it does not get to assert
+   // a psychology. Same for the manual-trade rule below and crude manners.
+   up:["Caretaker","Precision & Specificity Level"], down:[], label:"caring profession"},
   {re:/\b(scholar|academic|scientist|researcher|professor|student|librarian|engineer)\b/i,
    up:["Intelligence — Sharp & Analytical","Skeptic","Precision & Specificity Level","Intellectual & Wordplay"],
    down:[], label:"analytical profession"},
   {re:/\b(priest|nun|cleric|preacher|monk|pastor|zealot|devout|cult)\w*\b/i,
    up:["Idealistic & Visionary","Register & Formality Spectrum","Loyalty-Bound"], down:[], label:"religious"},
   {re:/\b(farmer|labourer|laborer|dock|sailor|miner|builder|mechanic|driver|shop-?floor|trade)\w*\b/i,
-   up:["Directness & Literalness","Manners — Crude & Ill-Mannered","Activeness — Energetic & Active"],
+   up:["Directness & Literalness","Activeness — Energetic & Active"],
    down:["Stylized & Elaborate"], label:"manual trade"},
-  {re:/\b(grief|grieving|bereaved|widow|mourning|loss)\w*\b/i,
+  {re:/\b(grief|grieving|bereaved|widow|widower|mourning)\w*\b/i,
    up:["Positivity — Pessimistic & Cynical","Temporal Orientation & Tense Usage","Avoidant"], down:[], label:"grief"},
-  {re:/\b(noble|aristocrat|royal|court|heir|lord|lady|duke|baron)\w*\b/i,
+  {re:/\b(nobleman|noblewoman|nobility|aristocrat|royalty|royal court|courtier|heir|heiress|duke|duchess|baron|baroness|earl|viscount)\w*\b/i,
    up:["Manners — Polished & Courteous","Register & Formality Spectrum","Leader"],
    down:["Manners — Crude & Ill-Mannered"], label:"aristocratic"},
 ];
@@ -2382,10 +2479,31 @@ function _axisForCategory(cat){
   }
   return null;
 }
+/* Words that turn the phrase after them into a denial. Deliberately a short, local
+   window rather than a parser: the rule is "within the few words immediately before
+   the match", which covers "not a soldier", "never a thief", "no longer grieving" and
+   "hardly a noble" without pretending to understand the sentence. */
+const NEGATION_RE = /\b(not|never|no longer|isn'?t|wasn'?t|aren'?t|hardly|rather than|instead of|anything but|far from|no)\b[^.;,]{0,24}$/i;
+function isNegated(text, matchIndex){
+  return NEGATION_RE.test(text.slice(Math.max(0, matchIndex - 40), matchIndex));
+}
+/* Labels the user has switched off for this character. The bias was previously
+   unconditional and invisible; this is the "removable suggestion" half. */
+const CONTEXT_SUPPRESSED = new Set();
+function suppressContextTag(label){ CONTEXT_SUPPRESSED.add(label); }
+function unsuppressContextTag(label){ CONTEXT_SUPPRESSED.delete(label); }
+function clearContextSuppression(){ CONTEXT_SUPPRESSED.clear(); }
+function getSuppressedContextTags(){ return [...CONTEXT_SUPPRESSED]; }
+// Matches that were found but NOT applied, with the reason — so "why didn't it read
+// this as military?" has an answer on screen.
+let CONTEXT_REJECTED = [];
+function getRejectedContextTags(){ return CONTEXT_REJECTED.slice(); }
+
 function buildContextBias(contextText, ageText){
   CONTEXT_BIAS = new Map();
   CONTEXT_AXIS_NUDGE = {};
   CONTEXT_BIAS_NOTES = [];
+  CONTEXT_REJECTED = [];
   const push = (cat, factor, sign) => {
     const ax = _axisForCategory(cat);
     if (ax) CONTEXT_AXIS_NUDGE[ax.id] = (CONTEXT_AXIS_NUDGE[ax.id]||0) + ax.dir * sign * CONTEXT_NUDGE;
@@ -2397,12 +2515,28 @@ function buildContextBias(contextText, ageText){
     CONTEXT_BIAS_NOTES.push(rule.label);
   };
   const text = String(contextText || "");
-  if (text.trim()) CONTEXT_RULES.forEach(r=>{ if (r.re.test(text)) apply(r); });
+  /* A keyword match is not a claim. "not a soldier" applied the military bias, "court
+     reporter" made the character aristocratic, and "not grieving" applied grief —
+     these are ordinary descriptions, not malformed input, and the tool was quietly
+     steering the whole character off them. Two changes: a negation immediately before
+     the match suppresses it, and every surviving match is recorded as a tag the user
+     can see and switch off, rather than an invisible multiplier. */
+  if (text.trim()) CONTEXT_RULES.forEach(r=>{
+    const m = r.re.exec(text);
+    if (!m) return;
+    if (CONTEXT_SUPPRESSED.has(r.label)) return;
+    if (isNegated(text, m.index)) { CONTEXT_REJECTED.push({label: r.label, why: 'negated in the text'}); return; }
+    apply(r);
+  });
   const age = parseAgeHint(ageText);
   if (age !== null) AGE_RULES.forEach(r=>{
     if ((r.min === undefined || age >= r.min) && (r.max === undefined || age <= r.max)) apply(r);
   });
-  return {bias: CONTEXT_BIAS, nudge: CONTEXT_AXIS_NUDGE, notes: CONTEXT_BIAS_NOTES, age};
+  CONTEXT_SUPPRESSED.forEach(l=>{
+    if (CONTEXT_RULES.some(r=>r.label===l)) CONTEXT_REJECTED.push({label:l, why:'you turned this one off'});
+  });
+  return {bias: CONTEXT_BIAS, nudge: CONTEXT_AXIS_NUDGE, notes: CONTEXT_BIAS_NOTES,
+          rejected: CONTEXT_REJECTED.slice(), age};
 }
 /* A slot can legitimately hold trait:null — an exhausted pool, a banned-out category,
    or a save file written by an older build. Three separate crashes (axisProfile,
@@ -3156,7 +3290,7 @@ function pickProfileSlots(rarityPref, resolvedCats, onlySectionId, skipSectionId
         const otherCats = catsOf(ps.section).filter(c => c !== cat);
         if (otherCats.length){
           const altCat = pickCategoryWeighted(otherCats, null);
-          const altPool = byFilter(ps.section, altCat);
+          const altPool = altCat ? byFilter(ps.section, altCat) : [];
           const altTgt = clamp(target - 1.2, 1, 5);
           const alt = _drawUnique(()=>pickInRange(altPool, rarityPref, altTgt));
           if (alt) seat(`prof_${ps.id}_alt`, "Counterpoint — " + altCat, ps.id, altTgt, alt, {counterpoint:true});
@@ -3166,7 +3300,7 @@ function pickProfileSlots(rarityPref, resolvedCats, onlySectionId, skipSectionId
             const otherCats2 = otherCats.filter(c => c !== altCat);
             if (otherCats2.length){
               const altCat2 = pickCategoryWeighted(otherCats2, null);
-              const altPool2 = byFilter(ps.section, altCat2);
+              const altPool2 = altCat2 ? byFilter(ps.section, altCat2) : [];
               const altTgt2 = clamp(target - 1.8, 1, 5);
               const alt2 = _drawUnique(()=>pickInRange(altPool2, rarityPref, altTgt2));
               if (alt2) seat(`prof_${ps.id}_alt2`, "Counterpoint — " + altCat2, ps.id, altTgt2, alt2, {counterpoint:true});
@@ -3467,13 +3601,59 @@ function secondOrderTensions(st){
     .map(r=>({name:r.name, note:r.note}));
 }
 
+/* Evaluate a SAVED SHEET as a pure function of itself.
+   `coherenceScore(st)` reads like one — it takes the sheet as its only argument — but
+   it called accumulateBoost with no configuration, so every axis level came from
+   whatever the live sliders happened to say and the motivation cross-links came from
+   whatever build ran last. Moving a slider without regenerating took one sheet from
+   17% to 92%; a cast export scored six characters using the single-character tab's
+   settings. A diagnostic that changes when you touch an unrelated control is not
+   measuring the character.
+
+   This derives the evaluation context FROM the sheet: personality levels from its own
+   trait polarity, motivation cross-links from its own motivation traits, and no
+   archetype hint at all (an archetype is an input to generation, not a property of a
+   finished character). Pure in, pure out — the same sheet always scores the same. */
+function sheetOverrides(st){
+  const o = {};
+  const prof = (typeof axisProfile === 'function') ? axisProfile(st) : {};
+  PERSONALITY_AXES.forEach(a=>{
+    const code = AXIS_TO_POLCODE[a.id];
+    const v = code ? (prof[code] || 0) : 0;
+    // axisProfile is normalised to roughly -2..2; axisLevel wants raw -100..100.
+    o[a.id] = Math.round(clamp(v * 50, -100, 100));
+  });
+  VOICE_AXES.forEach(a=>{
+    const code = AXIS_TO_POLCODE[a.id];
+    o[a.id] = code ? Math.round(clamp((prof[code] || 0) * 50, -100, 100)) : 0;
+  });
+  return o;
+}
+function withSheetContext(st, fn){
+  const priorLinks = CURRENT_MOTIVATION_LINKS;
+  const priorArch = CURRENT_ARCHETYPE_PROFILE;
+  try {
+    const motivTraits = Object.keys(st)
+      .filter(k=>k.startsWith('prof_' + MOTIVATION_SECTION_ID + '_'))
+      .map(k=>st[k] && st[k].trait).filter(Boolean);
+    setMotivationLinks(motivTraits.length ? motivationCrosslinkMap(motivTraits) : null);
+    CURRENT_ARCHETYPE_PROFILE = null;
+    return fn(sheetOverrides(st));
+  } finally {
+    CURRENT_MOTIVATION_LINKS = priorLinks;
+    CURRENT_ARCHETYPE_PROFILE = priorArch;
+  }
+}
 function coherenceScore(st){
+  return withSheetContext(st, ov => _coherenceScoreInner(st, ov));
+}
+function _coherenceScoreInner(st, OV){
   const chosen = {};
   PROFILE_SECTIONS.forEach(ps=>{ const c = slotCat(st["prof_"+ps.id+"_0"]); if (c) chosen[ps.id] = c; });
   let reinforced = 0, total = 0;
   const kinds = {vocab:VOCAB_CATS, grammar:GRAMMAR_CATS, manner:MANNER_CATS};
   Object.entries(kinds).forEach(([kind, cats])=>{
-    const fragMap = accumulateBoost(kind, chosen);
+    const fragMap = accumulateBoost(kind, chosen, OV);
     const boostMap = resolveBoostMapForCats(cats, fragMap);
     const picked = Object.keys(st).filter(k=>{
       if (kind==='vocab') return k.startsWith('vocab');
@@ -3484,7 +3664,7 @@ function coherenceScore(st){
   });
   PROFILE_SECTIONS.forEach(ps=>{
     if (ps.drawAll || !chosen[ps.id]) return;
-    const fragMap = accumulateBoost(ps.id, {});
+    const fragMap = accumulateBoost(ps.id, {}, OV);
     const boostMap = resolveBoostMapForCats(catsOf(ps.section), fragMap);
     total++; if ((boostMap.get(chosen[ps.id])||0) > 0) reinforced++;
   });
@@ -3501,7 +3681,7 @@ function coherenceScore(st){
   // over that. Lift is what actually tells you something.
   let baseHits = 0, baseTotal = 0, baseVar = 0;
   Object.entries(kinds).forEach(([kind, cats])=>{
-    const boostMap = resolveBoostMapForCats(cats, accumulateBoost(kind, chosen));
+    const boostMap = resolveBoostMapForCats(cats, accumulateBoost(kind, chosen, OV));
     const boostedCount = cats.filter(c=>(boostMap.get(c)||0) > 0).length;
     const picksOfKind = Object.keys(st).filter(k=>{
       if (kind==='vocab') return k.startsWith('vocab');
@@ -3517,7 +3697,7 @@ function coherenceScore(st){
   PROFILE_SECTIONS.forEach(ps=>{
     if (ps.drawAll || !chosen[ps.id]) return;
     const cats = catsOf(ps.section);
-    const boostMap = resolveBoostMapForCats(cats, accumulateBoost(ps.id, {}));
+    const boostMap = resolveBoostMapForCats(cats, accumulateBoost(ps.id, {}, OV));
     const boostedCount = cats.filter(c=>(boostMap.get(c)||0) > 0).length;
     const p = cats.length ? boostedCount/cats.length : 0;
     baseHits += p;
@@ -3754,6 +3934,20 @@ const DEPTH_TO_PERSONALITY = {
 };
 function deriveDepthCategories(){
   // Resolve profile types with NO personality influence — pure roll / manual choice.
+  /* The uniqueness registry is build-scoped and was NOT reset here, so this draw
+     rejected whatever the PREVIOUS character had seated — the depth-first foundation
+     was a function of the last character generated, and the same seed therefore
+     planted different foundations on its second run. buildCharacterState resets it for
+     its own draws; this runs before that, so it has to do the same. */
+  _buildUsedIds = new Set();
+  /* The trait-level affinity vector is live only during a build and was left pointing
+     at the PREVIOUS character's posture — so this draw, which is meant to be untouched
+     by any slider, was in fact weighted by the last person generated. Depth-first's
+     whole premise is "decide who they are before deciding how they speak", and it was
+     quietly starting from whoever came before. Zero it, matching ZERO_PERSONALITY. */
+  const _priorAffinity = CURRENT_AFFINITY_VEC;
+  setAffinityVec(ZERO_PERSONALITY());
+  try {
   const chosen = {};
   /* Motivation & Wound resolves first here for the same reason it draws first in
      buildCharacterState: it is drawAll, so it needs nothing resolved, and going first is
@@ -3769,13 +3963,18 @@ function deriveDepthCategories(){
     const tog = document.getElementById('sec_'+ps.id);
     if (tog && !tog.checked) return;
     const sel = document.getElementById('type_'+ps.id);
-    if (sel && sel.value) { chosen[ps.id] = sel.value; return; }
+    // A value depth-first itself wrote on a PREVIOUS run is not a user choice. Without
+    // this the second run treated the first run's automatic pick as a fixed manual
+    // selection, and every later exploration froze a little more of the character in
+    // place with nothing on screen saying so.
+    if (sel && sel.value && !AUTO_PROFILE_TYPES.has(ps.id)) { chosen[ps.id] = sel.value; return; }
     const cats = catsOf(ps.section);
     // biased only by already-chosen deep facts, never by sliders
     const boostMap = resolveBoostMapForCats(cats, accumulateBoost(ps.id, chosen, ZERO_PERSONALITY()));
     chosen[ps.id] = pickCategoryWeighted(cats, boostMap);
   });
   return chosen;
+  } finally { CURRENT_AFFINITY_VEC = _priorAffinity; }
 }
 function ZERO_PERSONALITY(){
   const o={};
@@ -3837,27 +4036,64 @@ function personalityFromDepth(chosen){
     } else {
       // No profile category implies this axis. Previously this returned 0, which
       // silently WIPED whatever the user had deliberately set on axes the depth
-      // map doesn't cover (Manners, Activeness, Curiosity). Preserve their value
-      // instead — depth-first should derive what it can and leave the rest alone.
-      const el = document.getElementById('pers_'+a.id);
-      out[a.id] = intVal(el, 0);
+      /* map doesn't cover (Manners, Activeness, Curiosity). Preserve their value
+         instead — depth-first should derive what it can and leave the rest alone.
+
+         "Their value" means the USER's value. A value a previous depth-first run
+         wrote is not one: reading it back made each run a function of the last one,
+         so the same seed derived different sliders the second time and the character
+         it built was not the character its own seed named. Same provenance rule as
+         AUTO_PROFILE_TYPES. */
+      /* An axis the depth map does not cover (Manners, Activeness, Curiosity) sits
+         NEUTRAL rather than keeping whatever the slider says.
+
+         Copying the control back looked kinder and was the last source of replay
+         drift: which axes the map covers shifts with the motivation draw, so an axis
+         derived on one run and copied on the next picked up the earlier run's own
+         derived number as though it were a user preference, and the same seed built a
+         different person each time it was pressed. It also contradicted the mode's
+         premise — depth-first resolves the profile with ZERO_PERSONALITY precisely so
+         that no slider leaks in, and then let three of them leak in here.
+
+         These axes are named in the "left alone" notice (lastDepthUntouched), so the
+         user is told which ones depth-first could not derive rather than being given a
+         number that looks derived and is not. */
+      out[a.id] = 0;
       out['__untouched_'+a.id] = true;
     }
   });
   return out;
 }
+/* Which profile-type dropdowns hold a value the app wrote rather than one the user
+   picked. Kept beside the DOM rather than in it because the control itself cannot
+   express the difference, and the difference is exactly what depth-first needs to know
+   on its next run. Cleared whenever the user touches the control (see app.js). */
+const AUTO_PROFILE_TYPES = new Set();
+/* (There is no equivalent set for the personality sliders. Depth-first used to read
+   them back for the axes it could not derive, which is what made each run a function
+   of the last; those axes now sit neutral instead — see personalityFromDepth.) */
+function markAutoProfileType(id){ AUTO_PROFILE_TYPES.add(id); }
+function clearAutoProfileType(id){ AUTO_PROFILE_TYPES.delete(id); }
+function isAutoProfileType(id){ return AUTO_PROFILE_TYPES.has(id); }
+
 function applyDepthFirst(){
   const chosen = deriveDepthCategories();
   const derived = personalityFromDepth(chosen);
   lastDepthUntouched = PERSONALITY_AXES.filter(a=>derived['__untouched_'+a.id]).map(a=>a.label);
   PERSONALITY_AXES.forEach(a=>{
     const el = document.getElementById('pers_'+a.id);
-    if (el) el.value = derived[a.id];
+    if (!el) return;
+    el.value = derived[a.id];
   });
-  // lock the resolved types into the dropdowns so the main build honours them
+  // Write the resolved types into the dropdowns so the main build honours them — and
+  // record that WE wrote them, so the next depth-first run can tell its own previous
+  // guesses apart from the user's deliberate choices.
   Object.entries(chosen).forEach(([id,cat])=>{
     const sel = document.getElementById('type_'+id);
-    if (sel && [...sel.options].some(o=>o.value===cat)) sel.value = cat;
+    if (sel && cat && [...sel.options].some(o=>o.value===cat)){
+      if (sel.value !== cat || isAutoProfileType(id)) markAutoProfileType(id);
+      sel.value = cat;
+    }
   });
   onSliderChange();
   suggestVoiceFromPersonality();
@@ -3942,13 +4178,60 @@ function generateFromSeed(){
   // so this path cannot use the deferred/skeleton wrapper.
   if (runGeneration() === false) return;
 
-  // 4. Force the exact seed trait into its slot and lock it.
-  if (ps){
-    const slotId = "prof_"+ps.id+"_0";
-    if (state[slotId]){ state[slotId].trait = seed; state[slotId].locked = true; }
-  } else if (seed.section === "Personality Traits"){
-    const axis = PERSONALITY_AXES.find(a=>a.pos===seed.category || a.neg===seed.category);
-    if (axis && state["pers_"+axis.id]){ state["pers_"+axis.id].trait = seed; state["pers_"+axis.id].locked = true; }
+  /* 4. Force the exact seed trait into the slot that SEMANTICALLY holds it, and lock it.
+     This used to search only the positive/negative axis categories and to hard-code
+     `prof_<section>_0`, so two whole families of seed failed silently:
+
+       - a Situational personality trait (the middle pole of an axis) matched no
+         category in the search and was neither seated nor locked — the build simply
+         ignored the seed the user had chosen;
+       - Motivation & Wound is drawAll, with ONE SLOT PER CATEGORY, so every motivation
+         seed was written into `prof_motivation_0` regardless of which facet it belongs
+         to. Seeding from a Ghost replaced the Core Want slot and left it labelled
+         "Core Want", so the sheet stated a fact about a category the trait is not in.
+
+     Resolve by category, over the slots the build actually produced. */
+  const seatSeed = () => {
+    // The slot already holding this trait's own category is always the right home.
+    const byCategory = Object.keys(state).find(id =>
+      state[id] && state[id].trait && state[id].trait.category === seed.category);
+    if (byCategory) return byCategory;
+    if (ps){
+      // Same section, any of its slots — take the first that exists, which for a
+      // single-slot section is its only slot.
+      const inSection = Object.keys(state).filter(id => id.startsWith("prof_"+ps.id+"_"));
+      if (inSection.length) return inSection[0];
+    }
+    if (seed.section === "Personality Traits"){
+      const axis = PERSONALITY_AXES.find(a=>a.pos===seed.category || a.neg===seed.category || a.mid===seed.category);
+      if (axis && state["pers_"+axis.id]) return "pers_"+axis.id;
+    }
+    return null;
+  };
+  const slotId = seatSeed();
+  if (slotId){
+    // Never leave the seed on the sheet twice: if the build already drew it elsewhere,
+    // that other seat gives it up.
+    Object.keys(state).forEach(id=>{
+      if (id !== slotId && state[id] && state[id].trait && state[id].trait.id === seed.id) state[id].trait = null;
+    });
+    state[slotId].trait = seed;
+    state[slotId].locked = true;
+    state[slotId].seeded = true;
+    /* The label named the category the slot USED to hold, which is how a Ghost seed
+       ended up on a card still headed "Core Want". Retarget it — but leave a label
+       that already names this category alone, rather than printing it twice. */
+    const label = state[slotId].label ? String(state[slotId].label) : "";
+    if (seed.category && !label.includes(seed.category)){
+      state[slotId].label = /—/.test(label)
+        ? label.replace(/—.*$/, "— " + seed.category).trim()
+        : (label ? label + " — " + seed.category : seed.category);
+    }
+    // Downstream state has to agree with the seat: re-run the shared finalizer so
+    // requirements, exclusivity and budgets solve against the seeded sheet.
+    try { state = finalizeSheet(state, {rarityPref: rarityPrefVal(), applyPins:false}); } catch(e){ console.error(e); }
+  } else {
+    toast(`"${seed.trait}" could not be placed — its section produced no slot in this build. Switch that section on and try again.`, "warn", 7000);
   }
   renderSheet(); checkConflicts();
 }
@@ -4006,14 +4289,32 @@ function restoreSliders(s){
    the way a naive id-only store would. */
 /* Bumped when the on-disk shape of a save changes in a way a reader must know about.
    Absent = a pre-compression save with full trait objects embedded, which still loads. */
-const SAVE_FORMAT = 2;
+/* Format 3 adds the tombstone (`__fb`) described below. A format-2 save reads back
+   identically except that an id deleted from the bank since is still lost — there is
+   nothing in the file to recover it from. */
+const SAVE_FORMAT = 3;
+/* Compressing a slot to `{__id}` assumed the bank is permanent. It is not: delete or
+   renumber a trait and every save referencing it expanded to `trait:null`, and because
+   the orphan counter only sees surviving trait objects, the loss was silent — the card
+   simply vanished from a character the user had saved months earlier. Old full-object
+   saves never had this problem, so compression was a regression in durability.
+   Carry a compact tombstone (the five fields the card and the validator actually read)
+   beside the id. ~120 bytes a slot against ~480 for a full trait copy, so the size win
+   that motivated compression is kept while a removed id degrades to an orphan with its
+   text intact instead of to nothing. */
+const TOMBSTONE_FIELDS = ['id','section','category','trait','desc','example','intensity','rarity'];
+function traitTombstone(t){
+  const fb = {};
+  TOMBSTONE_FIELDS.forEach(f=>{ if (t[f] !== undefined) fb[f] = t[f]; });
+  return fb;
+}
 function compressSlots(st){
   if (!st) return st;
   const out = {};
   Object.entries(st).forEach(([k, slot])=>{
     if (!slot){ out[k] = slot; return; }
     const copy = {...slot};
-    if (copy.trait && TRAITS_BY_ID.has(copy.trait.id)) copy.trait = {__id: copy.trait.id};
+    if (copy.trait && TRAITS_BY_ID.has(copy.trait.id)) copy.trait = {__id: copy.trait.id, __fb: traitTombstone(copy.trait)};
     else if (copy.trait) copy.trait = JSON.parse(JSON.stringify(copy.trait));
     out[k] = copy;
   });
@@ -4025,7 +4326,14 @@ function expandSlots(st){
   Object.entries(st).forEach(([k, slot])=>{
     if (!slot){ out[k] = slot; return; }
     const copy = {...slot};
-    if (copy.trait && copy.trait.__id !== undefined) copy.trait = TRAITS_BY_ID.get(copy.trait.__id) || null;
+    if (copy.trait && copy.trait.__id !== undefined){
+      const live = TRAITS_BY_ID.get(copy.trait.__id);
+      // No live trait and no tombstone (a format-2 save) is the one case that still
+      // cannot be recovered; mark it rather than dropping the slot silently.
+      copy.trait = live
+        || (copy.trait.__fb ? Object.assign({removed:true}, copy.trait.__fb) : null);
+      if (!live && !copy.trait) copy.removedTraitId = slot.trait.__id;
+    }
     out[k] = copy;
   });
   return out;
@@ -4035,12 +4343,23 @@ function expandSlots(st){
    direction; all that was missing was a second stack and the discipline of clearing it
    when a NEW action forks the timeline. Undo depth is 15, so redo matches it. */
 let redoStack = [];
+/* A snapshot used to hold sheets, meta, pressure and sliders only — so Undo after an
+   import left the OLD character's traits sitting under the NEW character's pins,
+   notes, presentation variants, constraints and budgets. One function now defines the
+   whole undoable transaction, and both stacks and every restore go through it, so a
+   field can never be added to the workspace and forgotten by Undo again.
+   `captureSettings`/`restoreSettings` live in render.js and read the DOM; under the
+   test harness they may be absent, hence the typeof guards. */
 function _snapshotNow(){
   return {
     state: compressSlots(state),
     charMeta: {...charMeta},
     pressureState: compressSlots(pressureState),
-    sliders: lastGeneratedSliders || captureSliders()
+    sliders: lastGeneratedSliders || captureSliders(),
+    pinnedTargets: JSON.parse(JSON.stringify(pinnedTargets || {})),
+    charVariants: Object.assign({}, (typeof charVariants !== 'undefined' ? charVariants : {})),
+    traitNotes: Object.assign({}, traitNotes || {}),
+    settings: (typeof captureSettings === 'function') ? captureSettings() : null,
   };
 }
 function updateUndoButtons(){
@@ -4050,14 +4369,7 @@ function updateUndoButtons(){
 function snapshotHistory(){
   // A fresh action invalidates anything that was ahead of us on the timeline.
   redoStack = [];
-  history.push({
-    state: compressSlots(state),
-    charMeta: {...charMeta},
-    pressureState: compressSlots(pressureState),
-    // Fall back to live DOM only for the very first snapshot ever taken, when there's
-    // no prior generation to have recorded sliders for.
-    sliders: lastGeneratedSliders || captureSliders()
-  });
+  history.push(_snapshotNow());
   if (history.length > 15) history.shift();
   updateUndoButtons();
 }
@@ -4066,6 +4378,12 @@ function snapshotHistory(){
 function _restoreSnapshot(prev){
   state = expandSlots(prev.state); charMeta = prev.charMeta;
   pressureState = expandSlots(prev.pressureState) || null;
+  // Restore the workspace BEFORE the sliders: restoreSettings writes slider values too,
+  // and the snapshot's own slider block is the authoritative one for this sheet.
+  if (prev.settings && typeof restoreSettings === 'function') restoreSettings(prev.settings);
+  if (prev.pinnedTargets) pinnedTargets = JSON.parse(JSON.stringify(prev.pinnedTargets));
+  if (prev.charVariants && typeof charVariants !== 'undefined') charVariants = Object.assign({}, prev.charVariants);
+  if (prev.traitNotes) traitNotes = Object.assign({}, prev.traitNotes);
   restoreSliders(prev.sliders);
   lastGeneratedSliders = prev.sliders; // the restored state now corresponds to these again
   setVal('charName', charMeta.name || "");
@@ -4207,6 +4525,8 @@ function pickVocabSlots(archetypePref, verbLevel, regLevel, rarityPref, count, p
   while (chosenCats.length < targetCount && attempts < 200){
     attempts++;
     const c = pickCategoryWeighted(pool, boosted);
+    // Every category in this pool is banned out: stop rather than spin 200 times.
+    if (!c) break;
     if (!usedCats.has(c)) { usedCats.add(c); chosenCats.push(c); }
     else if (usedCats.size >= pool.length) { chosenCats.push(c); }
   }
@@ -4218,6 +4538,7 @@ function pickVocabSlots(archetypePref, verbLevel, regLevel, rarityPref, count, p
 function pickGrammarSlot(verbLevel, compLevel, regLevel, rarityPref, profileCats, overrides){
   const boosted = boostedGrammarCats(verbLevel, compLevel, regLevel, profileCats, overrides);
   const c = pickCategoryWeighted(GRAMMAR_CATS, boosted);
+  if (!c) return emptySlot("grammar", "Dialogue Grammar", {});
   const r = pickFromCategoryIntensityAware("Dialogue Grammar Traits", c, boosted, rarityPref);
   return mkSlot("grammar", "Dialogue Grammar — "+c, r.target, r.trait, {steered:r.steered});
 }
@@ -4237,6 +4558,7 @@ function pickMannerSlots(count, compLevel, regLevel, rarityPref, forcePool, prof
   while (chosenCats.length < count && attempts < 200){
     attempts++;
     const c = pickCategoryWeighted(cats, boosted);
+    if (!c) break;
     if (!usedCats.has(c)) { usedCats.add(c); chosenCats.push(c); }
     else if (usedCats.size >= cats.length) { chosenCats.push(c); }
   }
@@ -4478,6 +4800,13 @@ function buildCharacterState(opts){
   setMotivationLinks(null);
   // One resolved read each per build rather than one per draw.
   invalidateSliderCache();
+  /* A replay must not depend on what this session generated earlier. Both repetition
+     memories take PREVIOUS characters as an input, and the "avoid recent traits"
+     toggle ships ON — so the seed field's own promise ("same seed + same settings =
+     the same character") was false by default for every user who never opened the
+     Advanced panel. A replay (an explicit seed in the box) runs the same code against
+     an empty history — see withReplayMode — so the toggle keeps its meaning and the
+     penalties simply have nothing to find. */
   _avoidRecentActive = avoidRecentEnabled();
   const {verbLevel, regLevel, compLevel, mannerCount, rarityPref, vocabPref, personalityOverrides, vocabCount, forcedProfileCats} = opts;
   // Fold the ACTUAL verb/reg/comp levels this build is using into the override map,
@@ -4699,6 +5028,7 @@ function buildStressVariant(baseVerbLevel, baseRegLevel, mannerCount, rarityPref
     const cats = catsOf(ps.section);
     const boostMap = resolveBoostMapForCats(cats, accumulateBoost(id, seed, stressOverrides));
     const cat = pickCategoryWeighted(cats, boostMap);
+    if (!cat) return;                           // every category here is banned out
     const tgt = clamp(profileTarget(id) + 0.6 * p, 1, 5);   // pressure reads louder than baseline
     const trait = pickInRange(byFilter(ps.section, cat), rarityPref, tgt, 4);
     if (!trait) return;
@@ -4759,7 +5089,84 @@ function refreshConstraintChips(){
     const a = byId.get(pair[0]), b = byId.get(pair[1]);
     if (a && b) h += `<span class="chip chip-tier">never together: ${escHTML(a.trait)} / ${escHTML(b.trait)} <b ${actAttr('click', 'removeExclusivePair', i)} title="Remove">&times;</b></span>`;
   });
+  /* Favourites are bookmarks, not rules — listed separately and labelled so the split
+     introduced on the card (★ saves, 📌 requires) is legible here too, with a
+     one-press promotion for a saved trait you have decided you always want. */
+  if (typeof getFavouriteTraitIds === 'function'){
+    getFavouriteTraitIds().forEach(id=>{
+      const t = byId.get(id);
+      if (!t) return;
+      h += `<span class="chip chip-fav">saved: ${escHTML(t.trait)}`
+         + ` <b ${actAttr('click', 'requireTrait', id)} title="Require this on every character">&#128204;</b>`
+         + ` <b ${actAttr('click', 'favouriteTrait', id)} title="Remove from saved">&times;</b></span>`;
+    });
+  }
   box.innerHTML = h || '<span class="sub" style="margin:0;">No constraints active.</span>';
+  renderRuleConflicts();
+  refreshActiveRuleStrip();
+}
+
+/* Contradictions between hard constraints, said out loud BEFORE a generation rather
+   than arbitrated silently during one — see detectConstraintConflicts. */
+function renderRuleConflicts(){
+  const box = document.getElementById('constraintConflicts');
+  if (!box) return;
+  let conflicts = [];
+  try { conflicts = detectConstraintConflicts(); } catch(e){ return; }
+  if (!conflicts.length){ box.style.display = 'none'; box.innerHTML = ''; return; }
+  box.style.display = 'block';
+  box.innerHTML = `<div class="ruleConflictTitle">These rules contradict each other</div>`
+    + conflicts.map(c=>`<div class="ruleConflictItem">${escHTML(c.message)}</div>`).join('');
+}
+
+/* THE ACTIVE-RULES STRIP.
+   Quick mode hides the Advanced panel, but not its effects: bans, requirements, an
+   archetype, budgets, manual profile types and history-aware exploration all keep
+   steering the build from behind a closed disclosure. A user in Quick mode could not
+   see why their characters had stopped varying. One line, always visible, naming every
+   rule currently in force. */
+function activeRuleChips(){
+  const out = [];
+  const n = (k, v) => out.push({k, v});
+  if (bannedSections.size) n('banned sections', bannedSections.size);
+  if (bannedCategories.size) n('banned categories', bannedCategories.size);
+  if (bannedTraitIds.size) n('banned traits', bannedTraitIds.size);
+  if (requiredTraitIds.length) n('always include', requiredTraitIds.length);
+  if (requiredCategories.length) n('at least one from', requiredCategories.length);
+  if (exclusivePairs.length) n('never together', exclusivePairs.length);
+  if (categoryTiers.size) n('weighted categories', categoryTiers.size);
+  const arch = (document.getElementById('archetypeSelect')||{}).value;
+  if (arch) n('archetype', arch);
+  if (typeof budgetsActive === 'function' && budgetsActive()){
+    const caps = RTIER_ORDER.filter(t=>rarityCaps[t] != null).length
+               + BUDGET_GROUPS.filter(g=>intensityCaps[g.id] != null).length;
+    n('budgets', caps + ' cap' + (caps===1?'':'s'));
+  }
+  const manual = (typeof PROFILE_SECTIONS !== 'undefined' ? PROFILE_SECTIONS : []).filter(ps=>{
+    const sel = document.getElementById('type_'+ps.id);
+    return sel && sel.value && !(typeof isAutoProfileType === 'function' && isAutoProfileType(ps.id));
+  }).length;
+  if (manual) n('fixed profile types', manual);
+  const off = (typeof PROFILE_SECTIONS !== 'undefined' ? PROFILE_SECTIONS : []).filter(ps=>{
+    const tog = document.getElementById('sec_'+ps.id);
+    return tog && !tog.checked;
+  }).length;
+  if (off) n('sections off', off);
+  const seedEl = document.getElementById('seedInput');
+  if (seedEl && seedEl.value.trim()) n('replaying seed', seedEl.value.trim());
+  else if (divergenceLevel() > 0) n('history-aware exploration', 'on');
+  if (typeof getSuppressedContextTags === 'function' && getSuppressedContextTags().length)
+    n('context readings off', getSuppressedContextTags().length);
+  return out;
+}
+function refreshActiveRuleStrip(){
+  const el = document.getElementById('activeRules');
+  if (!el) return;
+  const chips = activeRuleChips();
+  if (!chips.length){ el.style.display = 'none'; el.innerHTML = ''; return; }
+  el.style.display = 'flex';
+  el.innerHTML = `<span class="ruleStripLabel">In force:</span>`
+    + chips.map(c=>`<span class="ruleChip">${escHTML(c.k)} <b>${escHTML(String(c.v))}</b></span>`).join('');
 }
 function addCategoryBan(){
   const sel = document.getElementById('banCategorySelect');
@@ -4875,12 +5282,64 @@ function populateBanCategorySelect(){
 // After a build, force-insert every required trait as a locked slot. Required
 // beats banned if the user sets both on the same trait — an explicit "always"
 // is the stronger, more deliberate statement.
+/* Contradictions between hard constraints, found BEFORE anything is seated. Two
+   required traits declared mutually exclusive used to be resolved silently by
+   applyExclusivePairs replacing one of them — the sheet then showed a slot still
+   labelled "Required" whose trait was not the required one. An impossible pair of
+   instructions is not the solver's to arbitrate; it is the user's to resolve, so it is
+   reported instead. */
+let lastConstraintConflicts = [];
+function getConstraintConflicts(){ return lastConstraintConflicts; }
+function detectConstraintConflicts(){
+  const out = [];
+  const req = new Set(requiredTraitIds);
+  exclusivePairs.forEach(([a,b])=>{
+    if (req.has(a) && req.has(b)){
+      const ta = TRAITS_BY_ID.get(a), tb = TRAITS_BY_ID.get(b);
+      out.push({kind:'required-vs-exclusive', ids:[a,b],
+        message: `You require both "${ta?ta.trait:a}" and "${tb?tb.trait:b}", but marked them never together. Drop one of the two rules.`});
+    }
+  });
+  requiredTraitIds.forEach(id=>{
+    const t = TRAITS_BY_ID.get(id);
+    if (!t) return;
+    if (bannedCategories.has(t.category) || bannedSections.has(t.section)){
+      out.push({kind:'required-vs-ban', ids:[id],
+        message: `"${t.trait}" is required, but its ${bannedSections.has(t.section) ? 'section' : 'category'} is banned. Required wins, so the ban does nothing for this trait.`});
+    }
+  });
+  requiredCategories.forEach(cat=>{
+    const section = SECTION_OF_CATEGORY.get(cat);
+    if (section && byFilter(section, cat).length === 0){
+      out.push({kind:'required-category-empty', cats:[cat],
+        message: `"At least one from ${cat}" cannot be met — nothing in that category is currently drawable.`});
+    }
+  });
+  lastConstraintConflicts = out;
+  return out;
+}
+
 function applyRequiredTraits(obj){
   // PERF: this rebuilt a 7,073-entry Map on every single generation, and TRAITS_BY_ID
   // has existed the whole time. Same for the linear TRAITS.find below.
+  detectConstraintConflicts();
+  /* A required trait the build ALREADY drew used to be appended a second time under a
+     req_ slot, so the sheet carried it twice and every uniqueness check downstream was
+     working against a sheet that had already broken the invariant. Mark the seat that
+     exists instead; only genuinely missing requirements cost a new slot. */
+  const seatedBy = new Map();
+  Object.entries(obj).forEach(([k, sl])=>{ if (sl && sl.trait) seatedBy.set(sl.trait.id, k); });
   requiredTraitIds.forEach((id,i)=>{
     const t = TRAITS_BY_ID.get(id); if (!t) return;
+    const already = seatedBy.get(id);
+    if (already !== undefined && !already.startsWith('req_')){
+      obj[already] = Object.assign({}, obj[already], {locked:true, required:true,
+        requiredSatisfiedInPlace:true});
+      return;
+    }
+    if (already !== undefined) return;          // already seated as a req_ slot
     obj['req_'+i] = {slotId:'req_'+i, locked:true, required:true, label:'Required — '+t.category, trait:t};
+    seatedBy.set(id, 'req_'+i);
   });
   // "At least one from this category": satisfied silently when the build already
   // landed there, and topped up with a normally-weighted draw when it didn't — so
@@ -4944,6 +5403,9 @@ function clearBudgets(){
 function getBudgetMode(){ return budgetMode; }
 function setBudgetMode(m){ budgetMode = m; }
 function getBudgetReport(){ return lastBudgetReport; }
+// Needed by the speculative wrappers: a discarded batch must put back the report that
+// describes the sheet the user is actually looking at.
+function setBudgetReport(r){ lastBudgetReport = r; }
 // Same reason: rollCharacterVariants and the import path both reassign charVariants.
 function getCharVariants(){ return charVariants; }
 function budgetsActive(){
@@ -4951,9 +5413,34 @@ function budgetsActive(){
       || BUDGET_GROUPS.some(g => intensityCaps[g.id] != null);
 }
 
+/* Shared by every post-draw pass that replaces a trait. Each of them used to pick a
+   replacement against one rule and no awareness of the rest of the sheet, which is how
+   a fixed-seed budget probe could finish with the SAME trait in two slots. */
+function seatedIdSet(obj, exceptId){
+  const seen = new Set();
+  Object.keys(obj).forEach(k=>{
+    if (k === exceptId) return;
+    if (obj[k] && obj[k].trait) seen.add(obj[k].trait.id);
+  });
+  return seen;
+}
+// Would seating `id` break an exclusive pair against what is already on the sheet?
+function excludedByPairs(id, seated){
+  return exclusivePairs.some(([a,b]) => (a === id && seated.has(b)) || (b === id && seated.has(a)));
+}
+
 /* Runs after applyPinnedTargets and BEFORE applyRequiredTraits, so an explicit
    "always include this trait" can never be evicted by a budget: a constraint the user
-   stated by name outranks a quantity they stated in the abstract. */
+   stated by name outranks a quantity they stated in the abstract.
+
+   REWRITTEN for the interaction bugs. The rarity and intensity passes used to run
+   independently: a rarity redraw could return a tier a previous cap had already
+   emptied, an intensity redraw ignored the rarity caps entirely, and neither pool
+   excluded ids already seated elsewhere — so a sheet could come out of budgeting with
+   a duplicate trait. Both passes now draw against ONE eligibility predicate covering
+   every active hard constraint plus a live seated-id set, and the report is rebuilt
+   from the finished sheet at the end rather than accumulated from intermediate counts,
+   so an unmet cap is always the truth about what the user is looking at. */
 function applyBudgets(obj, rarityPref){
   const report = {rarity:{}, intensity:{}, actions:[], active: budgetsActive()};
   lastBudgetReport = report;
@@ -4966,6 +5453,28 @@ function applyBudgets(obj, rarityPref){
   const mutable = id => obj[id] && obj[id].trait && !obj[id].locked
                      && !obj[id].required && pinnedTargets[id] === undefined;
   const withTrait = () => Object.keys(obj).filter(id => obj[id] && obj[id].trait);
+  /* The one eligibility predicate. `extra` is the pass-specific requirement (leave the
+     capped tier / be quieter than what is there now); everything else is the standing
+     set of hard rules that any replacement anywhere has to satisfy. */
+  const capOf = tier => rarityCaps[tier];
+  const countTier = (tier, exceptId) => withTrait()
+    .filter(id => id !== exceptId && rarityTier(obj[id].trait) === tier).length;
+  const eligible = (slotId, extra) => {
+    const seated = seatedIdSet(obj, slotId);
+    const slot = obj[slotId];
+    return t => {
+      if (seated.has(t.id)) return false;                       // never seat a duplicate
+      if (excludedByPairs(t.id, seated)) return false;          // never break an exclusive pair
+      if (bannedTraitIds.has(t.id)) return false;
+      const tier = rarityTier(t);
+      const cap = capOf(tier);
+      // Moving INTO a tier is only allowed if that tier has room once this slot leaves
+      // whatever tier it is in now. This is the check whose absence let a later pass
+      // undo an earlier one.
+      if (cap != null && countTier(tier, slotId) >= cap) return false;
+      return !extra || extra(t, slot);
+    };
+  };
 
   // ---- Rarity caps -------------------------------------------------------
   RTIER_ORDER.forEach(tier=>{
@@ -4987,7 +5496,8 @@ function applyBudgets(obj, rarityPref){
       const slot = obj[id];
       if (budgetMode === 'warn') break;
       // Redraw within the same category at the same target, excluding the capped tier.
-      const pool = byFilter(slot.trait.section, slot.trait.category).filter(t => rarityTier(t) !== tier);
+      const pool = byFilter(slot.trait.section, slot.trait.category)
+        .filter(eligible(id, t => rarityTier(t) !== tier));
       const repl = pool.length ? pickInRange(pool, rarityPref, slot.target, 3) : null;
       if (repl){
         obj[id] = Object.assign({}, slot, {trait: repl, budgeted: 'rarity',
@@ -5025,7 +5535,7 @@ function applyBudgets(obj, rarityPref){
       const slot = obj[id];
       const want = Math.max(1, slot.trait.intensity - 1);
       const pool = byFilter(slot.trait.section, slot.trait.category)
-        .filter(t => t.intensity < slot.trait.intensity);
+        .filter(eligible(id, t => t.intensity < slot.trait.intensity));
       const repl = pool.length ? pickInRange(pool, rarityPref, want, 3) : null;
       if (!repl){
         if (budgetMode === 'drop'){
@@ -5040,10 +5550,47 @@ function applyBudgets(obj, rarityPref){
       report.actions.push({id, why:`${g.label} budget`, from: slot.trait.trait, to: repl.trait});
     }
     report.intensity[g.id].total = total();
-    if (report.intensity[g.id].total > cap) report.intensity[g.id].unmet = true;
   });
 
+  /* FINAL, INDEPENDENT PASS. Everything above is the solver; this is the auditor, and
+     it does not trust a single number the solver produced. It reads the finished sheet
+     — after every redraw, drop and locked-slot interaction — and rewrites the report
+     from it. A cap that a locked or required trait keeps unmet is reported as unmet,
+     which is exactly the case the old accumulate-as-you-go report got wrong. */
+  auditBudgets(obj, report);
   return obj;
+}
+
+/* Reads a committed sheet and states what is actually true of it. Used by applyBudgets
+   as its report, and by finalizeSheet as an assertion over every generation path. */
+function auditBudgets(obj, report){
+  const ids = Object.keys(obj).filter(id => obj[id] && obj[id].trait);
+  RTIER_ORDER.forEach(tier=>{
+    const cap = rarityCaps[tier];
+    if (cap == null) return;
+    const count = ids.filter(id => rarityTier(obj[id].trait) === tier).length;
+    const row = report.rarity[tier] = report.rarity[tier] || {};
+    row.count = count; row.cap = cap;
+    if (count > cap) row.unmet = count - cap; else delete row.unmet;
+  });
+  BUDGET_GROUPS.forEach(g=>{
+    const cap = intensityCaps[g.id];
+    if (cap == null) return;
+    const total = ids.filter(g.match).reduce((sum,id)=> sum + (obj[id].trait.intensity || 0), 0);
+    const row = report.intensity[g.id] = report.intensity[g.id] || {label: g.label};
+    row.total = total; row.cap = cap;
+    if (total > cap) row.unmet = true; else delete row.unmet;
+  });
+  // Duplicates are never acceptable, budgets or not. Reported rather than thrown: the
+  // sheet in front of the user is still usable, and a silent one was the actual bug.
+  const seen = new Map(), dupes = [];
+  ids.forEach(id=>{
+    const tid = obj[id].trait.id;
+    if (seen.has(tid)) dupes.push({id, other: seen.get(tid), trait: obj[id].trait.trait});
+    else seen.set(tid, id);
+  });
+  report.duplicates = dupes;
+  return report;
 }
 
 /* The "of N possible" figures beside each budget control, so a number the user types
@@ -5080,6 +5627,48 @@ function applyBudgetPreset(key){
   return true;
 }
 
+/* ================= THE ONE FINALIZER =================
+   Single generation, batch candidates, the cast, the foil and the gap-filler all
+   produced a raw buildCharacterState and then applied DIFFERENT subsets of the
+   post-draw rules in different orders. A cast with a named required trait and every
+   rarity cap at zero came out with neither honoured; a reroll or a pin nudge left a
+   budget-compliant sheet without the meter noticing; and the single-character path
+   merged locked slots back in only AFTER budgets, exclusivity and the whole pressure
+   sheet had been derived from a sheet the user was never shown.
+
+   Everything now goes through here, in one stated order:
+
+     1. protected intent is seated first (locked slots carried from the outgoing sheet),
+        so every later stage solves against what the user actually kept;
+     2. pins redraw within their own category toward the pinned target;
+     3. budgets constrain the mutable remainder, counting the protected slots;
+     4. named requirements go in last among the seating passes, so a quantity can never
+        evict a trait the user asked for by name;
+     5. exclusivity resolves whatever the above put next to each other;
+     6. an independent audit re-derives the report FROM THE COMMITTED SHEET.
+
+   `opts.carryLocked` is the previous sheet whose locked slots survive this build.
+   `opts.applyBudgets === false` opts a path out of budgets explicitly — the point is
+   that opting out is now a stated decision rather than an omission. */
+function finalizeSheet(obj, opts){
+  opts = opts || {};
+  const rarityPref = (opts.rarityPref === undefined) ? 0 : opts.rarityPref;
+  if (opts.carryLocked){
+    Object.keys(opts.carryLocked).forEach(id=>{
+      const old = opts.carryLocked[id];
+      if (old && old.locked && obj[id] !== undefined) obj[id] = old;
+    });
+  }
+  if (opts.applyPins !== false && typeof applyPinnedTargets === 'function') applyPinnedTargets(obj, rarityPref);
+  if (opts.applyBudgets !== false) applyBudgets(obj, rarityPref);
+  applyRequiredTraits(obj);
+  applyExclusivePairs(obj, rarityPref);
+  const report = lastBudgetReport || {rarity:{}, intensity:{}, actions:[], active: budgetsActive()};
+  auditBudgets(obj, report);
+  lastBudgetReport = report;
+  return obj;
+}
+
 // Mutually exclusive pairs, enforced after the build rather than inside byFilter: the
 // conflict only exists once both are actually seated, and resolving it here means the
 // loser's slot gets a genuine replacement draw from its own pool instead of the slot
@@ -5095,10 +5684,20 @@ function applyExclusivePairs(obj, rarityPref){
     const seatedA = slots.find(k=>obj[k].trait.id === a);
     const seatedB = slots.find(k=>obj[k].trait.id === b);
     if (!seatedA || !seatedB) return;
+    /* Both sides required is a contradiction, not a tie to break. Replacing one of them
+       left a slot still labelled "Required" holding a trait the user never asked for;
+       detectConstraintConflicts has already recorded it, so leave the sheet alone and
+       let the UI say what is wrong. */
+    if (obj[seatedA].required && obj[seatedB].required) return;
     const priority = k => (obj[k].required ? 2 : obj[k].locked ? 1 : 0);
     const loser = priority(seatedA) >= priority(seatedB) ? seatedB : seatedA;
     const slot = obj[loser];
-    const pool = byFilter(slot.trait.section, slot.trait.category).filter(t=>t.id !== slot.trait.id);
+    // The replacement has to respect every other rule too: not the trait it is
+    // replacing, not a trait already on the sheet, and not the other half of any
+    // exclusive pair that is currently seated.
+    const seated = seatedIdSet(obj, loser);
+    const pool = byFilter(slot.trait.section, slot.trait.category)
+      .filter(t=>t.id !== slot.trait.id && !seated.has(t.id) && !excludedByPairs(t.id, seated));
     const repl = pool.length ? pickInRange(pool, rarityPref, slot.target, 3) : null;
     if (repl) obj[loser] = Object.assign({}, slot, {trait: repl, exclusiveSwap: true});
     else delete obj[loser];

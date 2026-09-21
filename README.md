@@ -37,11 +37,92 @@ handler has crept back in, that the dark palette resolves, and that the whole ap
 under a Content-Security-Policy with no `'unsafe-inline'`:
 
 ```bash
-npm i playwright            # node_modules is gitignored
+npm install                 # node_modules is gitignored; the browser is pinned in package.json
 python3 -m http.server 8111 &
 node tests/browser.mjs http://localhost:8111          # behaviour
 CSP=1 node tests/browser.mjs http://localhost:8111    # ...and under script-src 'self'
 ```
+
+The browser suite also carries the replay matrix: every combination of divergence,
+depth-first, wildcard and pressure is generated with a blank seed, and the seed the app
+prints is pasted back and expected to reproduce both sheets exactly.
+
+## What a seed promises
+
+A seed the app prints replays the character it names — base sheet, pressure sheet and
+all — from any session. Pasting a seed puts the build in **replay mode**, which runs
+against an empty session history, so the history-aware mechanisms (Avoid recent traits,
+and the side of Surprise me that refuses to land where it has already landed) have
+nothing to remember.
+
+Leaving the box blank is **exploration**: that build *does* take the session's recent
+characters into account, which is what stops a long session converging on one person.
+The two modes are the same generator over the same seeded stream; only the history
+differs.
+
+Rerolls stay deliberately un-seeded — a reroll is you overriding the dice.
+
+## Generation order
+
+Single characters, batch candidates, casts, foils and the gap-filler all run the same
+pipeline and finish through the same function (`finalizeSheet`, `js/engine.js`), in one
+stated order:
+
+1. protected intent is seated first — the locked cards carried over from the outgoing
+   sheet, so everything after solves against what you kept;
+2. pins redraw within their own category toward the pinned intensity;
+3. budgets constrain the mutable remainder, counting the protected slots against the
+   caps rather than ignoring them;
+4. named requirements go in last among the seating passes, so a quantity can never
+   evict a trait you asked for by name;
+5. exclusivity resolves whatever the passes above put next to each other;
+6. an independent audit re-derives the budget report **from the committed sheet**, so
+   an unmet cap is always the truth about what is on screen, and a duplicate trait id
+   is reported rather than shipped.
+
+Contradictory hard rules (requiring two traits you also marked never-together, or
+requiring a trait whose category is banned) are reported before a generation rather
+than arbitrated silently inside one.
+
+## What the diagnostics mean
+
+- **Coherence** is a pure function of the sheet. It derives its evaluation context from
+  the character's own traits, so moving an unrelated control — or generating somebody
+  else — cannot change an existing sheet's score.
+- **Archetype fidelity** is reported as two numbers, because they answer different
+  questions: *direction* is the share of the archetype's axes that the sheet actually
+  leans the way the archetype asked, over the axes the sheet expresses at all;
+  *strength* is how loudly it leans, measured against the strongest expression this
+  trait bank produces. Self-generated samples of the built-in presets read around 85%
+  direction; the same presets with every control opposed read around 15%.
+- **The profile preview** is a simplified conditional preview, not the generator's own
+  probabilities: it takes the most likely category at each step and conditions the next
+  on it, and it models neither the divergence mixture nor the archetype slider blend.
+  The panel says so.
+- **Pool headroom** on a card counts what is reachable *inside that slot's current
+  intensity window*, and separately tells you how many more a looser precision setting
+  would reach.
+- **The pressure sheet** is derived from the base sheet at generation time. Edit a card
+  afterwards and it says it is out of date instead of quietly describing an earlier
+  version of the character.
+
+## Undo, and what it covers
+
+A snapshot is the whole workspace: sheets, metadata, pressure state, sliders, pins,
+notes, presentation variants, constraints and budgets. Generations, rerolls,
+step-backs, loads, imports, note edits, pin changes and bulk lock sweeps are all
+undoable. A single card's lock is deliberately not — its own button toggles it straight
+back.
+
+## Saving
+
+Saves are compressed by trait id and carry a compact tombstone alongside each id, so a
+trait later removed from the bank degrades to an orphan with its text intact rather
+than vanishing from a character you saved months ago.
+
+If the browser will not store data (private mode, blocked site data), the app says so
+before you save and labels the save as session-only — it does not report an ordinary
+success and lose your work on reload.
 
 They assert the things the UI states out loud and the things that have actually
 broken before: no duplicate ids or trait names, no duplicate example lines inside a
@@ -194,6 +275,7 @@ no quiet content to redraw into.
 - `js/app.js` — storage, cast, relationships, foil, UI wiring
 - `sw.js` — service worker, caches the shell so the bank isn't refetched every visit
 - `tests/` — the test harness and suite
+- `package.json` — no build step; it exists to pin the browser-test dependency
 
 The bank used to live on a single 1.4MB line inside `js/app.js`, which made the file
 unopenable in several editors and every content change an unreviewable diff. It is

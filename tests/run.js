@@ -48,6 +48,15 @@ const ctx = loadEngine([
   'strVal','boolVal','rarityPrefVal','ARCHETYPES','sheetToText','sheetToHTML','quantile','emptySlot',
   'MOTIVATION_CROSSLINKS','motivationCrosslinkMap','motivationText','setMotivationLinks','resolveProfileCategories',
   'WILDCARD_SECTIONS','PRESSURE_SHIFT_SECTIONS','DEPTH_TO_PERSONALITY','clearContextBias',
+  // Added with the audit fixes: the shared finalizer, the seed codec, the decoders and
+  // the diagnostics that had to become pure.
+  'finalizeSheet','auditBudgets','applyRequiredTraits','applyExclusivePairs','detectConstraintConflicts',
+  'getConstraintConflicts','seatedIdSet','excludedByPairs','eligibleCategories','pickCategoryWeighted',
+  'encodeSeed','seedNumberFrom','resolveSeed','withReplayMode','historyAwareGeneration',
+  'variantsFromProtected','archetypeFidelity','sheetOverrides','CATEGORY_USE','noteCategoryUse',
+  'bannedTraitIds','bannedSections','requiredCategories','intensityCaps','setBudgetReport',
+  'archetypeProblem','normalizeArchetype','isNegated','suppressContextTag','clearContextSuppression',
+  'magFromPos','bandHalf','cloneSheet','decodeSavedRecord','SAVE_FORMAT','pinnedTargets',
 ]);
 const A = ctx.api;
 const T = A.TRAITS;
@@ -1661,6 +1670,344 @@ check('the service worker precaches exactly what index.html loads', ()=>{
   assert(!missing.length, 'sw.js does not precache: ' + missing.join(', '));
   assert(!extra.length, 'sw.js precaches files index.html does not load: ' + extra.join(', '));
   return wanted.length + ' scripts/styles precached';
+});
+
+/* ================= AUDIT REGRESSIONS =================
+   One check per finding in the 2026-09-21 audit that can be asserted without a
+   browser. Each names its finding so a failure points at the behaviour, not the line. */
+group('Audit regressions');
+
+check('B01 — a quote in a character name cannot open a new SVG attribute', ()=>{
+  const svg = ctx.evalIn('radarSVG([{label: String.fromCharCode(65,34,32)+"data-audit=x", color:"red", prof:{warm:1}}], 200)');
+  // The label must stay INSIDE one attribute: a raw quote would close aria-label and
+  // everything after it would be parsed as further attributes on the <svg>.
+  const openTag = svg.slice(0, svg.indexOf('>') + 1);
+  // Walk the opening tag as an attribute list: everything hostile has to end up INSIDE
+  // one value, never as a name of its own. (A substring search is not enough — the
+  // escaped text legitimately still contains the characters `data-audit=x`.)
+  const names = [];
+  const attrRe = /([A-Za-z_:][-\w:.]*)\s*=\s*"([^"]*)"/g;
+  let m, lastEnd = 0;
+  while ((m = attrRe.exec(openTag))){ names.push(m[1]); lastEnd = attrRe.lastIndex; }
+  assert(!names.includes('data-audit'), 'the hostile label became its own attribute: ' + names.join(' '));
+  const label = openTag.match(/aria-label="([^"]*)"/);
+  assert(label && label[1].includes('&quot;'), 'the quote in the label was not encoded: ' + openTag);
+  assert(label[1].includes('data-audit=x'), 'the label text itself was lost');
+  return 'attributes: ' + names.join(', ') + ' — hostile text stayed inside aria-label';
+});
+
+check('B04 — an app-generated seed decodes back to its own number', ()=>{
+  for (let i = 0; i < 200; i++){
+    const n = (i * 2654435761) >>> 0;
+    assert(A.seedNumberFrom(A.encodeSeed(n)) === n, 'round trip failed for ' + n);
+  }
+  // A user's own text still hashes, exactly as before.
+  assert(A.seedNumberFrom('corven') === A.hashSeedString('corven'), 'plain text seeds changed meaning');
+  return '200 round trips + legacy text seeds preserved';
+});
+
+check('B05 — replay mode ignores session category history', ()=>{
+  ctx.evalIn('CATEGORY_USE.clear()');
+  const historyAware = A.withReplayMode(false, ()=> A.historyAwareGeneration());
+  const replay = A.withReplayMode(true, ()=> A.historyAwareGeneration());
+  assert(historyAware === true && replay === false, 'replay mode did not gate history');
+  return 'explore reads history, replay does not';
+});
+
+check('B13/B16 — a finalized sheet never seats the same trait twice', ()=>{
+  A.clearBudgets();
+  A.applyBudgetPreset('oneLoud');
+  let dupes = 0, sheets = 0;
+  for (let i = 0; i < 120; i++){
+    A.withRng(A.mulberry32(90000 + i), ()=>{
+      const st = A.finalizeSheet(A.buildCharacterState({
+        verbLevel:0, regLevel:0, compLevel:0, mannerCount:3, vocabCount:2,
+        rarityPref:0, vocabPref:null, personalityOverrides:{}}), {rarityPref:0, applyPins:false});
+      sheets++;
+      const rep = A.auditBudgets(st, {rarity:{}, intensity:{}, actions:[]});
+      dupes += rep.duplicates.length;
+    });
+  }
+  A.clearBudgets();
+  assert(dupes === 0, dupes + ' duplicate trait id(s) across ' + sheets + ' budgeted sheets');
+  return sheets + ' budgeted sheets, 0 duplicates';
+});
+
+check('B13 — the budget report describes the committed sheet, not an intermediate', ()=>{
+  A.clearBudgets();
+  A.RTIER_ORDER.forEach(t=>{ A.rarityCaps[t] = 0; });   // impossible: everything is capped out
+  let report = null, st = null;
+  A.withRng(A.mulberry32(4242), ()=>{
+    st = A.finalizeSheet(A.buildCharacterState({verbLevel:0, regLevel:0, compLevel:0,
+      mannerCount:3, vocabCount:2, rarityPref:0, vocabPref:null, personalityOverrides:{}}),
+      {rarityPref:0, applyPins:false});
+    report = A.getBudgetReport();
+  });
+  const ids = Object.keys(st).filter(k=>st[k] && st[k].trait);
+  A.RTIER_ORDER.forEach(tier=>{
+    const actual = ids.filter(id=>A.rarityTier(st[id].trait) === tier).length;
+    const row = report.rarity[tier];
+    assert(row && row.count === actual,
+      tier + ': report says ' + (row && row.count) + ', sheet holds ' + actual);
+    assert(actual === 0 || row.unmet === actual, tier + ': ' + actual + ' present but unmet was ' + row.unmet);
+  });
+  A.clearBudgets();
+  return 'every tier count and unmet figure matches the finished sheet';
+});
+
+check('B16 — a required trait already drawn is not seated a second time', ()=>{
+  /* `requiredTraitIds` and the ban sets are `let` bindings that restoreSettings
+     REASSIGNS, so the reference captured at load time is not the live one. Reach into
+     the bundle's own scope instead — the same seam the browser console gives you. */
+  const t = A.TRAITS.find(x=>x.section === 'Personality Traits');
+  const obj = ctx.evalIn(`(function(){
+    const t = TRAITS_BY_ID.get(${t.id});
+    const obj = {pers_test: {slotId:'pers_test', locked:false, label:'x', target:3, trait:t}};
+    const saved = requiredTraitIds;
+    requiredTraitIds = [${t.id}];
+    try { applyRequiredTraits(obj); } finally { requiredTraitIds = saved; }
+    return obj;
+  })()`);
+  const seats = Object.keys(obj).filter(k=>obj[k] && obj[k].trait && obj[k].trait.id === t.id);
+  assert(seats.length === 1, 'the required trait was seated ' + seats.length + ' times');
+  assert(obj.pers_test.required === true, 'the existing seat was not marked required');
+  return 'marked in place, one seat';
+});
+
+check('B16 — two required traits marked never-together are reported, not silently replaced', ()=>{
+  const [a, b] = A.TRAITS.filter(x=>x.section === 'Personality Traits').slice(0, 2);
+  const out = ctx.evalIn(`(function(){
+    const savedReq = requiredTraitIds, savedEx = exclusivePairs;
+    requiredTraitIds = [${a.id}, ${b.id}];
+    exclusivePairs = [[${a.id}, ${b.id}]];
+    const obj = {};
+    try {
+      applyRequiredTraits(obj);
+      applyExclusivePairs(obj, 0);
+      return {obj, conflicts: getConstraintConflicts()};
+    } finally { requiredTraitIds = savedReq; exclusivePairs = savedEx; }
+  })()`);
+  const obj = out.obj, conflicts = out.conflicts;
+  const ids = Object.values(obj).filter(s=>s && s.trait).map(s=>s.trait.id);
+  assert(conflicts.some(c=>c.kind === 'required-vs-exclusive'), 'the contradiction was not reported');
+  assert(ids.includes(a.id) && ids.includes(b.id), 'a required trait was silently replaced anyway');
+  return 'reported as a conflict; neither requirement was overwritten';
+});
+
+check('B17 — one permitted non-empty category always fills its section', ()=>{
+  const ps = A.PROFILE_SECTIONS.find(p=>!p.drawAll && A.catsOf(p.section).length > 2);
+  const cats = A.catsOf(ps.section);
+  const keep = cats[0];
+  const misses = ctx.evalIn(`(function(){
+    const cats = ${JSON.stringify(cats)};
+    const keep = cats[0];
+    const saved = bannedCategories;
+    bannedCategories = new Set(cats.slice(1));
+    let misses = 0;
+    try {
+      for (let i = 0; i < 60; i++){
+        withRng(mulberry32(7000 + i), ()=>{
+          if (pickCategoryWeighted(cats.slice(), new Map()) !== keep) misses++;
+        });
+      }
+    } finally { bannedCategories = saved; }
+    return misses;
+  })()`);
+  assert(misses === 0, misses + ' of 60 draws resolved to a banned (empty) category');
+  return '60/60 resolved to the one permitted category';
+});
+
+check('B17 — every category banned yields an explicit null, not a phantom pick', ()=>{
+  const ps = A.PROFILE_SECTIONS.find(p=>!p.drawAll);
+  const cats = A.catsOf(ps.section);
+  const got = ctx.evalIn(`(function(){
+    const cats = ${JSON.stringify(cats)};
+    const saved = bannedCategories;
+    bannedCategories = new Set(cats);
+    try { return withRng(mulberry32(11), ()=> pickCategoryWeighted(cats.slice(), new Map())); }
+    finally { bannedCategories = saved; }
+  })()`);
+  assert(got === null, 'expected null for a fully banned section, got ' + got);
+  return 'infeasible section reports null';
+});
+
+check('B12 — a kept variant-tagged trait fixes its own presentation lock', ()=>{
+  const tagged = A.TRAITS.find(t=>t.variant && A.PRESENTATION_VARIANTS[t.category]);
+  assert(tagged, 'no variant-tagged trait in the bank to test with');
+  const kept = {pers_x: {slotId:'pers_x', locked:true, trait:tagged}};
+  const {want} = A.variantsFromProtected(kept);
+  assert(want[tagged.category] === tagged.variant, 'the kept trait did not fix its category');
+  A.withRng(A.mulberry32(5), ()=> A.rollCharacterVariants(want));
+  assert(A.getCharVariants()[tagged.category] === tagged.variant,
+    'the roll overrode the committed presentation');
+  return tagged.category + ' committed to "' + tagged.variant + '" by the kept card';
+});
+
+check('B20 — a compressed save survives its trait being deleted from the bank', ()=>{
+  const t = A.TRAITS[0];
+  const packed = A.compressSlots({slot: {slotId:'slot', locked:false, target:3, trait:t}});
+  assert(packed.slot.trait.__fb, 'no tombstone was written');
+  // Simulate the trait being removed from a later build of the bank.
+  ctx.evalIn('globalThis.__savedTrait = TRAITS_BY_ID.get(' + t.id + '); TRAITS_BY_ID.delete(' + t.id + ');');
+  const out = A.expandSlots(JSON.parse(JSON.stringify(packed)));
+  ctx.evalIn('TRAITS_BY_ID.set(' + t.id + ', globalThis.__savedTrait);');
+  assert(out.slot.trait, 'the slot was silently emptied');
+  assert(out.slot.trait.trait === t.trait, 'the saved text was not recovered');
+  assert(out.slot.trait.removed === true, 'the recovered trait was not flagged as removed');
+  return 'text recovered from the tombstone and flagged';
+});
+
+check('B19 — malformed payloads are rejected before anything is committed', ()=>{
+  const bad = [
+    [{state:{}, settings:{constraints:{exclusivePairs: 123}}}, 'exclusivePairs'],
+    [{state:{s:{trait:{id:1, trait:'x', category:'c', section:'s', intensity:99}}}}, 'intensity'],
+    [{state:{s:{trait:{id:1, trait:'x', category:'c', section:'s'}}}, pinnedTargets:{s:'loud'}}, 'pinnedTargets'],
+    [{state:{s:{trait:{id:1, trait:'x', category:'c', section:'s'}}}, charVariants:{c:'z'}}, 'charVariants'],
+    [{state:{s:{trait:{id:1, trait:'x', category:'c', section:'s'}}}, settings:{constraints:{rarityCaps:{common:'lots'}}}}, 'rarityCaps'],
+  ];
+  bad.forEach(([payload, what])=>{
+    let threw = null;
+    try { A.validateSheetPayload(payload); } catch(e){ threw = e; }
+    assert(threw, 'a payload with a bad ' + what + ' passed validation');
+    assert(/[a-z]/.test(threw.message), 'the failure did not name a field: ' + threw.message);
+  });
+  return bad.length + ' malformed shapes rejected with a named field';
+});
+
+check('B22 — a pressure slot with no trait does not abort the text export', ()=>{
+  const st = {};
+  const pState = {verbosity: {slotId:'verbosity', label:'x', trait:null}, __pressure:{level:1}};
+  const out = A.sheetToText(st, {name:'T'}, pState);
+  assert(typeof out === 'string' && out.includes('Under Pressure'), 'the export did not complete');
+  assert(/omitted/.test(out), 'the missing slot was not accounted for');
+  return 'export completes and says what was skipped';
+});
+
+check('B23 — coherence is a pure function of the sheet', ()=>{
+  let st = null;
+  A.withRng(A.mulberry32(3131), ()=>{
+    st = A.buildCharacterState({verbLevel:0, regLevel:0, compLevel:0, mannerCount:3,
+      vocabCount:2, rarityPref:0, vocabPref:null, personalityOverrides:{}});
+  });
+  const before = A.coherenceScore(st);
+  // Move every live control well away from where it was, without regenerating.
+  ctx.evalIn("PERSONALITY_AXES.forEach(a=>{ const el = document.getElementById('pers_'+a.id); if (el) el.value = 95; });"
+           + "['verbositySlider','registerSlider','composureSlider'].forEach(id=>{ const el=document.getElementById(id); if (el) el.value = 95; });"
+           + "invalidateSliderCache();");
+  const after = A.coherenceScore(st);
+  ctx.evalIn("PERSONALITY_AXES.forEach(a=>{ const el = document.getElementById('pers_'+a.id); if (el) el.value = 0; });"
+           + "['verbositySlider','registerSlider','composureSlider'].forEach(id=>{ const el=document.getElementById(id); if (el) el.value = 0; });"
+           + "invalidateSliderCache();");
+  assert(before && after, 'no score was produced');
+  assert(before.pct === after.pct,
+    'the same sheet scored ' + before.pct + '% then ' + after.pct + '% after moving unrelated controls');
+  return 'unchanged at ' + before.pct + '% across a full slider sweep';
+});
+
+check('B24 — archetype fidelity separates direction from strength and is interpretable', ()=>{
+  const arch = Object.values(A.ARCHETYPES).find(a=>a.pers && Object.keys(a.pers).length >= 4);
+  const build = (sign)=>{
+    let st = null;
+    A.withRng(A.mulberry32(808), ()=>{
+      const ov = {};
+      A.PERSONALITY_AXES.forEach(x=>{ ov[x.id] = (arch.pers[x.id] || 0) * sign; });
+      st = A.buildCharacterState({verbLevel:arch.verbosity||0, regLevel:arch.register||0,
+        compLevel:arch.composure||0, mannerCount:3, vocabCount:2, rarityPref:0,
+        vocabPref:null, personalityOverrides:ov});
+    });
+    return A.archetypeFidelity(st, arch);
+  };
+  const self = build(1), opposed = build(-1);
+  assert(self && typeof self.strength === 'number', 'strength was not reported separately');
+  assert(self.pct > opposed.pct,
+    'opposing every control did not reduce the reading (' + self.pct + '% vs ' + opposed.pct + '%)');
+  assert(self.pct > 30, 'a self-generated sample read only ' + self.pct + '%, which is not interpretable');
+  return 'self ' + self.pct + '% / opposed ' + opposed.pct + '% · strength ' + self.strength + '%';
+});
+
+check('B26 — the printed active range matches the real inverse of the pick curve', ()=>{
+  const half = 0.73;
+  let worst = 0;
+  A.TRAITS.slice(0, 400).forEach(t=>{
+    const [lo, hi] = A.traitBand(t, half);
+    const pos = A.traitPos(t);
+    const wantLo = A.magFromPos(A.clamp(pos - half, 1, 5));
+    const wantHi = A.magFromPos(A.clamp(pos + half, 1, 5));
+    worst = Math.max(worst, Math.abs(lo - wantLo), Math.abs(hi - wantHi));
+  });
+  assert(worst <= 0.5, 'band edges are off by up to ' + worst.toFixed(2) + ' slider points');
+  return 'within rounding of the true inverse over 400 traits';
+});
+
+check('B29 — a negated or switched-off context reading is not applied', ()=>{
+  A.clearContextSuppression();
+  const negated = A.buildContextBias('not a soldier, never was', '');
+  assert(!negated.notes.includes('military'), '"not a soldier" still applied the military bias');
+  assert(negated.rejected.some(r=>r.label === 'military'), 'the rejected reading was not reported');
+  const plain = A.buildContextBias('a soldier', '');
+  assert(plain.notes.includes('military'), 'an ordinary match stopped working');
+  A.suppressContextTag('military');
+  const off = A.buildContextBias('a soldier', '');
+  A.clearContextSuppression();
+  A.clearContextBias();
+  assert(!off.notes.includes('military'), 'a switched-off reading was applied anyway');
+  return 'negation and suppression both honoured; plain matches unaffected';
+});
+
+check('B30 — the service worker deletes only its own obsolete caches', ()=>{
+  const fs = require('fs'), path = require('path');
+  const sw = fs.readFileSync(path.join(ROOT, 'sw.js'), 'utf8');
+  assert(/CACHE_PREFIX/.test(sw), 'sw.js no longer namespaces its caches');
+  assert(/k\.startsWith\(CACHE_PREFIX\)\s*&&\s*k\s*!==\s*CACHE/.test(sw),
+    'activate() does not restrict deletion to this app\'s own cache namespace');
+  assert(!/addAll\(ASSETS\)\)\.then\(\(\)=>self\.skipWaiting\(\)\)\.catch/.test(sw),
+    'install() still swallows a failed precache');
+  return 'namespaced purge, install fails loudly';
+});
+
+check('B10 — no top-level function is declared twice across the bundle', ()=>{
+  const fs = require('fs'), path = require('path');
+  const {ENGINE_FILES} = require('./harness');
+  const seen = new Map(), dupes = [];
+  ENGINE_FILES.forEach(f=>{
+    const src = fs.readFileSync(path.join(ROOT, f), 'utf8');
+    src.split('\n').forEach((line, i)=>{
+      const m = /^function\s+([A-Za-z_$][\w$]*)\s*\(/.exec(line);
+      if (!m) return;
+      const prev = seen.get(m[1]);
+      if (prev) dupes.push(m[1] + ' (' + prev + ' and ' + f + ':' + (i+1) + ')');
+      else seen.set(m[1], f + ':' + (i+1));
+    });
+  });
+  assert(!dupes.length, 'duplicate top-level function declarations: ' + dupes.join(', '));
+  return seen.size + ' top-level functions, all unique';
+});
+
+check('B36 — a workspace capture covers the cast and foil controls too', ()=>{
+  ['castSeed','castSpread','foilSeed'].forEach(id=>{
+    assert(A.SETTING_FIELDS.includes(id), id + ' is not part of the settings capture');
+  });
+  assert(A.SETTING_TOGGLES.includes('castAnchor'), 'castAnchor is not part of the settings capture');
+  return 'cast and foil settings travel with the workspace';
+});
+
+check('B09 — cloning a sheet does not share its slot objects', ()=>{
+  const t = A.TRAITS[0];
+  const src = {a: {slotId:'a', locked:false, trait:t}};
+  const copy = A.cloneSheet(src);
+  src.a.locked = true;
+  assert(copy.a.locked === false, 'a lock on the source leaked into the copy');
+  assert(copy.a.trait === t, 'the immutable trait definition was needlessly cloned');
+  return 'slots copied, trait definitions shared';
+});
+
+check('B33 — malformed archetype records are rejected before anything is written', ()=>{
+  assert(A.archetypeProblem(null), 'null passed');
+  assert(A.archetypeProblem({}), 'a record with no label passed');
+  assert(A.archetypeProblem({label:'x', verbosity: 'loud'}), 'a non-numeric slider passed');
+  assert(A.archetypeProblem({label:'x', pers:{warmth: 5000}}), 'an out-of-range axis passed');
+  assert(!A.archetypeProblem({label:'x', verbosity:1, pers:{friendliness:40}}), 'a valid record was rejected');
+  return 'four malformed shapes rejected, valid one accepted';
 });
 
 /* Bank figures, printed every run. Comments across the codebase cited the bank size as
