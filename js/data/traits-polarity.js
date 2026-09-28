@@ -21,7 +21,6 @@
              piled further into the Instinctive personality pole, which already
              holds 84 of the 205
      act-    low physical energy, in Mannerisms > Postural & Spatial Dynamics
-             and Appearance > Movement & Bearing
      ego+    self-assurance, in Mannerisms > Vocal Modulation and Dialogue
              Grammar > Turn-Taking Grammar
      vol+    wordiness, in Dialogue Grammar > Anchors & Fillers and Mannerisms >
@@ -65,10 +64,6 @@ const TRAITS_POLARITY = [
 {id:161029,section:"Mannerisms",category:"Postural & Spatial Dynamics",trait:"Sends someone else to fetch it",desc:"Delegates every small physical errand — the cup, the file, the door — as a matter of course.",example:"Could you— the thing on the— ta.",intensity:4,rarity:"uncommon",pol:{act:-1},conceptFamily:"posture-delegate",reviewStatus:"reviewed"},
 {id:161030,section:"Mannerisms",category:"Postural & Spatial Dynamics",trait:"Horizontal whenever possible",desc:"Reclines, sprawls or lies flat in any space that permits it, including some that don't.",example:"(on the office floor, phone up, perfectly comfortable)",intensity:4,rarity:"distinctive",pol:{act:-1},conceptFamily:"posture-horizontal",reviewStatus:"reviewed"},
 {id:161031,section:"Mannerisms",category:"Postural & Spatial Dynamics",trait:"Conserves movement like money",desc:"Every action is weighed for its physical cost and the cheaper one is chosen, visibly, every time.",example:"(rolls the chair to the printer rather than standing)",intensity:3,rarity:"distinctive",pol:{act:-1},conceptFamily:"posture-economy",reviewStatus:"reviewed"},
-{id:161032,section:"Appearance",category:"Movement & Bearing",trait:"A gait that saves itself for later",desc:"Walks at a pace that suggests the day is long and there is no reason to spend it early.",example:"(overtaken by a pram, unbothered)",intensity:2,rarity:"common",pol:{act:-1},conceptFamily:"bearing-slow",reviewStatus:"reviewed"},
-{id:161033,section:"Appearance",category:"Movement & Bearing",trait:"Stairs taken one at a time, with a hand",desc:"Every staircase is a considered project, banister and all, regardless of age or health.",example:"(the lift is a friend. The stairs are an acquaintance.)",intensity:3,rarity:"uncommon",pol:{act:-1},conceptFamily:"bearing-stairs-slow",reviewStatus:"reviewed"},
-{id:161034,section:"Appearance",category:"Movement & Bearing",trait:"Sits before they've been offered",desc:"Arrives and is already seated — no hovering, no waiting for a chair to be indicated.",example:"(the host is still saying 'please, sit'; they sat at 'please')",intensity:3,rarity:"distinctive",pol:{act:-1},conceptFamily:"bearing-sits-first",reviewStatus:"reviewed"},
-{id:161035,section:"Appearance",category:"Movement & Bearing",trait:"Moves like it's the end of a long shift",desc:"Every motion carries a visible, permanent tiredness — not illness, just an economy of effort.",example:"(the walk of someone who has been on their feet since 1987)",intensity:4,rarity:"signature",pol:{act:-1},conceptFamily:"bearing-tired",reviewStatus:"reviewed"},
 {id:161036,section:"Mannerisms",category:"Postural & Spatial Dynamics",trait:"Hands in pockets as a posture",desc:"Both hands in, shoulders down, for as long as the situation allows — a whole bearing built on not moving.",example:"(takes them out to shake hands; puts them straight back)",intensity:2,rarity:"common",pol:{act:-1},conceptFamily:"posture-pockets",reviewStatus:"reviewed"},
 
 // ---------------------------------------------------------------- ego+ (self-assurance)

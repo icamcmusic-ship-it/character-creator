@@ -45,7 +45,7 @@
     --wash-a: rgba(232,50,125,.06);
     --wash-b: rgba(139,154,46,.07);
 
-    /* Accents used outside the four-colour core: the Appearance and constraint section
+    /* Accents used outside the four-colour core: the constraint section
        stripes, the wildcard card, and the six cast-overlay lines. They were hardcoded
        hexes in js/render.js and js/app.js, so they were the one part of the palette a
        theme could not reach. */
@@ -406,6 +406,10 @@
   #insightPanel { background:var(--panel2); border:1.5px solid var(--border); border-radius:var(--radius-sm); padding:14px 16px; margin:14px 0 4px; }
   .coherenceRow { display:flex; align-items:center; gap:12px; }
   .coherenceLabel { font-family:var(--font-mono); font-size:.74rem; color:var(--dusk-blue); text-transform:uppercase; letter-spacing:.06em; white-space:nowrap; }
+  /* nowrap is right on a desktop, but "…AND HOW LOUDLY 82% (OF A FULLY-EXPRESSED AXIS)"
+     in uppercase mono is wider than a 375px phone and pushed the page 40-50px sideways
+     (caught by the lens-row phone-width check). Let it wrap where it has to. */
+  @media (max-width: 520px) { .coherenceLabel { white-space:normal; overflow-wrap:anywhere; } }
   .coherenceBar { flex:1; height:8px; background:var(--border); border-radius:99px; overflow:hidden; }
   .coherenceBar span { display:block; height:100%; border-radius:99px; transition:width .3s ease; }
   .coherenceBar { position:relative; }
@@ -821,6 +825,13 @@
     border-top:1.5px solid var(--border-strong); box-shadow:0 -4px 18px rgba(38,84,124,.08);
   }
   body.on-single-tab .stickyBar { display:flex; }
+  /* Six controls do not fit a 375px phone in one row. The bar is fixed, and a fixed
+     box's overflow still widens the page's scrollable area, so the whole page scrolled
+     sideways (and the lens chips row, the first full-width control, slid under the
+     edge). Keep the bar one row high and let it scroll inside itself instead. */
+  .stickyBar { max-width:100vw; box-sizing:border-box; overflow-x:auto; overscroll-behavior-x:contain; scrollbar-width:none; }
+  .stickyBar::-webkit-scrollbar { display:none; }
+  .stickyBar > * { flex-shrink:0; }
   .stickyBar button { padding:9px 18px; font-size:.82rem; }
   .stickySeed { margin-left:auto; font-family:var(--font-mono); font-size:.7rem; color:var(--muted); }
 
@@ -1293,6 +1304,20 @@
   .voiceHead { display:flex; flex-wrap:wrap; gap:8px; align-items:baseline; margin-bottom:6px; font-size:.88rem; }
   .voiceLine { margin:4px 0 6px; padding:6px 0 6px 12px; border-left:3px solid var(--golden-deep); font-style:italic; line-height:1.6; }
   .sharedDevice { background:var(--bubblegum); color:#fff; border-radius:8px; padding:0 6px; }
+  .voiceCard.userPrompt { border-style:dashed; }
+  .vlAddPrompt { margin-top:8px; font-size:.85rem; }
+  .vlAddPrompt summary { cursor:pointer; color:var(--text-muted, var(--text)); }
+  .vlForm { display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
+  .vlForm input[type=text] { flex:1 1 180px; min-width:0; }
+  .vlForm select { flex:0 1 auto; max-width:100%; }
+  /* Cast voice-collision heatmap: one tinted cell per pair, tint = share of the worst pair. */
+  .hmWrap { max-width:100%; overflow-x:auto; }
+  .heatmap { border-collapse:collapse; font-size:.8rem; }
+  .heatmap th { font-weight:600; padding:4px 6px; text-align:left; white-space:nowrap; max-width:9em; overflow:hidden; text-overflow:ellipsis; }
+  .heatmap td { min-width:2.4em; text-align:center; padding:4px 6px; border:1px solid var(--border); }
+  .heatmap .hmCell { background:color-mix(in srgb, var(--bubblegum) calc(var(--heat, 0) * 70%), transparent); }
+  .heatmap .hmSelf { color:var(--border-strong); }
+  .retireBtn.on { opacity:1; outline:1px dashed var(--border-strong); }
 
   /* Content packs */
   .packRow { display:flex; align-items:baseline; gap:7px; padding:5px 9px; border:1px solid var(--border-strong); border-radius:10px; margin:0 6px 6px 0; font-size:.83rem; }
@@ -1301,3 +1326,121 @@
   .projectRow { display:flex; align-items:center; gap:6px; margin-bottom:6px; }
   .projectRow.current { outline:2px solid var(--golden-deep); outline-offset:2px; border-radius:10px; }
   .projectRow .savedOpen { flex:1; }
+
+/* ================= FILE MENU, UNDO TOAST, LIBRARY TOOLS, COMPARE, ONBOARDING ================= */
+  label.btn-secondary:focus-within { outline:3px solid var(--dusk-blue-mid); outline-offset:2px; }
+  .fileMenu { position:relative; display:inline-block; }
+  .fileMenu > summary { list-style:none; cursor:pointer; }
+  .fileMenu > summary::-webkit-details-marker { display:none; }
+  .fileMenuList {
+    position:absolute; z-index:40; top:calc(100% + 6px); left:0; min-width:230px;
+    display:flex; flex-direction:column; padding:6px; gap:2px;
+    background:var(--panel); border:1.5px solid var(--border-strong); border-radius:var(--radius-sm);
+    box-shadow:var(--shadow-lg);
+  }
+  .fileMenuList button {
+    text-align:left; background:none; border:none; color:var(--text); padding:8px 10px;
+    border-radius:6px; font:inherit; font-size:.85rem; cursor:pointer;
+  }
+  .fileMenuList button:hover, .fileMenuList button:focus-visible { background:var(--panel2); color:var(--dusk-blue); }
+  .fileMenuList hr { border:none; border-top:1px solid var(--border); margin:4px 2px; width:auto; }
+  @media (max-width:560px){ .fileMenuList { position:fixed; left:12px; right:12px; top:auto; bottom:84px; min-width:0; } }
+
+  .toastUndo { display:flex; align-items:center; gap:10px; }
+  .toastUndo > span { flex:1; }
+  .toastUndoBtn {
+    background:none; border:1.5px solid var(--dusk-blue); color:var(--dusk-blue); border-radius:6px;
+    padding:3px 10px; font:inherit; font-size:.8rem; font-weight:700; cursor:pointer;
+  }
+  .toastUndoBtn:hover { background:var(--dusk-blue); color:var(--panel); }
+
+  .savedTools { display:flex; gap:8px; margin-top:12px; flex-wrap:wrap; }
+  .savedTools input { flex:1 1 180px; min-width:0; }
+  .savedTools select { flex:0 0 auto; width:auto; }
+  .savedRow[hidden] { display:none; }
+
+  .comparePanel { margin-top:12px; }
+  .compareHead { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+  .compareHead h3 { margin:0; font-size:1rem; }
+  .compareScroll { overflow-x:auto; margin-top:8px; }
+  .compareTable { width:100%; border-collapse:collapse; font-size:.8rem; }
+  .compareTable th, .compareTable td { padding:5px 8px; border-bottom:1px solid var(--border); text-align:left; vertical-align:top; }
+  .compareTable thead th { color:var(--muted); font-weight:700; }
+  .compareTable tbody th { color:var(--muted); font-weight:600; width:28%; }
+  .compareTable tr.cmpSame td { background:color-mix(in srgb, var(--emerald-deep) 12%, transparent); }
+  .cmpShared { text-decoration:underline; text-decoration-color:var(--emerald-deep); text-underline-offset:3px; }
+
+  .familiarList { list-style:none; margin:8px 0; padding:0; display:flex; flex-direction:column; gap:6px; }
+  .familiarList li { display:flex; align-items:center; justify-content:space-between; gap:10px;
+    padding:8px 10px; border:1px solid var(--border); border-radius:var(--radius-sm); background:var(--panel2); }
+
+  .onboard { border:1.5px solid var(--border-strong); border-radius:var(--radius-sm); background:var(--panel);
+    padding:14px 16px; margin:0 auto 16px; max-width:560px; text-align:center; }
+  .onboard[hidden] { display:none; }
+  .onboardTitle { font-family:var(--font-display); font-size:1.05rem; }
+  .onboardBtns { display:flex; gap:10px; justify-content:center; flex-wrap:wrap; }
+
+  .traitCard[tabindex]:focus-visible { outline:3px solid var(--dusk-blue-mid); outline-offset:2px; }
+  .stickyHelp {
+    width:32px; height:32px; border-radius:50%; border:1.5px solid var(--border-strong); background:var(--panel);
+    color:var(--text); font-weight:800; cursor:pointer; flex:0 0 auto;
+  }
+  .stickyHelp:hover { border-color:var(--dusk-blue); color:var(--dusk-blue); }
+  /* Five controls per saved row no longer fit a phone in one line: the name takes its
+     own line and the actions wrap beneath it. */
+  @media (max-width:560px){
+    .savedRow { flex-wrap:wrap; }
+    .savedRow .savedOpen { flex:1 1 100%; }
+  }
+  .fileMenu > summary.btn-secondary {
+    display:inline-flex; align-items:center; gap:4px; padding:11px 20px; border-radius:999px;
+    font-family:var(--font-body); font-size:.86rem; font-weight:700; letter-spacing:.01em;
+    color:var(--dusk-blue); margin:0; user-select:none;
+  }
+  .fileMenu[open] > summary.btn-secondary { border-color:var(--dusk-blue); }
+
+  /* ---------- §5 keeping output fresh: lenses, shape, seated contradictions, 10 lines ---------- */
+  .lensRow { margin:8px 0 4px; }
+  .lensLabel { font-size:.78rem; font-weight:600; color:var(--text); margin-bottom:4px; }
+  .lensPicker { display:flex; flex-wrap:wrap; gap:6px 14px; min-width:0; max-width:100%; }
+  .lensGroup { display:flex; flex-wrap:wrap; gap:4px; align-items:center; max-width:100%; }
+  .lensKind { font-family:var(--font-mono); font-size:.62rem; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); margin-right:2px; }
+  .lensChip { max-width:100%; white-space:normal; overflow-wrap:anywhere; font-size:.76rem; padding:3px 10px; border-radius:999px; border:1px solid var(--border-strong); background:transparent; color:var(--text); cursor:pointer; min-height:28px; }
+  .lensChip.on { background:var(--dusk-blue); border-color:var(--dusk-blue); color:#fff; }
+  .lensTaboo { flex-basis:100%; font-size:.74rem; margin:2px 0 0; }
+  .lensBadge { font-family:var(--font-mono); font-size:.58rem; text-transform:uppercase; letter-spacing:.06em; padding:2px 7px; border-radius:999px; margin-left:8px; vertical-align:middle; border:1px solid var(--border-strong); cursor:help; }
+  .lens-normal { color:var(--emerald-deep); border-color:var(--emerald-deep); }
+  .lens-deviant { color:var(--accent-rust); border-color:var(--accent-rust); }
+  .contraBadge { background:var(--golden-deep); border-color:var(--golden-deep); }
+  .seatedContra { border-left-color:var(--golden-deep); margin-top:10px; }
+  .seatedContra .tensionTitle { color:var(--golden-deep); }
+  .beatWhen { font-family:var(--font-mono); font-size:.68rem; color:var(--muted); margin-right:4px; }
+  .shapeMeta { margin-top:4px; }
+  .vlTen { font-size:.74rem; padding:2px 10px; margin-top:6px; }
+  .vlTenList { margin:6px 0 0; padding-left:22px; font-size:.84rem; line-height:1.45; overflow-wrap:anywhere; }
+  .vlTenList li { margin-bottom:3px; }
+
+/* ---------- Section 6 mechanics: cast seats, relationship web, pressure ladder ---------- */
+.castRoleBadge { display:inline-block; margin-left:8px; padding:1px 8px; border-radius:999px; font-size:.7rem; font-weight:600;
+  background:var(--dusk-blue-light); color:var(--dusk-blue); border:1px solid var(--border-strong); vertical-align:middle; }
+.castRole-leader { background:var(--golden-light); color:var(--golden-deep); }
+.castRole-foil { background:var(--bubblegum-light); color:var(--bubblegum); }
+.castRole-comic, .castRole-heart { background:var(--emerald-light); color:var(--emerald-deep); }
+.relWeb { display:grid; grid-template-columns:minmax(0, 340px) minmax(0, 1fr); gap:14px; align-items:start; }
+.relWebSvg { width:100%; max-width:340px; height:auto; display:block; }
+.relWebList ul { margin:4px 0 10px; padding-left:18px; }
+.relWebList li { margin:2px 0; font-size:.85rem; }
+.pressureStages { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:10px; margin:10px 0; }
+.pStage { border:1px solid var(--border); border-radius:var(--radius-sm); padding:8px 10px; background:var(--panel2); min-width:0; }
+.pStage.current { border-color:var(--bubblegum); box-shadow:0 0 0 1px var(--bubblegum) inset; }
+.pStage ul { margin:6px 0 0; padding-left:16px; font-size:.83rem; }
+.pStageNow { font-size:.7rem; color:var(--bubblegum); margin-left:4px; }
+.recoverySheet { margin:8px 0 12px; }
+.recoverySheet dl { margin:6px 0 0; display:grid; grid-template-columns:max-content minmax(0, 1fr); gap:4px 12px; font-size:.85rem; }
+.recoverySheet dt { font-weight:600; color:var(--dusk-blue-mid); }
+.recoverySheet dd { margin:0; }
+.arcReading { margin:4px 0; font-style:italic; }
+@media (max-width: 640px){
+  .relWeb, .pressureStages { grid-template-columns:minmax(0, 1fr); }
+  .recoverySheet dl { grid-template-columns:minmax(0, 1fr); }
+}

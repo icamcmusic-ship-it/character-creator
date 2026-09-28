@@ -54,6 +54,9 @@ await step('no inline on* handlers remain in the DOM', async ()=>{
   });
   if (found.length) throw new Error(found.length + ' remain: ' + found.slice(0,5).join(', '));
 });
+await step('first visit shows the onboarding call to action', async ()=>{
+  await page.waitForFunction(()=> document.getElementById('onboard') && !document.getElementById('onboard').hidden, null, {timeout:4000});
+});
 await step('Build & Roll renders a sheet', async ()=>{
   await page.locator('[data-act="generateCharacter"]:visible').first().click({timeout:8000});
   await page.waitForSelector('.traitCard', {timeout:5000});
@@ -316,6 +319,10 @@ await step('B28 — an exclusivity swap repaints both cards, not just the one pr
     // Declare the two seated traits mutually exclusive, then mutate ONE of them by
     // hand and repaint through the single-card path the way a reroll does.
     exclusivePairs = [[state[a].trait.id, state[b].trait.id]];
+    // Earlier steps keep cards; a pair of two KEPT cards is deliberately left alone
+    // and reported (audit B5), so release both for this repaint check.
+    const locks = [state[a].locked, state[b].locked];
+    state[a].locked = false; state[b].locked = false;
     const bBefore = state[b].trait.id;
     reapplyConstraintsAfterMutation();
     renderSlotChange(a);
@@ -324,6 +331,7 @@ await step('B28 — an exclusivity swap repaints both cards, not just the one pr
     const paintedName = painted ? (painted.querySelector('.traitName')||{}).textContent : null;
     const liveName = state[b] && state[b].trait ? state[b].trait.trait : null;
     exclusivePairs = savedPairs;
+    if (state[a]) state[a].locked = locks[0];
     return {changed: bBefore !== bAfter, paintedName, liveName};
   });
   if (r.skip) return;
@@ -443,6 +451,191 @@ await step('B21 — the app states whether this browser actually persists saves'
   const present = await page.evaluate(()=> !!document.getElementById('storageStatus') && typeof storageIsDurable === 'function');
   if (!present) throw new Error('no storage capability indicator exists');
 });
+/* ---- Audit section 1/2 follow-ups: keyboard, file menu, share, undo, compare ---- */
+await step('B3 — every file input stays in the accessibility tree (no display:none)', async ()=>{
+  const bad = await page.evaluate(()=> [...document.querySelectorAll('input[type=file]')]
+    .filter(i => getComputedStyle(i).display === 'none').length);
+  if (bad) throw new Error(bad + ' file input(s) are display:none');
+});
+await step('onboarding is gone once a character exists, and remembered', async ()=>{
+  const r = await page.evaluate(async ()=> ({hidden: document.getElementById('onboard').hidden,
+    stored: !!(await storage.get('ui:onboarded'))}));
+  if (!r.hidden || !r.stored) throw new Error(JSON.stringify(r));
+});
+await step('B9/QOL6 — R tosses and L keeps the focused card', async ()=>{
+  await page.evaluate(()=> document.querySelectorAll('.traitCard.locked, .lockBtn.locked').length);
+  const slot = await page.evaluate(()=>{
+    const c = [...document.querySelectorAll('#sheet .traitCard[data-slot][tabindex]')]
+      .find(c => { const s = state[c.dataset.slot]; return s && !s.locked && c.querySelector('.rerollBtn'); });
+    c.focus(); return c.dataset.slot;
+  });
+  const before = await page.evaluate(s=> state[s].trait.id, slot);
+  await page.keyboard.press('r'); await page.waitForTimeout(250);
+  const after = await page.evaluate(s=> state[s].trait.id, slot);
+  if (before === after) throw new Error('R did not toss the focused card');
+  await page.evaluate(s=> document.querySelector('.traitCard[data-slot="'+s+'"]').focus(), slot);
+  await page.keyboard.press('l'); await page.waitForTimeout(250);
+  const locked = await page.evaluate(s=> !!state[s].locked, slot);
+  if (!locked) throw new Error('L did not keep the focused card');
+  await page.evaluate(s=> toggleLock(s), slot);
+});
+await step('B8 — redo does not fire from inside a text field', async ()=>{
+  const r = await page.evaluate(()=>{
+    const before = JSON.stringify(Object.keys(state).map(k=>state[k]&&state[k].trait&&state[k].trait.id));
+    undoLast();   // puts something on the redo stack
+    const mid = JSON.stringify(Object.keys(state).map(k=>state[k]&&state[k].trait&&state[k].trait.id));
+    const inp = document.getElementById('charName'); inp.focus();
+    inp.dispatchEvent(new KeyboardEvent('keydown', {key:'y', ctrlKey:true, bubbles:true}));
+    const after = JSON.stringify(Object.keys(state).map(k=>state[k]&&state[k].trait&&state[k].trait.id));
+    inp.blur(); redoLast();
+    return {changedByUndo: before !== mid, redoFired: mid !== after};
+  });
+  if (r.redoFired) throw new Error('Ctrl+Y in a text field changed the sheet');
+});
+await step('share link replays the same character', async ()=>{
+  const r = await page.evaluate(()=>{
+    const ids = () => Object.values(state).filter(s=>s&&s.trait).map(s=>s.trait.id).sort().join(',');
+    // Build from a fixed seed so the replay has something to match.
+    setVal('seedInput', 'share-test-seed'); runGeneration(); setVal('seedInput', '');
+    const want = ids();
+    const link = shareLinkFor();
+    runGeneration();   // move away
+    location.hash = link.split('#')[1];
+    const applied = applyShareFromHash();
+    return {applied, same: ids() === want, hashLeft: location.hash, seedLeft: document.getElementById('seedInput').value};
+  });
+  if (!r.applied) throw new Error('the link was not applied');
+  if (!r.same) throw new Error('the shared link built a different character');
+  if (r.hashLeft) throw new Error('hash left in place: ' + r.hashLeft.slice(0,30));
+  if (r.seedLeft) throw new Error('seed field left set');
+});
+await step('LLM prompt export is a markdown voice spec with sample lines', async ()=>{
+  const md = await page.evaluate(()=> sheetToPrompt(state, charMeta));
+  if (!/^# Voice spec:/.test(md) || !/## How they speak/.test(md)) throw new Error(md.slice(0,120));
+});
+await step('File menu → Open file routes a cast file to the cast importer, with undo', async ()=>{
+  const bundle = await page.evaluate(()=>{
+    duplicateCharacter();
+    return JSON.stringify(castBundle());
+  });
+  const before = await page.evaluate(()=> castStates.length);
+  await page.locator('#fileMenu summary').click();
+  await page.locator('#fileMenuInput').setInputFiles({name:'c.json', mimeType:'application/json', buffer: Buffer.from(bundle)});
+  // A cast exists, so replacing it asks first.
+  await page.waitForSelector('dialog[open]', {timeout:4000});
+  await page.locator('dialog[open] button[value="ok"], dialog[open] .btn-primary').first().click();
+  await page.waitForSelector('.toastUndo', {timeout:4000});
+  const n = await page.evaluate(()=> castStates.length);
+  if (n !== JSON.parse(bundle).members.length) throw new Error('cast has ' + n + ' members');
+  await page.evaluate(()=> document.querySelectorAll('.toast').forEach(t=>t.remove()));
+  await page.locator('[data-act="switchTab"][data-args*="single"]').first().click();
+  if (before < 0) throw new Error('unreachable');
+});
+await step('removing a cast member offers Undo, and Undo puts them back', async ()=>{
+  const n0 = await page.evaluate(()=> castStates.length);
+  await page.evaluate(()=> removeCastMember(0));
+  await page.waitForSelector('.toastUndo .toastUndoBtn', {timeout:4000});
+  const n1 = await page.evaluate(()=> castStates.length);
+  await page.locator('.toastUndo .toastUndoBtn').last().click();
+  const n2 = await page.evaluate(()=> castStates.length);
+  if (!(n1 === n0 - 1 && n2 === n0)) throw new Error(`${n0} → ${n1} → ${n2}`);
+});
+await step('compare with a saved character, and search the library', async ()=>{
+  const r = await page.evaluate(async ()=>{
+    const rec = JSON.stringify({format: SAVE_FORMAT, state: compressSlots(state), charMeta: Object.assign({}, charMeta, {name:'Zed Compare'}), savedAt: new Date().toISOString()});
+    await storage.set('character:Zed Compare', rec);
+    await storage.set('character:Ann Other', rec);
+    await loadSavedList();
+    await compareWithSaved('Zed Compare');
+    const panel = document.getElementById('comparePanel');
+    const rows = panel.querySelectorAll('tr.cmpSame').length;
+    const f = document.getElementById('savedFilter'); f.value = 'zed'; applySavedFilter();
+    const visible = [...document.querySelectorAll('#savedList .savedRow')].filter(x=>!x.hidden).length;
+    f.value = ''; applySavedFilter(); closeCompare();
+    await storage.delete('character:Zed Compare'); await storage.delete('character:Ann Other'); await loadSavedList();
+    return {shown: panel.style.display !== 'none' || rows > 0, rows, visible};
+  });
+  if (!r.rows) throw new Error('an identical save showed no identical slots');
+  if (r.visible !== 1) throw new Error(r.visible + ' rows visible for "zed"');
+});
+await step('deleting a save offers Undo', async ()=>{
+  await page.evaluate(async ()=>{ await storage.set('character:Del Me', JSON.stringify({format: SAVE_FORMAT, state: compressSlots(state), charMeta})); });
+  page.evaluate(()=> deleteSavedCharacter('Del Me'));
+  await page.waitForSelector('dialog[open]', {timeout:4000});
+  await page.locator('dialog[open] button[value="ok"], dialog[open] .btn-primary').first().click();
+  await page.waitForSelector('.toastUndo .toastUndoBtn', {timeout:4000});
+  await page.locator('.toastUndo .toastUndoBtn').last().click();
+  await page.waitForTimeout(200);
+  const back = await page.evaluate(async ()=>{ const r = await storage.get('character:Del Me'); await storage.delete('character:Del Me'); await loadSavedList(); return !!r; });
+  if (!back) throw new Error('the deleted save did not come back');
+});
+await step('"Why does this feel familiar?" lists recurring traits with a ban', async ()=>{
+  const r = await page.evaluate(()=>{
+    setVal('seedInput', 'fam-seed'); for (let i=0;i<3;i++) runGeneration(); setVal('seedInput', '');
+    const p = document.getElementById('familiarPanel'); p.open = true; renderFamiliar();
+    return {items: p.querySelectorAll('.familiarList li').length, bans: p.querySelectorAll('[data-act="familiarBan"]').length};
+  });
+  if (!r.items || r.items !== r.bans) throw new Error(JSON.stringify(r));
+});
+await step('B18 — colour values are validated before reaching CSS', async ()=>{
+  const r = await page.evaluate(()=> [cssColor('var(--cast-1)'), cssColor('red;background:url(x)'), cssColor('#abc')]);
+  if (r[0] !== 'var(--cast-1)' || r[1] === 'red;background:url(x)' || r[2] !== '#abc') throw new Error(JSON.stringify(r));
+});
+await step('voice lab: an author prompt is added through the form, and Another take recomposes', async ()=>{
+  await page.evaluate(()=>{ switchTab && switchTab('single'); setVal('seedInput','vl-author'); runGeneration(); setVal('seedInput',''); document.getElementById('vlAddPrompt').open = true; });
+  await page.fill('#vlNewLabel', 'Turning down the captain');
+  await page.selectOption('#vlNewLike', 'refuse');
+  await page.click('#vlAddBtn');
+  const r = await page.evaluate(()=>({cards: document.querySelectorAll('#voiceLabBody .voiceCard').length,
+    user: document.querySelectorAll('#voiceLabBody .voiceCard.userPrompt').length,
+    text: [...document.querySelectorAll('#voiceLabBody .voiceLine')].map(e=>e.textContent).join('|')}));
+  if (r.cards !== VOICE_PROMPT_COUNT + 1 || r.user !== 1) throw new Error(JSON.stringify(r));
+  let moved = false;
+  for (let i = 0; i < 8 && !moved; i++){
+    await page.click('#vlReroll');
+    moved = await page.evaluate(t => [...document.querySelectorAll('#voiceLabBody .voiceLine')].map(e=>e.textContent).join('|') !== t, r.text);
+  }
+  if (!moved) throw new Error('Another take never changed a line');
+  await page.locator('#voiceLabBody .userPrompt [data-act="removeVoicePrompt"]').click();
+  const left = await page.evaluate(()=> document.querySelectorAll('#voiceLabBody .voiceCard.userPrompt').length);
+  if (left) throw new Error('the author prompt was not removed');
+});
+await step('retire for this project toggles from a trait card', async ()=>{
+  const btn = page.locator('#sheetBody .retireBtn').first();
+  await btn.click();
+  const r = await page.evaluate(()=>({n: getRetiredTraits().length, on: !!document.querySelector('#sheetBody .retireBtn.on')}));
+  if (r.n !== 1 || !r.on) throw new Error(JSON.stringify(r));
+  await page.locator('#sheetBody .retireBtn.on').first().click();
+  const n2 = await page.evaluate(()=> getRetiredTraits().length);
+  if (n2 !== 0) throw new Error('un-retire left ' + n2);
+});
+await step('arc timeline export downloads markdown with a pressure diff', async ()=>{
+  await page.evaluate(()=>{ arcBase = JSON.parse(JSON.stringify(state)); arcEvents = []; const ev = makeArcEvent(1, {title:'The fire', shape:'growth', at:'x'}); ev.changes = proposeArcChanges(state, ev, []); arcEvents.push(ev); renderArc(); });
+  const [dl] = await Promise.all([page.waitForEvent('download', {timeout:5000}), page.click('#arcTimelineBtn')]);
+  const path = await dl.path();
+  const fs = await import('fs');
+  const md = fs.readFileSync(path, 'utf8');
+  await page.evaluate(()=>{ arcEvents = []; arcBase = null; renderArc(); });
+  if (!/## 1\. The fire/.test(md) || !/Under pressure, after this event/.test(md)) throw new Error(md.slice(0, 160));
+});
+await step('cast voice-collision heatmap renders and De-collide keeps the cast', async ()=>{
+  await page.evaluate(()=>{ switchTab('cast'); setVal('castCount','4'); generateCast(); switchTab('rel'); renderVoiceCompare(); });
+  const r = await page.evaluate(()=>({cells: document.querySelectorAll('#voiceHeatmap td.hmCell').length, n: castStates.length}));
+  if (r.cells !== r.n * (r.n - 1)) throw new Error(JSON.stringify(r));
+  const btn = page.locator('#deCollideBtn');
+  if (await btn.isEnabled()){
+    const before = await page.evaluate(()=> voiceCollisionMatrix(castStates, voiceLabMode, voiceLabReroll).totals.reduce((a,b)=>a+b,0));
+    await btn.click();
+    const after = await page.evaluate(()=> ({t: voiceCollisionMatrix(castStates, voiceLabMode, voiceLabReroll).totals.reduce((a,b)=>a+b,0), n: castStates.length}));
+    if (after.n !== r.n || after.t > before) throw new Error(`${before} → ${after.t}, ${after.n} members`);
+  }
+});
+await step('heatmap fits a phone width without page scroll', async ()=>{
+  await page.setViewportSize({width: 375, height: 800});
+  const over = await page.evaluate(()=> document.documentElement.scrollWidth - window.innerWidth);
+  await page.setViewportSize({width: 1280, height: 900});
+  if (over > 1) throw new Error('page scrolls horizontally by ' + over + 'px');
+});
 await step('dark theme resolves real colours', async ()=>{
   await page.emulateMedia({colorScheme:'dark'});
   const c = await page.evaluate(()=>{
@@ -453,6 +646,112 @@ await step('dark theme resolves real colours', async ()=>{
   if (!c.bg || c.bg === '#f4f2f8') throw new Error('palette did not switch: ' + JSON.stringify(c));
   console.log('       dark --bg=' + c.bg + ' --text=' + c.text);
   await page.emulateMedia({colorScheme:'light'});
+});
+// ---------------- Section 6 mechanics ----------------
+await step('§6 cast: joint optimisation runs in reasonable time and every card shows a seat', async ()=>{
+  const r = await page.evaluate(()=>{
+    switchTab('cast'); setVal('castCount','5'); setVal('castSeed','s6-browser');
+    const t0 = performance.now(); generateCast(); const ms = performance.now() - t0;
+    setVal('castSeed','');
+    return {ms, badges: document.querySelectorAll('#castGrid .castRoleBadge').length, n: castStates.length,
+      readout: document.getElementById('castSeedReadout').textContent};
+  });
+  if (r.badges !== r.n) throw new Error(JSON.stringify(r));
+  if (r.ms > 8000) throw new Error('cast generation took ' + Math.round(r.ms) + 'ms');
+  console.log('       cast of ' + r.n + ' in ' + Math.round(r.ms) + 'ms — ' + r.readout);
+});
+await step('§6 relationship web: "Add both directions" draws the web with an asymmetric pair', async ()=>{
+  await page.evaluate(()=>{ switchTab('rel'); refreshRelSelectors(); });
+  const opts = await page.evaluate(()=> [...document.getElementById('relA').options].map(o=>o.value).filter(v=>v && v !== '__single__'));
+  await page.selectOption('#relA', opts[0]); await page.selectOption('#relB', opts[1]);
+  await page.locator('[data-act="addAsymmetricPair"]').click();
+  const r = await page.evaluate(()=>({edges: relationshipEdges.length, svg: !!document.querySelector('#relWeb svg.relWebSvg'),
+    lines: document.querySelectorAll('#relWeb svg line').length, t: relationshipEdges.map(e=>e.trust+'/'+e.dependence)}));
+  if (r.edges !== 2 || !r.svg || r.lines < 1) throw new Error(JSON.stringify(r));
+  if (r.t[0] === r.t[1]) throw new Error('the pair came out symmetric: ' + r.t);
+});
+await step('§6 relationship web fits a phone width', async ()=>{
+  await page.setViewportSize({width: 375, height: 800});
+  const over = await page.evaluate(()=> document.documentElement.scrollWidth - window.innerWidth);
+  await page.setViewportSize({width: 1280, height: 900});
+  await page.evaluate(()=>{ relationshipEdges = []; castStates = []; renderCast(); renderEdges(); });
+  if (over > 1) throw new Error('page scrolls horizontally by ' + over + 'px');
+});
+await step('§6 pressure ladder and recovery sheet render under pressure', async ()=>{
+  const r = await page.evaluate(()=>{
+    switchTab('single'); const was = document.getElementById('stressToggle').checked;
+    document.getElementById('stressToggle').checked = true; setVal('seedInput','s6-pressure'); runGeneration(); setVal('seedInput','');
+    const out = {stages: document.querySelectorAll('#pressureBody .pStage').length, current: document.querySelectorAll('#pressureBody .pStage.current').length,
+      rec: !!document.querySelector('#pressureBody .recoverySheet dl dt')};
+    document.getElementById('stressToggle').checked = was;
+    return out;
+  });
+  if (r.stages < 2 || r.current !== 1 || !r.rec) throw new Error(JSON.stringify(r));
+});
+await step('§6 arc template adds a multi-step arc with a reading of each event', async ()=>{
+  const r = await page.evaluate(()=>{
+    arcEvents = []; arcBase = null; renderArc();
+    setVal('arcTemplate', 'corruption-3'); applyArcTemplate();
+    const out = {events: arcEvents.length, shapes: arcEvents.map(e=>e.shape).join(), cards: document.querySelectorAll('#arcBody .arcEvent').length};
+    arcEvents = []; arcBase = null; renderArc();
+    return out;
+  });
+  if (r.events !== 3 || r.cards !== 3 || r.shapes !== 'deterioration,deterioration,deterioration') throw new Error(JSON.stringify(r));
+});
+// ---- §5 keeping output fresh (lenses, 10 lines, seated contradictions, shape, beats) ----
+await step('§5 lens chips toggle, reach the draw, and mark cards normal/deviant here', async ()=>{
+  await page.evaluate(()=> switchTab('single'));
+  await page.locator('#lensPicker [data-act="toggleLens"]').first().click();
+  const r = await page.evaluate(()=>{
+    toggleLens('latelife');
+    setVal('seedInput', 's5-lens'); runGeneration(); setVal('seedInput', '');
+    const out = {sel: document.getElementById('lensSelect').value, on: document.querySelectorAll('#lensPicker .lensChip.on').length,
+      badges: document.querySelectorAll('#sheetBody .lensBadge').length, meta: (document.querySelector('#summaryCard .shapeMeta') || {}).textContent || '',
+      notes: (charMeta.contextNotes || []).join(',')};
+    setVal('lensSelect', ''); renderLensPicker();
+    return out;
+  });
+  if (r.sel !== 'court,latelife' || r.on !== 2) throw new Error('lens selection: ' + JSON.stringify(r));
+  if (!/Court/.test(r.meta) || !/lens: Court/.test(r.notes)) throw new Error('lenses not reported: ' + JSON.stringify(r));
+  if (r.badges < 1) throw new Error('no card read as normal/deviant under two lenses');
+});
+await step('§5 seated contradictions, sheet shape and backstory beats render', async ()=>{
+  const r = await page.evaluate(()=>{
+    document.getElementById('sheetShapeToggle').checked = true;
+    document.getElementById('seatContradictions').checked = true;
+    setVal('seedInput', 's5-shape'); runGeneration(); setVal('seedInput', '');
+    return {contra: document.querySelectorAll('.seatedContra').length, answers: document.querySelectorAll('.seatedContra .contraField').length,
+      group: !!document.getElementById(sectionAnchorId('Seated contradictions')), beats: document.querySelectorAll('.beatList li').length,
+      shape: !!(charMeta.shape && charMeta.shape.text), text: /Seated contradiction/.test(sheetToText(state, charMeta, null))};
+  });
+  if (!r.contra || r.answers < 5 || !r.group || r.beats < 3 || !r.shape || !r.text) throw new Error(JSON.stringify(r));
+});
+await step('§5 voice lab "10 lines" opens ten takes of one situation', async ()=>{
+  await page.locator('#voiceLabBody [data-act="toggleVoiceTen"]').first().click();
+  const n = await page.evaluate(()=> document.querySelectorAll('#voiceLabBody .vlTenList li').length);
+  if (n !== 10) throw new Error(n + ' lines');
+  await page.locator('#voiceLabBody [data-act="toggleVoiceTen"]').first().click();
+});
+await step('§5 an exploration build with a project archive picks the most distinct of three, and its seed replays', async ()=>{
+  const r = await page.evaluate(()=>{
+    const fp = st => Object.keys(st).filter(k=>st[k] && st[k].trait).sort().map(k=>k + ':' + st[k].trait.id).join('|');
+    for (let i = 0; i < 4; i++){ setVal('seedInput', 's5-arch-' + i); runGeneration(); archiveCharacter(state, {name:'a' + i}); }
+    setVal('seedInput', ''); forgetRecentTraits(); forgetSlotDraws(); forgetCategoryUse(); runGeneration();
+    const ex = charMeta.exploration, a = fp(state), shown = lastSeedUsed;
+    forgetRecentTraits(); forgetSlotDraws(); forgetCategoryUse();
+    setVal('seedInput', shown); runGeneration(); setVal('seedInput', '');
+    const out = {ex, same: fp(state) === a};
+    forgetArchive();
+    return out;
+  });
+  if (!r.ex || r.ex.considered !== 3) throw new Error('no best-of-three on an exploration build: ' + JSON.stringify(r.ex));
+  if (!r.same) throw new Error('the printed seed of the chosen candidate did not replay it');
+});
+await step('§5 lens row fits a phone width', async ()=>{
+  await page.setViewportSize({width: 375, height: 800});
+  const over = await page.evaluate(()=> document.documentElement.scrollWidth - window.innerWidth);
+  await page.setViewportSize({width: 1280, height: 900});
+  if (over > 1) throw new Error('page scrolls horizontally by ' + over + 'px');
 });
 await b.close();
 if (process.env.CSP) console.log(csp.length ? '\nCSP violations:\n' + csp.slice(0,6).map(v=>'  '+v).join('\n') : '\nNo CSP violations under script-src \'self\'.');

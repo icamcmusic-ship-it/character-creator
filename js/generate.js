@@ -34,8 +34,13 @@ function seedNumberFrom(str){
   const t = String(str == null ? '' : str).trim();
   if (!t) return null;
   if (t.startsWith(SEED_PREFIX)){
-    const n = parseInt(t.slice(SEED_PREFIX.length), 36);
-    if (!Number.isNaN(n)) return n >>> 0;
+    // Only a strict v1-<base36> that fits in 32 bits decodes; "v1-abc#2" or an
+    // overflowing body is user text and is hashed whole, so it cannot collide.
+    const body = t.slice(SEED_PREFIX.length);
+    if (/^[0-9a-z]+$/.test(body)){
+      const n = parseInt(body, 36);
+      if (n <= 0xFFFFFFFF) return n >>> 0;
+    }
   }
   return hashSeedString(t);
 }
@@ -345,7 +350,10 @@ function generateBatch(n){
   const before = {state, charMeta, pressureState, lastSheetTraits,
                   lastGeneratedSliders, lastSeedUsed, charMetaSeed,
                   seedReadout: (document.getElementById('lastSeedReadout')||{}).textContent,
-                  budgetReport: getBudgetReport()};
+                  budgetReport: getBudgetReport(),
+                  // The DOM sliders: depth-first moves them per candidate, so each
+                  // candidate starts from these and the tray leaves them untouched.
+                  domSliders: captureSliders()};
   /* withSpeculativeGeneration: a batch runs `count` complete builds that the user has
      not accepted, and a complete build writes to the presentation locks, the undo and
      redo stacks, the anti-repetition window, lastBySlot, sessionProfiles, the novelty
@@ -358,6 +366,7 @@ function generateBatch(n){
       const seedEl = document.getElementById('seedInput');
       const userSeed = seedEl ? seedEl.value : "";
       if (seedEl && userSeed) seedEl.value = userSeed + "#" + (i + 1);
+      restoreSliders(before.domSliders);
       try {
         if (!_runGeneration()) continue;
         /* The candidate's presentation locks are part of the candidate. They used to be
@@ -378,6 +387,7 @@ function generateBatch(n){
     state = before.state; charMeta = before.charMeta;
     pressureState = before.pressureState; lastSheetTraits = before.lastSheetTraits;
     lastGeneratedSliders = before.lastGeneratedSliders;
+    restoreSliders(before.domSliders);
     lastSeedUsed = before.lastSeedUsed; charMetaSeed = before.charMetaSeed;
     const seedOut = document.getElementById('lastSeedReadout');
     if (seedOut && before.seedReadout !== undefined) seedOut.textContent = before.seedReadout;
@@ -443,7 +453,8 @@ function chooseBatch(i){
      belongs — on the one character the user kept, not on all five. The batch itself is
      isolated (see withSpeculativeGeneration); this is the deliberate commit. */
   if (pick.variants) charVariants = pick.variants;
-  if (pick.sliders) lastGeneratedSliders = pick.sliders;
+  // Put the chosen candidate's sliders on screen too, so controls match the sheet.
+  if (pick.sliders){ lastGeneratedSliders = pick.sliders; restoreSliders(pick.sliders); }
   if (pick.budgetReport && typeof setBudgetReport === 'function') setBudgetReport(pick.budgetReport);
   /* The seed readout was left showing the LAST candidate's seed, so "Seed: …" next to a
      kept character named a different one — and pasting it back reproduced the candidate
@@ -520,8 +531,15 @@ function generateSameWorld(){
   if (nameEl) nameEl.value = '';
   unlockAll();
   setAvoidSet(avoid);
-  try { runGeneration(); }
-  finally { setAvoidSet(null); if (nameEl && !nameEl.value) nameEl.value = ''; }
+  let ok = false;
+  try { ok = runGeneration(); }
+  finally {
+    setAvoidSet(null);
+    // Put the user's name back (the old line assigned '' to an empty field: a no-op).
+    if (nameEl) nameEl.value = keptName;
+    if (ok && keptName && charMeta) charMeta.name = keptName;
+  }
+  if (!ok) return;
   charMeta.mode = 'same-world';
   toast(`Built someone else in the same world${keptName ? ' as "' + keptName + '"' : ''}: their traits, concept families and profile categories were all avoided.`);
 }
@@ -536,13 +554,22 @@ function generateVariation(){
   const div = document.getElementById('divergence');
   const prevDiv = div ? div.value : null;
   if (div) div.value = '0';
-  try { runGeneration(); }
+  const topBefore = history[history.length - 1];
+  let ok = false;
+  try { ok = runGeneration(); }
   finally {
     if (div && prevDiv !== null) div.value = prevDiv;
+    // The undo snapshot was taken with the temporary locks on; strip them there too,
+    // or Undo would restore five locks the user never set.
+    if (history[history.length - 1] !== topBefore){
+      const snap = history[history.length - 1];
+      if (snap && snap.state) defining.forEach(k=>{ if (snap.state[k] && !wasLocked[k]) snap.state[k].locked = false; });
+    }
     // The locks were the mechanism, not a decision the user made: put them back.
     defining.forEach(k=>{ if (state[k] && !wasLocked[k]) state[k].locked = false; });
     renderSheet();
   }
+  if (!ok) return;
   charMeta.mode = 'variation';
   toast(`A variation: the ${defining.length} most defining cards were held, everything else re-rolled without divergence.`);
 }
@@ -559,6 +586,11 @@ function runGeneration(){
   }
 }
 
+/* Best-of-three on exploration builds (audit §5). On unless the control says otherwise. */
+function exploreCandidatesEnabled(){
+  const el = settingEl('exploreCandidates');
+  return el ? !!el.checked : true;
+}
 function _runGeneration(){
   snapshotHistory();
   diffLog = {};
@@ -644,14 +676,45 @@ function _runGeneration(){
   // (withRng, engine.js) rather than reassigning Math.random globally.
   const seedInput = document.getElementById('seedInput');
   const seed = resolveSeed(seedInput ? seedInput.value : "");
-  const seedNum = seed.num;
+  let seedNum = seed.num;
   lastSeedUsed = seed.label;
   const wantStress = !!(document.getElementById('stressToggle')||{}).checked;
   // An explicit seed means "give me this character again", so it suppresses the
   // session-history branch of divergence (see REPLAY_MODE in engine.js). An
   // unseeded roll is exploration and keeps it.
   const replay = seed.explicit;
-  let newState0, newState, newPressure = null;
+  // Setting / culture / life-stage lenses carry a register norm: a nudge on the dial.
+  if (ctxInfo && ctxInfo.lensRegister) regLevel = clamp(regLevel + ctxInfo.lensRegister, -2, 2);
+  /* §5 ANTI-STALENESS: best of three. An exploration build (blank seed box) draws three
+     candidates on three sub-seeds, each speculatively (nothing they touch survives),
+     and keeps the one most distinct from the project archive and the sheet on screen,
+     above a coherence floor — see selectDistinctCandidate. The winner's own seed is the
+     one printed, so pasting it back replays that candidate. A replay never gets here:
+     choosing against the archive is history, and a seed promises no history. */
+  let exploreInfo = null;
+  if (!replay && !wantDepthFirst && exploreCandidatesEnabled()){
+    const refs = explorationReferences(state);
+    if (refs.length){
+      const want0 = variantsFromProtected(state).want;
+      const cands = [];
+      for (let k = 0; k < EXPLORE_CANDIDATES; k++){
+        const num = candidateSeed(seedNum, k);
+        const st = withSpeculativeGeneration(()=> withReplayMode(false, ()=>
+          withArchetypeProfile(arch && arch.profile, ()=> withRng(mulberry32(num), ()=>{
+            rollCharacterVariants(want0);
+            return buildCharacterState({verbLevel, regLevel, compLevel, mannerCount, rarityPref,
+              vocabPref: arch?arch.vocabPref:null, vocabCount, personalityOverrides: archOverrides});
+          }))));
+        cands.push({num, state: st});
+      }
+      const pick = selectDistinctCandidate(cands, refs);
+      if (pick){
+        exploreInfo = {chosen: pick.index, considered: pick.considered, scores: pick.scores};
+        if (pick.index > 0){ seedNum = pick.num; lastSeedUsed = encodeSeed(seedNum); }
+      }
+    }
+  }
+  let newState0, newState, newPressure = null, newShape = null;
   // The archetype's profile hints are live for the whole build and nothing else — see
   // ARCHETYPE PROFILE HINTS in engine.js. Cast, foil and gap-filler deliberately do not
   // inherit them; they are not this archetype's character.
@@ -686,6 +749,7 @@ function _runGeneration(){
     }
     newState0 = buildCharacterState({verbLevel, regLevel, compLevel, mannerCount, rarityPref,
       vocabPref: arch?arch.vocabPref:null, vocabCount, personalityOverrides: archOverrides});
+    newShape = (typeof shapeSummary === 'function') ? shapeSummary(LAST_SHAPE) : null;
     /* One finalizer, one order — see finalizeSheet in engine.js. The locked slots the
        user kept are seated HERE, before budgets, exclusivity and the pressure sheet,
        rather than being merged back in afterwards over the top of everything those
@@ -734,6 +798,10 @@ function _runGeneration(){
     seed: charMetaSeed
   };
   charMeta.viewContext = (typeof viewContext !== 'undefined') ? viewContext : 'baseline';
+  // §5: which lenses, what shape, and whether it was the most distinct of three.
+  charMeta.lenses = ctxInfo && ctxInfo.lenses && ctxInfo.lenses.length ? ctxInfo.lenses.slice() : null;
+  charMeta.shape = newShape;
+  charMeta.exploration = exploreInfo;
   // A freshly generated character starts its arc over — see resetArc in app.js.
   if (typeof resetArc === 'function') resetArc(false);
   charMeta.archFidelity = arch ? archetypeFidelity(state, arch) : null;
@@ -827,14 +895,24 @@ function rerollSlot(slotId){
   // BUG FIX: snapshotHistory() ran before the lock check and before validating the
   // slot, so rerolling a locked (or missing) slot pushed a junk no-op entry onto
   // the undo stack. Validate first, snapshot only once we know we'll change something.
-  if (!old || !old.trait || old.locked) return;
+  if (!old || !old.trait) return;
+  // A requirement that was satisfied in place and has since been removed leaves stale
+  // locked/required flags; lift them so Toss works on the card again.
+  if (old.requiredSatisfiedInPlace && typeof clearStaleRequirement === 'function'){
+    const cleaned = clearStaleRequirement(old);
+    if (cleaned !== old){ state[slotId] = cleaned; return rerollSlot(slotId); }
+  }
   /* BUG FIX: a required slot rendered a Toss button that could not work — req_* is
      the user's own "always include this exact trait", so there is nothing to draw.
-     Say so instead of failing silently. */
-  if (old.required && slotId.startsWith("req_")){
+     Say so instead of failing silently. (Checked BEFORE the lock test: required slots
+     are also locked, so this toast used to be unreachable.) */
+  if (old.required && (slotId.startsWith("req_") || old.requiredSatisfiedInPlace)){
     toast("This trait is here because you required it by name — remove the constraint to change it.", "warn");
     return;
   }
+  // reqcat_ slots are locked by construction but mandate only the CATEGORY, so Toss
+  // redraws within it (the branch below); every other locked slot stays put.
+  if (old.locked && !(old.required && slotId.startsWith("reqcat_"))) return;
   const rarityPref = rarityPrefVal();
   // Reroll always operates on the single main-character UI, so the live DOM sliders
   // ARE the correct source for trait-level polarity affinity here (no per-call
@@ -924,15 +1002,6 @@ function rerollSlot(slotId){
     const axisId = slotId.replace("pers_","").replace(/__2$/,"");
     const axis = PERSONALITY_AXES.find(a=>a.id===axisId);
     if (axis) replacement = drawFresh(()=>pickPersonalitySlot(axis, rawToLevel(rawOf('pers_'+axisId)), rarityPref));
-  } else if (slotId.startsWith("app_")){
-    /* BUG FIX: renderSheet gives every card the full control strip, but rerollSlot
-       only ever branched on the voice, profile and personality families — so Toss on
-       an Appearance card (a section that is ON by default) fell through to the bail-out
-       below and did nothing at all, with no feedback. Everything the draw needs is
-       already on the slot: same section and category, same intensity target. */
-    const cat = old.trait.category, tgt = old.target;
-    replacement = drawFresh(()=>({slotId, locked:false, label: old.label, derived: old.derived,
-      target: tgt, trait: pickInRange(byFilter("Appearance", cat), rarityPref, tgt, 3)}));
   } else if (slotId.startsWith("wild_")){
     // The outlier's whole premise is "a category chosen at random" — so rerolling it
     // draws a new category too, rather than another sample of the same one.
@@ -1135,6 +1204,13 @@ function togglePin(slotId){
 }
 function adjustPin(slotId, delta){
   if (pinnedTargets[slotId] === undefined) return;
+  // A locked or required card is never redrawn — the lock wins over the pin.
+  const cur0 = state[slotId];
+  if (cur0 && (cur0.locked || cur0.required)){
+    toast(cur0.required ? "That card holds a required trait — remove the requirement to change it."
+                        : "That card is locked — unlock it to nudge its intensity.", "warn");
+    return;
+  }
   // A nudge redraws the card, so it is a content change and belongs on the stack.
   snapshotHistory();
   pinnedTargets[slotId] = clamp(pinnedTargets[slotId] + delta, 1, 5);
@@ -1180,9 +1256,15 @@ function applyPinnedTargets(obj, rarityPref){
   Object.keys(pinnedTargets).forEach(slotId=>{
     const cur = obj[slotId];
     if (!cur || !cur.trait){ delete pinnedTargets[slotId]; return; }
-    const pool = byFilter(cur.trait.section, cur.trait.category);
+    // Lock (and a required trait) wins over a pin: never redraw those slots.
+    if (cur.locked || cur.required) return;
+    // Never seat a trait that is already elsewhere on the sheet, or one that would
+    // break a "never together" pair with what is seated (as applyBudgets does).
+    const seated = seatedIdSet(obj, slotId);
+    const full = byFilter(cur.trait.section, cur.trait.category);
+    const pool = full.filter(t => t.id === cur.trait.id || (!seated.has(t.id) && !excludedByPairs(t.id, seated)));
     const tgt = pinnedTargets[slotId];
-    const picked = pickInRange(pool, rarityPref, tgt, 3);
+    const picked = pool.length ? pickInRange(pool, rarityPref, tgt, 3) : null;
     obj[slotId] = {...cur, target: tgt, pinned: true, trait: picked || cur.trait};
   });
   return obj;

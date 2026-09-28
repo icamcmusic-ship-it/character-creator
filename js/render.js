@@ -109,7 +109,6 @@ SECTION_COLORS["Ordinary Texture"] = "var(--dusk-blue)";
 SECTION_COLORS["Recovery & Repair"] = "var(--emerald-deep)";
 SECTION_COLORS["Contradiction Functions"] = "var(--golden-deep)";
 SECTION_COLORS["Role by Context"] = "var(--dusk-blue)";
-SECTION_COLORS["Appearance"] = "var(--accent-violet)";
 SECTION_COLORS["Required (constraints)"] = "var(--accent-amber)";
 SECTION_COLORS["The one thing that doesn't fit"] = "var(--accent-rust)";
 SECTION_COLORS["Where They Stand Under Pressure"] = "var(--bubblegum)";
@@ -421,7 +420,7 @@ function traitCardHTML(id, s, includeControls, showDiff, accent, tagLabel){
   const tier = t.rtier || (typeof rarityTier === 'function' ? rarityTier(t) : t.rarity);
   const lockedClass = s.locked ? "locked" : "";
   const diff = showDiff ? diffLog[id] : null;
-  const style = accent ? ` style="--section-accent:${escHTML(accent)}"` : ``;
+  const style = accent ? ` style="--section-accent:${escHTML(cssColor(accent))}"` : ``;
   const history = includeControls && rerollHistory[id] && rerollHistory[id].length;
   // Flash slots that a full regeneration actually moved. renderChangeList already knew
   // WHICH slots changed but only reported it in a collapsed list; the highlight was
@@ -443,7 +442,7 @@ function traitCardHTML(id, s, includeControls, showDiff, accent, tagLabel){
   const ctxNote = cv && cv.status !== 'active'
     ? `<div class="traitNote ctxNote"><b>${escHTML(CONTEXT_VIEW.label)}:</b> ${cv.status} — ${escHTML(cv.why)}.</div>` : ``;
   return `
-    <div class="traitCard${s.wildcard ? ' wildcardCard' : ''}${changedClass}${tag ? ' tagged' : ''}${openNow ? ' controlsOpen' : ''}${ctxClass}"${style} data-slot="${escAttr(id)}">
+    <div class="traitCard${s.wildcard ? ' wildcardCard' : ''}${changedClass}${tag ? ' tagged' : ''}${openNow ? ' controlsOpen' : ''}${ctxClass}"${style} data-slot="${escAttr(id)}"${includeControls ? ` tabindex="0" role="group" aria-label="${escHTML(t.trait)}" aria-keyshortcuts="R L" title="R to toss, L to keep"` : ``}>
       ${tag}
       <div class="traitMain">
         <div class="traitName">${escHTML(t.trait)}
@@ -452,6 +451,9 @@ function traitCardHTML(id, s, includeControls, showDiff, accent, tagLabel){
           ${dimsChipHTML(t)}
           ${s.wildcard ? `<span class="wildBadge" title="Deliberately drawn against the grain — see 'the one thing that doesn't fit'">outlier</span>` : ``}
           ${s.derived ? `<span class="wildBadge" style="background:var(--emerald-deep);border-color:var(--emerald-deep);" title="Derived from this character's psychology rather than a slider">derived</span>` : ``}
+          ${(()=>{ const lr = includeControls && typeof lensReading === 'function' ? lensReading(t) : null;
+             return lr ? `<span class="lensBadge lens-${lr.status}" title="${escAttr(lr.why)}">${lr.status === 'normal' ? 'normal here' : 'deviant here'}</span>` : ``; })()}
+          ${s.contradiction ? `<span class="wildBadge contraBadge" title="Seated on purpose: it cuts against the sheet on ${escAttr(AXIS_LABELS[s.contradiction.axis] || '')}">${s.contradiction.role === 'function' ? 'what it is for' : 'contradiction'}</span>` : ``}
           ${s.budgeted ? `<span class="wildBadge budgetBadge" title="${escHTML(s.budgetWhy || 'Adjusted to fit a budget you set')}">budgeted</span>` : ``}
         </div>
         <div class="traitCat">${escHTML(t.category)}</div>
@@ -501,6 +503,9 @@ function traitCardHTML(id, s, includeControls, showDiff, accent, tagLabel){
         <button class="markBtn ${bannedTraitIds.has(t.id) ? 'on' : ''}" ${actAttr('click', 'banTrait', t.id)}
                 aria-pressed="${bannedTraitIds.has(t.id) ? 'true' : 'false'}"
                 title="${bannedTraitIds.has(t.id) ? 'Allow this trait again' : 'Never draw this trait again'}"><span aria-hidden="true">🚫</span><span class="srOnly">never draw this again</span></button>
+        ${typeof isRetired === 'function' ? `<button class="markBtn retireBtn ${isRetired(t.id) ? 'on' : ''}" ${actAttr('click', 'retireTrait', t.id)}
+                aria-pressed="${isRetired(t.id) ? 'true' : 'false'}"
+                title="${isRetired(t.id) ? 'Bring this trait back at full weight' : 'Retire for this project: drawn far less often in new characters, never banned; seeds still replay'}"><span aria-hidden="true">⏸</span><span class="srOnly">${isRetired(t.id) ? 'un-retire this trait' : 'retire this trait for this project'}</span></button>` : ``}
         <button class="whyBtn" ${actAttr('click', 'editTraitNote', id)} title="${traitNotes[id] ? 'Edit your note on this card' : 'Attach a note to this card'}">${traitNotes[id] ? 'note ✎' : '+ note'}</button>
       </div>` : ``}
     </div>`;
@@ -512,7 +517,6 @@ const RARITY_TIER_HINT = {
   signature:   "Defines the voice. Two of these is a caricature.",
 };
 function titleForSlotId(id){
-  if (id.startsWith("app_")) return "Appearance";
   if (id.startsWith("req_") || id.startsWith("reqcat_")) return "Required (constraints)";
   if (id.startsWith("wild_")) return "The one thing that doesn't fit";
   if (id.startsWith("pers_")) return "Personality";
@@ -547,7 +551,7 @@ function toggleGroup(title){ collapsedGroups[title] = !collapsedGroups[title]; r
    Applied on the first render after a generate only — once you have started opening and
    closing sections by hand, that is your arrangement and the setting stops overriding it. */
 const DENSITY_DEEP_GROUPS = ["Motivation & Wound","Conflict & Stress Response","Social Role in a Group",
-  "Values & Moral Line","Attachment & Intimacy","Humor Style","Habits & Vices","Appearance","Vocabulary","Mannerisms"];
+  "Values & Moral Line","Attachment & Intimacy","Humor Style","Habits & Vices","Vocabulary","Mannerisms"];
 function sheetDensity(){
   const el = document.getElementById('sheetDensity');
   return el ? el.value : 'standard';
@@ -657,6 +661,17 @@ function summaryCardHTML(){
       chain.links.map(l => `<li><span class="chainKey">${escHTML(l.key)}</span> ${escHTML(l.text)} <span class="chainFrom">← ${escHTML(l.from.join(" · "))}</span></li>`).join("") +
       `</ol></details>`;
   }
+  const beats = (typeof backstoryBeats === 'function') ? backstoryBeats(state, charMeta) : null;
+  if (beats){
+    h += `<details class="chainBox beatsBox"><summary>Backstory beats <span class="chainCount">${beats.length}</span></summary><ol class="chainList beatList">` +
+      beats.map(b => `<li><span class="chainKey">${escHTML(b.title)}</span> <span class="beatWhen">${escHTML(b.when)}</span> ${escHTML(b.text)} <span class="chainFrom">← ${escHTML(b.from.join(" · "))}</span></li>`).join("") +
+      `</ol></details>`;
+  }
+  const shapeBits = [];
+  if (charMeta.lenses && charMeta.lenses.length && typeof lensById === 'function') shapeBits.push(`Lenses: <b>${escHTML(charMeta.lenses.map(id => (lensById(id) || {label:id}).label).join(" + "))}</b>`);
+  if (charMeta.shape && charMeta.shape.text) shapeBits.push(`Shape: ${escHTML(charMeta.shape.text)}`);
+  if (charMeta.exploration) shapeBits.push(`Most distinct of ${charMeta.exploration.considered} drafts from this project's characters`);
+  if (shapeBits.length) h += `<div class="summaryMeta shapeMeta">${shapeBits.join(" · ")}</div>`;
 
   if (loudest.length){
     h += `<ul class="summaryTraits">` + loudest.map(s=>
@@ -772,7 +787,7 @@ function whyThisCharacterHTML(){
    optional group), so the sheet does not fill up with notes about nothing. */
 const GROUP_TOGGLE_IDS = {
   "Personality": "genPersonality", "Speech Pattern": "genSpeech",
-  "Vocabulary": "genVocab", "Mannerisms": "genManner", "Appearance": "genAppearance",
+  "Vocabulary": "genVocab", "Mannerisms": "genManner",
 };
 /* Which trait sections feed each sheet group. Lets a question asked from a section
    header ("why didn't I get X here?") be answered against the pools that section
@@ -782,7 +797,6 @@ const GROUP_TOGGLE_IDS = {
 const SECTIONS_FOR_GROUP = (function(){
   const m = {
     "Personality": ["Personality Traits"],
-    "Appearance": ["Appearance"],
     "Speech Pattern": ["Verbosity Traits", "Vocabulary Traits", "Dialogue Grammar Traits"],
     "Vocabulary": ["Vocabulary Traits"],
     "Mannerisms": ["Mannerisms"],
@@ -799,6 +813,7 @@ function emptyGroupReason(title){
   const ps = PROFILE_SECTIONS.find(p=>p.label === title);
   if (ps){
     if (!profileSectionEnabled(ps)) return "Switched off in the Character Profile panel.";
+    if (charMeta && charMeta.shape && charMeta.shape.dropped === ps.label) return "Dropped by this sheet's shape — the signature budget spent the space on the sections that define them. Switch \"Vary the sheet's shape\" off to always draw it.";
     if (bannedSections.has(ps.section)) return `The whole "${ps.section}" section is banned in your constraints, so nothing here can ever be drawn.`;
     const cats = catsOf(ps.section);
     if (cats.length && cats.every(c => bannedCategories.has(c)))
@@ -905,8 +920,8 @@ function renderSheet(){
     {title:"Vocabulary", ids:Object.keys(state).filter(k=>k.startsWith("vocab"))},
     {title:"Mannerisms", ids:Object.keys(state).filter(k=>k.startsWith("manner"))},
     ...profGroups,
-    {title:"Appearance", ids:Object.keys(state).filter(k=>k.startsWith("app_"))},
     {title:"The one thing that doesn't fit", ids:Object.keys(state).filter(k=>k.startsWith("wild_"))},
+    {title:"Seated contradictions", ids:Object.keys(state).filter(k=>k.startsWith("contra_"))},
   ];
   SHEET_GROUP_TITLES = groups.map(g=>g.title);
   SHEET_GROUPS = groups;
@@ -933,7 +948,7 @@ function renderSheet(){
     const collapsed = !!collapsedGroups[g.title];
     div.className = "axisGroup" + (collapsed ? " collapsed" : "");
     div.id = sectionAnchorId(g.title);
-    div.style.setProperty('--section-accent', sectionColor(g.title));
+    div.style.setProperty('--section-accent', cssColor(sectionColor(g.title)));
     // PERF FIX: innerHTML += inside a loop re-parses the accumulated HTML on every
     // iteration (quadratic), which was the main source of visible lag on large
     // sheets. Build the string once, assign once.
@@ -1029,6 +1044,14 @@ function renderSheet(){
         <div class="sub" style="margin:6px 0 0;">Not an error to fix. A ${escHTML(contra.tier.toLowerCase())} opposition on one axis is where a character stops being a list of traits — answer the question and the rest of the sheet reorganises around it.</div>
       </div>`;
     }
+    (typeof seatedContradictions === 'function' ? seatedContradictions(state) : []).forEach(sc => {
+      h += `<div class="tensionBlock seatedContra">
+        <div class="tensionTitle">Seated contradiction &mdash; ${escHTML(sc.axisLabel)} <span class="sub">(${escHTML(sc.fn)})</span></div>
+        <div style="margin:6px 0;">${sc.face ? `They are <b>${escHTML(sc.face.trait)}</b> and also ` : `They are also `}<b>${escHTML(sc.exception.trait)}</b>${sc.fnTrait ? ` &mdash; <i>${escHTML(sc.fnTrait.trait)}</i>` : ``}.</div>
+        <div style="margin:6px 0; font-style:italic;">${escHTML(sc.question)}</div>
+        ${sc.answers.map(a => `<div class="contraField"><b>${escHTML(a.prompt)}</b> <span class="contraDerived">${escHTML(a.answer)}</span>${a.from.length ? ` <span class="chainFrom">← ${escHTML(a.from.join(" · "))}</span>` : ``}</div>`).join("")}
+      </div>`;
+    });
     const patterns = secondOrderTensions(state);
     if (patterns.length){
       h += `<div class="tensionBlock" style="border-left-color:var(--dusk-blue);"><div class="tensionTitle" style="color:var(--dusk-blue);">Emergent patterns</div>` +
@@ -1152,6 +1175,8 @@ function renderSheet(){
       head += `<ol class="chainList pressureChain">` + chain.stages.map(sg =>
         `<li><b>${escHTML(sg.title)}.</b> ${escHTML(sg.text)} <span class="chainFrom">← ${escHTML(sg.from.join(" · ") || "the pressure dial")}</span></li>`).join("") + `</ol>`;
     }
+    // Section 6: irritated → cornered → broken, and the day after (mechanics.js).
+    if (typeof pressureEscalationHTML === 'function') head += pressureEscalationHTML(state, pressureState);
     pbody.innerHTML = head;
     const pgroups = [
       {title:"Speech Under Pressure", ids:["verbosity","register","grammar"]},
@@ -1163,7 +1188,7 @@ function renderSheet(){
       if(!validIds.length) return;
       const div = document.createElement('div');
       div.className = "axisGroup";
-      div.style.setProperty('--section-accent', sectionColor(g.title));
+      div.style.setProperty('--section-accent', cssColor(sectionColor(g.title)));
       let inner = `<div class="axisTitle static"><span class="axisGlyph" aria-hidden="true">${sectionGlyph(g.title)}</span>${escHTML(g.title)}</div>`;
       validIds.forEach(id=>{
         const slot = pressureState[id];
@@ -1185,8 +1210,8 @@ const SECTION_GLYPHS = {
   "Personality":"◆", "Speech Pattern":"◼", "Speech Under Pressure":"◼", "Vocabulary":"▲",
   "Mannerisms":"●", "Mannerisms Under Pressure":"●", "Motivation & Wound":"◆",
   "Conflict & Stress Response":"◼", "Social Role in a Group":"▲", "Values & Moral Line":"●",
-  "Attachment & Intimacy":"◆", "Humor Style":"◼", "Habits & Vices":"▲", "Appearance":"✦",
-  "Required (constraints)":"✚", "The one thing that doesn't fit":"✳",
+  "Attachment & Intimacy":"◆", "Humor Style":"◼", "Habits & Vices":"▲",
+  "Required (constraints)":"✚", "The one thing that doesn't fit":"✳", "Seated contradictions":"⇄",
   "Where They Stand Under Pressure":"▲",
   "Competence & Method":"▲", "Positive Origins":"●", "Goals & Stakes":"◆", "Ordinary Texture":"◼",
   "Recovery & Repair":"▲", "Contradiction Functions":"●", "Role by Context":"◼",
@@ -1367,6 +1392,14 @@ function sheetToText(st, meta, pState){
       L.push("", `**The contradiction — ${contra.axisLabel}:** ${contra.hi.trait} and also ${contra.lo.trait}. _${contra.question}_`,
         ...contra.fields.map(f => `- ${f.prompt} ${f.answer || f.derived || "(unanswered)"}`));
     }
+    (typeof seatedContradictions === 'function' ? seatedContradictions(st) : []).forEach(sc => {
+      L.push("", `**Seated contradiction — ${sc.axisLabel}:** ${sc.face ? sc.face.trait + " and also " : ""}${sc.exception.trait}${sc.fnTrait ? ` (for: ${sc.fnTrait.trait})` : ""}. _${sc.question}_`,
+        ...sc.answers.map(a => `- ${a.prompt} ${a.answer}`));
+    });
+    const beats = typeof backstoryBeats === 'function' ? backstoryBeats(st, meta) : null;
+    if (beats) L.push("", "**Backstory beats:**", ...beats.map((b, i) => `${i + 1}. _${b.title}_ (${b.when}) — ${b.text} (from: ${b.from.join(", ")})`));
+    if (meta.lenses && meta.lenses.length && typeof lensById === 'function') L.push("", `_Lenses: ${meta.lenses.map(id => (lensById(id) || {label:id}).label).join(", ")}_`);
+    if (meta.shape && meta.shape.text) L.push("", `_Shape: ${meta.shape.text}_`);
   } catch(e){}
   try {
     const co = coherenceScore(st);
@@ -1399,6 +1432,7 @@ function sheetToText(st, meta, pState){
   // ---- Required constraints ----
   block("Required (constraints)", Object.keys(st).filter(k=>k.startsWith("req_")||k.startsWith("reqcat_")));
   block("The one thing that doesn't fit", Object.keys(st).filter(k=>k.startsWith("wild_")));
+  block("Seated contradictions", Object.keys(st).filter(k=>k.startsWith("contra_")));
 
   // ---- Personality ----
   block("Personality", Object.keys(st).filter(k=>k.startsWith("pers_")));
@@ -1409,9 +1443,6 @@ function sheetToText(st, meta, pState){
       block(ps.label, Object.keys(st).filter(k=>k.startsWith("prof_"+ps.id+"_")));
     });
   }
-
-  // ---- Appearance ----
-  block("Appearance", Object.keys(st).filter(k=>k.startsWith("app_")));
 
   // ---- Voice ----
   block("Speech Pattern", ["verbosity","register","grammar"]);
@@ -1446,6 +1477,7 @@ function sheetToText(st, meta, pState){
       const chain = pressureChain(st, pState);
       if (chain) L.push(...chain.stages.map(sg => `1. **${sg.title}.** ${sg.text} (from: ${sg.from.join(", ") || "the pressure dial"})`), "");
     } catch(e){}
+    try { if (typeof pressureEscalationMarkdown === 'function'){ const esc = pressureEscalationMarkdown(st, pState); if (esc) L.push(esc, ""); } } catch(e){}
     /* The base sheet's `block` helper filters slots whose TRAIT is null; the pressure
        section checked only that the slot existed, so one blanked or banned-out pressure
        slot threw `Cannot read properties of null (reading 'trait')` and aborted the
@@ -1528,15 +1560,17 @@ const CHAR_FORMAT_VERSION = 2;
 // Every control that changes what a generation produces.
 const SETTING_FIELDS = ['mannerCount','vocabCount','personalityCount','profileDepth',
   'rarityPref','affinityBoost','rangeFocus','profileWeight','divergence',
-  'app_stature','app_upkeep','app_presence','archetypeSelect','archetypeVariation','archetypeBlend','seedInput','sheetDensity','wildcardCount','pressureLevel',
+  'archetypeSelect','archetypeVariation','archetypeBlend','seedInput','sheetDensity','wildcardCount','pressureLevel',
+  'lensSelect',
   /* The cast and foil controls were the one part of the workspace that no capture
      covered, so "export my setup" and Undo both silently dropped them and a cast was
      unreproducible from a settings file even though it now has a seed. A workspace is
      everything that decides what the next generation produces. */
   'charName','charAge','charContext','castCount','castSeed','castSpread','foilSeed'];
 const SETTING_TOGGLES = ['personalityToggle','depthFirstToggle','examplesToggle','stressToggle',
-  'genPersonality','genSpeech','genVocab','genManner','genAppearance',
-  'avoidRecentToggle','wildcardToggle','foilOpposeComposure','compactToggle','castAnchor'];
+  'genPersonality','genSpeech','genVocab','genManner',
+  'avoidRecentToggle','wildcardToggle','foilOpposeComposure','compactToggle','castAnchor',
+  'sheetShapeToggle','seatContradictions','exploreCandidates'];
 
 function captureSettings(){
   const fields = {}, toggles = {}, sections = {};
@@ -1610,16 +1644,20 @@ function restoreSettings(s){
   });
   if (s.sliders) restoreSliders(s.sliders);
   const c = s.constraints || {};
-  bannedCategories = new Set(c.bannedCategories || []);
-  bannedSections   = new Set(c.bannedSections || []);
+  // Settings saved while the removed Appearance section existed can name its section,
+  // categories or budget group; those have nothing left to act on, so they are dropped.
+  const liveCat = x => !RETIRED_CATEGORIES.has(x);
+  bannedCategories = new Set((c.bannedCategories || []).filter(liveCat));
+  bannedSections   = new Set((c.bannedSections || []).filter(x => !RETIRED_SECTIONS.has(x)));
   bannedTraitIds   = new Set(c.bannedTraitIds || []);
   requiredTraitIds = (c.requiredTraitIds || []).slice();
-  requiredCategories = (c.requiredCategories || []).slice();
+  requiredCategories = (c.requiredCategories || []).filter(liveCat);
   exclusivePairs   = (c.exclusivePairs || []).map(p=>p.slice());
-  categoryTiers    = new Map(c.categoryTiers || []);
+  categoryTiers    = new Map((c.categoryTiers || []).filter(e => Array.isArray(e) && liveCat(e[0])));
   clearBudgets();
-  Object.assign(rarityCaps, c.rarityCaps || {});
-  Object.assign(intensityCaps, c.intensityCaps || {});
+  const liveGroups = caps => { const o = Object.assign({}, caps || {}); delete o.appearance; return o; };
+  Object.assign(rarityCaps, liveGroups(c.rarityCaps));
+  Object.assign(intensityCaps, liveGroups(c.intensityCaps));
   setBudgetMode(c.budgetMode || 'redraw');
   if (typeof setMutationBudgetMode === 'function') setMutationBudgetMode(c.mutationBudgetMode || 'enforce');
   const mbm = document.getElementById('mutationBudgetMode');
@@ -1634,6 +1672,7 @@ function restoreSettings(s){
   if (typeof refreshBudgetChips === 'function') refreshBudgetChips();
   if (typeof togglePersonalityPanel === 'function') togglePersonalityPanel();
   if (typeof toggleExamples === 'function') toggleExamples();
+  if (typeof renderLensPicker === 'function') renderLensPicker();
   invalidateSliderCache();
 }
 
@@ -1905,6 +1944,10 @@ function validateSheetPayload(p){
       if (t.variant !== undefined && t.variant !== 'a' && t.variant !== 'b') delete t.variant;
     });
   };
+  // Sheets written while the (since removed) Appearance section existed: drop its slots
+  // and anything keyed by them before validating, so old files import cleanly.
+  dropRetiredSlots(p.state); dropRetiredSlots(p.pressureState);
+  dropRetiredKeys(p.pinnedTargets); dropRetiredKeys(p.charVariants); dropRetiredKeys(p.traitNotes);
   checkSlots(p.state, "state");
   checkSlots(p.pressureState, "pressureState");
 
@@ -2189,4 +2232,97 @@ function copySheet(btnEl){
 function downloadSheet(){
   const fn = (charMeta.name || "character").replace(/[^a-z0-9]+/gi,"_").replace(/^_|_$/g,"") + ".md";
   downloadText(sheetToText(state, charMeta, pressureState), fn);
+}
+
+/* ================= SAFE CSS COLOURS (B18) =================
+   Colours reach inline `background:` / `--section-accent` declarations. escHTML is the
+   wrong context for that — it stops a quote breaking the attribute, not a `;` injecting
+   another declaration. Accept only shapes a colour can take; anything else falls back. */
+function cssColor(v, fallback){
+  const s = String(v == null ? "" : v).trim();
+  if (/^#[0-9a-f]{3,8}$/i.test(s) ||
+      /^var\(--[a-z0-9-]+\)$/i.test(s) ||
+      /^(rgb|rgba|hsl|hsla)\(\s*[0-9.%,\s/+-]+\)$/i.test(s) ||
+      /^[a-z]{3,20}$/i.test(s)) return s;
+  return fallback || "var(--dusk-blue)";
+}
+
+/* A toast with an Undo button, for destructive actions that do not go through the sheet
+   undo stack (cast removal, deleting a save, replacing a cast). `onUndo` runs at most
+   once; the toast stays a little longer than a plain one so there is time to reach it. */
+function toastUndo(message, onUndo, ms, label){
+  const host = document.getElementById('toastHost');
+  if (!host){ console.log(message); return null; }
+  const el = document.createElement('div');
+  el.className = 'toast toast-ok toastUndo';
+  el.setAttribute('role', 'status');
+  const text = document.createElement('span');
+  text.textContent = message;
+  el.appendChild(text);
+  const undo = document.createElement('button');
+  undo.type = 'button';
+  undo.className = 'toastUndoBtn';
+  undo.textContent = label || 'Undo';
+  let used = false;
+  undo.onclick = async ()=>{
+    if (used) return; used = true;
+    el.remove();
+    try { await onUndo(); } catch(e){ console.error(e); toast("Could not undo: " + (e && e.message || e), "warn"); }
+  };
+  el.appendChild(undo);
+  const close = document.createElement('button');
+  close.className = 'toastClose'; close.textContent = '×';
+  close.setAttribute('aria-label', 'Dismiss');
+  close.onclick = ()=> el.remove();
+  el.appendChild(close);
+  host.appendChild(el);
+  setTimeout(()=>{ el.classList.add('toastOut'); setTimeout(()=>el.remove(), 300); }, ms || 9000);
+  return el;
+}
+
+/* ================= EXPORT AS AN LLM PROMPT =================
+   A condensed voice spec for pasting into a model's system prompt: who they are, how
+   they talk, what they would never do, and a handful of sample lines — without the
+   intensity/rarity bookkeeping sheetToText carries for a human reader. */
+function sheetToPrompt(st, meta){
+  meta = meta || {};
+  const name = meta.name && meta.name !== "Unnamed Character" ? meta.name : "this character";
+  const L = [`# Voice spec: ${meta.name || "Unnamed Character"}`, ""];
+  L.push(`You are writing dialogue and narration for ${name}. Stay inside this voice. Do not name or list these traits in the character's speech; let them show.`);
+  const bits = [];
+  if (meta.age) bits.push(`Age: ${meta.age}`);
+  if (meta.context) bits.push(`Context: ${meta.context}`);
+  if (meta.archetypeLabel) bits.push(`Archetype: ${meta.archetypeLabel}`);
+  if (bits.length) L.push("", bits.map(b=>`- ${b}`).join("\n"));
+  try {
+    const fp = (typeof voiceFingerprint === 'function') ? voiceFingerprint(st, meta) : null;
+    if (fp) L.push("", `**In one line:** ${fp}`);
+  } catch(e){}
+  const valid = ids => ids.filter(id => st[id] && st[id].trait);
+  const keys = Object.keys(st || {});
+  const line = id => `- **${st[id].trait.trait}** — ${st[id].trait.desc}`;
+  const sec = (title, ids) => { const v = valid(ids); if (v.length) L.push("", `## ${title}`, ...v.map(line)); };
+  sec("How they speak", ["verbosity","register","grammar"].concat(keys.filter(k=>k.startsWith("vocab")), keys.filter(k=>k.startsWith("manner"))));
+  sec("Who they are", keys.filter(k=>k.startsWith("pers_") || k.startsWith("req_") || k.startsWith("reqcat_")));
+  sec("What drives them", keys.filter(k=>k.startsWith("prof_")));
+  sec("The one thing that doesn't fit", keys.filter(k=>k.startsWith("wild_")));
+  try {
+    const contra = (typeof structuredContradiction === 'function') ? structuredContradiction(st, meta) : null;
+    if (contra) L.push("", `## Central contradiction`, `${contra.hi.trait} — and also ${contra.lo.trait}. ${contra.question}`);
+  } catch(e){}
+  const samples = valid(keys).map(id => st[id].trait.example).filter(Boolean).slice(0, 8);
+  if (samples.length) L.push("", "## Sample lines (for rhythm, not to repeat verbatim)", ...samples.map(x => `> ${x}`));
+  L.push("", "## Rules", "- Keep the verbosity, register and grammar above consistent line to line.",
+    "- Use the mannerisms sparingly; a habit shown every line stops reading as a habit.",
+    "- Under stress, let the voice slip rather than become someone else.");
+  return L.join("\n") + "\n";
+}
+function copyPrompt(btnEl){
+  if (!Object.keys(state).length){ toast("Generate a character first.", "warn"); return; }
+  copyText(sheetToPrompt(state, charMeta), btnEl);
+}
+function downloadPrompt(){
+  if (!Object.keys(state).length){ toast("Generate a character first.", "warn"); return; }
+  const fn = (charMeta.name || "character").replace(/[^a-z0-9]+/gi,"_").replace(/^_|_$/g,"") + ".prompt.md";
+  downloadText(sheetToPrompt(state, charMeta), fn);
 }

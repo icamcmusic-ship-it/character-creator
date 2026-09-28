@@ -27,6 +27,34 @@ function withRng(next, fn){
 }
 // Non-seeded entropy for "pick a seed number" — deliberately NOT rand(), so a seeded
 // block asking for a fresh seed does not get one out of its own stream.
+/* ================= HEADLESS SETTINGS =================
+   The engine reads its dials (divergence, wildcard count, pressure, range focus, the
+   generate toggles) through the helpers below. With no settings object those read the
+   DOM exactly as before; with one, a key present in it wins and the DOM is never
+   touched for that id — so tests, the studio and any embedding can drive a build with
+   a plain object instead of stubbing a document. `var`, not `let`: the helpers can be
+   reached during module load, before a `let` binding would exist. */
+var ENGINE_SETTINGS = null;
+function setEngineSettings(obj){
+  ENGINE_SETTINGS = (obj && typeof obj === 'object') ? Object.assign({}, obj) : null;
+  if (typeof invalidateSliderCache === 'function') invalidateSliderCache();
+}
+function getEngineSettings(){ return ENGINE_SETTINGS ? Object.assign({}, ENGINE_SETTINGS) : null; }
+function withEngineSettings(obj, fn){
+  const prev = ENGINE_SETTINGS;
+  setEngineSettings(obj ? Object.assign({}, prev || {}, obj) : null);
+  try { return fn(); }
+  finally { ENGINE_SETTINGS = prev; if (typeof invalidateSliderCache === 'function') invalidateSliderCache(); }
+}
+/* One lookup for "the control called id": a settings-object stand-in shaped like an
+   input ({value, checked}) when the object names it, otherwise the DOM element. */
+function settingEl(id){
+  if (ENGINE_SETTINGS && Object.prototype.hasOwnProperty.call(ENGINE_SETTINGS, id)){
+    const v = ENGINE_SETTINGS[id];
+    return {value: v == null ? '' : String(v), checked: v === true || (v !== false && v != null && v !== '' && v !== 0 && v !== '0' && v !== 'false')};
+  }
+  return (typeof document !== 'undefined' && document && document.getElementById) ? document.getElementById(id) : null;
+}
 function entropySeed(){ return ((Date.now() ^ (Math.random()*0x7fffffff)) >>> 0); }
 
 // ---------- Static category maps ----------
@@ -300,9 +328,11 @@ function withSpeculativeGeneration(fn){
     sessionProfiles: sessionProfiles.slice(),
     lastGenerationSignature: (typeof lastGenerationSignature !== 'undefined') ? lastGenerationSignature : undefined,
     categoryUse: new Map(CATEGORY_USE),
+    drawContext: captureDrawContext(),
   };
   try { return fn(); }
   finally {
+    _applyDrawContext(saved.drawContext);
     charVariants = saved.charVariants;
     history = saved.history;
     redoStack = saved.redoStack;
@@ -315,6 +345,56 @@ function withSpeculativeGeneration(fn){
     saved.categoryUse.forEach((v,k)=>CATEGORY_USE.set(k,v));
     if (typeof updateUndoButtons === 'function') updateUndoButtons();
   }
+}
+/* ================= THE DRAW CONTEXT =================
+   A build's steering lives in nine module globals — the slot being drawn for, the
+   explicit avoid set, the context-text bias (three maps), the motivation links, the
+   archetype profile, the affinity vector and replay mode — each with its own with*
+   wrapper, and "a speculative build polluted state" has recurred every time a new
+   generator forgot one. The draw context names all of them as ONE object:
+
+     captureDrawContext()          the live values, as an object
+     withDrawContext(ctx, fn)      run fn with ctx's keys applied, then put every one back
+     makeDrawContext(overrides)    a clean context (nothing steering) plus overrides
+
+   buildCharacterState({... , drawContext}) runs inside withDrawContext, and
+   withSpeculativeGeneration restores the whole context too. The globals stay as the
+   storage (the draw functions read them), so seeded replay is untouched: a build with
+   no drawContext reads exactly what it read before. */
+const DRAW_CONTEXT_KEYS = ['slotDrawKey','avoidSet','contextBias','contextNudge','contextNotes',
+  'motivationLinks','archetypeProfile','affinityVec','replayMode'];
+function captureDrawContext(){
+  return {slotDrawKey: _slotDrawKey, avoidSet: AVOID_SET, contextBias: CONTEXT_BIAS,
+    contextNudge: CONTEXT_AXIS_NUDGE, contextNotes: CONTEXT_BIAS_NOTES,
+    motivationLinks: CURRENT_MOTIVATION_LINKS, archetypeProfile: CURRENT_ARCHETYPE_PROFILE,
+    affinityVec: CURRENT_AFFINITY_VEC, replayMode: REPLAY_MODE};
+}
+function _applyDrawContext(c){
+  const has = k => Object.prototype.hasOwnProperty.call(c, k);
+  if (has('slotDrawKey')) _slotDrawKey = c.slotDrawKey || null;
+  if (has('avoidSet')) AVOID_SET = c.avoidSet || null;
+  if (has('contextBias')) CONTEXT_BIAS = c.contextBias instanceof Map ? c.contextBias : new Map(Object.entries(c.contextBias || {}));
+  if (has('contextNudge')) CONTEXT_AXIS_NUDGE = c.contextNudge || {};
+  if (has('contextNotes')) CONTEXT_BIAS_NOTES = c.contextNotes || [];
+  if (has('motivationLinks')) CURRENT_MOTIVATION_LINKS = c.motivationLinks || {};
+  if (has('archetypeProfile')) CURRENT_ARCHETYPE_PROFILE = c.archetypeProfile || null;
+  if (has('affinityVec')) CURRENT_AFFINITY_VEC = c.affinityVec || null;
+  if (has('replayMode')) REPLAY_MODE = !!c.replayMode;
+}
+function makeDrawContext(overrides){
+  return Object.assign({slotDrawKey:null, avoidSet:null, contextBias:new Map(), contextNudge:{}, contextNotes:[],
+    motivationLinks:{}, archetypeProfile:null, affinityVec:null, replayMode:false}, overrides || {});
+}
+function withDrawContext(ctx, fn){
+  const saved = captureDrawContext();
+  const c = Object.assign({}, ctx || {});
+  // Replay is more than a flag — it swaps the history memories for empty ones — so it
+  // goes through its own wrapper rather than being set bare.
+  const replay = Object.prototype.hasOwnProperty.call(c, 'replayMode') ? !!c.replayMode : null;
+  delete c.replayMode;
+  _applyDrawContext(c);
+  try { return replay === null ? fn() : withReplayMode(replay, fn); }
+  finally { _applyDrawContext(saved); }
 }
 function variantLabelFor(cat, variants){
   const spec = PRESENTATION_VARIANTS[cat], v = (variants || charVariants)[cat];
@@ -445,8 +525,8 @@ const COVERAGE_LIMITS = {
      below that, polarityFit has nothing to select on and the sliders reach the CATEGORY
      but not the trait within it. Measured: the seven profile sections are at 100%,
      Personality 75%, Verbosity 76% — and then Vocabulary 34%, Dialogue Grammar 33%,
-     Mannerisms 21%, Appearance 18%. That is roughly seven of 37 slots on a default
-     sheet, plus all of Appearance, where the sliders can only choose a category.
+     Mannerisms 21%. That is roughly seven slots on a default sheet where the sliders
+     can only choose a category.
      One target for all of them, deliberately: these numbers report a standing content
      debt, and setting the bar under where the thin sections already sit would report
      nothing, which is the state that let this go unnoticed. */
@@ -529,8 +609,6 @@ function assertDrawWindows(){
   };
   const motivTarget = targetFromMag(55);
   catsOf("Motivation & Wound").forEach(cat=> check("Motivation & Wound", cat, motivTarget, `Motivation > ${cat}`));
-  check("Appearance", "Movement & Bearing", targetFromMag(40), "Appearance > Movement & Bearing");
-  check("Appearance", "Distinguishing Marks", targetFromMag(15), "Appearance > Distinguishing Marks");
   return problems;
 }
 if (typeof location !== 'undefined' && /[?&]dev=1\b/.test(location.search || '')){
@@ -768,11 +846,11 @@ const CALM_MANNER_CATS = ["Postural & Spatial Dynamics","Gestural & Kinetic Inte
 
 let ARCHETYPES = {
   soldier:  {label:"Wounded Soldier", verbosity:-1, register:-1, composure:1, vocabPref:["Conceptual Framework & Loanwords","Precision & Specificity Level"],
-             pers:{discipline:70, rebelliousness:-40, emotionalcapacity:-55, assertiveness:45, friendliness:-25}},
+             pers:{discipline:70, rebelliousness:-40, emotionalcapacity:-55, assertiveness:45, friendliness:-25, confidence:35, activeness:40, positivity:-35}},
   conartist:{label:"Smug Con Artist", verbosity:1, register:1, composure:-1, vocabPref:["Pragmatic Focus & Speech Functions","Directness & Literalness"],
-             pers:{honesty:-85, confidence:60, friendliness:55, manners:40, intelligence:50, agreeableness:-30}},
+             pers:{honesty:-85, confidence:70, friendliness:40, manners:30, intelligence:55, agreeableness:-30, rebelliousness:50, activeness:40}},
   intern:   {label:"Anxious Intern", verbosity:1, register:0, composure:2, vocabPref:["Register & Formality Spectrum"],
-             pers:{confidence:-70, assertiveness:-65, agreeableness:70, manners:55, rebelliousness:-45}},
+             pers:{confidence:-70, assertiveness:-65, agreeableness:70, manners:55, rebelliousness:-45, activeness:45, intelligence:35, emotionalcapacity:35}},
   scholar:  {label:"Weary Scholar", verbosity:0, register:2, composure:-1, vocabPref:["Morphological & Structural Lexicon","Precision & Specificity Level"],
              pers:{intelligence:85, activeness:-60, positivity:-35, discipline:50, emotionalcapacity:-20, manners:40, curiosity:60}},
   noble:    {label:"Cold Noble", verbosity:-1, register:2, composure:-2, vocabPref:["Register & Formality Spectrum","Semantic Density & Modifiers"],
@@ -784,33 +862,33 @@ let ARCHETYPES = {
   // changes, so a narrow preset list was the cheapest lever available against
   // repeatedly-hit, conventional character types.
   burntIdealist:      {label:"Burnt-Out Idealist", verbosity:0, register:1, composure:-1, vocabPref:["Affective & Emotional Intensity","Temporal Orientation & Tense Usage"],
-             pers:{positivity:-55, intelligence:55, discipline:35, emotionalcapacity:40, curiosity:30, activeness:-30, honesty:60}},
+             pers:{positivity:-55, activeness:-55, emotionalcapacity:-30, honesty:60, agreeableness:-30, discipline:-20, confidence:-30, intelligence:50}},
   charmingManipulator: {label:"Charming Manipulator", verbosity:1, register:0, composure:1, vocabPref:["Pragmatic Focus & Speech Functions","Affective & Emotional Intensity"],
-             pers:{honesty:-70, friendliness:75, confidence:70, manners:50, agreeableness:40, intelligence:45}},
+             pers:{honesty:-60, friendliness:75, agreeableness:55, emotionalcapacity:45, manners:55, confidence:40, assertiveness:-25}},
   grievingParent:      {label:"Grieving Parent", verbosity:-1, register:0, composure:-1, vocabPref:["Temporal Orientation & Tense Usage","Abstractness & Sensory Modality"],
-             pers:{emotionalcapacity:-35, positivity:-50, discipline:40, friendliness:20, activeness:-45, honesty:50}},
+             pers:{emotionalcapacity:-35, positivity:-50, discipline:-30, friendliness:20, activeness:-45, honesty:50, confidence:-30}},
   reluctantSecond:     {label:"Reluctant Second-in-Command", verbosity:-1, register:0, composure:0, vocabPref:["Directness & Literalness","Precision & Specificity Level"],
-             pers:{assertiveness:-30, confidence:-25, discipline:65, agreeableness:55, honesty:55, rebelliousness:-40}},
+             pers:{assertiveness:-30, confidence:-25, discipline:65, agreeableness:55, honesty:55, rebelliousness:-40, intelligence:45}},
   cheerfulSociopath:   {label:"Cheerful Sociopath", verbosity:1, register:0, composure:2, vocabPref:["Affective & Emotional Intensity","Pragmatic Focus & Speech Functions"],
              pers:{emotionalcapacity:-70, positivity:60, honesty:-40, friendliness:60, confidence:75, agreeableness:-20}},
   furiousCaretaker:    {label:"Quietly Furious Caretaker", verbosity:-1, register:0, composure:-2, vocabPref:["Directness & Literalness","Affective & Emotional Intensity"],
              pers:{agreeableness:-30, discipline:60, emotionalcapacity:-40, assertiveness:-20, friendliness:20, rebelliousness:20}},
   washedUpProdigy:     {label:"Washed-Up Prodigy", verbosity:0, register:1, composure:-1, vocabPref:["Conceptual Framework & Loanwords","Register & Formality Spectrum"],
-             pers:{intelligence:70, positivity:-45, confidence:-30, discipline:-35, curiosity:-30, activeness:-40}},
+             pers:{intelligence:70, positivity:-45, confidence:40, discipline:-35, curiosity:-30, activeness:-40, rebelliousness:30, honesty:-30, friendliness:-30}},
   companyLoyalist:     {label:"Company Loyalist", verbosity:0, register:1, composure:0, vocabPref:["Register & Formality Spectrum","Pragmatic Focus & Speech Functions"],
-             pers:{discipline:65, honesty:35, rebelliousness:-70, agreeableness:50, manners:50, confidence:20}},
+             pers:{discipline:65, honesty:35, rebelliousness:-70, agreeableness:50, manners:50, confidence:20, positivity:50, activeness:45, friendliness:40}},
   blackSheep:          {label:"Black-Sheep Returnee", verbosity:0, register:-1, composure:-1, vocabPref:["Directness & Literalness","Phonetic & Auditory Qualities"],
-             pers:{rebelliousness:55, honesty:45, agreeableness:-25, confidence:20, friendliness:-15, discipline:-25}},
+             pers:{rebelliousness:55, honesty:45, agreeableness:-25, confidence:20, friendliness:-15, discipline:-25, activeness:30, assertiveness:35}},
   compulsiveFixer:     {label:"Compulsive Fixer", verbosity:1, register:0, composure:1, vocabPref:["Precision & Specificity Level","Pragmatic Focus & Speech Functions"],
-             pers:{discipline:70, assertiveness:40, agreeableness:35, emotionalcapacity:-25, activeness:55, curiosity:25}},
+             pers:{discipline:70, assertiveness:55, agreeableness:-25, friendliness:40, activeness:55, curiosity:40, emotionalcapacity:20, confidence:40}},
   undiscussedSurvivor: {label:"Survivor Who Won't Discuss It", verbosity:-2, register:0, composure:1, vocabPref:["Directness & Literalness","Temporal Orientation & Tense Usage"],
-             pers:{emotionalcapacity:-65, discipline:50, honesty:-20, friendliness:-10, assertiveness:15}},
+             pers:{emotionalcapacity:-60, discipline:45, honesty:-35, friendliness:40, positivity:40, assertiveness:-35, agreeableness:45, curiosity:-30}},
   workaholicAvoiding:  {label:"Workaholic Avoiding a Diagnosis", verbosity:0, register:0, composure:0, vocabPref:["Pragmatic Focus & Speech Functions","Precision & Specificity Level"],
-             pers:{discipline:60, activeness:60, emotionalcapacity:-30, positivity:15, honesty:-15, agreeableness:20}},
+             pers:{discipline:55, activeness:65, emotionalcapacity:-50, honesty:-45, positivity:30, friendliness:-20, confidence:30, curiosity:-40}},
   formerTrueBeliever:  {label:"Former True Believer", verbosity:0, register:1, composure:0, vocabPref:["Conceptual Framework & Loanwords","Affective & Emotional Intensity"],
-             pers:{positivity:-40, intelligence:50, honesty:60, curiosity:40, rebelliousness:30, discipline:20}},
+             pers:{rebelliousness:65, curiosity:60, positivity:-25, honesty:55, assertiveness:45, agreeableness:-35, intelligence:50, emotionalcapacity:-20}},
   goldenChild:         {label:"Golden Child", verbosity:1, register:0, composure:1, vocabPref:["Affective & Emotional Intensity","Register & Formality Spectrum"],
-             pers:{confidence:70, positivity:55, agreeableness:40, friendliness:55, discipline:30, honesty:20}},
+             pers:{confidence:70, positivity:55, agreeableness:40, friendliness:55, discipline:30, honesty:20, rebelliousness:-30, intelligence:40}},
   // ---- Widened again, deliberately away from one register --------------------
   // Counted honestly, nine of the twenty presets above were variations on "damaged
   // person carrying a secret" — Wounded Soldier, Burnt-Out Idealist, Grieving Parent,
@@ -824,11 +902,11 @@ let ARCHETYPES = {
   competentProfessional: {label:"Quietly Excellent Professional", verbosity:-1, register:1, composure:-1, vocabPref:["Precision & Specificity Level","Directness & Literalness"],
              pers:{discipline:70, intelligence:60, confidence:55, emotionalcapacity:-10, agreeableness:25, activeness:35, manners:45}},
   contentedElder:      {label:"Contented Elder", verbosity:0, register:0, composure:-2, vocabPref:["Abstractness & Sensory Modality","Temporal Orientation & Tense Usage"],
-             pers:{positivity:55, friendliness:50, emotionalcapacity:40, activeness:-40, curiosity:20, agreeableness:45, discipline:20}},
+             pers:{positivity:55, friendliness:50, emotionalcapacity:40, activeness:-40, curiosity:20, agreeableness:45, confidence:40, assertiveness:-20}},
   genuinelyFunny:      {label:"Genuinely Funny One", verbosity:1, register:-1, composure:0, vocabPref:["Phonetic & Auditory Qualities","Semantic Density & Modifiers"],
              pers:{friendliness:65, positivity:50, intelligence:55, curiosity:45, manners:-20, rebelliousness:30}},
   careerBureaucrat:    {label:"Career Bureaucrat", verbosity:0, register:2, composure:-2, vocabPref:["Register & Formality Spectrum","Conceptual Framework & Loanwords"],
-             pers:{discipline:65, manners:60, rebelliousness:-60, emotionalcapacity:-35, honesty:15, assertiveness:-15, curiosity:-25}},
+             pers:{discipline:65, manners:60, rebelliousness:-60, emotionalcapacity:-35, honesty:15, assertiveness:-40, curiosity:-25, activeness:-35, confidence:-25, positivity:-30}},
   trueZealot:          {label:"Ecstatic True Believer", verbosity:1, register:1, composure:2, vocabPref:["Affective & Emotional Intensity","Abstractness & Sensory Modality"],
              pers:{positivity:70, emotionalcapacity:65, honesty:55, discipline:40, agreeableness:-20, rebelliousness:35, curiosity:25}},
   alienLogic:          {label:"Alien-Logic Outsider", verbosity:0, register:1, composure:-2, vocabPref:["Morphological & Structural Lexicon","Precision & Specificity Level"],
@@ -860,15 +938,15 @@ let ARCHETYPES = {
      intelligence WITHOUT being written stupid — the point of the axis is how someone
      thinks, not how much they are worth. */
   cheerfulMess:        {label:"Cheerful Mess", verbosity:1, register:-1, composure:1, vocabPref:["Pragmatic Focus & Speech Functions","Affective & Emotional Intensity"],
-             pers:{discipline:-70, friendliness:60, positivity:55, agreeableness:45, activeness:40, emotionalcapacity:35, manners:-20}},
-  plainSpoken:         {label:"Plain-Spoken Practical", verbosity:-1, register:-2, composure:-1, vocabPref:["Directness & Literalness","Precision & Specificity Level"],
-             pers:{intelligence:-50, honesty:60, assertiveness:45, curiosity:-30, discipline:40, manners:-25, emotionalcapacity:-20}},
+             pers:{discipline:-70, friendliness:60, positivity:55, agreeableness:45, activeness:40, emotionalcapacity:35, manners:-20, confidence:30, intelligence:-20}},
+  plainSpoken:         {label:"Plain-Spoken Practical", verbosity:-1, register:-2, composure:-2, vocabPref:["Directness & Literalness","Precision & Specificity Level"],
+             pers:{intelligence:-45, honesty:60, friendliness:45, agreeableness:35, assertiveness:30, positivity:35, activeness:40, curiosity:-30, confidence:-15, manners:10}},
   softSpokenSecond:    {label:"Soft-Spoken Second", verbosity:-1, register:1, composure:0, vocabPref:["Semantic Density & Modifiers","Pragmatic Focus & Speech Functions"],
              pers:{assertiveness:-70, agreeableness:60, manners:50, confidence:-35, friendliness:35, emotionalcapacity:25}},
   bluntForeman:        {label:"Blunt Foreman", verbosity:-1, register:-2, composure:-1, vocabPref:["Directness & Literalness","Morphological & Structural Lexicon"],
-             pers:{assertiveness:75, discipline:45, manners:-50, agreeableness:-40, honesty:50, emotionalcapacity:-30, intelligence:-15}},
+             pers:{assertiveness:80, discipline:55, manners:-55, agreeableness:-45, honesty:40, emotionalcapacity:-35, confidence:60, friendliness:-35, activeness:50}},
   dreamyDrifter:       {label:"Dreamy Drifter", verbosity:0, register:1, composure:1, vocabPref:["Abstractness & Sensory Modality","Temporal Orientation & Tense Usage"],
-             pers:{discipline:-55, curiosity:65, intelligence:-25, activeness:-35, positivity:35, emotionalcapacity:40, assertiveness:-30}},
+             pers:{discipline:-55, curiosity:65, intelligence:-25, activeness:-35, positivity:35, emotionalcapacity:40, assertiveness:-30, rebelliousness:25, confidence:-20}},
   stubbornCraftsman:   {label:"Stubborn Craftsman", verbosity:-2, register:-1, composure:-2, vocabPref:["Precision & Specificity Level","Directness & Literalness"],
              pers:{intelligence:-30, discipline:70, rebelliousness:-35, assertiveness:40, curiosity:-25, manners:-15, emotionalcapacity:-25}},
 
@@ -885,13 +963,13 @@ let ARCHETYPES = {
      five lean emotionally open, three are dishonest, three are incurious, three are
      pessimists, and their hints go to the under-used categories. */
   openHeartedShambles: {label:"Open-Hearted Shambles", verbosity:1, register:-1, composure:0, vocabPref:["Affective & Emotional Intensity","Abstractness & Sensory Modality"],
-             pers:{emotionalcapacity:75, discipline:-60, friendliness:55, honesty:50, agreeableness:35, positivity:20, curiosity:40}},
+             pers:{emotionalcapacity:75, discipline:-60, friendliness:55, honesty:50, agreeableness:35, positivity:-15, curiosity:40, confidence:-35, activeness:-25}},
   weepingBrawler:      {label:"Weeping Brawler", verbosity:0, register:-2, composure:2, vocabPref:["Directness & Literalness","Phonetic & Auditory Qualities"],
              pers:{emotionalcapacity:70, assertiveness:60, discipline:-45, agreeableness:-40, manners:-45, positivity:-20, honesty:30, friendliness:-15}},
   lovableLiar:         {label:"Lovable Liar", verbosity:1, register:-1, composure:-1, vocabPref:["Pragmatic Focus & Speech Functions","Affective & Emotional Intensity"],
              pers:{honesty:-65, friendliness:70, emotionalcapacity:45, discipline:-40, positivity:45, confidence:30, curiosity:-20}},
   incuriousContent:    {label:"Incurious and Content", verbosity:-1, register:-1, composure:-2, vocabPref:["Directness & Literalness","Pragmatic Focus & Speech Functions"],
-             pers:{curiosity:-70, positivity:40, discipline:-20, agreeableness:50, friendliness:35, activeness:-30, intelligence:-20}},
+             pers:{curiosity:-70, positivity:40, discipline:-35, agreeableness:50, friendliness:35, activeness:-45, intelligence:-20, rebelliousness:-30, confidence:20}},
   gloomyRomantic:      {label:"Gloomy Romantic", verbosity:0, register:1, composure:-1, vocabPref:["Affective & Emotional Intensity","Temporal Orientation & Tense Usage"],
              pers:{emotionalcapacity:70, positivity:-60, discipline:-35, curiosity:30, friendliness:20, confidence:-25, activeness:-30}},
   scatteredGenius:     {label:"Scattered Genius", verbosity:1, register:0, composure:1, vocabPref:["Conceptual Framework & Loanwords","Morphological & Structural Lexicon"],
@@ -900,6 +978,35 @@ let ARCHETYPES = {
              pers:{honesty:-50, positivity:-45, discipline:35, emotionalcapacity:-30, curiosity:-35, intelligence:40, assertiveness:35, friendliness:-30}},
   bigHeartedBoss:      {label:"Big-Hearted Boss", verbosity:1, register:0, composure:0, vocabPref:["Directness & Literalness","Affective & Emotional Intensity"],
              pers:{emotionalcapacity:60, assertiveness:65, friendliness:60, discipline:-25, manners:-20, positivity:40, confidence:55}},
+
+  /* ---- THE 2026 AUDIT'S MISSING-TYPES PASS (§4) --------------------------------
+     Ten presets for kinds of person the list could not be asked for: three defined by
+     life stage rather than injury, a code-switcher who lives between two languages and
+     two sets of manners, a literal, deep-focus communicator (written as behaviour —
+     precise, direct, routine-loving, very honest — not as a diagnosis), a flirt, a
+     secular ideologue, a nosy neighbour, a pompous blowhard and a trickster whose
+     jokes are meant to hurt. Six of the ten lean undisciplined or leave discipline
+     alone, which pulls the catalogue's 21:12 discipline skew back toward even. */
+  newParent:           {label:"Sleep-Deprived New Parent", verbosity:1, register:-1, composure:2, vocabPref:["Affective & Emotional Intensity","Temporal Orientation & Tense Usage"],
+             pers:{emotionalcapacity:60, confidence:-40, activeness:55, discipline:-40, friendliness:45, agreeableness:40, curiosity:-25, manners:-15, positivity:-25}},
+  midlifeReinventor:   {label:"Midlife Reinventor", verbosity:1, register:0, composure:1, vocabPref:["Conceptual Framework & Loanwords","Temporal Orientation & Tense Usage"],
+             pers:{rebelliousness:60, curiosity:70, confidence:35, activeness:55, discipline:-35, positivity:50, honesty:40, agreeableness:-20}},
+  restlessRetiree:     {label:"Restless Retiree", verbosity:1, register:1, composure:-1, vocabPref:["Precision & Specificity Level","Temporal Orientation & Tense Usage"],
+             pers:{activeness:45, assertiveness:50, discipline:55, curiosity:30, confidence:45, rebelliousness:-30, positivity:-20, manners:40, agreeableness:-30}},
+  codeSwitcher:        {label:"Diaspora Code-Switcher", verbosity:0, register:0, composure:-1, vocabPref:["Conceptual Framework & Loanwords","Register & Formality Spectrum"],
+             pers:{manners:60, friendliness:50, intelligence:55, agreeableness:45, confidence:30, emotionalcapacity:-15, honesty:20, rebelliousness:25, curiosity:45}},
+  preciseLiteralist:   {label:"Precise Literalist", verbosity:1, register:1, composure:-1, vocabPref:["Precision & Specificity Level","Directness & Literalness"],
+             pers:{honesty:80, curiosity:60, discipline:60, manners:45, rebelliousness:-45, emotionalcapacity:35, intelligence:45, assertiveness:30, confidence:-20, activeness:-30, friendliness:15}},
+  incurableFlirt:      {label:"Incurable Flirt", verbosity:0, register:1, composure:-1, vocabPref:["Affective & Emotional Intensity","Phonetic & Auditory Qualities"],
+             pers:{friendliness:80, confidence:75, emotionalcapacity:55, positivity:45, discipline:-40, manners:50, honesty:-30, curiosity:45, agreeableness:-20, rebelliousness:20}},
+  secularIdeologue:    {label:"Secular Ideologue", verbosity:1, register:2, composure:-1, vocabPref:["Conceptual Framework & Loanwords","Morphological & Structural Lexicon"],
+             pers:{assertiveness:70, agreeableness:-60, intelligence:65, rebelliousness:50, honesty:55, positivity:-30, friendliness:-30, discipline:50, emotionalcapacity:-25, curiosity:-40}},
+  nosyNeighbour:       {label:"Nosy Neighbour", verbosity:2, register:-1, composure:1, vocabPref:["Pragmatic Focus & Speech Functions","Temporal Orientation & Tense Usage"],
+             pers:{curiosity:80, honesty:-30, friendliness:45, activeness:50, manners:35, assertiveness:30, emotionalcapacity:30, intelligence:-20, agreeableness:-20}},
+  pompousBlowhard:     {label:"Pompous Blowhard", verbosity:2, register:2, composure:-1, vocabPref:["Register & Formality Spectrum","Semantic Density & Modifiers"],
+             pers:{confidence:90, curiosity:-50, assertiveness:70, intelligence:-35, honesty:-25, agreeableness:-40, manners:25, friendliness:20, positivity:30}},
+  maliciousTrickster:  {label:"Malicious Trickster", verbosity:1, register:-1, composure:1, vocabPref:["Pragmatic Focus & Speech Functions","Phonetic & Auditory Qualities"],
+             pers:{honesty:-75, agreeableness:-75, rebelliousness:70, positivity:40, discipline:-45, intelligence:50, friendliness:30, emotionalcapacity:-45, activeness:55}},
 };
 
 /* Optional profile hints, per archetype. See ARCHETYPE PROFILE HINTS in accumulateBoost:
@@ -909,56 +1016,68 @@ let ARCHETYPES = {
 
    Kept as a separate table rather than inlined into the 34 entries above so the whole
    psychological shape of the preset list can be read, and audited for lean, in one
-   place. Every archetype names at most three sections; the rest stay free, because a
-   preset that pinned all seven would stop being a starting point.
+   place. Every archetype names four to six sections, and usually one Competence or
+   Origins hint; at least one of the six core sections stays free, and each hint is a
+   nudge at ARCHETYPE_HINT_STRENGTH, so a preset still reads as a starting point. Three
+   hints at one STRONG link were measured too weak to carry identity: 50% hint fidelity
+   and 28-39 distinct emergent names in 40 builds of the same preset (2026 audit §4).
 
    Deliberately spread: eleven of these name Secure attachment and nine name Restraint
    or Discipline, against the "damaged person with a secret" pull the preset list was
    already corrected for once on the personality axes but never on the profile. */
 const ARCHETYPE_PROFILE_HINTS = {
-  soldier:             {attachment:"Avoidant", stress:"Freeze (shut down)", values:"Loyalty-Bound"},
-  conartist:           {values:"Self-Interested", humor:"Cruel & Barbed", role:"Instigator"},
-  intern:              {attachment:"Anxious", stress:"Fawn (appease the threat)", humor:"Self-Deprecating"},
-  scholar:             {role:"Skeptic", humor:"Dry & Deadpan", vices:"Avoidance & Procrastination"},
-  noble:               {attachment:"Avoidant", values:"Rigid & Principled", role:"Leader"},
-  child:               {attachment:"Secure", humor:"Absurd & Chaotic", role:"Connector"},
-  burntIdealist:       {values:"Idealistic & Visionary", vices:"Avoidance & Procrastination", stress:"Freeze (shut down)"},
-  charmingManipulator: {attachment:"Avoidant", values:"Self-Interested", role:"Connector"},
-  grievingParent:      {attachment:"Anxious", stress:"Freeze (shut down)", humor:"Humorless & Absent"},
-  reluctantSecond:     {role:"Caretaker", values:"Loyalty-Bound", attachment:"Secure"},
-  cheerfulSociopath:   {attachment:"Avoidant", values:"Self-Interested", humor:"Cruel & Barbed"},
-  furiousCaretaker:    {role:"Caretaker", stress:"Fawn (appease the threat)", vices:"Restraint & Discipline"},
-  washedUpProdigy:     {vices:"Substance & Consumption", humor:"Self-Deprecating", values:"Pragmatic & Flexible"},
-  companyLoyalist:     {values:"Loyalty-Bound", role:"Peacemaker", vices:"Restraint & Discipline"},
-  blackSheep:          {role:"Outsider", attachment:"Disorganized", values:"Self-Interested"},
-  compulsiveFixer:     {vices:"Compulsion & Ritual", role:"Caretaker", stress:"Fight (attack the threat)"},
-  undiscussedSurvivor: {attachment:"Avoidant", stress:"Flight (remove yourself)", humor:"Dry & Deadpan"},
-  workaholicAvoiding:  {vices:"Avoidance & Procrastination", attachment:"Avoidant", stress:"Flight (remove yourself)"},
-  formerTrueBeliever:  {values:"Idealistic & Visionary", role:"Skeptic", attachment:"Disorganized"},
-  goldenChild:         {attachment:"Anxious", role:"Leader", values:"Idealistic & Visionary"},
-  competentProfessional:{attachment:"Secure", vices:"Restraint & Discipline", role:"Skeptic"},
-  contentedElder:      {attachment:"Secure", humor:"Warm & Playful", values:"Pragmatic & Flexible"},
-  genuinelyFunny:      {humor:"Warm & Playful", role:"Connector", attachment:"Secure"},
-  careerBureaucrat:    {values:"Rigid & Principled", vices:"Restraint & Discipline", humor:"Dry & Deadpan"},
-  trueZealot:          {values:"Idealistic & Visionary", role:"Instigator", stress:"Fight (attack the threat)"},
-  alienLogic:          {role:"Outsider", humor:"Intellectual & Wordplay", attachment:"Avoidant"},
-  unbotheredYoung:     {attachment:"Secure", humor:"Dry & Deadpan", values:"Pragmatic & Flexible"},
-  steadyOrganiser:     {attachment:"Anxious", role:"Leader", vices:"Restraint & Discipline"},
-  cheerfulMess:        {attachment:"Disorganized", humor:"Absurd & Chaotic", vices:"Risk & Escape"},
-  plainSpoken:         {attachment:"Secure", values:"Pragmatic & Flexible", humor:"Dry & Deadpan"},
-  softSpokenSecond:    {role:"Peacemaker", stress:"Fawn (appease the threat)", attachment:"Anxious"},
-  bluntForeman:        {role:"Leader", stress:"Fight (attack the threat)", attachment:"Secure"},
-  dreamyDrifter:       {role:"Outsider", vices:"Avoidance & Procrastination", attachment:"Secure"},
-  stubbornCraftsman:   {values:"Rigid & Principled", vices:"Restraint & Discipline", attachment:"Secure"},
-  // The balance pass: hints to the categories the table above barely reached.
-  openHeartedShambles: {attachment:"Anxious", vices:"Substance & Consumption", humor:"Warm & Playful"},
-  weepingBrawler:      {stress:"Fight (attack the threat)", vices:"Risk & Escape", attachment:"Disorganized"},
-  lovableLiar:         {values:"Self-Interested", humor:"Absurd & Chaotic", role:"Connector"},
-  incuriousContent:    {humor:"Humorless & Absent", values:"Pragmatic & Flexible", role:"Peacemaker"},
-  gloomyRomantic:      {attachment:"Anxious", humor:"Self-Deprecating", vices:"Substance & Consumption"},
-  scatteredGenius:     {humor:"Intellectual & Wordplay", vices:"Compulsion & Ritual", role:"Outsider"},
-  jadedFixer:          {values:"Pragmatic & Flexible", humor:"Cruel & Barbed", stress:"Flight (remove yourself)"},
-  bigHeartedBoss:      {role:"Leader", humor:"Warm & Playful", vices:"Risk & Escape"},
+  soldier:              {attachment:"Avoidant", stress:"Freeze (shut down)", values:"Loyalty-Bound", humor:"Dry & Deadpan", vices:"Substance & Consumption", competence:"Hands & Materials"},
+  conartist:            {values:"Self-Interested", humor:"Cruel & Barbed", role:"Instigator", vices:"Risk & Escape", stress:"Flight (remove yourself)", competence:"People & Rooms"},
+  intern:               {attachment:"Anxious", stress:"Fawn (appease the threat)", humor:"Self-Deprecating", role:"Peacemaker", vices:"Compulsion & Ritual", origins:"Earned Success"},
+  scholar:              {role:"Skeptic", humor:"Intellectual & Wordplay", vices:"Avoidance & Procrastination", values:"Rigid & Principled", attachment:"Avoidant", competence:"Craft & Knowledge"},
+  noble:                {attachment:"Avoidant", values:"Rigid & Principled", role:"Leader", humor:"Dry & Deadpan", stress:"Freeze (shut down)", origins:"Stable Care"},
+  child:                {attachment:"Secure", humor:"Absurd & Chaotic", role:"Connector", values:"Idealistic & Visionary", stress:"Flight (remove yourself)", origins:"Stable Care"},
+  burntIdealist:        {values:"Idealistic & Visionary", vices:"Avoidance & Procrastination", stress:"Freeze (shut down)", humor:"Self-Deprecating", attachment:"Anxious"},
+  charmingManipulator:  {attachment:"Avoidant", values:"Self-Interested", role:"Connector", humor:"Warm & Playful", stress:"Fawn (appease the threat)", competence:"People & Rooms"},
+  grievingParent:       {attachment:"Anxious", stress:"Freeze (shut down)", humor:"Humorless & Absent", vices:"Substance & Consumption", role:"Caretaker"},
+  reluctantSecond:      {role:"Caretaker", values:"Loyalty-Bound", attachment:"Secure", stress:"Fawn (appease the threat)", humor:"Dry & Deadpan", competence:"Systems & Logistics"},
+  cheerfulSociopath:    {attachment:"Avoidant", values:"Self-Interested", humor:"Cruel & Barbed", stress:"Fight (attack the threat)", role:"Instigator"},
+  furiousCaretaker:     {role:"Caretaker", stress:"Fawn (appease the threat)", vices:"Restraint & Discipline", humor:"Dry & Deadpan", values:"Loyalty-Bound"},
+  washedUpProdigy:      {vices:"Substance & Consumption", humor:"Self-Deprecating", values:"Pragmatic & Flexible", role:"Outsider", stress:"Flight (remove yourself)"},
+  companyLoyalist:      {values:"Loyalty-Bound", role:"Peacemaker", vices:"Restraint & Discipline", humor:"Warm & Playful", attachment:"Secure", competence:"Systems & Logistics"},
+  blackSheep:           {role:"Outsider", attachment:"Disorganized", values:"Self-Interested", humor:"Dry & Deadpan", stress:"Flight (remove yourself)"},
+  compulsiveFixer:      {vices:"Compulsion & Ritual", role:"Caretaker", stress:"Fight (attack the threat)", attachment:"Anxious", humor:"Warm & Playful", competence:"Hands & Materials"},
+  undiscussedSurvivor:  {attachment:"Avoidant", stress:"Flight (remove yourself)", humor:"Absurd & Chaotic", values:"Pragmatic & Flexible", role:"Peacemaker"},
+  workaholicAvoiding:   {vices:"Avoidance & Procrastination", attachment:"Avoidant", stress:"Fight (attack the threat)", role:"Leader", humor:"Humorless & Absent", competence:"Systems & Logistics"},
+  formerTrueBeliever:   {role:"Skeptic", values:"Pragmatic & Flexible", attachment:"Disorganized", humor:"Intellectual & Wordplay", stress:"Fight (attack the threat)"},
+  goldenChild:          {attachment:"Anxious", role:"Leader", values:"Idealistic & Visionary", humor:"Warm & Playful", stress:"Fawn (appease the threat)", origins:"Earned Success"},
+  competentProfessional: {attachment:"Secure", vices:"Restraint & Discipline", role:"Skeptic", humor:"Dry & Deadpan", values:"Pragmatic & Flexible", competence:"Craft & Knowledge"},
+  contentedElder:       {attachment:"Secure", humor:"Warm & Playful", values:"Pragmatic & Flexible", role:"Peacemaker", vices:"Compulsion & Ritual", origins:"Stable Care"},
+  genuinelyFunny:       {humor:"Intellectual & Wordplay", role:"Connector", attachment:"Anxious", vices:"Risk & Escape", stress:"Flight (remove yourself)"},
+  careerBureaucrat:     {values:"Rigid & Principled", vices:"Restraint & Discipline", humor:"Humorless & Absent", stress:"Freeze (shut down)", attachment:"Avoidant", competence:"Systems & Logistics"},
+  trueZealot:           {values:"Idealistic & Visionary", role:"Instigator", stress:"Fight (attack the threat)", attachment:"Disorganized", humor:"Humorless & Absent"},
+  alienLogic:           {role:"Outsider", humor:"Intellectual & Wordplay", attachment:"Avoidant", values:"Rigid & Principled", stress:"Freeze (shut down)"},
+  unbotheredYoung:      {attachment:"Secure", humor:"Dry & Deadpan", values:"Pragmatic & Flexible", vices:"Avoidance & Procrastination", role:"Instigator"},
+  steadyOrganiser:      {role:"Leader", vices:"Restraint & Discipline", humor:"Warm & Playful", values:"Loyalty-Bound", attachment:"Secure", competence:"People & Rooms", origins:"Learned Trust"},
+  cheerfulMess:         {attachment:"Disorganized", humor:"Absurd & Chaotic", vices:"Risk & Escape", role:"Connector", stress:"Fawn (appease the threat)"},
+  plainSpoken:          {attachment:"Secure", values:"Pragmatic & Flexible", role:"Caretaker", humor:"Warm & Playful", stress:"Freeze (shut down)", competence:"Hands & Materials", origins:"Stable Care"},
+  softSpokenSecond:     {role:"Peacemaker", stress:"Fawn (appease the threat)", attachment:"Anxious", values:"Loyalty-Bound", humor:"Self-Deprecating"},
+  bluntForeman:         {role:"Leader", stress:"Fight (attack the threat)", values:"Rigid & Principled", humor:"Cruel & Barbed", competence:"Hands & Materials", vices:"Substance & Consumption"},
+  dreamyDrifter:        {role:"Outsider", vices:"Avoidance & Procrastination", attachment:"Secure", humor:"Absurd & Chaotic", values:"Idealistic & Visionary"},
+  stubbornCraftsman:    {values:"Rigid & Principled", vices:"Compulsion & Ritual", attachment:"Avoidant", role:"Skeptic", humor:"Humorless & Absent", competence:"Craft & Knowledge"},
+  openHeartedShambles:  {attachment:"Anxious", vices:"Substance & Consumption", humor:"Warm & Playful", role:"Connector", stress:"Fawn (appease the threat)"},
+  weepingBrawler:       {stress:"Fight (attack the threat)", vices:"Risk & Escape", attachment:"Disorganized", values:"Loyalty-Bound", role:"Instigator"},
+  lovableLiar:          {values:"Self-Interested", humor:"Absurd & Chaotic", role:"Connector", attachment:"Anxious", stress:"Flight (remove yourself)"},
+  incuriousContent:     {humor:"Humorless & Absent", values:"Pragmatic & Flexible", role:"Peacemaker", attachment:"Secure", vices:"Restraint & Discipline"},
+  gloomyRomantic:       {attachment:"Anxious", humor:"Self-Deprecating", vices:"Substance & Consumption", values:"Idealistic & Visionary", stress:"Freeze (shut down)"},
+  scatteredGenius:      {humor:"Intellectual & Wordplay", vices:"Compulsion & Ritual", role:"Outsider", attachment:"Disorganized", stress:"Flight (remove yourself)"},
+  jadedFixer:           {values:"Pragmatic & Flexible", humor:"Cruel & Barbed", stress:"Flight (remove yourself)", role:"Skeptic", attachment:"Avoidant", competence:"People & Rooms"},
+  bigHeartedBoss:       {role:"Leader", humor:"Warm & Playful", vices:"Risk & Escape", attachment:"Secure", stress:"Fight (attack the threat)", origins:"Learned Trust"},
+  newParent:            {attachment:"Anxious", role:"Caretaker", stress:"Freeze (shut down)", humor:"Self-Deprecating", values:"Loyalty-Bound", origins:"Stable Care"},
+  midlifeReinventor:    {vices:"Risk & Escape", role:"Instigator", values:"Idealistic & Visionary", attachment:"Disorganized", humor:"Self-Deprecating"},
+  restlessRetiree:      {vices:"Compulsion & Ritual", humor:"Dry & Deadpan", role:"Skeptic", values:"Rigid & Principled", competence:"Craft & Knowledge", stress:"Fight (attack the threat)"},
+  codeSwitcher:         {role:"Connector", values:"Loyalty-Bound", stress:"Fawn (appease the threat)", humor:"Intellectual & Wordplay", attachment:"Secure", origins:"Learned Trust"},
+  preciseLiteralist:    {role:"Outsider", humor:"Dry & Deadpan", values:"Rigid & Principled", vices:"Compulsion & Ritual", stress:"Flight (remove yourself)", competence:"Craft & Knowledge"},
+  incurableFlirt:       {attachment:"Disorganized", humor:"Warm & Playful", role:"Connector", vices:"Risk & Escape", values:"Idealistic & Visionary"},
+  secularIdeologue:     {values:"Rigid & Principled", role:"Instigator", stress:"Fight (attack the threat)", humor:"Humorless & Absent", attachment:"Avoidant"},
+  nosyNeighbour:        {role:"Connector", vices:"Compulsion & Ritual", values:"Rigid & Principled", humor:"Cruel & Barbed", attachment:"Anxious"},
+  pompousBlowhard:      {role:"Leader", humor:"Intellectual & Wordplay", values:"Self-Interested", stress:"Fight (attack the threat)", attachment:"Avoidant"},
+  maliciousTrickster:   {humor:"Cruel & Barbed", role:"Instigator", values:"Self-Interested", vices:"Risk & Escape", attachment:"Disorganized"},
 };
 Object.entries(ARCHETYPE_PROFILE_HINTS).forEach(([k, profile])=>{
   if (ARCHETYPES[k]) ARCHETYPES[k].profile = profile;
@@ -1067,48 +1186,58 @@ const INTERNAL_DIMENSION_PAIRS = [["selfWorth","selfPresent"],["emoDepth","emoEx
    `nudge` is the profile hint set. `open` is stated so it is visibly a decision. Every
    built-in preset has an entry; the test suite refuses one that does not. */
 const ARCHETYPE_INTENT = {
-  soldier:             {must:["discipline","emotionalcapacity"], nudge:["attachment","stress","values"], open:["humor","vices","role"]},
-  conartist:           {must:["honesty","confidence"], nudge:["values","humor","role"], open:["attachment","stress","vices"]},
-  intern:              {must:["confidence","assertiveness"], nudge:["attachment","stress","humor"], open:["values","vices","role"]},
-  scholar:             {must:["intelligence","activeness"], nudge:["role","humor","vices"], open:["attachment","stress","values"]},
-  noble:               {must:["manners","friendliness"], nudge:["attachment","values","role"], open:["humor","stress","vices"]},
-  child:               {must:["curiosity","positivity"], nudge:["attachment","humor","role"], open:["values","stress","vices"]},
-  burntIdealist:       {must:["positivity","honesty"], nudge:["values","vices","stress"], open:["attachment","humor","role"]},
-  charmingManipulator: {must:["honesty","friendliness"], nudge:["attachment","values","role"], open:["humor","stress","vices"]},
-  grievingParent:      {must:["positivity","emotionalcapacity"], nudge:["attachment","stress","humor"], open:["values","vices","role"]},
-  reluctantSecond:     {must:["assertiveness","discipline"], nudge:["role","values","attachment"], open:["humor","stress","vices"]},
-  cheerfulSociopath:   {must:["emotionalcapacity","positivity"], nudge:["attachment","values","humor"], open:["stress","vices","role"]},
-  furiousCaretaker:    {must:["agreeableness","discipline"], nudge:["role","stress","vices"], open:["attachment","humor","values"]},
-  washedUpProdigy:     {must:["intelligence","confidence"], nudge:["vices","humor","values"], open:["attachment","stress","role"]},
-  companyLoyalist:     {must:["rebelliousness","discipline"], nudge:["values","role","vices"], open:["attachment","humor","stress"]},
-  blackSheep:          {must:["rebelliousness","honesty"], nudge:["role","attachment","values"], open:["humor","stress","vices"]},
-  compulsiveFixer:     {must:["discipline","activeness"], nudge:["vices","role","stress"], open:["attachment","humor","values"]},
-  undiscussedSurvivor: {must:["emotionalcapacity"], nudge:["attachment","stress","humor"], open:["values","vices","role"]},
-  workaholicAvoiding:  {must:["discipline","activeness"], nudge:["vices","attachment","stress"], open:["humor","values","role"]},
-  formerTrueBeliever:  {must:["honesty","positivity"], nudge:["values","role","attachment"], open:["humor","stress","vices"]},
-  goldenChild:         {must:["confidence","positivity"], nudge:["attachment","role","values"], open:["humor","stress","vices"]},
-  competentProfessional:{must:["discipline","intelligence"], nudge:["attachment","vices","role"], open:["humor","stress","values"]},
-  contentedElder:      {must:["positivity","activeness"], nudge:["attachment","humor","values"], open:["stress","vices","role"]},
-  genuinelyFunny:      {must:["friendliness","intelligence"], nudge:["humor","role","attachment"], open:["values","stress","vices"]},
-  careerBureaucrat:    {must:["rebelliousness","manners"], nudge:["values","vices","humor"], open:["attachment","stress","role"]},
-  trueZealot:          {must:["positivity","emotionalcapacity"], nudge:["values","role","stress"], open:["attachment","humor","vices"]},
-  alienLogic:          {must:["curiosity","honesty"], nudge:["role","humor","attachment"], open:["values","stress","vices"]},
-  unbotheredYoung:     {must:["manners","confidence"], nudge:["attachment","humor","values"], open:["stress","vices","role"]},
-  steadyOrganiser:     {must:["discipline","agreeableness"], nudge:["attachment","role","vices"], open:["humor","stress","values"]},
-  cheerfulMess:        {must:["discipline","friendliness"], nudge:["attachment","humor","vices"], open:["values","stress","role"]},
-  plainSpoken:         {must:["intelligence","honesty"], nudge:["attachment","values","humor"], open:["stress","vices","role"]},
-  softSpokenSecond:    {must:["assertiveness","agreeableness"], nudge:["role","stress","attachment"], open:["humor","values","vices"]},
-  bluntForeman:        {must:["assertiveness","manners"], nudge:["role","stress","attachment"], open:["humor","values","vices"]},
-  dreamyDrifter:       {must:["discipline","curiosity"], nudge:["role","vices","attachment"], open:["humor","stress","values"]},
-  stubbornCraftsman:   {must:["discipline","rebelliousness"], nudge:["values","vices","attachment"], open:["humor","stress","role"]},
-  openHeartedShambles: {must:["emotionalcapacity","discipline"], nudge:["attachment","vices","humor"], open:["values","stress","role"]},
-  weepingBrawler:      {must:["emotionalcapacity","assertiveness"], nudge:["stress","vices","attachment"], open:["humor","values","role"]},
-  lovableLiar:         {must:["honesty","friendliness"], nudge:["values","humor","role"], open:["attachment","stress","vices"]},
-  incuriousContent:    {must:["curiosity","positivity"], nudge:["humor","values","role"], open:["attachment","stress","vices"]},
-  gloomyRomantic:      {must:["emotionalcapacity","positivity"], nudge:["attachment","humor","vices"], open:["values","stress","role"]},
-  scatteredGenius:     {must:["intelligence","discipline"], nudge:["humor","vices","role"], open:["attachment","stress","values"]},
-  jadedFixer:          {must:["honesty","positivity"], nudge:["values","humor","stress"], open:["attachment","vices","role"]},
-  bigHeartedBoss:      {must:["emotionalcapacity","assertiveness"], nudge:["role","humor","vices"], open:["attachment","stress","values"]},
+  soldier:              {must:["discipline","emotionalcapacity"], nudge:["attachment","stress","values","humor","vices","competence"], open:["role"]},
+  conartist:            {must:["honesty","confidence"], nudge:["values","humor","role","vices","stress","competence"], open:["attachment"]},
+  intern:               {must:["confidence","assertiveness"], nudge:["attachment","stress","humor","role","vices","origins"], open:["values"]},
+  scholar:              {must:["intelligence","activeness"], nudge:["role","humor","vices","values","attachment","competence"], open:["stress"]},
+  noble:                {must:["manners","friendliness"], nudge:["attachment","values","role","humor","stress","origins"], open:["vices"]},
+  child:                {must:["curiosity","positivity"], nudge:["attachment","humor","role","values","stress","origins"], open:["vices"]},
+  burntIdealist:        {must:["positivity","honesty"], nudge:["values","vices","stress","humor","attachment"], open:["role"]},
+  charmingManipulator:  {must:["honesty","friendliness"], nudge:["attachment","values","role","humor","stress","competence"], open:["vices"]},
+  grievingParent:       {must:["positivity","emotionalcapacity"], nudge:["attachment","stress","humor","vices","role"], open:["values"]},
+  reluctantSecond:      {must:["assertiveness","discipline"], nudge:["role","values","attachment","stress","humor","competence"], open:["vices"]},
+  cheerfulSociopath:    {must:["emotionalcapacity","positivity"], nudge:["attachment","values","humor","stress","role"], open:["vices"]},
+  furiousCaretaker:     {must:["agreeableness","discipline"], nudge:["role","stress","vices","humor","values"], open:["attachment"]},
+  washedUpProdigy:      {must:["intelligence","confidence"], nudge:["vices","humor","values","role","stress"], open:["attachment"]},
+  companyLoyalist:      {must:["rebelliousness","discipline"], nudge:["values","role","vices","humor","attachment","competence"], open:["stress"]},
+  blackSheep:           {must:["rebelliousness","honesty"], nudge:["role","attachment","values","humor","stress"], open:["vices"]},
+  compulsiveFixer:      {must:["discipline","activeness"], nudge:["vices","role","stress","attachment","humor","competence"], open:["values"]},
+  undiscussedSurvivor:  {must:["emotionalcapacity"], nudge:["attachment","stress","humor","values","role"], open:["vices"]},
+  workaholicAvoiding:   {must:["discipline","activeness"], nudge:["vices","attachment","stress","role","humor","competence"], open:["values"]},
+  formerTrueBeliever:   {must:["honesty","positivity"], nudge:["role","values","attachment","humor","stress"], open:["vices"]},
+  goldenChild:          {must:["confidence","positivity"], nudge:["attachment","role","values","humor","stress","origins"], open:["vices"]},
+  competentProfessional: {must:["discipline","intelligence"], nudge:["attachment","vices","role","humor","values","competence"], open:["stress"]},
+  contentedElder:       {must:["positivity","activeness"], nudge:["attachment","humor","values","role","vices","origins"], open:["stress"]},
+  genuinelyFunny:       {must:["friendliness","intelligence"], nudge:["humor","role","attachment","vices","stress"], open:["values"]},
+  careerBureaucrat:     {must:["rebelliousness","manners"], nudge:["values","vices","humor","stress","attachment","competence"], open:["role"]},
+  trueZealot:           {must:["positivity","emotionalcapacity"], nudge:["values","role","stress","attachment","humor"], open:["vices"]},
+  alienLogic:           {must:["curiosity","honesty"], nudge:["role","humor","attachment","values","stress"], open:["vices"]},
+  unbotheredYoung:      {must:["manners","confidence"], nudge:["attachment","humor","values","vices","role"], open:["stress"]},
+  steadyOrganiser:      {must:["discipline","agreeableness"], nudge:["role","vices","humor","values","attachment","competence","origins"], open:["stress"]},
+  cheerfulMess:         {must:["discipline","friendliness"], nudge:["attachment","humor","vices","role","stress"], open:["values"]},
+  plainSpoken:          {must:["intelligence","honesty"], nudge:["attachment","values","role","humor","stress","competence","origins"], open:["vices"]},
+  softSpokenSecond:     {must:["assertiveness","agreeableness"], nudge:["role","stress","attachment","values","humor"], open:["vices"]},
+  bluntForeman:         {must:["assertiveness","manners"], nudge:["role","stress","values","humor","competence","vices"], open:["attachment"]},
+  dreamyDrifter:        {must:["discipline","curiosity"], nudge:["role","vices","attachment","humor","values"], open:["stress"]},
+  stubbornCraftsman:    {must:["discipline","rebelliousness"], nudge:["values","vices","attachment","role","humor","competence"], open:["stress"]},
+  openHeartedShambles:  {must:["emotionalcapacity","discipline"], nudge:["attachment","vices","humor","role","stress"], open:["values"]},
+  weepingBrawler:       {must:["emotionalcapacity","assertiveness"], nudge:["stress","vices","attachment","values","role"], open:["humor"]},
+  lovableLiar:          {must:["honesty","friendliness"], nudge:["values","humor","role","attachment","stress"], open:["vices"]},
+  incuriousContent:     {must:["curiosity","positivity"], nudge:["humor","values","role","attachment","vices"], open:["stress"]},
+  gloomyRomantic:       {must:["emotionalcapacity","positivity"], nudge:["attachment","humor","vices","values","stress"], open:["role"]},
+  scatteredGenius:      {must:["intelligence","discipline"], nudge:["humor","vices","role","attachment","stress"], open:["values"]},
+  jadedFixer:           {must:["honesty","positivity"], nudge:["values","humor","stress","role","attachment","competence"], open:["vices"]},
+  bigHeartedBoss:       {must:["emotionalcapacity","assertiveness"], nudge:["role","humor","vices","attachment","stress","origins"], open:["values"]},
+  newParent:            {must:["emotionalcapacity","confidence"], nudge:["attachment","role","stress","humor","values","origins"], open:["vices"]},
+  midlifeReinventor:    {must:["rebelliousness","curiosity"], nudge:["vices","role","values","attachment","humor"], open:["stress"]},
+  restlessRetiree:      {must:["activeness","assertiveness"], nudge:["vices","humor","role","values","competence","stress"], open:["attachment"]},
+  codeSwitcher:         {must:["manners","friendliness"], nudge:["role","values","stress","humor","attachment","origins"], open:["vices"]},
+  preciseLiteralist:    {must:["honesty","curiosity"], nudge:["role","humor","values","vices","stress","competence"], open:["attachment"]},
+  incurableFlirt:       {must:["friendliness","confidence"], nudge:["attachment","humor","role","vices","values"], open:["stress"]},
+  secularIdeologue:     {must:["assertiveness","agreeableness"], nudge:["values","role","stress","humor","attachment"], open:["vices"]},
+  nosyNeighbour:        {must:["curiosity","honesty"], nudge:["role","vices","values","humor","attachment"], open:["stress"]},
+  pompousBlowhard:      {must:["confidence","curiosity"], nudge:["role","humor","values","stress","attachment"], open:["vices"]},
+  maliciousTrickster:   {must:["honesty","agreeableness"], nudge:["humor","role","values","vices","attachment"], open:["stress"]},
 };
 
 /* ================= NAMED VARIATIONS =================
@@ -1244,6 +1373,36 @@ const ARCHETYPE_VARIATIONS = {
   bigHeartedBoss:[{id:"gruff", label:"Gruff", pers:{manners:-40}, profile:{humor:"Dry & Deadpan"}},
              {id:"sentimental", label:"Sentimental", pers:{positivity:30}, profile:{humor:"Warm & Playful"}},
              {id:"volatile", label:"Volatile", pers:{agreeableness:-40}, profile:{stress:"Fight (attack the threat)"}}],
+  newParent:[{id:"besotted", label:"Besotted", pers:{positivity:50}, profile:{humor:"Warm & Playful"}},
+             {id:"drowning", label:"Drowning", pers:{positivity:-50, friendliness:-20}, profile:{stress:"Fight (attack the threat)", attachment:"Disorganized"}},
+             {id:"over-prepared", label:"Over-prepared", pers:{discipline:70, curiosity:40}, profile:{vices:"Compulsion & Ritual"}}],
+  midlifeReinventor:[{id:"glorious", label:"Gloriously late bloomer", pers:{agreeableness:30, friendliness:30}, profile:{humor:"Warm & Playful", attachment:"Secure"}},
+             {id:"crisis", label:"Crisis, frankly", pers:{discipline:-30, honesty:-30}, profile:{vices:"Substance & Consumption", stress:"Flight (remove yourself)"}},
+             {id:"evangelist", label:"Evangelist", pers:{assertiveness:50}, profile:{values:"Rigid & Principled"}}],
+  restlessRetiree:[{id:"volunteer", label:"Volunteers for everything", pers:{friendliness:40, agreeableness:40}, profile:{role:"Leader"}},
+             {id:"complainer", label:"Writes to the council", pers:{positivity:-30}, profile:{humor:"Cruel & Barbed", role:"Instigator"}},
+             {id:"lost", label:"Lost without the job", pers:{confidence:-60, positivity:-30}, profile:{attachment:"Anxious"}}],
+  codeSwitcher:[{id:"bridge", label:"The family's translator", pers:{agreeableness:20, discipline:30}, profile:{role:"Caretaker"}},
+             {id:"split", label:"Split down the middle", pers:{emotionalcapacity:-30, confidence:-30}, profile:{attachment:"Avoidant", stress:"Freeze (shut down)"}},
+             {id:"unapologetic", label:"Stopped switching", pers:{rebelliousness:60, assertiveness:50}, profile:{role:"Instigator", humor:"Cruel & Barbed"}}],
+  preciseLiteralist:[{id:"gentle", label:"Gentle", pers:{friendliness:40, agreeableness:30}, profile:{role:"Caretaker", humor:"Warm & Playful"}},
+             {id:"expert", label:"The expert in the room", pers:{confidence:50}, profile:{role:"Skeptic"}},
+             {id:"overwhelmed", label:"Running out of room", pers:{emotionalcapacity:40, confidence:-40}, profile:{stress:"Freeze (shut down)", attachment:"Anxious"}}],
+  incurableFlirt:[{id:"harmless", label:"Harmless", pers:{honesty:40, agreeableness:40}, profile:{attachment:"Secure"}},
+             {id:"heartbreaker", label:"Heartbreaker", pers:{agreeableness:-40, emotionalcapacity:-30}, profile:{values:"Self-Interested", attachment:"Avoidant"}},
+             {id:"lonely", label:"Lonely underneath", pers:{positivity:-40}, profile:{attachment:"Anxious", humor:"Self-Deprecating"}}],
+  secularIdeologue:[{id:"academic", label:"Academic", pers:{activeness:-30, manners:40}, profile:{humor:"Intellectual & Wordplay", role:"Skeptic"}},
+             {id:"street", label:"On the street", pers:{activeness:60, manners:-40}, profile:{vices:"Risk & Escape"}},
+             {id:"lonely", label:"Burned every bridge", pers:{positivity:-30, confidence:-20}, profile:{role:"Outsider", attachment:"Disorganized"}}],
+  nosyNeighbour:[{id:"kind", label:"Nosy but kind", pers:{agreeableness:40}, profile:{role:"Caretaker", humor:"Warm & Playful"}},
+             {id:"vigilante", label:"Neighbourhood watch", pers:{discipline:50, rebelliousness:-40}, profile:{values:"Rigid & Principled", role:"Leader"}},
+             {id:"lonely", label:"Lonely", pers:{positivity:-40}, profile:{attachment:"Anxious", stress:"Fawn (appease the threat)"}}],
+  pompousBlowhard:[{id:"clubbable", label:"Clubbable", pers:{friendliness:40}, profile:{humor:"Warm & Playful", role:"Connector"}},
+             {id:"bully", label:"Bully", pers:{manners:-50}, profile:{humor:"Cruel & Barbed"}},
+             {id:"hollow", label:"Hollow underneath", pers:{positivity:-40, emotionalcapacity:30}, profile:{attachment:"Anxious"}}],
+  maliciousTrickster:[{id:"playful", label:"Mostly playful", pers:{friendliness:40, emotionalcapacity:20}, profile:{humor:"Absurd & Chaotic"}},
+             {id:"cold", label:"Cold", pers:{friendliness:-50, positivity:-30}, profile:{humor:"Dry & Deadpan", role:"Outsider"}},
+             {id:"avenger", label:"Settling scores", pers:{discipline:50}, profile:{values:"Rigid & Principled", stress:"Fight (attack the threat)"}}],
 };
 Object.entries(ARCHETYPE_INTENT).forEach(([k, v])=>{ if (ARCHETYPES[k]) ARCHETYPES[k].intent = v; });
 Object.entries(ARCHETYPE_VARIATIONS).forEach(([k, v])=>{ if (ARCHETYPES[k]) ARCHETYPES[k].variations = v; });
@@ -1277,7 +1436,7 @@ function effectiveArchetype(key, variationId){
    — the con artist stays dishonest at 20% blend; their manners are up to you. */
 const ARCHETYPE_MUST_FLOOR = 0.85;
 function archetypeBlendLevel(){
-  const el = document.getElementById('archetypeBlend');
+  const el = settingEl('archetypeBlend');
   return el ? clamp(parseFloat(el.value) || 0, 0, 1) : 0.65;
 }
 function archetypeAxisBlend(arch, axisId){
@@ -1310,7 +1469,7 @@ function clamp(v,min,max){ return Math.max(min, Math.min(max, v)); }
 // fields already are), a blank value would silently produce NaN and propagate through
 // slot counts with no visible error.
 function intVal(idOrEl, fallback){
-  const el = typeof idOrEl === 'string' ? document.getElementById(idOrEl) : idOrEl;
+  const el = typeof idOrEl === 'string' ? settingEl(idOrEl) : idOrEl;
   if (!el) return fallback;
   const n = parseInt(el.value, 10);
   return Number.isNaN(n) ? fallback : n;
@@ -1455,7 +1614,7 @@ function invalidateSliderCache(){
 }
 function bandHalf(){
   if (_bandHalfMemo !== null) return _bandHalfMemo;
-  if (!_rangeFocusEl) _rangeFocusEl = document.getElementById('rangeFocus');
+  if (!_rangeFocusEl) _rangeFocusEl = settingEl('rangeFocus');
   const el = _rangeFocusEl;
   const focus = clamp(floatVal(el, 0.62), 0, 1);
   return (_bandHalfMemo = 1.35 - 1.0 * focus); // 1.35 (loose) .. 0.35 (tight)
@@ -1564,7 +1723,7 @@ function recurringTraits(minCount){
     .filter(r => r.trait);
 }
 function avoidRecentEnabled(){
-  const el = document.getElementById('avoidRecentToggle');
+  const el = settingEl('avoidRecentToggle');
   return el ? !!el.checked : true;   // default-on; see RECENT_WINDOW above
 }
 let _avoidRecentActive = false;   // resolved once per build, not per draw
@@ -1582,7 +1741,7 @@ const RECENT_DECAY = 0.82;            // per character of age
 const RECENT_FAMILY_PENALTY = 0.7;    // same concept family as a recent trait
 let recentFamilies = [];              // array of Sets of conceptFamily, newest last
 function recentPenalty(t){
-  let m = avoidPenalty(t);
+  let m = avoidPenalty(t) * retirePenalty(t);
   if (!_avoidRecentActive || !recentTraitIds.length) return m;
   const n = recentTraitIds.length;
   for (let i = n - 1; i >= 0; i--){
@@ -1612,6 +1771,19 @@ function recentPenalty(t){
    mode (a "different person from X" is reproducible given X). Set by
    generateSameWorld(), cleared after the build. */
 let AVOID_SET = null;   // {ids:Set, families:Set, cats:Set}
+/* RETIRED FOR THIS PROJECT. Softer than a ban: "we have used this one enough in this
+   book" rather than "never". A retired trait keeps a small share of its weight, so a
+   pool that holds little else still seats it; it is stored with the project (app.js),
+   applies to exploration draws only, and is ignored under replay — a seed names a
+   character, and retiring something later must not change what that seed rebuilds. */
+const RETIRE_PENALTY = 0.15;
+let RETIRED_IDS = new Set();
+function setRetiredTraits(ids){ RETIRED_IDS = new Set((ids || []).map(Number).filter(Number.isFinite)); return RETIRED_IDS.size; }
+function getRetiredTraits(){ return [...RETIRED_IDS]; }
+function isRetired(id){ return RETIRED_IDS.has(Number(id)); }
+function retirePenalty(t){
+  return (t && RETIRED_IDS.size && !REPLAY_MODE && RETIRED_IDS.has(t.id)) ? RETIRE_PENALTY : 1;
+}
 function setAvoidSet(v){ AVOID_SET = v || null; }
 function avoidPenalty(t){
   if (!AVOID_SET || !t) return 1;
@@ -1728,12 +1900,9 @@ function referenceFromState(st, name){
 
      Register (neutral slot)               83-trait pool ->  15 distinct, top trait 28.4%
      Situational Friendliness @ slider 0   41-trait pool ->  15 distinct, top trait 35.0%
-     Movement & Bearing @ default          39-trait pool ->  11 distinct, top trait 33.4%
-     Distinguishing Marks @ default        38-trait pool ->   9 distinct, top trait 26.1%
 
    And over 300 default-settings characters the consequence is visible from orbit:
-   "Hushed-deliberate" in 83 of 300, "Sailor's roll on dry land" in 81, "Enters a room
-   backwards" in 79. Nothing is more corrosive to a generator than a distinctive image
+   "Hushed-deliberate" in 83 of 300. Nothing is more corrosive to a generator than a distinctive image
    turning up every fourth time.
 
    The cause is targetFromMag(18) = 1.20 (and targetFromMag(15) = 1.09 for Marks)
@@ -1760,8 +1929,8 @@ function quantile(values, q){
    everywhere, the lift produced 0.90, and max(1.20, 0.90) returned the ORIGINAL target
    unchanged. Every pool this function was written for was still being aimed below its
    own material — Register (neutral) was measured at 15 distinct traits out of 83, and
-   app_move's most frequent draw was still "Enters a room backwards", the exact trait
-   the original fix names as its symptom.
+   the most-seated fixed slot kept returning the exact trait the original fix names
+   as its symptom.
 
    A single tail trait must not be allowed to define where the pool "starts". Use the
    25th percentile of the pool's positions instead: robust to one or two outliers at
@@ -1943,7 +2112,10 @@ function _pickInRangeInner(pool, rarityPref, target, minCount, flatten){
      is a statement about, it does not change shape as the window widens, and a
      singleton inside one window is no longer mistaken for a whole class. */
   const norm = rarityNorm(pool);
-  const prox = proximityWeights(list, centre, half, flatten);
+  /* Divergence used to act only BETWEEN categories (and on the polarity fit); inside a
+     category the proximity kernel still pulled every draw to the same few on-target
+     traits. When this draw's coin diverges, the kernel is flattened too (audit §5). */
+  const prox = proximityWeights(list, centre, half, flatten || _divergeThisDraw);
   const weights = list.map((t, i) => {
     let w = prox[i] * rarityWeight(t, rarityPref, norm) * tierWeight(t, centre);
     if (aff > 0 && CURRENT_AFFINITY_VEC){
@@ -1954,7 +2126,7 @@ function _pickInRangeInner(pool, rarityPref, target, minCount, flatten){
       // The same coin now flips the trait-level fit too.
       if (fit) w *= clamp(1 + aff*fit*(_divergeThisDraw ? -1 : 1), 0.15, 3);
     }
-    w *= recentPenalty(t) * slotRepeatPenalty(t);
+    w *= recentPenalty(t) * slotRepeatPenalty(t) * worldTagMultiplier(t);
     return w;
   });
   const total = weights.reduce((a,b)=>a+b,0);
@@ -2273,6 +2445,28 @@ const WEIGHT_MATRIX = {
     role:{"Peacemaker":TIER_STRONG,"Caretaker":TIER_MODERATE,"Connector":TIER_WEAK}, values:{"Loyalty-Bound":TIER_MODERATE},
     attachment:{"Anxious":TIER_STRONG}, humor:{"Self-Deprecating":TIER_MODERATE} },
 };
+// Inbound links for the §6 gap sections live beside their content (js/data/traits-gaps.js)
+// and are merged here, so a trimmed build without that pack simply has no such links.
+if (typeof GAP_WEIGHT_LINKS !== 'undefined'){
+  const GAP_TIER = {S:TIER_STRONG, M:TIER_MODERATE, W:TIER_WEAK};
+  Object.entries(GAP_WEIGHT_LINKS).forEach(([ax, poles])=>{
+    const e = WEIGHT_MATRIX[ax] = WEIGHT_MATRIX[ax] || {};
+    Object.entries(poles).forEach(([pole, kinds])=>{
+      const p = e[pole] = e[pole] || {};
+      Object.entries(kinds).forEach(([kind, frags])=>{
+        const k = p[kind] = p[kind] || {};
+        Object.entries(frags).forEach(([frag, t])=>{ if (!(frag in k)) k[frag] = GAP_TIER[t] || TIER_WEAK; });
+      });
+    });
+  });
+  if (typeof GAP_SECTION_LINKS !== 'undefined') Object.entries(GAP_SECTION_LINKS).forEach(([key, kinds])=>{
+    const e = WEIGHT_MATRIX[key] = WEIGHT_MATRIX[key] || {};
+    Object.entries(kinds).forEach(([kind, frags])=>{
+      const k = e[kind] = e[kind] || {};
+      Object.entries(frags).forEach(([frag, t])=>{ if (!(frag in k)) k[frag] = GAP_TIER[t] || TIER_WEAK; });
+    });
+  });
+}
 
 // Guarded: this is called from pickCategoryWeighted, which runs on every category
 // draw, including from code paths that have no DOM at all (tests, and any future
@@ -2281,7 +2475,7 @@ const WEIGHT_MATRIX = {
 // means "switch off all category steering" — a silent, invisible mode change from a
 // cleared input. Fall back to the default the same way intVal does.
 function floatVal(idOrEl, fallback){
-  const el = typeof idOrEl === 'string' ? document.getElementById(idOrEl) : idOrEl;
+  const el = typeof idOrEl === 'string' ? settingEl(idOrEl) : idOrEl;
   if (!el) return fallback;
   const n = parseFloat(el.value);
   return Number.isFinite(n) ? n : fallback;
@@ -2295,11 +2489,11 @@ function floatVal(idOrEl, fallback){
    panel is removed, or the file is loaded under test, they throw. togglePersonalityPanel
    did exactly that as soon as js/app.js was brought under test coverage. */
 function strVal(idOrEl, fallback){
-  const el = typeof idOrEl === 'string' ? document.getElementById(idOrEl) : idOrEl;
+  const el = typeof idOrEl === 'string' ? settingEl(idOrEl) : idOrEl;
   return el && el.value != null ? el.value : fallback;
 }
 function boolVal(idOrEl, fallback){
-  const el = typeof idOrEl === 'string' ? document.getElementById(idOrEl) : idOrEl;
+  const el = typeof idOrEl === 'string' ? settingEl(idOrEl) : idOrEl;
   return el ? !!el.checked : fallback;
 }
 function setVal(id, v){ const el = document.getElementById(id); if (el) el.value = v; return el; }
@@ -2438,7 +2632,7 @@ function _explainPickInner(slotId, s){
   if (slotId.startsWith("pers_")){
     const axisId = slotId.replace("pers_","").replace(/__2$/,"");
     const axis = PERSONALITY_AXES.find(a=>a.id===axisId);
-    const el = document.getElementById('pers_'+axisId);
+    const el = settingEl('pers_'+axisId);
     const raw = intVal(el, 0);
     const side = raw >= 0 ? "positive" : "negative";
     const target = targetFromMag(Math.abs(raw));
@@ -2454,7 +2648,7 @@ function _explainPickInner(slotId, s){
 
   if (slotId === "verbosity" || slotId === "register"){
     const sliderId = slotId === "verbosity" ? 'verbositySlider' : 'registerSlider';
-    const el = document.getElementById(sliderId);
+    const el = settingEl(sliderId);
     const raw = intVal(el, 0);
     return pinNote + `Set by your <b>${slotId === "verbosity" ? "Verbosity" : "Register"}</b> slider at <b>${raw}</b>, which chooses the "${cat}" pool.${bandNote(s.trait, s.target)}${polNote}`;
   }
@@ -2488,9 +2682,8 @@ const CROSSLINK_STRENGTH = 0.45;
    The section the sheet leads with, that draws on every character, that supplies the
    pressure trigger, participated in the weight matrix in NEITHER direction: not one of
    its seven categories was a WEIGHT_MATRIX target, none had a DEPTH_TO_PERSONALITY
-   entry, and it was excluded from WILDCARD_SECTIONS and PRESSURE_SHIFT_SECTIONS. Its
-   entire outbound influence was one hardcoded link, wound intensity -> Distinguishing
-   Marks target.
+   entry, and it was excluded from WILDCARD_SECTIONS and PRESSURE_SHIFT_SECTIONS. It had
+   no outbound influence at all.
 
    The reason is real but it is an implementation constraint, not a design decision:
    Motivation is drawAll:true, so it never resolves to a single category the cross-link
@@ -2679,6 +2872,13 @@ function setMotivationLinks(map){ CURRENT_MOTIVATION_LINKS = map || {}; }
    somewhere else. An explicit type_<section> choice still wins outright, because that
    short-circuits before any boost is consulted. */
 let CURRENT_ARCHETYPE_PROFILE = null;
+/* Was exactly TIER_STRONG. Measured over 40 builds per preset, a hinted section landed
+   on its hint only ~50% of the time and presets produced 28-39 distinct emergent names
+   out of 40 — a Smug Con Artist read as "Practical Guardian". 2.2x keeps every other
+   category reachable (a hinted 4-way section lands on its hint ~75% of the time at
+   neutral sliders; the nudge test caps it below 80%) while making the preset's own
+   shape the usual outcome rather than a coin toss. Hint fidelity measured 50% -> 65%. */
+const ARCHETYPE_HINT_STRENGTH = 2.2 * TIER_STRONG;
 function setArchetypeProfile(map){ CURRENT_ARCHETYPE_PROFILE = map || null; }
 function withArchetypeProfile(map, fn){
   const prev = CURRENT_ARCHETYPE_PROFILE;
@@ -2690,9 +2890,9 @@ function withArchetypeProfile(map, fn){
 function accumulateBoost(kind, profileCats, overrides){
   const m = new Map();
   const add = (frag, s) => { if(!frag || s<=0) return; m.set(frag, (m.get(frag)||0) + s); };
-  // See ARCHETYPE PROFILE HINTS above. One entry, at one STRONG link's worth of pull.
+  // See ARCHETYPE PROFILE HINTS above. One entry, at ARCHETYPE_HINT_STRENGTH.
   if (CURRENT_ARCHETYPE_PROFILE && CURRENT_ARCHETYPE_PROFILE[kind]){
-    add(CURRENT_ARCHETYPE_PROFILE[kind], TIER_STRONG);
+    add(CURRENT_ARCHETYPE_PROFILE[kind], ARCHETYPE_HINT_STRENGTH);
   }
   SIGNAL_AXES.forEach(a=>{
     const entry = WEIGHT_MATRIX[a.id];
@@ -2899,7 +3099,7 @@ function noteCategoryUse(cat){ if (cat) CATEGORY_USE.set(cat, (CATEGORY_USE.get(
 function forgetCategoryUse(){ CATEGORY_USE.clear(); }
 
 function divergenceLevel(){
-  const el = document.getElementById('divergence');
+  const el = settingEl('divergence');
   return el ? clamp(parseFloat(el.value) || 0, 0, 1) : 0;
 }
 /* REPLAY vs EXPLORE. Divergence's "freshen" branch below consults CATEGORY_USE, the
@@ -3087,6 +3287,16 @@ let CONTEXT_BIAS = new Map();   // category -> multiplier (voice + profile categ
 let CONTEXT_AXIS_NUDGE = {};    // personality axis id -> raw slider delta
 let CONTEXT_BIAS_NOTES = [];    // human-readable, surfaced in the preview
 const CONTEXT_UP = 2.2, CONTEXT_DOWN = 0.45, CONTEXT_NUDGE = 18;
+/* PRECEDENCE AND CAP. Rules used to stack with no ceiling: "a soldier, ex-military,
+   veteran of the war" matched three rules pointing at the same categories and the
+   product ran to 2.2^3 ≈ 10.6x, which is no longer a bias but a verdict. The order is
+     1. a label the user switched off never applies (CONTEXT_SUPPRESSED);
+     2. a negated match never applies ("not a soldier");
+     3. surviving text rules, then age rules, compose multiplicatively;
+     4. the combined product per category is clamped to [MIN, MAX], and a personality
+        nudge to ±CONTEXT_NUDGE_CAP,
+   so one strong match reads as a bias and several read as a stronger one, never more. */
+const CONTEXT_MULT_MIN = 0.2, CONTEXT_MULT_MAX = 4, CONTEXT_NUDGE_CAP = 2 * CONTEXT_NUDGE;
 // A personality pole isn't chosen by weighted category draw — it's chosen by the sign
 // of its slider — so a category multiplier would be a no-op there. Express those rules
 // as a small slider NUDGE instead: the same intent, through the mechanism that axis
@@ -3155,8 +3365,14 @@ function buildContextBias(contextText, ageText){
   CONTEXT_SUPPRESSED.forEach(l=>{
     if (CONTEXT_RULES.some(r=>r.label===l)) CONTEXT_REJECTED.push({label:l, why:'you turned this one off'});
   });
+  // Selected lenses (setting / culture / life stage) compose with the text rules and
+  // share their cap — see LENSES.
+  const lensRegister = applyLensBias(push, CONTEXT_BIAS_NOTES);
+  // Step 4 of the precedence above: compose exactly, clamp once.
+  CONTEXT_BIAS.forEach((v, k) => CONTEXT_BIAS.set(k, clamp(v, CONTEXT_MULT_MIN, CONTEXT_MULT_MAX)));
+  Object.keys(CONTEXT_AXIS_NUDGE).forEach(k => { CONTEXT_AXIS_NUDGE[k] = clamp(CONTEXT_AXIS_NUDGE[k], -CONTEXT_NUDGE_CAP, CONTEXT_NUDGE_CAP); });
   return {bias: CONTEXT_BIAS, nudge: CONTEXT_AXIS_NUDGE, notes: CONTEXT_BIAS_NOTES,
-          rejected: CONTEXT_REJECTED.slice(), age};
+          rejected: CONTEXT_REJECTED.slice(), age, lensRegister, lenses: activeLensIds()};
 }
 /* A slot can legitimately hold trait:null — an exhausted pool, a banned-out category,
    or a save file written by an older build. Three separate crashes (axisProfile,
@@ -3183,7 +3399,9 @@ function withoutContextBias(fn){
   try { return fn(); }
   finally { CONTEXT_BIAS = savedBias; CONTEXT_AXIS_NUDGE = savedNudge; CONTEXT_BIAS_NOTES = savedNotes; }
 }
-function contextMultiplier(cat){ return CONTEXT_BIAS.get(cat) || 1; }
+// Clamped on read as well: a bias map handed in through a draw context is not built by
+// push() above and must not be able to exceed the cap either.
+function contextMultiplier(cat){ return clamp(CONTEXT_BIAS.get(cat) || 1, CONTEXT_MULT_MIN, CONTEXT_MULT_MAX); }
 
 // ---------- Real per-trait conflict detection via polarity vectors ----------
 // Conflicts used to be flat present/absent: two intensity-1 traits that could
@@ -3199,15 +3417,39 @@ const CONFLICT_TIERS = [
   {min:0, label:"Mild",      note:"Both are quiet enough that a real person could carry both without anyone noticing."},
 ];
 function conflictTier(severity){ return CONFLICT_TIERS.find(t => severity >= t.min); }
+const CONFLICT_EXEMPT_SECTIONS = new Set(["Role by Context", "Contradiction Functions"]);
 function checkConflictsFor(stateObj){
-  const items = Object.values(stateObj).filter(s=>s && s.trait);
+  const keys = Object.keys(stateObj).filter(k=>stateObj[k] && stateObj[k].trait);
+  const items = keys.map(k=>stateObj[k]);
+  /* B19: cards drawn together as facets of ONE profile section (prof_<section>_N, e.g.
+     Role by Context: "the confidant" with the friend, "confides in" the child) or two
+     facets of one personality axis (pers_x / pers_x__2) are meant to differ — flagging
+     them as contradictions was most of the ~55 "conflicts" per sheet. */
+  const groupOf = k => {
+    let m = /^prof_(.+)_\d+$/.exec(k); if (m) return 'prof:' + m[1];
+    m = /^pers_(.+?)(?:__2)?$/.exec(k); if (m) return 'pers:' + m[1];
+    return null;
+  };
+  const groups = keys.map(groupOf);
+  /* Traits that are contextual BY DESIGN — a role that changes with the room, a named
+     contradiction, a "— Situational" facet — describe variation, so opposing another
+     card is their content rather than a tension to warn about. */
+  const contextual = t => CONFLICT_EXEMPT_SECTIONS.has(t.section) || /Situational/.test(t.category || '');
   const found = new Map();   // dedupe key -> graded conflict
+  const pairSeen = new Set(); // one entry per trait pair, not one per shared axis
   for (let i=0;i<items.length;i++){
     for (let j=i+1;j<items.length;j++){
+      if (groups[i] && groups[i] === groups[j]) continue;
       const a = items[i].trait, b = items[j].trait;
       if (!a.pol || !b.pol) continue;
+      if (contextual(a) || contextual(b)) continue;
+      // A seated contradiction (audit §5) is the point, not a clash to warn about.
+      if (items[i].contradiction || items[j].contradiction) continue;
       for (const axis of Object.keys(AXIS_LABELS)){
         if (a.pol[axis] === 1 && b.pol[axis] === -1 || a.pol[axis] === -1 && b.pol[axis] === 1){
+          const pk = a.trait + '|' + b.trait;
+          if (pairSeen.has(pk)) break;
+          pairSeen.add(pk);
           const severity = (a.intensity||3) + (b.intensity||3);
           const tier = conflictTier(severity);
           const key = `${a.trait}|${b.trait}|${axis}`;
@@ -3401,7 +3643,7 @@ const SIGNAL_AXES = PERSONALITY_AXES.concat(VOICE_AXES);
 function axisLevel(axisId, overrides){
   if (overrides && overrides[axisId] !== undefined) return rawToLevel(overrides[axisId]);
   const voice = VOICE_AXES.find(v=>v.id===axisId);
-  const el = document.getElementById(voice ? voice.sliderId : 'pers_'+axisId);
+  const el = settingEl(voice ? voice.sliderId : 'pers_'+axisId);
   return rawToLevel(intVal(el, 0));
 }
 
@@ -3660,9 +3902,9 @@ function pickPersonalitySlot(axis, level, rarityPref){
 }
 
 function pickPersonalitySlots(rarityPref, overrides){
-  const includeToggle = document.getElementById('personalityToggle');
+  const includeToggle = settingEl('personalityToggle');
   if (includeToggle && !includeToggle.checked) return {};
-  const countEl = document.getElementById('personalityCount');
+  const countEl = settingEl('personalityCount');
   const count = intVal(countEl, PERSONALITY_AXES.length);
 
   let axesToUse = PERSONALITY_AXES;
@@ -3747,10 +3989,33 @@ const PROFILE_SECTIONS = [
    blurb:"Preferences, routines, affiliations, a thing practised badly — texture that does not need a rare slot."},
   {id:"repair", section:"Recovery & Repair", label:"Recovery & Repair", drawAll:false, defaultOn:false,
    blurb:"What they do after a conflict, which the pressure sheet's aftermath reads from."},
-  {id:"contradiction", section:"Contradiction Functions", label:"Contradiction Functions", drawAll:false, defaultOn:false,
+  // On by default since the pool reached ~100 (traits-gaps.js): the audit's §5 asks for
+  // one seated contradiction, with its function, on every sheet.
+  {id:"contradiction", section:"Contradiction Functions", label:"Contradiction Functions", drawAll:false, defaultOn:true,
    blurb:"What the contradiction is for — protective hypocrisy, aspirational values, the exceptions they make."},
   {id:"contextrole", section:"Role by Context", label:"Role by Context", drawAll:true, defaultOn:false,
    blurb:"The seat they take among peers, under authority, and with dependents — not one seat in every room."},
+  /* ---- The audit's §6 trait-bank gap sections (js/data/traits-gaps.js) --------------
+     Opt-in facts a writer CHOOSES — a random "military jargon" card on every sheet would
+     be noise, not texture — so all ship off, with the usual toggle / type / weight. */
+  {id:"romance", section:"Romance & Desire", label:"Romance & Desire", drawAll:false, defaultOn:false,
+   blurb:"How they flirt, court, get jealous and pine — attraction as it comes out in speech."},
+  {id:"dialect", section:"Dialect & Linguistic Background", label:"Dialect & Linguistic Background", drawAll:false, defaultOn:false,
+   blurb:"Region, code-switching, a second language, heritage words, class register and the generation they talk like."},
+  {id:"beliefs", section:"Beliefs & Worldview", label:"Beliefs & Worldview", drawAll:false, defaultOn:false,
+   blurb:"Faith kept or lapsed, superstition, how they hold their politics, and the rituals that stand in for either."},
+  {id:"jargon", section:"Occupational Jargon", label:"Occupational Jargon", drawAll:false, defaultOn:false,
+   blurb:"How the job gets into the mouth off-shift: medical, military, legal, trade, tech, academic, service."},
+  {id:"conversation", section:"Conversation Mechanics", label:"Conversation Mechanics", drawAll:false, defaultOn:false,
+   blurb:"Literal uptake, info-dumping, scripts, turn-timing, sensory load and masking — behaviours, not diagnoses."},
+  {id:"body", section:"Body in Speech", label:"Body in Speech", drawAll:false, defaultOn:false,
+   blurb:"Pain, hearing and sight, medication, breath and a stammer — how a body shows up in talk."},
+  {id:"money", section:"Money & Class", label:"Money & Class", drawAll:false, defaultOn:false,
+   blurb:"Thrift, status signals, what they won't say about money, and the tells of having moved class."},
+  {id:"fears", section:"Fears & Aversions", label:"Fears & Aversions", drawAll:false, defaultOn:false,
+   blurb:"The concrete ones — phobias, social dreads, bodily aversions — beside the abstract Core Fear."},
+  {id:"family", section:"Family Talk", label:"Family Talk", drawAll:false, defaultOn:false,
+   blurb:"How much, and how, family comes into their conversation."},
 ];
 
 
@@ -3758,7 +4023,7 @@ const PROFILE_SECTIONS = [
    read as ON, which was fine when every section shipped on. The §6 sections ship off
    by default, so an absent control has to mean "the shipped default", not "yes". */
 function profileSectionEnabled(ps){
-  const tog = document.getElementById('sec_'+ps.id);
+  const tog = settingEl('sec_'+ps.id);
   if (tog) return !!tog.checked;
   return ps.defaultOn !== false;
 }
@@ -3788,7 +4053,7 @@ function predictProfileCategories(withConfidence){
   PROFILE_SECTIONS.forEach(ps=>{
     if (ps.drawAll) return;
     if (!profileSectionEnabled(ps)) return;
-    const sel = document.getElementById('type_'+ps.id);
+    const sel = settingEl('type_'+ps.id);
     if (sel && sel.value){ chosen[ps.id] = sel.value; conf[ps.id] = 1; return; }
     const cats = catsOf(ps.section);
     if (!cats.length) return;
@@ -3811,8 +4076,9 @@ function resolveProfileCategories(rarityPref, overrides, forcedCats){
   PROFILE_SECTIONS.forEach(ps=>{
     if (ps.drawAll) return; // Motivation & Wound always draws every category; nothing to "resolve"
     if (!profileSectionEnabled(ps)) return;
+    if (CURRENT_SHAPE && CURRENT_SHAPE.drop === ps.id) return;   // the signature budget dropped it
     if (forcedCats && forcedCats[ps.id]) { chosen[ps.id] = forcedCats[ps.id]; return; }
-    const sel = document.getElementById('type_'+ps.id);
+    const sel = settingEl('type_'+ps.id);
     const manual = (sel && sel.value) ? sel.value : null;
     chosen[ps.id] = manual || resolveTypeForSection(ps, chosen, overrides);
   });
@@ -3829,7 +4095,7 @@ function resolveProfileCategories(rarityPref, overrides, forcedCats){
 // blank (the default) means "follow the global dial", so nothing changes until asked.
 function profileTarget(sectionId){
   if (sectionId){
-    const el = document.getElementById('pw_' + sectionId);
+    const el = settingEl('pw_' + sectionId);
     if (el && el.value !== "" && el.value !== undefined){
       const n = parseInt(el.value, 10);
       if (!Number.isNaN(n)) return targetFromMag(clamp(n, 0, 100));
@@ -3851,7 +4117,7 @@ function profileTarget(sectionId){
 const MOTIVATION_TARGET_SPREAD = 2.4;
 function pickProfileSlots(rarityPref, resolvedCats, onlySectionId, skipSectionId){
   const out = {};
-  const depthEl = document.getElementById('profileDepth');
+  const depthEl = settingEl('profileDepth');
   const want = intVal(depthEl, 1);
   // Staggered intensity targets so multiple traits in one section read as distinct
   // facets (a defining note, a moderate habit, a background tendency) rather than
@@ -3877,18 +4143,18 @@ function pickProfileSlots(rarityPref, resolvedCats, onlySectionId, skipSectionId
 
          MEASURED STALENESS, and the three mechanical causes. Over 400 characters at
          default settings, every one of the twenty-five most repeated traits came from
-         this section or Appearance — nothing from Personality, Vocabulary, Mannerisms
+         this section — nothing from Personality, Vocabulary, Mannerisms
          or Speech appeared at all. The Motivation slots returned 23-38 distinct traits
          in 400 draws against 44-64 for every pers_* slot, with a top trait at 13%.
 
          Three fixes already existed in this file and had simply never been extended
-         here, because they were written when app_move and the personality axes were
+         here, because they were written when the fixed slots and the personality axes were
          the worst offenders and this section was not yet measured:
 
           (a) withSlotMemory — the slot-repeat penalty. Applied to five slots; these
               seven, now the worst in the bank, were not among them.
-          (b) minCount + flatten — the same widen-and-soften treatment app_move and
-              register get. These drew with a bare pickInRange: narrowest window, most
+          (b) minCount + flatten — the same widen-and-soften treatment register
+              gets. These drew with a bare pickInRange: narrowest window, most
               concentrated falloff.
           (c) A per-category target. All seven primaries drew at the identical
               profileTarget('motivation') = 2.41, so all seven asked for the same slice
@@ -3924,11 +4190,23 @@ function pickProfileSlots(rarityPref, resolvedCats, onlySectionId, skipSectionId
       const pool = byFilter(ps.section, cat);
 
       // Primary facets within the resolved category: up to min(want, 3), staggered.
-      const primaryCount = Math.min(want, 4, Math.max(1, pool.length));
+      /* COVERAGE FIX (2026 audit §4). The single-slot sections drew every primary at
+         the one shared profileTarget with the narrowest window and no slot memory —
+         the same three omissions the drawAll branch above already fixed for
+         Motivation. Measured over 1,500 random builds: 45% of Values, 45% of Stress,
+         49% of Attachment were never drawn, because every sheet asked the same slice
+         of the pool. The primary's target now takes a seeded jitter across the same
+         MOTIVATION_TARGET_SPREAD band, draws with minCount + flatten, and remembers
+         its own slot. Staggered secondaries keep their offset from the jittered base. */
+      // The signature budget gives a defining section one more card (see rollSheetShape).
+      const bonus = CURRENT_SHAPE && CURRENT_SHAPE.double.has(ps.id) ? 1 : 0;
+      const primaryCount = Math.min(want + bonus, 4, Math.max(1, pool.length));
+      const jittered = pool.length > 1 ? clamp(target + (rand() - 0.5) * MOTIVATION_TARGET_SPREAD, 1, 5) : target;
       let placed = 0;
       for (let i = 0; i < primaryCount; i++){
-        const tgt = staggered(target, i);
-        const t = _drawUnique(()=>pickInRange(pool, rarityPref, tgt));
+        const tgt = staggered(jittered, i);
+        const slotKey = `prof_${ps.id}_${i}`;
+        const t = _drawUnique(()=>withSlotMemory(slotKey, ()=>pickInRange(pool, rarityPref, tgt, 10, true)));
         if (!t) break;
         // If the pool is genuinely exhausted _drawUnique may hand back a repeat; skip it.
         if (Object.values(out).some(s => s.sectionId === ps.id && s.trait && s.trait.id === t.id)) continue;
@@ -4149,8 +4427,15 @@ function emergentArchetypeName(st){
   const nounSrc = [role, stress, values, attach, humor, vices].filter(c=>c && ARCH_NOUN[c]);
   const composed = (()=>{
     if (adjSrc.length && nounSrc.length){
-      const adj  = pickFrom(ARCH_ADJ[pickFrom(adjSrc, seed+"a")], seed+"a2");
-      const noun = pickFrom(ARCH_NOUN[pickFrom(nounSrc, seed+"n")], seed+"n2");
+      let adj  = pickFrom(ARCH_ADJ[pickFrom(adjSrc, seed+"a")], seed+"a2");
+      let noun = pickFrom(ARCH_NOUN[pickFrom(nounSrc, seed+"n")], seed+"n2");
+      // Section 6: the sheet's own loudest traits can lend a word (mechanics.js).
+      const sig = typeof signatureArchetypeWords === 'function' ? signatureArchetypeWords(st) : null;
+      if (sig){
+        const sk = seed + "|" + sig.adj.concat(sig.noun).join(",");
+        if (sig.adj.length && seededRandom(sk + "sa")() < 0.4) adj = pickFrom(sig.adj, sk + "sa2");
+        else if (sig.noun.length && seededRandom(sk + "sn")() < 0.35) noun = pickFrom(sig.noun, sk + "sn2");
+      }
       // "The Barbed Blade" — an adjective and noun from the same category is a tautology
       if (adj.toLowerCase() === noun.toLowerCase()) return null;
       return "The " + adj + " " + noun;
@@ -4232,7 +4517,7 @@ const SECOND_ORDER_RULES = [
    test:(c,ax)=> c.has("Connector") && (ax.warm||0) <= -1,
    note:"Runs everyone's relationships while staying personally unreachable. The web of introductions and favours is real infrastructure — and it's also the wall."},
   {name:"The volatile perfectionist",
-   test:(c,ax)=> (c.has("Compulsion & Ritual") || c.has("Upkeep — Immaculate")) && (ax.mood||0) <= -2,
+   test:(c,ax)=> c.has("Compulsion & Ritual") && (ax.mood||0) <= -2,
    note:"Ritual and immaculate order maintained on top of visible emotional volatility: the discipline isn't a personality, it's a container. Watch what happens to the routine on the bad days — that's the barometer everyone learns to read."},
   {name:"The doubting idealist",
    test:(c,ax)=> c.has("Idealistic & Visionary") && (ax.pos||0) <= -1,
@@ -4530,21 +4815,24 @@ function sessionDistinctiveness(prof){
 function explainWhyNot(trait){
   if (!trait) return "No trait by that name.";
   const out = [];
+  // B17: category/section/label names can come from custom packs or imports; they go
+  // into HTML here, so escape every one of them.
+  const e = v => String(v == null ? '' : v).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const cat = trait.category;
   if (bannedTraitIds.has(trait.id)) out.push(`It is <b>banned by name</b> in your constraints, so nothing else matters until you remove that.`);
-  if (bannedCategories.has(cat)) out.push(`Its whole category, "${cat}", is <b>banned</b> in your constraints.`);
-  if (typeof bannedSections !== 'undefined' && bannedSections.has(trait.section)) out.push(`Its whole section, "${trait.section}", is <b>banned</b> in your constraints.`);
+  if (bannedCategories.has(cat)) out.push(`Its whole category, "${e(cat)}", is <b>banned</b> in your constraints.`);
+  if (typeof bannedSections !== 'undefined' && bannedSections.has(trait.section)) out.push(`Its whole section, "${e(trait.section)}", is <b>banned</b> in your constraints.`);
   const spec = PRESENTATION_VARIANTS[cat];
   if (rarityCaps[rarityTier(trait)] === 0){
-    out.push(`You have capped <b>${rarityTier(trait)}</b> traits at zero for this sheet, and this is one — see Budgets.`);
+    out.push(`You have capped <b>${e(rarityTier(trait))}</b> traits at zero for this sheet, and this is one — see Budgets.`);
   }
   if (spec && trait.variant && charVariants[cat] && charVariants[cat] !== trait.variant){
-    out.push(`This character is locked to the <b>${spec[charVariants[cat]].label}</b> presentation of "${cat}", and this trait belongs to the other one. Regenerate to reroll the presentation lock.`);
+    out.push(`This character is locked to the <b>${e(spec[charVariants[cat]].label)}</b> presentation of "${e(cat)}", and this trait belongs to the other one. Regenerate to reroll the presentation lock.`);
   }
   const tierNote = categoryTiers.get(cat);
-  if (tierNote === 'rarely') out.push(`You've set "${cat}" to <b>rarely</b> (×¼), so its whole category is being suppressed.`);
+  if (tierNote === 'rarely') out.push(`You've set "${e(cat)}" to <b>rarely</b> (×¼), so its whole category is being suppressed.`);
   if (cat === AXES.circular.category && tierNote !== 'prefer'){
-    out.push(`"${cat}" is only reached through the high-volume branch of the Verbosity slider, as a minority of those draws. ` +
+    out.push(`"${e(cat)}" is only reached through the high-volume branch of the Verbosity slider, as a minority of those draws. ` +
              `Push <b>Verbosity</b> up, or set this category to <b>prefer</b> in Constraints to make it the likely outcome instead.`);
   }
   // The band: the real, checkable reason most of the time.
@@ -4555,15 +4843,15 @@ function explainWhyNot(trait){
   else if (trait.section === "Verbosity Traits"){ cur = Math.abs(intVal('verbositySlider', 0)); driver = "Verbosity"; }
   else if (cat === "Register & Formality Spectrum" || cat === "Stylized & Elaborate"){ cur = Math.abs(intVal('registerSlider', 0)); driver = "Register"; }
   if (cur !== null){
-    if (cur < lo) out.push(`Its active range is <b>${lo}–${hi}</b> and your <b>${driver}</b> slider is at magnitude <b>${cur}</b> — below the window. Push that slider further from centre and it becomes eligible.`);
-    else if (cur > hi) out.push(`Its active range is <b>${lo}–${hi}</b> and your <b>${driver}</b> slider is at magnitude <b>${cur}</b> — past the window. This trait is too quiet for the intensity you're asking for; ease that slider back toward centre.`);
-    else out.push(`It <b>is</b> eligible right now: its active range is ${lo}–${hi} and your <b>${driver}</b> slider sits at ${cur}. It simply hasn't come up — the draw is weighted, never guaranteed. Use "Always include" if you want it every time.`);
+    if (cur < lo) out.push(`Its active range is <b>${lo}–${hi}</b> and your <b>${e(driver)}</b> slider is at magnitude <b>${cur}</b> — below the window. Push that slider further from centre and it becomes eligible.`);
+    else if (cur > hi) out.push(`Its active range is <b>${lo}–${hi}</b> and your <b>${e(driver)}</b> slider is at magnitude <b>${cur}</b> — past the window. This trait is too quiet for the intensity you're asking for; ease that slider back toward centre.`);
+    else out.push(`It <b>is</b> eligible right now: its active range is ${lo}–${hi} and your <b>${e(driver)}</b> slider sits at ${cur}. It simply hasn't come up — the draw is weighted, never guaranteed. Use "Always include" if you want it every time.`);
   } else {
     if (axis && axis.mid === cat) out.push(`Situational traits only draw while that axis sits inside the neutral band.`);
-    out.push(`It sits at continuous intensity position <b>${traitPos(trait).toFixed(2)}</b>, giving it an active range of <b>${lo}–${hi}</b>. Whichever signal drives "${cat}" has to land inside that window before it is eligible at all.`);
+    out.push(`It sits at continuous intensity position <b>${traitPos(trait).toFixed(2)}</b>, giving it an active range of <b>${lo}–${hi}</b>. Whichever signal drives "${e(cat)}" has to land inside that window before it is eligible at all.`);
   }
   const pool = TRAITS_BY_KEY.get(trait.section+"||"+cat) || [];
-  out.push(`For scale: "${cat}" holds ${pool.length} traits, so even when everything lines up this one is competing with ${pool.length-1} others.`);
+  out.push(`For scale: "${e(cat)}" holds ${pool.length} traits, so even when everything lines up this one is competing with ${pool.length-1} others.`);
   return out.map(x=>`<div style="margin:4px 0;">${x}</div>`).join("");
 }
 
@@ -4963,6 +5251,33 @@ function traitTombstone(t){
   TOMBSTONE_FIELDS.forEach(f=>{ if (t[f] !== undefined) fb[f] = t[f]; });
   return fb;
 }
+/* RETIRED SLOTS. The Appearance section was removed from the tool for good (it is out of
+   scope: this generates voice and personality only). Saves, backups, projects, casts and
+   undo snapshots written before that still carry its slots — app_0..app_2, app_move,
+   app_mark — and occasionally an Appearance trait seated by a wildcard or a constraint.
+   Every decode path runs through this so those load cleanly with the slots dropped,
+   rather than rendering orphan cards for a section that no longer exists. Returns the
+   number of slots removed; mutates in place. */
+const RETIRED_SECTIONS = new Set(["Appearance"]);
+const RETIRED_CATEGORIES = new Set(["Build \u2014 Imposing","Build \u2014 Slight","Upkeep \u2014 Immaculate",
+  "Upkeep \u2014 Unkempt","Presence \u2014 Striking","Presence \u2014 Unremarkable","Movement & Bearing","Distinguishing Marks"]);
+function isRetiredSlotId(id){ return typeof id === 'string' && id.startsWith('app_'); }
+function dropRetiredSlots(st){
+  if (!st || typeof st !== 'object') return 0;
+  let n = 0;
+  Object.keys(st).forEach(k=>{
+    const sl = st[k];
+    const t = sl && sl.trait;
+    const sec = t && (t.section || (t.__fb && t.__fb.section));
+    if (isRetiredSlotId(k) || (sec && RETIRED_SECTIONS.has(sec))){ delete st[k]; n++; }
+  });
+  return n;
+}
+function dropRetiredKeys(obj){
+  if (!obj || typeof obj !== 'object') return obj;
+  Object.keys(obj).forEach(k=>{ if (isRetiredSlotId(k)) delete obj[k]; });
+  return obj;
+}
 function compressSlots(st){
   if (!st) return st;
   const out = {};
@@ -4977,6 +5292,7 @@ function compressSlots(st){
 }
 function expandSlots(st){
   if (!st) return st;
+  if (typeof st === 'object') { st = Object.assign({}, st); dropRetiredSlots(st); }
   const out = {};
   Object.entries(st).forEach(([k, slot])=>{
     if (!slot){ out[k] = slot; return; }
@@ -5223,129 +5539,21 @@ function pickMannerSlots(count, compLevel, regLevel, rarityPref, forcePool, prof
   });
 }
 
-/* ================= APPEARANCE CRAFTER =================
-   Same engine, new domain. Three dedicated sliders map to pos/neg category pairs
-   with continuous intensity, exactly like personality axes:
-     Stature:  + Build - Imposing      / - Build - Slight
-     Upkeep:   + Upkeep - Immaculate   / - Upkeep - Unkempt
-     Presence: + Presence - Striking   / - Presence - Unremarkable
-   Movement & Bearing is deliberately NOT its own slider: it draws from the existing
-   Activeness personality axis, so a sedentary character moves like one - appearance
-   stays causally downstream of who the character is, same as voice. Distinguishing
-   Marks draws at the Presence magnitude: the more striking the design intent, the
-   stronger the mark. Near-centre sliders (|raw| < 8) skip their slot entirely,
-   so an untouched appearance panel adds only Movement + a mild Mark. */
-const APPEARANCE_AXES = [
-  {id:"stature",  label:"Stature",  pos:"Build \u2014 Imposing",    neg:"Build \u2014 Slight"},
-  {id:"upkeep",   label:"Upkeep",   pos:"Upkeep \u2014 Immaculate", neg:"Upkeep \u2014 Unkempt"},
-  {id:"presence", label:"Presence", pos:"Presence \u2014 Striking", neg:"Presence \u2014 Unremarkable"},
-];
-/* Appearance used to be the only section with no causal link back to the psychology
-   beyond "Movement derives from Activeness" \u2014 it read as a bolt-on, and a functional
-   drinker with a Compulsion-and-Ritual habit looked exactly like anyone else. These
-   two rules close that gap without adding another slider:
-
-     Upkeep  \u2014 a CENTRED upkeep slider no longer means "no slot". It means "no
-               deliberate statement", which is precisely when the character's own
-               habits should decide: a substance or avoidance vice pulls unkempt, a
-               ritual or restraint vice pulls immaculate. An off-centre slider still
-               wins outright; this only fills the silence.
-     Marks   \u2014 the mark target rises with the intensity of the actual wound, so a
-               life-defining injury tends to have left something visible.  */
-const UPKEEP_FROM_VICE = {
-  "Substance & Consumption": -1, "Avoidance & Procrastination": -1, "Risk & Escape": -1,
-  "Compulsion & Ritual": 1, "Restraint & Discipline": 1,
-};
-/* app_move and app_mark are the only two slots in the app that are seated on EVERY
-   sheet regardless of any slider, and they draw from the two smallest always-drawn
-   pools in the bank (44 and 43). Measured over 400 default characters they returned 19
-   and 22 distinct traits with a top trait at 8-13% — the worst two slots in the app,
-   and the only place a user sees the same line twice in an afternoon.
-
-   Two of the three causes are mechanical and fixed here. The window was the same 8-wide
-   slice of a 44-trait pool every time, and the target was a fixed number at neutral
-   sliders, so the same slice was asked for on every build. A wider minimum window plus
-   a small per-build jitter of the target between them make most of each pool reachable.
-
-   The third cause is content: two guaranteed cards drawn 400 times cannot be hidden
-   behind any amount of weighting, and these two categories want more entries. That is
-   a data pass, not a code fix. */
-const APPEARANCE_MIN_WINDOW = 16;
-function appearanceJitter(target){ return clamp(target + (rand() - 0.5) * 1.4, 1, 5); }
-function pickAppearanceSlots(rarityPref, overrides, resolvedCats, sourceState){
-  const out = {};
-  const derivedUpkeep = resolvedCats ? UPKEEP_FROM_VICE[resolvedCats.vices] : 0;
-  APPEARANCE_AXES.forEach((axis,i)=>{
-    const el = document.getElementById('app_'+axis.id);
-    const raw = intVal(el, 0);
-    let cat, target, derived = false;
-    if (Math.abs(raw) < 8){
-      // centred slider = no deliberate statement
-      if (!(axis.id === 'upkeep' && derivedUpkeep)) return;
-      cat = derivedUpkeep > 0 ? axis.pos : axis.neg;
-      target = targetFromMag(38);   // a real but unemphatic statement
-      derived = true;
-    } else {
-      cat = raw >= 0 ? axis.pos : axis.neg;
-      target = targetFromMag(Math.abs(raw));
-    }
-    const trait = pickInRange(byFilter("Appearance", cat), rarityPref, target);
-    /* BUG FIX: none of the five Appearance slots registered their draw in the build's
-       uniqueness registry, so an Appearance trait could be seated here AND drawn again
-       by the wildcard (which draws across sections, Appearance included) — the same
-       line twice on one sheet. Every other multi-draw path marks; these were simply
-       missed. */
-    if (trait){
-      _markUsed(trait);
-      out['app_'+i] = {slotId:'app_'+i, locked:false, derived,
-        label:"Appearance \u2014 "+axis.label + (derived ? " (from their habits)" : ""), target, trait};
-    }
-  });
-  const actLevel = axisLevel('activeness', overrides);
-  // Floor raised from 25 to 40. Movement & Bearing has no material down at the
-  // intensity a magnitude of 25 asks for (target 1.35), so a neutral Activeness
-  // slider aimed the picker below the pool entirely — 7 distinct traits in 400
-  // characters. 40 lands inside the pool's real content.
-  const mvPool = byFilter("Appearance","Movement & Bearing");
-  const mvTarget = appearanceJitter(poolFloorTarget(mvPool, targetFromMag(Math.max(40, Math.abs(actLevel)*50))));
-  const mv = withSlotMemory("app_move", ()=>pickInRange(mvPool, rarityPref, mvTarget, APPEARANCE_MIN_WINDOW, true));
-  _markUsed(mv);
-  out['app_move'] = mkSlot('app_move', "Appearance \u2014 Movement & Bearing", mvTarget, mv);
-  const pEl = document.getElementById('app_presence');
-  const pMag = Math.abs(intVal(pEl, 0));
-  // Wound intensity, read off whichever Motivation slots this build has already seated.
-  let woundMag = 0;
-  const st = sourceState || null;
-  if (st) Object.keys(st).forEach(k=>{
-    if (!k.startsWith('prof_motivation_')) return;
-    const t = st[k] && st[k].trait;
-    if (t && /Wound/i.test(t.category)) woundMag = Math.max(woundMag, (t.intensity||3) * 18);
-  });
-  const mkPool = byFilter("Appearance","Distinguishing Marks");
-  // targetFromMag(15) = 1.09 against a pool whose floor is well above it — 38 traits
-  // were returning 9, and two of them were showing up in a quarter of all characters.
-  const mkTarget = appearanceJitter(poolFloorTarget(mkPool, targetFromMag(Math.max(15, pMag, woundMag))));
-  const mk = withSlotMemory("app_mark", ()=>pickInRange(mkPool, rarityPref, mkTarget, APPEARANCE_MIN_WINDOW, true));
-  _markUsed(mk);
-  out['app_mark'] = mkSlot('app_mark', "Appearance \u2014 Distinguishing Marks", mkTarget, mk);
-  return out;
-}
-
 // Robustness: one registry of trait ids already placed in the CURRENT build, so
 // multi-trait sections (profile depth, doubled personality axes) never seat the
 // same trait twice on one sheet. Reset per build; consulted by the multi-draw paths.
 let _buildUsedIds = new Set();
 function _markUsed(t){ if (t) _buildUsedIds.add(t.id); }
 // BUG FIX: this used to hand back the duplicate after exhausting its attempts, so in a
-// thin category (Appearance sits at 15–24 per category) the same trait could be seated
+// thin category the same trait could be seated
 // twice on one sheet with nothing said about it. Return null instead: every caller
 // already handles an empty draw, and traitCardHTML renders "no trait available at
 // these settings", which is the truth — a pool gap, visible as a pool gap.
 /* ================= THE EMPTY-SLOT CONVENTION =================
    A draw can come back with nothing: the pool was banned out, a constraint emptied it,
    the precision band is too tight, or _drawUnique exhausted a thin category. Three
-   different call sites had three different answers to that. pickProfileSlots and
-   pickAppearanceSlots guarded with `if (!trait) return;`, so the slot silently vanished
+   different call sites had three different answers to that. pickProfileSlots
+   guarded with `if (!trait) return;`, so the slot silently vanished
    from the sheet. pickVerbositySlot, pickRegisterSlot and pickGrammarSlot returned the
    slot object with trait:null, which then propagated into every consumer — and the
    consumers that did not guard it (sheetToText, sheetToHTML, coherenceScore,
@@ -5356,12 +5564,12 @@ function _markUsed(t){ if (t) _buildUsedIds.add(t.id); }
      A slot the sheet ALWAYS has stays on the sheet as an explicit empty slot.
      A slot that only exists because something asked for it is omitted when empty.
 
-   The first case is the fixed spine of the sheet — verbosity, register, grammar,
-   movement, marks. Those disappearing is worse than useless: the user has no way to
+   The first case is the fixed spine of the sheet — verbosity, register, grammar.
+   Those disappearing is worse than useless: the user has no way to
    tell "this pool is empty at your settings" from "this section doesn't exist", and
    traitCardHTML already renders exactly that message. The second case is the optional
-   depth — the fourth motivation facet, a counterpoint, an appearance axis the user left
-   centred. Nobody asked for those specifically, and an empty card for each would be
+   depth — the fourth motivation facet, a counterpoint. Nobody asked for those
+   specifically, and an empty card for each would be
    noise.
 
    Every empty slot carries `empty:true` so a consumer can tell a deliberate gap from a
@@ -5403,7 +5611,7 @@ const WILDCARD_SECTIONS = ["Personality Traits","Mannerisms","Vocabulary Traits"
   "Conflict & Stress Response","Social Role in a Group","Values & Moral Line","Attachment & Intimacy Style","Motivation & Wound"];
 function wildcardCount(){
   if (!wildcardEnabled()) return 0;
-  const el = document.getElementById('wildcardCount');
+  const el = settingEl('wildcardCount');
   return el ? clamp(parseInt(el.value, 10) || 0, 0, 3) : 1;
 }
 /* Which axis the partial sheet leans on hardest, and which way — read straight off
@@ -5488,19 +5696,25 @@ function pickWildcardSlot(rarityPref, index, partial){
   const slotId = "wild_" + (index || 0);
   const contradicts = lean && trait.pol && Math.sign(trait.pol[lean.ax] || 0) === -Math.sign(lean.v);
   const why = contradicts
-    ? `Cuts against the sheet's strongest lean (${AXIS_LABELS[lean.ax]}, ${lean.v > 0 ? 'high' : 'low'}) — ` + (EXCEPTION_SURVIVES[trait.behaviorFunction] || EXCEPTION_SURVIVES.default) + '.'
+    ? `Cuts against the sheet's strongest lean (${AXIS_LABELS[lean.ax]}, ${lean.v > 0 ? 'high' : 'low'}) — ` + (typeof wildcardSurvivesBecause === 'function'
+        ? wildcardSurvivesBecause(trait, lean, partial)
+        : (EXCEPTION_SURVIVES[trait.behaviorFunction] || EXCEPTION_SURVIVES.default) + '.')
     : `A far-tail draw from ${cat}; nothing in that category opposes the sheet's strongest lean, so this is texture rather than a contradiction.`;
   return {slotId, locked:false, wildcard:true, target,
           label: (contradicts ? "The exception — " : "Doesn't fit the rest — ") + cat, trait,
           exceptionAxis: contradicts ? lean.ax : null, exceptionWhy: why};
 }
 function wildcardEnabled(){
-  const el = document.getElementById('wildcardToggle');
+  const el = settingEl('wildcardToggle');
   return el ? !!el.checked : false;
 }
 
 const MOTIVATION_SECTION_ID = "motivation";
 function buildCharacterState(opts){
+  if (opts && opts.drawContext){
+    const inner = Object.assign({}, opts); delete inner.drawContext;
+    return withDrawContext(opts.drawContext, () => buildCharacterState(inner));
+  }
   _buildUsedIds = new Set();
   setMotivationLinks(null);
   // One resolved read each per build rather than one per draw.
@@ -5527,6 +5741,12 @@ function buildCharacterState(opts){
     composure: Math.round(clamp(compLevel,-2,2)*50),
   });
   setAffinityVec(fullOverrides);
+  /* §5 plans, rolled up front on the seeded stream — each only when its own setting is
+     on, so a build with both off consumes exactly the draws it always did. */
+  CURRENT_SHAPE = sheetShapeEnabled() ? rollSheetShape() : null;
+  LAST_SHAPE = CURRENT_SHAPE;
+  const contraPlan = contradictionSeatingEnabled() ? planContradictions(fullOverrides) : null;
+  try {
   /* Motivation & Wound genuinely goes first now, rather than nominally. It is drawAll,
      so it needs nothing resolved to draw, and drawing it up front is what lets its
      keywords reach resolveProfileCategories — which is where Stress, Role, Values,
@@ -5541,10 +5761,10 @@ function buildCharacterState(opts){
   // Decide WHO they are first (motivation-adjacent facts), then let that inform HOW they speak.
   const resolvedCats = resolveProfileCategories(rarityPref, fullOverrides, forcedProfileCats);
   // Group toggles: users generating only one kind of content (just a voice, just a
-  // psychology, just an appearance) can switch whole blocks off. Profile sections
+  // psychology) can switch whole blocks off. Profile sections
   // already have per-section toggles; these cover the rest. Unchecked = skipped
   // entirely, not hidden — the slots simply don't exist on the sheet.
-  const on = id => { const el = document.getElementById(id); return !el || el.checked; };
+  const on = id => { const el = settingEl(id); return !el || el.checked; };
   // BUG FIX: the voice paths never consulted _buildUsedIds, and the Register slot draws
   // from Vocabulary categories — so a sheet could seat the same trait as both "Register"
   // and "Vocabulary". Route every voice pick through the same uniqueness registry the
@@ -5584,14 +5804,14 @@ function buildCharacterState(opts){
   if (on('genPersonality')) Object.assign(obj, pickPersonalitySlots(rarityPref, fullOverrides));
   Object.assign(obj, motivationSlots);
   Object.assign(obj, pickProfileSlots(rarityPref, resolvedCats, null, MOTIVATION_SECTION_ID));
-  // Appearance draws last on purpose: it now reads the Motivation slots this build
-  // just seated (see the wound → distinguishing-marks link) and the resolved vice.
-  if (on('genAppearance')) Object.assign(obj, pickAppearanceSlots(rarityPref, fullOverrides, resolvedCats, obj));
-  for (let w = 0; w < wildcardCount(); w++){
+  if (contraPlan) Object.assign(obj, seatContradictions(contraPlan, obj));
+  const nWild = CURRENT_SHAPE ? CURRENT_SHAPE.wild : wildcardCount();
+  for (let w = 0; w < nWild; w++){
     const wild = pickWildcardSlot(rarityPref, w, obj);
     if (wild) obj[wild.slotId] = wild;
   }
   return obj;
+  } finally { CURRENT_SHAPE = null; }
 }
 
 // Sections whose resolved type can legitimately CHANGE under pressure. Vices stay
@@ -5614,7 +5834,7 @@ const PRESSURE_SHIFT_SECTIONS = ["role", "values", "attachment", "motivation", "
    existing machinery already takes a continuous level everywhere. 0-100, where the
    old behaviour is 100 and stays the default. */
 function pressureLevel(){
-  const el = document.getElementById('pressureLevel');
+  const el = settingEl('pressureLevel');
   return el ? clamp(intVal(el, 100), 0, 100) / 100 : 1;
 }
 
@@ -5808,7 +6028,6 @@ function structuredContradiction(st, meta){
    and the export can carry them — with the inference flagged so nobody mistakes a
    default for an authored judgment. */
 const DIM_DEFAULTS_BY_SECTION = {
-  "Appearance":            {visibility:5, persistence:5},
   "Mannerisms":            {visibility:4, persistence:4},
   "Habits & Vices":        {visibility:3, persistence:4},
   "Verbosity Traits":      {visibility:4, persistence:4},
@@ -5882,7 +6101,7 @@ function contextMode(id){ return CONTEXT_MODES.find(m => m.id === id) || CONTEXT
 
 /* Per-context rules on section and polarity. Each entry is {test, status, why}; the
    first matching rule after the authored ones wins, so the order is the priority. */
-const _SURFACE_SECTIONS = new Set(["Appearance","Mannerisms","Verbosity Traits","Vocabulary Traits","Dialogue Grammar Traits","Humor Style"]);
+const _SURFACE_SECTIONS = new Set(["Mannerisms","Verbosity Traits","Vocabulary Traits","Dialogue Grammar Traits","Humor Style"]);
 const _INTERIOR_SECTIONS = new Set(["Motivation & Wound","Positive Origins","Attachment & Intimacy Style","Contradiction Functions"]);
 const CONTEXT_LENS_RULES = {
   public: [
@@ -5901,7 +6120,6 @@ const CONTEXT_LENS_RULES = {
     {test:(t,d,dim)=> dim.selfPresent > 0.3 && t.pol && t.pol.ego === 1, status:"suppressed", why:"the grandiose face is a performance, and there is no audience"},
     {test:(t,d,dim)=> dim.emoDepth > 0.3 && t.pol && t.pol.emo === 1, status:"amplified", why:"emotional depth runs high; in private the guard comes down"},
     {test:(t,d)=> t.section === "Ordinary Texture" || t.section === "Habits & Vices", status:"amplified", why:"habits and small pleasures belong to unwatched time"},
-    {test:(t,d)=> t.section === "Appearance" && d.visibility >= 5, status:"active", why:"still there; nobody is looking"},
   ],
   authority: [
     {test:(t,d)=> t.category === "Under Authority", status:"amplified", why:"exactly the room this role is for"},
@@ -5953,6 +6171,11 @@ function contextualView(st, contextId){
       else {
         const r = (CONTEXT_LENS_RULES[mode.id] || []).find(r => r.test(t, d, dim));
         if (r){ status = r.status; why = r.why; rule = "section/polarity"; }
+        else {
+          // Section 6: read the room off the card's own text before falling back (mechanics.js).
+          const dv = typeof derivedContextVerdict === 'function' ? (derivedContextVerdict(t, mode) || categoryContextVerdict(t, mode)) : null;
+          if (dv){ status = dv.status; why = dv.why; rule = "derived"; }
+        }
       }
     }
     slots.push({slotId:id, trait:t, status, why, rule});
@@ -6092,7 +6315,7 @@ function edgesToMarkdown(edges, members){
 const ARC_SHAPES = [
   {id:"growth",        label:"Growth",        blurb:"The belief loosened. They move toward the thing they were avoiding.", dir:1},
   {id:"deterioration", label:"Deterioration", blurb:"The belief won. They move further into the defence.", dir:-1},
-  {id:"steadfast",     label:"Steadfast",     blurb:"It cost them and they did not move. Nothing on the sheet changes; the cost is the record.", dir:0},
+  {id:"steadfast",     label:"Steadfast",     blurb:"It cost them and they did not move. Their Values deepen, and the cost becomes the Price they are paying.", dir:0},
   {id:"cyclical",      label:"Cyclical",      blurb:"They have been here before. This undoes the last change of the opposite kind.", dir:0},
 ];
 const ARC_SHAPE_IDS = ARC_SHAPES.map(s => s.id);
@@ -6154,7 +6377,9 @@ function proposeArcChanges(st, event, priorEvents){
     }
     return out;
   }
-  if (shape.dir === 0) return out;   // steadfast: the cost is the record
+  // Steadfast used to propose nothing. Its changes now come from the event text:
+  // Values deepen and the cost becomes the Price (arcTextChanges in mechanics.js).
+  if (shape.dir === 0) return typeof arcTextChanges === 'function' ? out.concat(arcTextChanges(st, event, shape, out)) : out;
   withRng(mulberry32(hashSeedString(event.id + "|" + event.shape)), ()=>{
     // 1. The loudest personality card pointing the wrong way for this shape.
     const pers = Object.keys(st).filter(k => k.startsWith("pers_") && st[k] && st[k].trait)
@@ -6194,7 +6419,7 @@ function proposeArcChanges(st, event, priorEvents){
       }
     }
   });
-  return out;
+  return typeof arcTextChanges === 'function' ? out.concat(arcTextChanges(st, event, shape, out)) : out;
 }
 
 /* Applying an event is applying only its ACCEPTED changes, and never mutating the
@@ -6260,6 +6485,27 @@ const VOICE_PROMPTS = [
 ];
 const VOICE_PROMPT_IDS = VOICE_PROMPTS.map(p => p.id);
 const VOICE_MODES = ["baseline", "pressure"];
+/* AUTHOR PROMPTS. The seven situations are fixed; a project can add its own ("turning
+   down the captain's offer", "telling the child"), each composed with the fragment
+   table of the built-in situation it is most like, since the fragments are the only
+   authored prose the lab has. Held here, stored with the project by app.js. */
+let USER_VOICE_PROMPTS = [];   // [{id:"u_...", label, setup, like}]
+function normaliseUserVoicePrompt(p){
+  if (!p || typeof p !== 'object') return null;
+  const label = String(p.label || "").trim().slice(0, 80);
+  if (!label) return null;
+  const like = VOICE_PROMPT_IDS.includes(p.like) ? p.like : "request";
+  const id = /^u_[a-z0-9_]{1,40}$/i.test(String(p.id || "")) ? String(p.id) : "u_" + hashSeedString(label + "|" + like).toString(36);
+  return {id, label, setup: String(p.setup || "").trim().slice(0, 240), like, user: true};
+}
+function setUserVoicePrompts(list){
+  const seen = new Set();
+  USER_VOICE_PROMPTS = (Array.isArray(list) ? list : []).map(normaliseUserVoicePrompt)
+    .filter(p => p && !seen.has(p.id) && seen.add(p.id)).slice(0, 24);
+  return USER_VOICE_PROMPTS;
+}
+function getUserVoicePrompts(){ return USER_VOICE_PROMPTS.map(p => Object.assign({}, p)); }
+function allVoicePrompts(){ return VOICE_PROMPTS.concat(USER_VOICE_PROMPTS); }
 
 /* The rules, read off the sheet once. Everything the composer uses comes from here, so
    the "which rules shaped this" list can never drift from what actually shaped it. */
@@ -6353,23 +6599,32 @@ const PRESSURE_TAIL = {
 };
 
 function _pickFrag(list, rng){ return list && list.length ? list[Math.floor(rng() * list.length)] : null; }
-function composeVoiceLine(st, promptId, mode){
-  const prompt = VOICE_PROMPTS.find(p => p.id === promptId);
+/* The original fragment composer, kept as the backing table's reference reader (and for
+   comparison): composeVoiceLine below is the compositional generator that replaced it. */
+function composeVoiceLineFragments(st, promptId, mode, opts){
+  const prompt = allVoicePrompts().find(p => p.id === promptId);
   if (!prompt) return null;
+  opts = opts || {};
   const r = voiceRules(st);
   const underPressure = mode === "pressure";
   let seed = 11;
   Object.values(st || {}).forEach(s => { if (s && s.trait) seed = (seed * 31 + s.trait.id) >>> 0; });
-  const rng = mulberry32(hashSeedString(String(seed) + "|" + promptId + "|" + (mode || "baseline")));
+  /* The seed used to hash the trait ids alone (plus the prompt id), so two prompts with
+     the same fragment table and a sheet with few voice traits read identically, and
+     there was no way to ask for another take. Prompt index and a reroll counter join
+     it; at index/reroll absent the line is what it has always been. */
+  const idx = Number.isInteger(opts.index) ? opts.index : -1, reroll = Number.isInteger(opts.reroll) ? opts.reroll : 0;
+  const rng = mulberry32(hashSeedString(String(seed) + "|" + promptId + "|" + (mode || "baseline") + (idx >= 0 || reroll ? "|" + idx + "|" + reroll : "")));
   const parts = [], used = [];
   const take = frag => { if (!frag) return; if (frag.text) parts.push(frag.text); used.push(frag.rule); };
-  const table = VOICE_FRAGMENTS[promptId];
+  const table = VOICE_FRAGMENTS[prompt.like || promptId];
   /* Pressure strips the politeness layer first — the opener and the manners are the
      first things to go when someone is holding themselves together. */
   if (!underPressure){
     // The mannered openers thank someone for asking, so they only belong where someone
     // has actually asked — otherwise an apology opens by thanking the injured party.
-    const asked = promptId === "refuse" || promptId === "request" || promptId === "askhelp";
+    const kind = prompt.like || promptId;
+    const asked = kind === "refuse" || kind === "request" || kind === "askhelp";
     if (r.mannered && asked) take(_pickFrag(VOICE_FRAGMENTS.opener.mannered, rng));
     else if (r.formal) take(_pickFrag(VOICE_FRAGMENTS.opener.formal, rng));
     else if (r.casual) take(_pickFrag(VOICE_FRAGMENTS.opener.casual, rng));
@@ -6390,15 +6645,20 @@ function composeVoiceLine(st, promptId, mode){
     device: device ? {label: device.trait, example: device.example || ""} : null,
   };
 }
-function voiceLab(st, mode){
-  return VOICE_PROMPT_IDS.map(id => composeVoiceLine(st, id, mode)).filter(Boolean);
+function voiceLab(st, mode, reroll){
+  return allVoicePrompts().map((p, index) => {
+    const l = composeVoiceLine(st, p.id, mode, {index, reroll: reroll || 0});
+    if (l && p.user) l.user = true;
+    return l;
+  }).filter(Boolean);
 }
 /* Cast comparison. Two characters who reach for the same device are the failure this
    panel exists to catch, so a rule or device used by more than one member is marked. */
-function voiceComparison(members, promptId, mode){
+function voiceComparison(members, promptId, mode, reroll){
+  const index = allVoicePrompts().findIndex(p => p.id === promptId);
   const rows = (members || []).map(m => ({
     name: (m.meta && m.meta.name) || "Unnamed",
-    line: composeVoiceLine(m.state, promptId, mode),
+    line: composeVoiceLine(m.state, promptId, mode, {index, reroll: reroll || 0}),
   })).filter(r => r.line);
   const counts = {};
   rows.forEach(r => {
@@ -6414,10 +6674,668 @@ function voiceComparison(members, promptId, mode){
       ? `${repeated.length} device${repeated.length===1?'':'s'} shared by more than one character — if these are the ones you can hear, the cast has one voice with different hats on.`
       : "No shared devices in this prompt. Every character reaches for something different."};
 }
+/* THE COLLISION HEATMAP. voiceComparison answers one prompt at a time; this runs
+   every prompt and counts, for each PAIR of members, how many devices and rules they
+   share — a symmetric matrix whose hot cells are the pairs a reader will confuse. The
+   worst offender is the member with the largest row total: rerolling them removes the
+   most collisions at once (see deCollideCast in app.js). */
+function voiceCollisionMatrix(members, mode, reroll){
+  const list = members || [];
+  const n = list.length;
+  const matrix = Array.from({length: n}, () => new Array(n).fill(0));
+  const shared = Array.from({length: n}, () => Array.from({length: n}, () => new Set()));
+  const keysOf = line => new Set(line.rules.concat(line.device ? ["device: " + line.device.label] : []));
+  allVoicePrompts().forEach((p, index) => {
+    const lines = list.map(m => composeVoiceLine(m.state, p.id, mode, {index, reroll: reroll || 0}));
+    for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++){
+      if (!lines[i] || !lines[j]) continue;
+      const a = keysOf(lines[i]), b = keysOf(lines[j]);
+      a.forEach(k => { if (b.has(k) && !/no strong lean/.test(k)){ matrix[i][j]++; matrix[j][i]++; shared[i][j].add(k); shared[j][i].add(k); } });
+    }
+  });
+  const totals = matrix.map(row => row.reduce((x, y) => x + y, 0));
+  let worst = -1;
+  totals.forEach((t, i) => { if (t > 0 && (worst < 0 || t > totals[worst])) worst = i; });
+  const max = Math.max(0, ...matrix.map(r => Math.max(0, ...r)));
+  return {names: list.map(m => (m.meta && m.meta.name) || "Unnamed"), matrix, totals, max, worst,
+    shared: shared.map(r => r.map(set => [...set]))};
+}
 function voiceLabToMarkdown(st, mode){
   return voiceLab(st, mode).map(l =>
     `### ${l.prompt}\n\n_${l.setup}_\n\n> ${l.text}\n\n- Rules: ${l.rules.join("; ") || "none"}${l.device ? `\n- Habitual device: ${l.device.label}` : ""}`
   ).join("\n\n");
+}
+
+// ================= KEEPING OUTPUT FRESH (audit §5) =================
+/* Six mechanisms, one block, because they share their inputs (the seated sheet, the
+   active lenses, the seeded stream) and none of them may consume the build's random
+   stream unless its own setting is on — so a sheet from a seed that predates them
+   replays unchanged with every one of them switched off.
+
+     1. Compositional voice lines        composeVoiceLine / voiceLines
+     2. Seated contradictions            planContradictions / seatContradictions
+     3. Variable sheet shape             rollSheetShape (signature budget)
+     4. Anti-staleness                   selectDistinctCandidate, archiveCategoryMultiplier
+     5. Setting / culture / life lenses  LENSES, lensReading
+     6. Backstory beats                  backstoryBeats
+
+   NOTE: there is no name pool anywhere in this block, on purpose (CLAUDE.md). The
+   voice lines' "entity pool" is roles and relations — "my sister", "the foreman" —
+   never a personal name. */
+
+/* ---------- 5. LENSES ----------
+   The ten context regexes and three age bands were inferred from free text, so there
+   was no way to SAY "court" or "late life" and see what that means. A lens is the same
+   bias made first-class and combinable: category multipliers (through the one
+   contextMultiplier the draw already reads), a register norm (a nudge to the Register
+   dial), preferred worldTags (a soft multiplier on the trait draw), taboo topics (kept
+   out of the voice lines) and extra topics for them. Lenses are SETTINGS, not history,
+   so a seed replays under the same lenses exactly. */
+const LENSES = [
+  {id:"court", kind:"setting", label:"Court",
+   up:["Manners — Polished & Courteous","Register & Formality Spectrum","Stylized & Elaborate","Honesty — Deceptive & Evasive","Loyalty-Bound"],
+   down:["Manners — Crude & Ill-Mannered","Directness & Literalness"], worldTags:["pre-modern","institutional"], register:1,
+   taboo:["money","the body"], topics:{thing:["the seal","the petition","the queen's letter","the ring of office"], place:["the long gallery","the antechamber"], person:["the chamberlain","the heir"]}},
+  {id:"frontier", kind:"setting", label:"Frontier",
+   up:["Directness & Literalness","Hands & Materials","Minimal & Ultra-Brief","Pragmatic & Flexible","Activeness — Energetic & Active"],
+   down:["Stylized & Elaborate","Conceptual Framework & Loanwords"], worldTags:["rural","pre-modern","industrial"], register:-1,
+   taboo:["the law"], topics:{thing:["the water rights","the horse","the claim papers"], place:["the ridge","the creek"], person:["the marshal","the trader"]}},
+  {id:"corporate", kind:"setting", label:"Corporate",
+   up:["Conceptual Framework & Loanwords","Pragmatic Focus & Speech Functions","Systems & Logistics","Self-Interested","Register & Formality Spectrum"],
+   down:["Absurd & Chaotic","Manners — Crude & Ill-Mannered"], worldTags:["modern","institutional","urban"], register:0.5,
+   taboo:["salary","the layoffs"], topics:{thing:["the quarterly numbers","the deck","the org chart"], place:["the third floor","the all-hands"], person:["the VP","legal"]}},
+  {id:"diaspora", kind:"setting", label:"Diaspora",
+   up:["Temporal Orientation & Tense Usage","Loyalty-Bound","Connector","Code-Switching","Stable Care"],
+   down:[], worldTags:["modern","urban","domestic"], register:0,
+   taboo:["going back"], topics:{thing:["the papers","the money we send home","grandmother's recipe"], place:["the consulate","the old country"], person:["my aunt","the cousins"]}},
+  {id:"military", kind:"setting", label:"Military",
+   up:["Discipline — Self-Controlled","Rigid & Principled","Spoken Compression","Morphological & Structural Lexicon","Leader"],
+   down:["Absurd & Chaotic","Discipline — Impulsive & Undisciplined"], worldTags:["military","institutional"], register:0.5,
+   taboo:["the ones we lost"], topics:{thing:["the orders","the duty roster","the sidearm"], place:["the perimeter","the mess"], person:["the sergeant","the CO"]}},
+  {id:"online", kind:"setting", label:"Online-native",
+   up:["Conceptual Framework & Loanwords","Semantic Density & Modifiers","Dry & Deadpan","Absurd & Chaotic","Spoken Compression"],
+   down:["Register & Formality Spectrum","Stylized & Elaborate"], worldTags:["online","modern"], register:-1,
+   taboo:["real names"], topics:{thing:["the screenshot","the group chat","the thread"], place:["the server","the stream"], person:["the mods","my followers"]}},
+  {id:"clergy", kind:"setting", label:"Clergy",
+   up:["Idealistic & Visionary","Register & Formality Spectrum","Caretaker","Loyalty-Bound","Restraint & Discipline"],
+   down:["Cruel & Barbed","Manners — Crude & Ill-Mannered","Substance & Consumption"], worldTags:["institutional","pre-modern"], register:1,
+   taboo:["doubt","the bishop's money"], topics:{thing:["the collection","the confession","the vestry key"], place:["the sacristy","the chapel"], person:["the bishop","the sexton"]}},
+  {id:"scifi", kind:"setting", label:"Sci-fi",
+   up:["Precision & Specificity Level","Systems & Logistics","Morphological & Structural Lexicon","Intelligence — Sharp & Analytical","Curiosity — Inquisitive & Exploratory"],
+   down:[], worldTags:["futuristic"], register:0,
+   taboo:["Earth"], topics:{thing:["the nav log","the air ration","the core key"], place:["the airlock","the hydro bay"], person:["the pilot","the ship's mind"]}},
+  {id:"child", kind:"life", label:"Child",
+   up:["Curiosity — Inquisitive & Exploratory","Absurd & Chaotic","Emotional Capacity — Expressive & Deep","Warm & Playful"],
+   down:["Conceptual Framework & Loanwords","Restraint & Discipline","Substance & Consumption","Self-Interested"], worldTags:["domestic"], register:-1,
+   taboo:["sex","money"], topics:{thing:["the biscuit tin","my drawing","the tablet"], place:["school","the garden"], person:["Mum","my teacher"]}},
+  {id:"adolescent", kind:"life", label:"Adolescent",
+   up:["Rebelliousness — Defiant","Confidence — Insecure or Egotistical","Activeness — Energetic & Active","Risk & Escape"],
+   down:["Curiosity — Incurious & Settled","Rigid & Principled"], worldTags:[], register:-1,
+   taboo:["their body"], topics:{thing:["my phone","the party","my grades"], place:["the bus stop","my room"], person:["my mum","the others"]}},
+  {id:"earlycareer", kind:"life", label:"Early career",
+   up:["Earned Success","Confidence — Situational","Systems & Logistics","Immediate Objective"],
+   down:[], worldTags:[], register:0.3,
+   taboo:["rent"], topics:{thing:["the probation review","the first pay cheque"], place:["the break room"], person:["my manager","the other graduate"]}},
+  {id:"parent", kind:"life", label:"Parent",
+   up:["Caretaker","Restitution & Practical Care","Stable Care","Activeness — Energetic & Active","Discipline — Self-Controlled"],
+   down:["Risk & Escape"], worldTags:["domestic"], register:0,
+   taboo:["what I gave up"], topics:{thing:["the school run","the car seat","the doctor's letter"], place:["the school gate","the kitchen"], person:["the kids","their father"]}},
+  {id:"midlife", kind:"life", label:"Midlife",
+   up:["Pragmatic & Flexible","The Price & The Competing Claim","Positivity — Pessimistic & Cynical","Routines"],
+   down:[], worldTags:[], register:0.3,
+   taboo:["getting older"], topics:{thing:["the mortgage","the test results"], place:["the old house"], person:["my father","the kids"]}},
+  {id:"latelife", kind:"life", label:"Late life",
+   up:["Curiosity — Incurious & Settled","Temporal Orientation & Tense Usage","Activeness — Sedentary & Low-Energy","Dry & Deadpan"],
+   down:["Activeness — Energetic & Active","Rebelliousness — Defiant"], worldTags:[], register:0.5,
+   taboo:["the home"], topics:{thing:["the photographs","the will","my glasses"], place:["the old street","the allotment"], person:["my late husband","the grandchildren"]}},
+  {id:"dying", kind:"life", label:"Dying",
+   up:["The Need (what would actually help)","Repaired Conflict","Apology","Emotional Capacity — Expressive & Deep","Temporal Orientation & Tense Usage"],
+   down:["Immediate Objective","Risk & Escape"], worldTags:[], register:0,
+   taboo:["next year"], topics:{thing:["the letter I haven't sent","the morphine"], place:["the ward"], person:["my son","the night nurse"]}},
+];
+const LENS_IDS = LENSES.map(l => l.id);
+const LENS_UP = 1.8, LENS_DOWN = 0.55;
+function lensById(id){ return LENSES.find(l => l.id === id) || null; }
+/* Active lenses come from a comma-separated control (so the settings object, the save
+   file and the DOM all speak one format). Unknown ids are dropped, order is canonical. */
+function activeLensIds(){
+  const el = settingEl('lensSelect');
+  const raw = el ? String(el.value || '') : '';
+  const want = new Set(raw.split(/[\s,]+/).filter(Boolean));
+  return LENS_IDS.filter(id => want.has(id));
+}
+function activeLenses(){ return activeLensIds().map(lensById); }
+// Folded into buildContextBias's maps before its clamp. Returns the register nudge
+// (-1..1 on the dial's -2..2 scale) for the caller to add to the Register level.
+function applyLensBias(push, notes){
+  const ls = activeLenses();
+  let reg = 0;
+  // A category not in the bank (yet) is skipped rather than stored as a dead multiplier.
+  const known = c => SECTION_OF_CATEGORY.has(c) || !!_axisForCategory(c);
+  ls.forEach(l => {
+    (l.up || []).filter(known).forEach(c => push(c, LENS_UP, 1));
+    (l.down || []).filter(known).forEach(c => push(c, LENS_DOWN, -1));
+    reg += l.register || 0;
+    notes.push("lens: " + l.label);
+  });
+  return clamp(reg * 0.5, -1, 1);
+}
+/* worldTags at draw time. A trait tagged only for a world none of the active lenses
+   name is pushed back; one tagged for a lens's world is pulled forward; untagged and
+   "any" traits are untouched. Soft — never an exclusion. */
+const WORLD_TAG_MATCH = 1.5, WORLD_TAG_MISMATCH = 0.6;
+let _lensWorldTagsCache = null, _lensWorldKey = null;
+function lensWorldTags(){
+  const key = activeLensIds().join(',');
+  if (key !== _lensWorldKey){
+    _lensWorldKey = key;
+    const s = new Set(); activeLenses().forEach(l => (l.worldTags || []).forEach(w => s.add(w)));
+    _lensWorldTagsCache = s;
+  }
+  return _lensWorldTagsCache;
+}
+function worldTagMultiplier(t){
+  const wt = t && t.worldTags;
+  if (!wt || !wt.length || wt.includes('any')) return 1;
+  const want = lensWorldTags();
+  if (!want.size) return 1;
+  return wt.some(w => want.has(w)) ? WORLD_TAG_MATCH : WORLD_TAG_MISMATCH;
+}
+/* "Normal here / deviant here". Read per trait against every active lens: a category
+   the lens favours, a worldTag it names, or a formality pole that matches its register
+   norm reads as normal; the reverse reads as deviant. Deviance wins a tie — a courtier
+   who swears is the thing a reader notices. */
+function lensReading(t, lenses){
+  const ls = lenses || activeLenses();
+  if (!t || !ls.length) return null;
+  let normal = null, deviant = null;
+  ls.forEach(l => {
+    if ((l.down || []).includes(t.category)) deviant = deviant || {lens:l.label, why:`${l.label} disfavours ${t.category}`};
+    else if ((l.up || []).includes(t.category)) normal = normal || {lens:l.label, why:`${l.label} expects ${t.category}`};
+    const wt = t.worldTags || [];
+    if (wt.length && !wt.includes('any') && (l.worldTags || []).length){
+      if (wt.some(w => l.worldTags.includes(w))) normal = normal || {lens:l.label, why:`tagged for a ${wt.join('/')} world`};
+      else deviant = deviant || {lens:l.label, why:`tagged for a ${wt.join('/')} world, not this one`};
+    }
+    const f = t.pol && t.pol.form;
+    if (f && l.register && Math.abs(l.register) >= 0.5){
+      if (Math.sign(f) === Math.sign(l.register)) normal = normal || {lens:l.label, why:`${l.register > 0 ? 'formal' : 'plain'} speech is the norm`};
+      else deviant = deviant || {lens:l.label, why:`${l.register > 0 ? 'formal' : 'plain'} speech is the norm, and this is not`};
+    }
+  });
+  if (deviant) return Object.assign({status:'deviant'}, deviant);
+  if (normal) return Object.assign({status:'normal'}, normal);
+  return null;
+}
+function lensTaboos(){ const out = []; activeLenses().forEach(l => (l.taboo || []).forEach(x => out.push(x))); return out; }
+
+/* ---------- 3. VARIABLE SHEET SHAPE (the signature budget) ----------
+   Every sheet was the same template: one card per profile section, the same outlier
+   count, ~42 slots every time. With the shape on, a build rolls — from its OWN seeded
+   stream, before anything is drawn — which one or two sections define this person (they
+   get a second card), which thin section is dropped, and how many outliers (0-3) they
+   carry. Off (or absent), nothing is rolled and the stream is untouched. */
+let CURRENT_SHAPE = null;   // {double:Set, drop:string|null, wild:number} during a build
+let LAST_SHAPE = null;      // the most recent build's shape, for the sheet to report
+function sheetShapeEnabled(){ const el = settingEl('sheetShapeToggle'); return el ? !!el.checked : false; }
+const SHAPE_WILD_ODDS = [0.25, 0.35, 0.25, 0.15];   // 0, 1, 2, 3 outliers
+function rollSheetShape(){
+  const eligible = PROFILE_SECTIONS.filter(ps => !ps.drawAll && profileSectionEnabled(ps));
+  const ids = eligible.map(ps => ps.id);
+  const take = () => ids.length ? ids.splice(Math.floor(rand() * ids.length), 1)[0] : null;
+  const double = new Set();
+  const nDouble = rand() < 0.45 ? 2 : 1;
+  for (let i = 0; i < nDouble; i++){ const id = take(); if (id) double.add(id); }
+  /* "Thin" = the section with the least content behind it among what is left, with a
+     coin so the same thin section is not always the one to go. */
+  let drop = null;
+  if (ids.length > 2 && rand() < 0.7){
+    const size = id => { const ps = PROFILE_SECTIONS.find(p => p.id === id); return catsOf(ps.section).reduce((n, c) => n + byFilter(ps.section, c).length, 0); };
+    const sorted = ids.slice().sort((a, b) => size(a) - size(b));
+    drop = sorted[Math.floor(rand() * Math.min(2, sorted.length))];
+  }
+  let r = rand(), wild = 0;
+  for (let i = 0; i < SHAPE_WILD_ODDS.length; i++){ r -= SHAPE_WILD_ODDS[i]; if (r <= 0){ wild = i; break; } }
+  return {double, drop, wild};
+}
+function shapeSummary(shape){
+  const s = shape || LAST_SHAPE;
+  if (!s) return null;
+  const label = id => { const ps = PROFILE_SECTIONS.find(p => p.id === id); return ps ? ps.label : id; };
+  return {doubled: [...s.double].map(label), dropped: s.drop ? label(s.drop) : null, wildcards: s.wild,
+    text: `Defined by ${[...s.double].map(label).join(" and ") || "nothing in particular"}${s.drop ? `; no ${label(s.drop)} card` : ``}; ${s.wild} outlier${s.wild === 1 ? '' : 's'}.`};
+}
+
+/* ---------- 2. SEATED CONTRADICTIONS ----------
+   contradictionFor finds a contradiction if the dice happened to produce one. This
+   seats one or two ON PURPOSE: the axis and the function it serves (protect, soothe,
+   perform…) are chosen before the sheet is drawn, the exception trait is drawn against
+   the sheet's actual lean on that axis once it exists, and a Contradiction Functions
+   card says what the contradiction is for. Its scene questions are answered from the
+   sheet rather than left blank. */
+function contradictionSeatingEnabled(){ const el = settingEl('seatContradictions'); return el ? !!el.checked : false; }
+const CONTRA_FUNCTIONS = ["protect","soothe","perform","control","connect","avoid","provide","repair"];
+function planContradictions(overrides){
+  const axes = Object.values(AXIS_TO_POLCODE);
+  const lean = {};
+  PERSONALITY_AXES.forEach(a => { const code = AXIS_TO_POLCODE[a.id]; if (code) lean[code] = Math.abs((overrides && overrides[a.id]) || 0) / 100; });
+  const n = rand() < 0.55 ? 1 : 2;
+  const pool = axes.slice(), plan = [];
+  for (let i = 0; i < n && pool.length; i++){
+    // A leaning axis is likelier to be the one the contradiction cuts across.
+    const w = pool.map(ax => 0.4 + (lean[ax] || 0));
+    let r = rand() * w.reduce((a, b) => a + b, 0), k = 0;
+    for (; k < pool.length - 1; k++){ r -= w[k]; if (r <= 0) break; }
+    const axis = pool.splice(k, 1)[0];
+    const fnCats = catsOf("Contradiction Functions");
+    plan.push({axis, fn: CONTRA_FUNCTIONS[Math.floor(rand() * CONTRA_FUNCTIONS.length)],
+      fnCat: fnCats.length ? fnCats[Math.floor(rand() * fnCats.length)] : null, coin: rand()});
+  }
+  return plan;
+}
+function _axisLean(obj, axis){
+  let s = 0; Object.values(obj || {}).forEach(sl => { const v = sl && sl.trait && sl.trait.pol ? sl.trait.pol[axis] : 0; if (v) s += v; });
+  return s;
+}
+function _weightedPick(list, weightOf){
+  if (!list.length) return null;
+  const w = list.map(weightOf);
+  let r = rand() * w.reduce((a, b) => a + b, 0);
+  for (let i = 0; i < list.length; i++){ r -= w[i]; if (r <= 0) return list[i]; }
+  return list[list.length - 1];
+}
+function seatContradictions(plan, obj){
+  const out = {};
+  (plan || []).forEach((p, i) => {
+    let sign = Math.sign(_axisLean(obj, p.axis));
+    if (!sign) sign = p.coin < 0.5 ? 1 : -1;
+    const pool = [];
+    WILDCARD_SECTIONS.forEach(s => catsOf(s).forEach(c => byFilter(s, c).forEach(t => {
+      if (t.pol && t.pol[p.axis] === -sign && !_buildUsedIds.has(t.id)) pool.push(t);
+    })));
+    const ex = _weightedPick(pool, t => (t.behaviorFunction === p.fn ? 4 : 1) * (t.intensity >= 3 ? 1.5 : 1) * recentPenalty(t));
+    if (!ex) return;
+    _markUsed(ex);
+    const fnPool = p.fnCat ? byFilter("Contradiction Functions", p.fnCat).filter(t => !_buildUsedIds.has(t.id)) : [];
+    const fnTrait = _weightedPick(fnPool, t => (t.behaviorFunction === p.fn ? 4 : 1) * recentPenalty(t));
+    if (fnTrait) _markUsed(fnTrait);
+    const id = "contra_" + i;
+    out[id] = {slotId:id, locked:false, label:`Seated contradiction — ${AXIS_LABELS[p.axis]}`, trait:ex, target:ex.intensity,
+      contradiction:{axis:p.axis, face:sign, fn:p.fn}};
+    if (fnTrait) out[id + "_fn"] = {slotId:id + "_fn", locked:false, label:`What it is for — ${p.fnCat}`, trait:fnTrait, target:fnTrait.intensity,
+      contradiction:{axis:p.axis, face:sign, fn:p.fn, role:"function"}};
+  });
+  return out;
+}
+/* The scene questions, answered from the sheet. Each answer names the card it read. */
+function seatedContradictions(st){
+  const ids = Object.keys(st || {}).filter(k => /^contra_\d+$/.test(k) && st[k] && st[k].trait && st[k].contradiction);
+  return ids.map(id => {
+    const s = st[id], c = s.contradiction, ex = s.trait;
+    const fnSlot = st[id + "_fn"], fnT = fnSlot && fnSlot.trait;
+    // The face: the loudest other card that leans the sheet's way on this axis.
+    const face = Object.keys(st).filter(k => k !== id && !k.startsWith("contra_") && st[k] && st[k].trait && st[k].trait.pol && st[k].trait.pol[c.axis] === c.face)
+      .map(k => st[k].trait).sort((a, b) => (b.intensity || 0) - (a.intensity || 0))[0] || null;
+    const words = t => (t && t.conditions || []).map(x => CONTEXT_WORDS[x] || x);
+    const fear = _profTrait(st, "motivation", /Core Fear/i), ghost = _profTrait(st, "motivation", /The Ghost/i);
+    const attach = _profTrait(st, "attachment"), price = _profTrait(st, "goals", /Price/i), wound = _profTrait(st, "motivation", /Core Wound/i);
+    const role = ["Under Authority","With Dependents","Among Peers"].map(r => _profTrait(st, "contextrole", new RegExp("^" + r + "$"))).filter(Boolean)[0];
+    const when = words(ex).length ? `${words(ex).join(" or ")} — that is when ${ex.trait.toLowerCase()} comes out.`
+      : fear ? `When anything looks like ${fear.trait.toLowerCase()}.` : `Only when nobody who knows the other face is watching.`;
+    const who = ghost ? `Around anything that touches ${ghost.trait.toLowerCase()}.`
+      : role ? `${role.category}: they are ${role.trait.toLowerCase()} there.`
+      : attach ? `With the people their ${attach.category.toLowerCase()} attachment lets close.` : `With strangers, who have no earlier version to compare it to.`;
+    const change = face ? `${face.trait} gives way to ${ex.trait} — ${AXIS_LABELS[c.axis].toLowerCase()} flips.` : `${ex.trait}, against the rest of the sheet on ${AXIS_LABELS[c.axis].toLowerCase()}.`;
+    const cost = fnT ? `${fnT.trait}${fnT.desc ? `: ${fnT.desc}` : ``}${price ? ` And it is paid out of ${price.trait.toLowerCase()}.` : wound ? ` It keeps ${wound.trait.toLowerCase()} covered.` : ``}`
+      : price ? `It is paid out of ${price.trait.toLowerCase()}.` : `Someone eventually sees both faces.`;
+    const answers = [
+      {key:"for", prompt:"What is it for?", answer:(EXCEPTION_SURVIVES[c.fn] || EXCEPTION_SURVIVES.default).replace(/^it survives because /, ""), from:[fnT && fnT.trait].filter(Boolean)},
+      {key:"when", prompt:"When does the second face appear?", answer:when, from:[words(ex).length ? ex.trait : fear && fear.trait].filter(Boolean)},
+      {key:"who", prompt:"With whom?", answer:who, from:[(ghost || role || attach || {}).trait].filter(Boolean)},
+      {key:"change", prompt:"What actually changes?", answer:change, from:[face && face.trait, ex.trait].filter(Boolean)},
+      {key:"cost", prompt:"What does it cost them?", answer:cost, from:[fnT && fnT.trait, (price || wound || {}).trait].filter(Boolean)},
+    ];
+    return {slotId:id, axis:c.axis, axisLabel:AXIS_LABELS[c.axis], fn:c.fn, face, exception:ex, fnTrait:fnT || null, answers,
+      question: CONTRADICTION_QUESTIONS[c.axis] || "When does each of these come out, and what decides it?"};
+  });
+}
+
+/* ---------- 4. ANTI-STALENESS ----------
+   (a) A long-horizon per-project category tally: the archive already holds every
+   accepted character's resolved categories, so the tally is derived from it rather
+   than kept as a second store that could drift. A category this project keeps landing
+   in reads below 1, one it has neglected above 1 — and a replay (REPLAY_MODE) reads 1.
+
+   It steers through CANDIDATE SELECTION, not inside the draw. Multiplying it into the
+   category weights made the drawn sheet depend on the archive, so the seed an
+   exploration build printed no longer replayed the sheet on screen ("What a seed
+   promises"). Scoring the three candidates with it keeps every candidate a pure
+   function of its own seed and still moves the project away from its ruts. */
+const ARCHIVE_TALLY_MIN = 3, ARCHIVE_TALLY_STRENGTH = 0.35;
+function projectCategoryTally(){
+  const m = new Map();
+  PROJECT_ARCHIVE.forEach(a => a.cats.forEach(c => m.set(c, (m.get(c) || 0) + 1)));
+  return m;
+}
+let _tallyCache = null, _tallyKey = -1;
+function archiveCategoryMultiplier(cat, cats){
+  if (!historyAwareGeneration() || PROJECT_ARCHIVE.length < ARCHIVE_TALLY_MIN || !cats || cats.length < 2) return 1;
+  if (_tallyKey !== PROJECT_ARCHIVE.length){ _tallyCache = projectCategoryTally(); _tallyKey = PROJECT_ARCHIVE.length; }
+  const n = c => _tallyCache.get(c) || 0;
+  const mean = cats.reduce((s, c) => s + n(c), 0) / cats.length;
+  if (!mean) return 1;
+  return clamp(1 + ARCHIVE_TALLY_STRENGTH * (mean - n(cat)) / mean, 0.6, 1.4);
+}
+/* (b) Best of three. An exploration build draws three candidates on three sub-seeds
+   and keeps the one furthest (diversityScore, nearest-reference) from the project
+   archive, among those whose coherence is within COHERENCE_FLOOR_DROP points of the
+   best — distinct but not incoherent. Pure selection, so it can be tested; the
+   building lives in generate.js, and a replay never calls it. */
+const EXPLORE_CANDIDATES = 3;
+const COHERENCE_FLOOR_DROP = 12;
+function candidateSeed(seedNum, k){ return k ? hashSeedString(String(seedNum >>> 0) + "|candidate|" + k) : (seedNum >>> 0); }
+/* How far a sheet's resolved profile categories lean INTO this project's ruts: the
+   mean of (1 - tally multiplier) over its profile slots, so positive = over-used. */
+const TALLY_WEIGHT = 1.0;
+function tallyOveruse(st){
+  const cats = new Map();
+  Object.keys(st || {}).forEach(k => { const sl = st[k]; if (k.startsWith("prof_") && sl && sl.trait && !sl.counterpoint) cats.set(sl.trait.category, sl.trait.section); });
+  if (!cats.size) return 0;
+  let s = 0; cats.forEach((sec, c) => { s += 1 - archiveCategoryMultiplier(c, catsOf(sec)); });
+  return s / cats.size;
+}
+function selectDistinctCandidate(cands, references){
+  if (!cands || !cands.length) return null;
+  const scored = cands.map((c, i) => {
+    const co = c.coherence !== undefined ? c.coherence : ((typeof coherenceScore === 'function' && coherenceScore(c.state)) || {pct:0}).pct;
+    const d = (references && references.length ? diversityScore(c.state, references).score : 0) - TALLY_WEIGHT * tallyOveruse(c.state);
+    return Object.assign({}, c, {index:i, coherence:co, diversity:d});
+  });
+  const best = Math.max(...scored.map(c => c.coherence));
+  const ok = scored.filter(c => c.coherence >= best - COHERENCE_FLOOR_DROP);
+  ok.sort((a, b) => (b.diversity - a.diversity) || (a.index - b.index));
+  return Object.assign({}, ok[0], {considered: scored.length, floor: best - COHERENCE_FLOOR_DROP,
+    scores: scored.map(c => ({index:c.index, diversity:+c.diversity.toFixed(3), coherence:c.coherence}))});
+}
+function explorationReferences(currentState){
+  const refs = PROJECT_ARCHIVE.slice(-60);
+  if (currentState && Object.keys(currentState).length) refs.push(referenceFromState(currentState, "current"));
+  return refs;
+}
+
+/* ---------- 6. BACKSTORY BEATS ----------
+   motivationChain says want → belief → origin → need as logic; a writer also needs it
+   as TIME. Three to five beats — formative event, the lesson, a turning point, the most
+   recent failure, where it stands now — each tied to a seated card, and dated from the
+   character's age when there is one. Deterministic: phrasing variants are chosen by a
+   hash of the sheet, not the dice. */
+function backstoryBeats(st, meta){
+  const chain = motivationChain(st);
+  if (!chain) return null;
+  let h = 7; Object.values(st || {}).forEach(s => { if (s && s.trait) h = (h * 31 + s.trait.id) >>> 0; });
+  const pick = (arr, salt) => arr[hashSeedString(h + "|" + salt) % arr.length];
+  const age = parseAgeHint(meta && meta.age);
+  const at = (frac, lo, hi, word) => age ? `around ${clamp(Math.round(age * frac), lo, Math.max(lo, Math.min(hi, age - 1)))}` : word;
+  const {wound, lie, defence, origin, stress, values, want, need, ghost} = chain;
+  const competence = _profTrait(st, "competence"), vice = _profTrait(st, "vices"), aim = _profTrait(st, "goals", /Immediate|Longer Aim/i);
+  const role = _profTrait(st, "role"), price = _profTrait(st, "goals", /Price/i);
+  const beats = [];
+  const add = (key, title, when, text, from) => beats.push({key, title, when, text, from: from.filter(Boolean).map(t => t.trait)});
+  if (wound || origin){
+    const src = wound || origin;
+    add("formative", "Formative event", at(0.25, 5, 14, "in childhood"),
+      wound ? `${pick(["It starts with","Before anything else there was","The first thing that happened to them was"], "f")} ${wound.trait.toLowerCase()}${ghost ? `, and it is still tied to ${ghost.trait.toLowerCase()}` : ``}.${origin ? ` What kept it from being everything: ${origin.trait.toLowerCase()}.` : ``}`
+            : `${pick(["What went right early:","The thing that held:"], "o")} ${origin.trait.toLowerCase()}.`, [src, ghost, wound && origin]);
+  }
+  if (lie) add("lesson", "What they took from it", at(0.4, 8, 20, "in their teens"),
+    `${pick(["They drew the conclusion","They learned, wrongly,","It taught them"], "l")} that ${lie.trait.replace(/^I /, "they ").toLowerCase()}.`, [lie]);
+  if (defence || values || competence){
+    const pivot = competence || values || defence;
+    add("turning", "Turning point", at(0.6, 14, 40, "in early adulthood"),
+      `${pick(["The turn came when","Everything changed when","The first time it paid off was when"], "t")} ${competence ? `${competence.trait.toLowerCase()} made them useful` : values ? `they chose ${STRATEGY_BY_VALUES[values.category] || values.trait.toLowerCase()} over the easier thing` : `they found the defence would hold`}${defence ? ` — ${defence.trait.toLowerCase()} set, from then on, into how they operate` : ``}.`, [pivot, defence]);
+  }
+  if (stress || vice){
+    add("failure", "Most recent failure", age ? "within the last year" : "recently",
+      `${pick(["The latest time it broke:","Most recently it went wrong when"], "r")} under pressure they ${stress ? (STRATEGY_BY_STRESS[stress.category] || stress.trait.toLowerCase()) : "fell back on the old habit"}${vice ? `, and ${vice.trait.toLowerCase()} did the rest` : ``}${price ? ` — the bill was ${price.trait.toLowerCase()}` : need ? ` — which is the opposite of ${need.trait.toLowerCase()}` : ``}.`, [stress, vice, price]);
+  }
+  if (want || aim || role) add("now", "Where it stands", "now",
+    `${want ? `They want ${want.trait.toLowerCase()}` : `They are after ${aim.trait.toLowerCase()}`}${aim && want ? `, which right now means ${aim.trait.toLowerCase()}` : ``}${role ? `, and in any room they are the ${role.category.toLowerCase()}` : ``}.`, [want, aim, role]);
+  return beats.length >= 3 ? beats.slice(0, 5) : (beats.length ? beats : null);
+}
+
+/* ---------- 1. COMPOSITIONAL VOICE LINES ----------
+   VOICE_FRAGMENTS had one to three fixed lines per lean, so every slippery liar said
+   "I was with Marcus. All evening." A line is now composed:
+
+     clause template (per speech act and lean — the same leans and rule names as the
+     fragments, which stay as the backing table)
+       + slots filled from a topic/entity pool (roles and things, never names),
+         the lenses' own topics, and noun phrases lifted from the sheet's vocabulary
+         examples
+       + transforms driven by the sheet's grammar, verbosity and vocabulary traits:
+         compression, fillers, false starts, afterthoughts, echoes, hedges, ellipsis,
+         tense habits, tag questions, contractions.
+
+   Every transform that fires adds the rule that fired it, so the "shaped by" list is
+   still the literal list of what shaped the line. */
+const VOICE_TOPIC_POOL = {
+  thing: ["the ledger","the key to the back room","the letter","the money","the boat","the recording","the dog","the ring","the report","the car","the medicine","the map","the second set of books","the photographs","the contract","the spare key","the shipment","the password","the draft","the tin under the sink","the van","the lease","the rota","the box in the loft"],
+  person: ["my sister","your father","the landlord","the new one","the foreman","my ex","the neighbour","the priest","the kid from downstairs","the captain","the nurse on nights","my brother-in-law","the old man at the gate","the client","her mother","the driver","my supervisor","the woman at the counter","my cousin","the lodger","the man from the council"],
+  place: ["the kitchen","the station","the harbour","the back office","the car park","the chapel","the stairwell","the far field","the hospital","the bar on the corner","the roof","the garage","the waiting room","the market","the ferry","my mother's","the depot","the laundrette"],
+  time: ["last night","on Tuesday","all evening","after the funeral","before the storm","this morning","around nine","the whole weekend","after the meeting","before you got here","at the weekend","until close","in the spring"],
+  task: ["carry this","sign for it","talk to them","drive","hold the door","look at the numbers","keep an eye on it","cover for me","tell her","wait with me","make the call","fix it","go back there","lend it"],
+};
+const _VT = (templates, rule) => ({templates, rule});
+const VOICE_CLAUSES = {
+  refuse: {
+    direct:  _VT(["No.","I'm not going to {task}.","No. Not {time}, not for {person}.","Find someone else to {task}.","You've asked the wrong person. No.","I won't {task}. Don't ask again.","The answer's no, and it was no before you asked."], "high assertiveness — the refusal is the whole sentence"),
+    yielding:_VT(["I don't think I can {task}, I'm sorry — it's not that I don't want to.","I'd rather not, if that's all right.","It's just that I told {person} I'd be at {place} {time}.","Could someone else {task}? Only this once.","I wish I could. I really do.","I'm not sure I'm the right one to {task}."], "low assertiveness — the refusal arrives wrapped"),
+    mid:     _VT(["I'm going to say no to that.","Not {thing}. Anything else, maybe.","I can't {task} {time}.","That's not something I'll do.","No — but ask {person}.","Not this one."], "no strong assertiveness lean"),
+  },
+  apologise: {
+    straight:_VT(["I was wrong. That's all it is.","I got it wrong about {thing}, and I'm sorry.","That was my fault. Nobody else's.","I should have told you {time}. I didn't. I'm sorry."], "high honesty — the apology concedes the point"),
+    slippery:_VT(["I'm sorry you took it that way.","Mistakes were made. {person} would say the same.","If anything I did about {thing} upset you, then of course.","I'm sorry it came out the way it did."], "low honesty — the apology moves the fault"),
+    open:    _VT(["I've been sick about it since.","I haven't slept since {time}. I'm so sorry.","I keep going over it — {thing}, all of it. I'm sorry."], "high emotional expression"),
+    guarded: _VT(["It won't happen again.","Noted. It won't be repeated.","I'll sort {thing}. That's the end of it."], "guarded emotion — the feeling stays off the page"),
+  },
+  persuade: {
+    direct:  _VT(["Here's what you're going to do, and here's why you'll want to.","You'll {task}, because nobody else can.","Do it {time}. I'll handle {person}."], "high assertiveness"),
+    warm:    _VT(["I wouldn't ask if there were another way to do it.","You're the only one {person} listens to. Please.","Do this for me and I'll owe you — properly."], "high warmth"),
+    cold:    _VT(["You can do it now or you can do it later with more paperwork.","Either you {task}, or {person} hears about {thing}.","It's not a request, it's the cheaper option."], "low warmth"),
+    mid:     _VT(["I think this is the better road. Let me show you why.","Look at {thing} and tell me I'm wrong.","If you {task}, the rest takes care of itself."], "no strong lean"),
+  },
+  conceal: {
+    slippery:_VT(["That's a long story, and not a very interesting one.","Oh, {thing}? Nothing. Ask {person}, they'll bore you with it.","You know, I honestly couldn't tell you.","Funny you should ask about {place} — have you eaten?"], "low honesty — deflection by boredom"),
+    straight:_VT(["I'm not going to answer that.","That's mine. I'm not discussing it.","I won't lie to you, so I'm not going to say anything."], "high honesty — refuses rather than lies"),
+    guarded: _VT(["Nothing worth the telling.","It's handled.","Leave {thing} alone."], "guarded emotion"),
+    mid:     _VT(["Ask me another time.","Not {time}.","Some other day, maybe."], "no strong lean"),
+  },
+  request: {
+    mannered:_VT(["When you have a moment — and only then — could I trouble you?","Would you be so kind as to {task}?","I hate to ask, but might you {task}?"], "high manners"),
+    blunt:   _VT(["Give me a hand with this.","{task}. Now's good.","You — {task}."], "low manners"),
+    terse:   _VT(["Need a minute.","Hand me {thing}.","You free {time}?"], "low verbosity"),
+    mid:     _VT(["Could you help me with something?","Could you {task}? It won't take long.","Have you got {thing}? I'll bring it back."], "no strong lean"),
+  },
+  askhelp: {
+    open:    _VT(["I can't do this on my own and I've stopped pretending otherwise.","I need you. With {thing}. I can't — I need you.","I've been trying since {time} and I can't."], "high emotional expression"),
+    guarded: _VT(["There's a piece of this that's outside my remit. That's all.","I'd need someone to {task}. Operationally.","It's a two-person job. That's the only reason."], "guarded emotion — the ask is reframed as logistics"),
+    yielding:_VT(["Only if you've got time. Really, only if you have.","If it's no trouble — could you {task}?","You don't have to. But {person} said you might."], "low assertiveness"),
+    mid:     _VT(["I need help with this part.","Can you {task}? I can't manage it.","I'm stuck on {thing}."], "no strong lean"),
+  },
+  lie: {
+    slippery:_VT(["I was with {person}. {time}.","I was at {place} {time}. Ask anyone.","{thing}? Never saw it.","I left before {person} even got there.","It was {person}'s idea, not mine."], "low honesty — a specific, checkable lie, told smoothly"),
+    straight:_VT(["...Yes. Yes, that's right.","I — no. I mean yes. I was at {place}.","That's — yes. {time}. Yes.","Yes. {place}. I — yes.","I was — I was with {person}.","{time}? Yes. Of course. Yes."], "high honesty — the lie comes out badly because lying is not what they do"),
+    mid:     _VT(["Something like that.","More or less.","I was at {place}, I think."], "no strong lean"),
+  },
+};
+const VOICE_ELABORATIONS = ["{person} was there {time}, if you want to check.","It's to do with {thing}, mostly.","And before you say it — yes, I know about {place}.","I've been thinking about it since {time}.","Which is more than {person} ever did."];
+// Pull noun phrases out of the sheet's own vocabulary examples, so the words a
+// character reaches for turn up in what they talk about.
+function _examplePhrases(traits){
+  const out = [];
+  (traits || []).forEach(t => {
+    const ex = t && t.example ? String(t.example) : "";
+    const re = /\b(the|my|your|his|her|their|our) ([a-z][a-z'-]{2,}(?: [a-z][a-z'-]{2,})?)\b/gi;
+    let m; while ((m = re.exec(ex))) out.push({text: (m[1] + " " + m[2]).toLowerCase().replace(/^the the /, "the "), from: t.trait});
+  });
+  return out;
+}
+function _exampleSentence(t){
+  if (!t || !t.example) return null;
+  const parts = String(t.example).split(/(?<=[.!?])\s+/).map(s => s.trim()).filter(s => s.split(/\s+/).length >= 3 && s.length <= 60 && !/[()]/.test(s));
+  return parts.length ? parts[0] : null;
+}
+const _sentences = s => s.split(/(?<=[.!?])\s+/).filter(Boolean);
+const _cap = s => s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
+const _lowerFirst = s => /^(I\b|I'|[A-Z]{2})/.test(s) ? s : s.charAt(0).toLowerCase() + s.slice(1);
+const CONTRACT = [["I am","I'm"],["do not","don't"],["cannot","can't"],["will not","won't"],["it is","it's"],["I would","I'd"],["you are","you're"],["that is","that's"],["I have","I've"],["is not","isn't"]];
+function _topicPools(rng, vocabPhrases){
+  const taboo = lensTaboos().map(x => x.toLowerCase());
+  const pools = {};
+  Object.keys(VOICE_TOPIC_POOL).forEach(k => { pools[k] = VOICE_TOPIC_POOL[k].slice(); });
+  activeLenses().forEach(l => Object.entries(l.topics || {}).forEach(([k, arr]) => { if (pools[k]) pools[k] = arr.concat(arr, pools[k]); }));
+  vocabPhrases.forEach(p => { pools.thing.unshift(p.text); pools.thing.unshift(p.text); });
+  Object.keys(pools).forEach(k => { pools[k] = pools[k].filter(x => !taboo.some(tb => x.toLowerCase().includes(tb))); });
+  return pools;
+}
+function _fill(template, pools, rng, used, vocabPhrases){
+  return template.replace(/\{(\w+)\}/g, (m, k) => {
+    const arr = pools[k];
+    if (!arr || !arr.length) return k;
+    const v = arr[Math.floor(rng() * arr.length)];
+    const vp = vocabPhrases.find(p => p.text === v);
+    if (vp && !used.includes("vocabulary: " + vp.from)) used.push("vocabulary: " + vp.from);
+    return v;
+  });
+}
+function composeVoiceLine(st, promptId, mode, opts){
+  const prompt = allVoicePrompts().find(p => p.id === promptId);
+  if (!prompt) return null;
+  opts = opts || {};
+  const r = voiceRules(st);
+  const underPressure = mode === "pressure";
+  let seed = 11;
+  Object.values(st || {}).forEach(s => { if (s && s.trait) seed = (seed * 31 + s.trait.id) >>> 0; });
+  const idx = Number.isInteger(opts.index) ? opts.index : -1, reroll = Number.isInteger(opts.reroll) ? opts.reroll : 0;
+  const take = Number.isInteger(opts.take) ? opts.take : 0;
+  const rng = mulberry32(hashSeedString(String(seed) + "|" + promptId + "|" + (mode || "baseline") + "|c2" +
+    (idx >= 0 || reroll ? "|" + idx + "|" + reroll : "") + (take ? "|t" + take : "")));
+  const kind = prompt.like || promptId;
+  const table = VOICE_CLAUSES[kind];
+  const used = [];
+  const vocabPhrases = _examplePhrases(r.vocab);
+  const pools = _topicPools(rng, vocabPhrases);
+  const fill = t => _fill(t, pools, rng, used, vocabPhrases);
+  const gcat = r.grammar ? r.grammar.category : null, vcat = r.verbosity ? r.verbosity.category : null;
+  const minimal = vcat === "Minimal & Ultra-Brief" || r.terse;
+  // Opener — the politeness layer, dropped under pressure (as before).
+  let opener = "";
+  if (!underPressure){
+    const asked = kind === "refuse" || kind === "request" || kind === "askhelp";
+    let f = null;
+    if (r.mannered && asked) f = _pickFrag(VOICE_FRAGMENTS.opener.mannered, rng);
+    else if (r.formal) f = _pickFrag(VOICE_FRAGMENTS.opener.formal, rng);
+    else if (r.casual) f = _pickFrag(VOICE_FRAGMENTS.opener.casual.concat([_VF("Listen.", "casual register"), _VF("Okay, so.", "casual register")]), rng);
+    if (f){ if (f.text && !minimal) opener = f.text; used.push(f.rule); }
+  }
+  // Core clause, same lean priority as the fragment composer.
+  const order = ["direct","yielding","slippery","straight","open","guarded","warm","cold","mannered","blunt","terse"];
+  let entry = null;
+  for (const k of order){ if (r[k] && table[k]){ entry = table[k]; break; } }
+  if (!entry) entry = table.mid || table.straight || Object.values(table)[0];
+  used.push(entry.rule);
+  let core = _cap(fill(entry.templates[Math.floor(rng() * entry.templates.length)]));
+  const rule = x => { if (!used.includes(x)) used.push(x); };
+  // Verbosity shapes how much survives.
+  if (minimal){ core = _sentences(core)[0]; rule("low verbosity — only one clause survives"); }
+  // Hedges go on before the grammar reshapes the clause, so a cut-in stays a cut-in.
+  if (r.yielding && !minimal && !/^(I think|Maybe|I mean|\.\.\.|—)/.test(core) && rng() < 0.7){
+    core = ["I think ","Maybe ","I mean, ","Sort of — "][Math.floor(rng() * 4)] + _lowerFirst(core); rule("hedged (low assertiveness)");
+  }
+  const extra = [];
+  if (!minimal && !underPressure && (r.long || vcat === "High-Volume & Wordy")){
+    extra.push(_cap(fill(VOICE_ELABORATIONS[Math.floor(rng() * VOICE_ELABORATIONS.length)])));
+    if (r.long) extra.push(_pickFrag(VOICE_FRAGMENTS.tail.long, rng).text);
+    rule("high verbosity");
+  }
+  if (!underPressure && r.warm && !minimal){ const w = _pickFrag(VOICE_FRAGMENTS.tail.warm, rng); extra.push(w.text); rule(w.rule); }
+  // Grammar transforms, keyed on the grammar card's category and fed by its example.
+  const gName = r.grammar ? r.grammar.trait : "";
+  if (gcat === "Spoken Compression"){
+    core = core.replace(/(^|[.!?] )(I'm going to|I'm|I am|I|It's|That's|There's|You've) (?=[a-z])/g, (m, p) => p).replace(/\b(the|a) (?=\w)/g, (m, a, off) => off > 0 && rng() < 0.5 ? "" : m);
+    core = _cap(core.trim()); rule("grammar: " + gName + " — pronouns and articles dropped");
+  } else if (gcat === "Anchors & Fillers"){
+    const m = r.grammar.example && r.grammar.example.match(/—\s*([^—]{2,18}?)\s*—|,\s*(like|you know|right|yeah|see|so|mind)\b/i);
+    const filler = m ? (m[1] || m[2]).toLowerCase().replace(/[.,!?]/g, "") : "you know";
+    const ss = _sentences(core);
+    core = ss.length > 1 ? ss[0].replace(/[.!?]$/, "") + ` — ${filler} — ` + ss.slice(1).join(" ") : core.replace(/([.!?])$/, `, ${filler}$1`);
+    rule("grammar: " + gName + " — a filler anchors the line");
+  } else if (gcat === "Disfluencies & Flow"){
+    const w = core.split(" ")[0];
+    core = `${w.replace(/[.,!?]$/, "")} — ${_lowerFirst(core)}`; rule("grammar: " + gName + " — a false start");
+  } else if (gcat === "Structural Shifts"){
+    extra.push(_cap(fill(["If {person} lets me.","Probably.","Which it won't be.","Or {time}.","Mostly."][Math.floor(rng() * 5)])));
+    rule("grammar: " + gName + " — an afterthought tacked on");
+  } else if (gcat === "Turn-Taking Grammar"){
+    core = ["—no, let me finish — ","Before you start — ","Wait — "][Math.floor(rng() * 3)] + _lowerFirst(core); rule("grammar: " + gName + " — cuts in");
+  } else if (gcat === "Repetition & Echo Patterns"){
+    const words = core.replace(/[.!?]+$/, "").split(" ");
+    const last = words[words.length - 1].replace(/[,;]/g, "");
+    core = core.replace(/[.!?]+$/, "") + `, ${last}.`; rule("grammar: " + gName + " — echoes itself");
+  }
+  // Hedges, ellipsis, tense habits and tag questions.
+  if ((r.guarded && rng() < 0.5) || (underPressure && r.stress && /Freeze/.test(r.stress.category))){
+    core = core.replace(/[.!?]$/, "...").replace(/ — /, "... "); rule("ellipsis (the sentence trails off)");
+  }
+  const temporal = r.vocab.find(t => t.category === "Temporal Orientation & Tense Usage");
+  if (temporal && !minimal){
+    const past = /past|nostalg|used|retro|memor|history/i.test(temporal.trait + " " + (temporal.example || ""));
+    const fut = /future|forecast|plan|prospect|will/i.test(temporal.trait);
+    if (past){ extra.push(["It used to be simpler.","Like it always was.","Same as back then."][Math.floor(rng() * 3)]); rule("tense habit: " + temporal.trait); }
+    else if (fut){ extra.push(["We'll see how it looks tomorrow.","It'll matter later.","Ask me again next week."][Math.floor(rng() * 3)]); rule("tense habit: " + temporal.trait); }
+  }
+  const asksQuestions = gcat === "Turn-Taking Grammar" || /question|tag|checking|confirm/i.test(gName) || (r.warm && r.yielding);
+  if (asksQuestions && !minimal && !underPressure){
+    const tag = [", right?",", yeah?",", don't you think?",", okay?"][Math.floor(rng() * 4)];
+    const addTag = x => /\.\.\.$/.test(x) ? x + tag.replace(/^, /, " ") : x.replace(/[.!]$/, tag);
+    if (extra.length) extra[extra.length - 1] = addTag(extra[extra.length - 1]);
+    else core = addTag(core);
+    rule("tag question (checks the listener is still with them)");
+  }
+  // Pressure: the stress response closes the line.
+  if (underPressure && r.stress && PRESSURE_TAIL[r.stress.category]){ extra.push(PRESSURE_TAIL[r.stress.category].text); rule(PRESSURE_TAIL[r.stress.category].rule); }
+  // The habitual device: a sentence lifted whole from a vocabulary example, now and then.
+  const deviceT = r.vocab.filter(t => t.example)[0] || r.grammar;
+  const devSentence = r.vocab.map(_exampleSentence).filter(Boolean)[0];
+  if (devSentence && !minimal && rng() < 0.35){ extra.push(devSentence); rule("vocabulary: " + r.vocab.find(t => _exampleSentence(t) === devSentence).trait); }
+  let text = [opener, core].concat(extra).filter(Boolean).join(" ").replace(/\s+/g, " ").trim()
+    .replace(/([^.][.!?] )([a-z])/g, (m, a, b) => a + b.toUpperCase());
+  // Register: formal speech drops its contractions, casual speech takes them. Not under
+  // pressure — the politeness layer is the first thing to go.
+  if (!underPressure && r.formal && !r.casual){
+    let n = 0; CONTRACT.forEach(([full, short]) => { const re = new RegExp("\\b" + short.replace("'", "'") + "\\b", "g"); text = text.replace(re, () => { n++; return full; }); });
+    if (n) rule("formal register — no contractions");
+  } else if (!underPressure && r.casual){
+    let n = 0; CONTRACT.forEach(([full, short]) => { const re = new RegExp("\\b" + full + "\\b", "g"); text = text.replace(re, () => { n++; return short; }); });
+    if (n) rule("casual register — contracts everything");
+  }
+  return {
+    prompt: prompt.label, promptId, setup: prompt.setup, mode: underPressure ? "pressure" : "baseline",
+    text: text || "(this sheet has no voice traits to compose from)",
+    rules: [...new Set(used.filter(Boolean))],
+    device: deviceT ? {label: deviceT.trait, example: deviceT.example || ""} : null,
+  };
+}
+/* The "10 lines" view: ten takes of one prompt from one sheet. Each take is its own
+   sub-seed, so the list is stable for a sheet and the same take always reads the same. */
+function voiceLines(st, promptId, mode, n, reroll){
+  const index = allVoicePrompts().findIndex(p => p.id === promptId);
+  const out = [];
+  for (let k = 0; k < (n || 10); k++){
+    const l = composeVoiceLine(st, promptId, mode, {index, reroll: reroll || 0, take: k});
+    if (l) out.push(l);
+  }
+  return out;
 }
 
 // ================= PROJECT LIBRARY AND BACKUP BUNDLE (MVP) =================
@@ -6607,6 +7525,18 @@ function buildStressVariant(baseVerbLevel, baseRegLevel, mannerCount, rarityPref
   /* Carried on the returned object under a key no slot path can produce, so the sheet
      renderers (which all filter for `.trait`) skip it and the pressure panel can read
      it back. */
+  /* BUDGETS AND EXCLUSIVITY. The pressure sheet redraws its slots outside
+     finalizeSheet, so a sheet built with every signature cap at zero or a never-together
+     pair could show both on the pressure panel while the base sheet honoured them. Run
+     the same two passes over the pressure sheet — as its own sheet: its caps count its
+     own slots. Only when a rule is on, so a default build draws exactly as before; and
+     the committed base sheet's budget report is put back, because it is what the
+     report panel describes. */
+  if ((typeof budgetsActive === 'function' && budgetsActive()) || exclusivePairs.length){
+    const savedReport = lastBudgetReport;
+    try { applyBudgets(obj, rarityPref); applyExclusivePairs(obj, rarityPref); }
+    finally { lastBudgetReport = savedReport; }
+  }
   obj.__pressure = {level: p, trigger: pressureTrigger(st), recovery: pressureRecovery(st)};
   return obj;
   } finally {
@@ -6884,6 +7814,18 @@ function detectConstraintConflicts(){
   return out;
 }
 
+/* A trait that was required and happened to be drawn in place is flagged locked+
+   required. Once the requirement is removed those flags are stale: the slot must go
+   back to being an ordinary (or user-locked) card, or it stays locked forever. */
+function clearStaleRequirement(slot){
+  if (!slot || !slot.requiredSatisfiedInPlace || !slot.trait) return slot;
+  if (requiredTraitIds.includes(slot.trait.id)) return slot;
+  const out = Object.assign({}, slot);
+  delete out.required; delete out.requiredSatisfiedInPlace;
+  if (out.lockedByRequirement) out.locked = false;
+  delete out.lockedByRequirement;
+  return out;
+}
 function applyRequiredTraits(obj){
   // PERF: this rebuilt a 7,073-entry Map on every single generation, and TRAITS_BY_ID
   // has existed the whole time. Same for the linear TRAITS.find below.
@@ -6898,8 +7840,12 @@ function applyRequiredTraits(obj){
     const t = TRAITS_BY_ID.get(id); if (!t) return;
     const already = seatedBy.get(id);
     if (already !== undefined && !already.startsWith('req_')){
-      obj[already] = Object.assign({}, obj[already], {locked:true, required:true,
-        requiredSatisfiedInPlace:true});
+      // lockedByRequirement records that the LOCK came from the requirement, not the
+      // user, so it can be lifted once the requirement goes (see clearStaleRequirement).
+      const prev = obj[already];
+      obj[already] = Object.assign({}, prev, {locked:true, required:true,
+        requiredSatisfiedInPlace:true,
+        lockedByRequirement: !prev.locked || !!prev.lockedByRequirement});
       return;
     }
     if (already !== undefined) return;          // already seated as a req_ slot
@@ -6915,7 +7861,7 @@ function applyRequiredTraits(obj){
     if (present.has(cat)) return;
     const section = SECTION_OF_CATEGORY.get(cat);
     if (!section) return;
-    const pool = byFilter(section, cat);
+    const pool = budgetFriendlyPool(obj, 'reqcat_'+i, byFilter(section, cat));
     const pick = pool.length ? pickInRange(pool, 0, profileTarget(), 4) : null;
     if (pick) obj['reqcat_'+i] = {slotId:'reqcat_'+i, locked:true, required:true,
       label:'Required (at least one) — '+cat, trait:pick};
@@ -6939,6 +7885,8 @@ function applyRequiredTraits(obj){
    That is signature-cap 1 plus a tight intensity budget everywhere else. */
 const rarityCaps  = {common:null, uncommon:null, distinctive:null, signature:null};
 const intensityCaps = {};      // budget group id -> max total intensity, or null
+const intensityPerSlot = {};         // group id -> max average intensity per slot (see BUDGET_PRESETS)
+const intensityPerSlotResolved = {}; // the absolute cap last derived from it
 let budgetMode    = 'redraw';  // 'redraw' | 'drop' | 'warn'
 let lastBudgetReport = null;
 
@@ -6950,7 +7898,6 @@ const BUDGET_GROUPS = [
   {id:'profile',     label:'Deep profile',         match: id => id.startsWith('prof_') && !id.startsWith('prof_motivation_')},
   {id:'voice',       label:'Speech & Vocabulary',  match: id => ['verbosity','register','grammar'].includes(id) || id.startsWith('vocab')},
   {id:'manner',      label:'Mannerisms',           match: id => id.startsWith('manner')},
-  {id:'appearance',  label:'Appearance',           match: id => id.startsWith('app_')},
   {id:'sheet',       label:'Whole sheet',          match: () => true},
 ];
 
@@ -6960,6 +7907,7 @@ const BUDGET_GROUPS = [
 function clearBudgets(){
   RTIER_ORDER.forEach(t=>{ rarityCaps[t] = null; });
   Object.keys(intensityCaps).forEach(k=>{ delete intensityCaps[k]; });
+  Object.keys(intensityPerSlot).forEach(k=>{ delete intensityPerSlot[k]; delete intensityPerSlotResolved[k]; });
   budgetMode = 'redraw';
   lastBudgetReport = null;
 }
@@ -7007,6 +7955,7 @@ function excludedByPairs(id, seated){
    from the finished sheet at the end rather than accumulated from intermediate counts,
    so an unmet cap is always the truth about what the user is looking at. */
 function applyBudgets(obj, rarityPref){
+  if (typeof resolveRelativeCaps === 'function') resolveRelativeCaps(obj);
   const report = {rarity:{}, intensity:{}, actions:[], active: budgetsActive()};
   lastBudgetReport = report;
   if (!report.active) return obj;
@@ -7091,10 +8040,13 @@ function applyBudgets(obj, rarityPref){
        honest answer — it doubles as a data-gap finder, surfacing exactly the thin pools
        that have no low tail to redraw into. */
     let guard = 0;
-    while (total() > cap && guard++ < 60){
+    // Slots whose category has nothing quieter: skip them and keep going with the next
+    // loudest, instead of giving up on the whole budget at the first thin category.
+    const stuck = new Set();
+    while (total() > cap && guard++ < 200){
       if (budgetMode === 'warn') break;
       // Always redraw the loudest mutable slot: the one spending the most budget.
-      const id = ids().filter(mutable)
+      const id = ids().filter(id => mutable(id) && !stuck.has(id))
         .sort((a,b)=> obj[b].trait.intensity - obj[a].trait.intensity)[0];
       if (!id) break;                                   // everything left is user-locked
       const slot = obj[id];
@@ -7108,7 +8060,8 @@ function applyBudgets(obj, rarityPref){
           delete obj[id];
           continue;
         }
-        break;   // nothing quieter exists in this category — a real content gap
+        stuck.add(id);   // nothing quieter exists in this category — a real content gap
+        continue;
       }
       obj[id] = Object.assign({}, slot, {trait: repl, target: want, budgeted: 'intensity',
         budgetWhy: `redrawn quieter — ${g.label} intensity budget`});
@@ -7174,12 +8127,16 @@ function budgetCapacity(obj){
 /* §9.6 — the four presets. "One loud thing" is the case the tool could not express at
    all before budgets existed, and it is the one most writers reach for. */
 const BUDGET_PRESETS = {
+  /* B13: the whole-sheet caps were absolute (45/65/90), but a default sheet has 43+
+     slots and every trait is at least intensity 1, so "Background" (45) could never
+     be met. They are now PER SLOT, resolved against the sheet being budgeted
+     (intensityPerSlot); `intensity` is only the starting figure shown before a build. */
   background: {label:"Background character",
-    rarity:{signature:0, distinctive:2}, intensity:{sheet:45}},
+    rarity:{signature:0, distinctive:2}, intensity:{sheet:70}, intensityPerSlot:{sheet:1.6}},
   supporting: {label:"Supporting",
-    rarity:{signature:1, distinctive:5}, intensity:{sheet:65}},
+    rarity:{signature:1, distinctive:5}, intensity:{sheet:95}, intensityPerSlot:{sheet:2.2}},
   protagonist:{label:"Protagonist",
-    rarity:{signature:3}, intensity:{sheet:90}},
+    rarity:{signature:3}, intensity:{sheet:130}, intensityPerSlot:{sheet:3}},
   oneLoud:    {label:"One loud thing",
     rarity:{signature:1}, intensity:{personality:18, manner:6, voice:8}},
 };
@@ -7189,7 +8146,32 @@ function applyBudgetPreset(key){
   clearBudgets();
   Object.entries(p.rarity || {}).forEach(([tier,v])=>{ rarityCaps[tier] = v; });
   Object.entries(p.intensity || {}).forEach(([g,v])=>{ intensityCaps[g] = v; });
+  Object.entries(p.intensityPerSlot || {}).forEach(([g,v])=>{
+    intensityPerSlot[g] = v;
+    // Show a figure for the sheet on screen now, if there is one.
+    const grp = BUDGET_GROUPS.find(x => x.id === g);
+    if (grp && typeof state !== 'undefined' && state){
+      const n = Object.keys(state).filter(id => state[id] && state[id].trait && grp.match(id)).length;
+      if (n) intensityCaps[g] = Math.ceil(v * n);
+    }
+    intensityPerSlotResolved[g] = intensityCaps[g];
+  });
   return true;
+}
+/* Relative caps: group id -> max average intensity per slot. Resolved to an absolute
+   cap against each sheet in applyBudgets. If the user edits the cap by hand (it no
+   longer equals what we last resolved), the relative rule is dropped. */
+function resolveRelativeCaps(obj){
+  Object.keys(intensityPerSlot).forEach(g=>{
+    if (intensityCaps[g] !== intensityPerSlotResolved[g]){
+      delete intensityPerSlot[g]; delete intensityPerSlotResolved[g]; return;
+    }
+    const grp = BUDGET_GROUPS.find(x => x.id === g);
+    if (!grp) return;
+    const n = Object.keys(obj).filter(id => obj[id] && obj[id].trait && grp.match(id)).length;
+    if (!n) return;
+    intensityCaps[g] = intensityPerSlotResolved[g] = Math.ceil(intensityPerSlot[g] * n);
+  });
 }
 
 /* ================= THE ONE FINALIZER =================
@@ -7220,7 +8202,7 @@ function finalizeSheet(obj, opts){
   const rarityPref = (opts.rarityPref === undefined) ? 0 : opts.rarityPref;
   if (opts.carryLocked){
     Object.keys(opts.carryLocked).forEach(id=>{
-      const old = opts.carryLocked[id];
+      const old = clearStaleRequirement(opts.carryLocked[id]);
       if (old && old.locked && obj[id] !== undefined) obj[id] = old;
     });
   }
@@ -7238,6 +8220,30 @@ function finalizeSheet(obj, opts){
 // conflict only exists once both are actually seated, and resolving it here means the
 // loser's slot gets a genuine replacement draw from its own pool instead of the slot
 // silently disappearing. A locked or explicitly required slot always wins the tie.
+/* B14: the required and exclusivity passes run after budgets, so their draws must not
+   undo them. Narrow a replacement pool to traits that fit every rarity cap (counting
+   the rest of the sheet) and, when an intensity budget is on, are no louder than what
+   the slot holds now. Where that leaves nothing, fall back to the pool as given — the
+   seat matters more, and auditBudgets reports the breach. */
+function budgetFriendlyPool(obj, slotId, pool){
+  if (!pool.length || !budgetsActive()) return pool;
+  const counts = {};
+  Object.keys(obj).forEach(id=>{
+    if (id === slotId || !obj[id] || !obj[id].trait) return;
+    const t = rarityTier(obj[id].trait); counts[t] = (counts[t] || 0) + 1;
+  });
+  const cur = obj[slotId] && obj[slotId].trait;
+  const intensityOn = BUDGET_GROUPS.some(g => intensityCaps[g.id] != null);
+  const fits = pool.filter(t=>{
+    const tier = rarityTier(t), cap = rarityCaps[tier];
+    if (cap != null && (counts[tier] || 0) >= cap) return false;
+    if (intensityOn && cur && (t.intensity || 0) > (cur.intensity || 0)) return false;
+    return true;
+  });
+  if (fits.length) return fits;
+  const tierOnly = pool.filter(t=>{ const c = rarityCaps[rarityTier(t)]; return c == null || (counts[rarityTier(t)] || 0) < c; });
+  return tierOnly.length ? tierOnly : pool;
+}
 function applyExclusivePairs(obj, rarityPref){
   if (!exclusivePairs.length) return obj;
   exclusivePairs.forEach(([a, b])=>{
@@ -7257,12 +8263,24 @@ function applyExclusivePairs(obj, rarityPref){
     const priority = k => (obj[k].required ? 2 : obj[k].locked ? 1 : 0);
     const loser = priority(seatedA) >= priority(seatedB) ? seatedB : seatedA;
     const slot = obj[loser];
+    /* B5: the loser is itself locked (or required) — both halves are user intent.
+       Replacing one silently (the replacement even inherited the lock) or deleting a
+       locked slot are both wrong; leave the sheet alone and report the conflict. */
+    if (priority(loser) > 0){
+      const ta = obj[seatedA].trait, tb = obj[seatedB].trait;
+      if (!Array.isArray(lastConstraintConflicts)) lastConstraintConflicts = [];
+      if (!lastConstraintConflicts.some(c => c.kind === 'locked-vs-exclusive' && c.ids[0] === a && c.ids[1] === b)){
+        lastConstraintConflicts.push({kind:'locked-vs-exclusive', ids:[a,b],
+          message: `"${ta.trait}" and "${tb.trait}" are both locked or required, but marked never together. Unlock one or drop the rule.`});
+      }
+      return;
+    }
     // The replacement has to respect every other rule too: not the trait it is
     // replacing, not a trait already on the sheet, and not the other half of any
     // exclusive pair that is currently seated.
     const seated = seatedIdSet(obj, loser);
-    const pool = byFilter(slot.trait.section, slot.trait.category)
-      .filter(t=>t.id !== slot.trait.id && !seated.has(t.id) && !excludedByPairs(t.id, seated));
+    const pool = budgetFriendlyPool(obj, loser, byFilter(slot.trait.section, slot.trait.category)
+      .filter(t=>t.id !== slot.trait.id && !seated.has(t.id) && !excludedByPairs(t.id, seated)));
     const repl = pool.length ? pickInRange(pool, rarityPref, slot.target, 3) : null;
     if (repl) obj[loser] = Object.assign({}, slot, {trait: repl, exclusiveSwap: true});
     else delete obj[loser];

@@ -1,5 +1,5 @@
 /* Service worker: the app ships ~3MB of JavaScript, nearly all of it the trait bank,
-   and every visit re-downloaded the lot. Cache-first for the shell, with a version
+   and every visit re-downloaded the lot. Network-first with an offline precache, with a version
    stamp so a deploy invalidates it. The app works fine without this — registration
    is best-effort and every handler falls back to the network.
 
@@ -39,9 +39,11 @@ const ASSETS = [
   './js/data/traits-cells.js',
   './js/data/traits-polarity.js',
   './js/data/traits-life.js',
+  './js/data/traits-gaps.js',
   './js/engine.js',
   './js/generate.js',
   './js/render.js',
+  './js/mechanics.js',
   './js/app.js',
 ];
 
@@ -69,47 +71,42 @@ self.addEventListener('activate', (e)=>{
   ).then(()=>self.clients.claim()));
 });
 
+/* NETWORK-FIRST, for everything same-origin (B10). This was cache-first with a
+   background refresh, which had three faults: every deploy showed up one load late; the
+   refresh replaced files one at a time, so a page could run a new app.js against an old
+   engine.js (a mixed build); and with BUILD_ID left at 'dev' outside CI the cache never
+   busted at all. Now the network is always asked first — with `cache: 'no-cache'`, so the
+   HTTP cache revalidates and an unchanged 3 MB trait bank costs a 304, not a download —
+   and the cache is only the offline fallback. Online, every file comes from the same
+   deploy; offline, every file comes from the same precache. */
 self.addEventListener('fetch', (e)=>{
   if (e.request.method !== 'GET') return;
   const url = new URL(e.request.url);
   if (url.origin !== location.origin) return;   // fonts etc. keep their own caching
+  const isNav = e.request.mode === 'navigate' || (e.request.headers.get('accept')||'').includes('text/html');
+  const netReq = isNav ? e.request : new Request(e.request, {cache: 'no-cache'});
   e.respondWith(
-    caches.match(e.request).then(hit=>{
-      if (hit){
-        /* Refresh in the background so a deploy is picked up on the next load rather
-           than requiring a hard reload — but keep the event alive while it happens.
-           Without waitUntil the browser is free to kill the worker mid-write, which is
-           how a cache ends up holding half of one build and half of the next. */
-        const refresh = fetch(e.request).then(res=>{
-          if (res && res.ok) return caches.open(CACHE).then(c=>c.put(e.request, res.clone()));
-        }).catch(()=>{});
-        if (e.waitUntil) e.waitUntil(refresh);
-        return hit;
+    fetch(netReq).then(res=>{
+      if (res && res.ok && (isNav || url.pathname.match(/\.(html|css|js)$/))){
+        const copy = res.clone();
+        const write = caches.open(CACHE).then(c=>c.put(isNav ? './index.html' : e.request, copy));
+        // Keep the worker alive until the write lands, or the cache can be left half-written.
+        if (e.waitUntil) e.waitUntil(write.catch(()=>{}));
       }
-      return fetch(e.request).then(res=>{
-        if (res && res.ok && url.pathname.match(/\.(html|css|js)$/)){
-          const copy = res.clone();
-          const write = caches.open(CACHE).then(c=>c.put(e.request, copy));
-          if (e.waitUntil) e.waitUntil(write.catch(()=>{}));
-        }
-        return res;
-      });
-    }).catch(()=> {
-      /* The index.html fallback is for NAVIGATIONS only. Applied to everything, a
-         failed script or stylesheet fetch was answered with a page of HTML — which the
-         browser then tried to parse as JavaScript or CSS, producing a syntax error
-         that says nothing about the real problem (the network). Anything else fails as
-         what it is. */
-      if (e.request.mode === 'navigate' || (e.request.headers.get('accept')||'').includes('text/html')){
-        return caches.match('./index.html');
-      }
-      return Response.error();
-    })
+      return res;
+    }).catch(()=>
+      caches.match(e.request, {ignoreSearch: isNav}).then(hit=>{
+        if (hit) return hit;
+        /* The index.html fallback is for NAVIGATIONS only. Applied to everything, a
+           failed script fetch was answered with a page of HTML, which the browser then
+           tried to parse as JavaScript. Anything else fails as what it is. */
+        if (isNav) return caches.match('./index.html');
+        return Response.error();
+      })
+    )
   );
 });
 
-/* Let the page ask for the waiting worker to take over, so an update can be an
-   explicit "reload for the new version" rather than a silent swap mid-session. */
-self.addEventListener('message', (e)=>{
-  if (e.data && e.data.type === 'SKIP_WAITING') self.skipWaiting();
-});
+/* The SKIP_WAITING message handler that used to be here was dead code: nothing ever
+   posted it, and install already calls skipWaiting(). The page now watches for a new
+   worker itself (see watchForUpdates in app.js) and offers a reload. */

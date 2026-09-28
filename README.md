@@ -2,7 +2,7 @@
 
 Axis-based, per-trait conflict-aware, intensity & rarity-weighted character voice
 generator drawing from a bank of several thousand speech, vocabulary, grammar,
-mannerism, psychology and appearance traits. Generate single characters, compare
+mannerism and psychology traits. Generate single characters, compare
 casts for voice collisions, and model relationship dynamics — all client-side, no
 build step required.
 
@@ -62,6 +62,46 @@ differs.
 
 Rerolls stay deliberately un-seeded — a reroll is you overriding the dice.
 
+Exploration also runs **best of three**: a blank-seed build draws three candidates on
+three sub-seeds and keeps the one least like the project's archived characters (and the
+sheet on screen), among those within 12 coherence points of the best. The long-horizon
+per-project category tally (derived from the archive) is a term in that choice, not a
+weight inside the draw — so every candidate is a pure function of its own seed, and the
+seed printed is the *winner's* seed, which replays it exactly. A pasted seed skips the
+candidate step entirely. Lenses and the new sheet options are settings, not history:
+the same seed under the same lenses and toggles gives the same sheet.
+
+## Keeping output fresh (audit §5)
+
+- **Compositional voice lines.** Each Voice lab line is a clause template for the
+  speech act and the sheet's lean, filled from a topic pool of roles, things, places and
+  times (never personal names), the active lenses' own topics and noun phrases lifted
+  from the sheet's vocabulary examples, then reshaped by the grammar and verbosity cards
+  (compression, fillers, false starts, afterthoughts, echoes, cut-ins), hedges, ellipsis,
+  tense habits, tag questions and contractions. Every transform names its rule. **10
+  lines** under any situation shows ten takes. Measured over 100 characters: 124 → ~640
+  distinct lines of 700; the lie prompt 13 → ~94 distinct. Author prompts compose the
+  same way through the situation they are "like".
+- **Seated contradictions** (Advanced, on by default). One or two axes are chosen before
+  the draw; afterwards a trait against the sheet's actual lean on that axis is seated
+  with a Contradiction Functions card saying what it is for, and its scene questions
+  (what it is for, when, with whom, what changes, the cost) are answered from the sheet.
+- **Variable sheet shape** (on by default). A seeded signature budget gives one or two
+  defining profile sections a second card, drops one thin section, and sets 0–3
+  outliers. 40 seeds give ~6 sheet sizes and ~37 shapes, where every sheet used to be 42
+  slots in one shape.
+- **Divergence within categories.** When "Surprise me" diverges a draw, the proximity
+  kernel is flattened too, not only the category choice.
+- **Lenses.** Eight settings (court, frontier, corporate, diaspora, military,
+  online-native, clergy, sci-fi) and seven life stages (child, adolescent, early career,
+  parent, midlife, late life, dying), combinable. Each bundles category multipliers
+  (sharing the context rules' cap), a register nudge, preferred `worldTags` (a soft
+  ×1.5 / ×0.6 on the trait draw) and taboo topics kept out of the voice lines. Cards
+  read "normal here" or "deviant here" against the active lenses.
+- **Backstory beats.** The motivation chain is laid out in time: formative event, what
+  they took from it, turning point, most recent failure, where it stands now — each tied
+  to a seated card and dated from the age field when there is one.
+
 ## Generation order
 
 Single characters, batch candidates, casts, foils and the gap-filler all run the same
@@ -113,6 +153,29 @@ notes, presentation variants, constraints and budgets. Generations, rerolls,
 step-backs, loads, imports, note edits, pin changes and bulk lock sweeps are all
 undoable. A single card's lock is deliberately not — its own button toggles it straight
 back.
+
+Destructive actions outside the sheet — removing a cast member, deleting a save,
+replacing the cast from a file, importing a workspace — show a toast with an **Undo**
+button instead of (or as well as) a confirm.
+
+## Files, sharing and keyboard
+
+* **File ▾ → Open file…** reads the `format` stamp every export carries and routes the
+  file to the right importer: character, cast, workspace, archetype library or backup.
+  The same menu exports each of those, the markdown sheet, and an **LLM prompt** — a
+  condensed markdown voice spec with sample lines, for pasting into a system prompt.
+* **Copy share link** puts the seed and the settings that shaped the build in the URL
+  hash (`#share=…`). Opening the link replays that character once, then clears the hash.
+* **Compare** on a saved character lays it beside the current sheet slot by slot; the
+  saved list can be searched and sorted.
+* **Why does this feel familiar?** lists traits recurring across your recent characters,
+  each with a one-click ban.
+* Trait cards are focusable: **R** tosses and **L** keeps the focused (or hovered) card.
+  **Ctrl/⌘+Enter** generates, **Ctrl/⌘+Z** undoes, **Shift+Ctrl/⌘+Z** / **Ctrl+Y**
+  redoes, **?** opens help. None of them fire while you are typing or a dialog is open.
+* The service worker is network-first (the cache is the offline fallback), so a deploy
+  appears on the next load and never mixes files from two builds; a deploy that lands
+  during a session offers a **Reload** toast.
 
 ## Saving
 
@@ -174,7 +237,7 @@ the console.
 Shape is the easy half. The commoner failure in a bank this size is content that is
 well-formed and *missing*, so the same flag also reports coverage: polarity tagging per
 section, per-axis pole balance, category size, how many of its 20 (rarity × intensity)
-cells each category populates, and how much of each Motivation and Appearance pool is
+cells each category populates, and how much of each Motivation pool is
 actually reachable at default settings. Those are grouped and warned, never thrown —
 they say "this section is thin", not "this build is broken". It costs a normal load
 nothing. The app links to it from its own footer.
@@ -204,9 +267,9 @@ the same set in the browser, per category, for whoever is editing the files.
 * **Polarity coverage.** `polarityFit` is what lets a slider *combination* reach an
   individual trait rather than only a category. It needs a `pol` tag to select on, and
   four sections mostly do not have one: Vocabulary 34% tagged, Dialogue Grammar 33%,
-  Mannerisms 21%, Appearance 18% — against 100% for the seven profile sections and 75%
-  for Personality. Across those sections (about seven of 37 slots on a default sheet,
-  plus every Appearance card) the sliders currently choose the category and the dice
+  Mannerisms 21% — against 100% for the seven profile sections and 75%
+  for Personality. Across those sections (about seven slots on a default sheet)
+  the sliders currently choose the category and the dice
   choose the trait. Those traits are also invisible to `axisProfile`, the radar,
   conflict detection and the Relationship/Ensemble analysers, for the same reason.
 * **The (rarity × intensity) grid, per category.** On average a category populates 10.7
@@ -266,6 +329,30 @@ politeness layer and brings the stress response in, and a cast view that puts on
 situation to every member and marks the devices more than one of them reaches for.
 These are demonstrations of shape, not publishable prose.
 
+**Another take** composes every line again from the same sheet. The line seed covers the
+sheet's traits, the prompt's position and a take counter, so a take can be reproduced
+and two prompts never share a seed. Under **Add your own situation** you can write your
+own prompt ("Turning down the captain") and pick the built-in situation it should be
+composed like. Author prompts are saved with the current project; without a project
+they last for the session.
+
+**Voice collisions.** The Relationships tab shows a heatmap of every cast pair. Each cell
+counts the devices and rules the two members share across all prompts, including your
+own. **De-collide** rerolls the member with the highest total, keeping their name and
+axis posture. It keeps the new version only if the cast's total goes down, and an Undo
+toast brings the old one back.
+
+**Retire for this project** (⏸ on a trait card) is softer than a ban. It cuts the trait's
+weight in new characters to 15% but never removes it. The retired list is stored with
+the current project and follows it when you switch projects. Replaying a seed ignores
+it, so a seed always rebuilds the character it named.
+
+**Arc timeline export** (Arc panel → Export timeline) downloads markdown with one
+section per event: the belief tested, the choice, the cost and the changes you
+accepted. Each section also shows how the pressure sheet moved after that event. Every
+step uses the same pressure sub-stream, so a slot shows as changed only when the sheet
+under it changed.
+
 ## Casts, relationships and projects
 
 **Relationship workspace.** Cast members can be joined by directed edges carrying trust,
@@ -276,6 +363,54 @@ is yours to overwrite. Eight named roles (rival, mentor, protégé, confidant, d
 antagonist, ally, the ex) will also generate a new member built to sit opposite an
 anchor, with the edge recorded. Edges travel in the cast JSON and markdown, are
 validated on import, and are dropped when a member leaves.
+
+**Cast seats and distinct voices.** A generated cast is optimised jointly: after the
+roll, the member who shares the most voice devices with the others is rerolled (a few
+attempts per pass, seeded off the cast seed) and kept only if the cast's shared-device
+total drops. The seed readout reports the before/after; the "Distinct voices" checkbox
+turns it off. Each card carries a seat — Leader, Foil (furthest from the leader), Comic
+relief, Heart, Skeptic, Wildcard — read off Role, Humor, Attachment and the axis
+profile, with the reason on hover.
+
+**Foils** get a premise built from the source sheet: the foil who lives as if the
+source's Lie were false, who was there for the Wound and chose other Values, who wants
+the same thing by the same door. The generic premise list is the fallback.
+
+**Relationship web.** "Add both directions" creates A→B and B→A together, asymmetric by
+construction: statuses mirror (mentor/protégé), and whichever side leans in harder
+(anxious attachment, lower self-assurance, more warmth) is given more dependence and a
+different trust. Below the edges, the web draws the whole cast and lists factions
+(components of positive edges; shared Values when there are no edges yet), triads judged
+by structural balance ("R1 likes both R0 and R2, who cannot stand each other") or as a
+broker, shared secrets (two people who "know" something about the same third) and
+lopsided pairs.
+
+**Pressure ladder and recovery.** The Under Pressure panel shows three stages —
+irritated, cornered, broken — each built from named cards (first tell, stress response,
+the line in Values, the Defence, then the Lie, attachment and vice), with the current
+pressure dial highlighted, followed by a recovery sheet: first hours, who they go to,
+what helps (the Need), what grounds them, what does not help, how they repair it, and
+the story they tell afterwards. Both go into the markdown export.
+
+**Arcs read the event.** The belief/choice/cost text is matched against the Lie, Want,
+Need, Defence, Fear, Values and Price by shared content words, and the choice's verbs
+imply a shape ("lied" reads as deterioration). A choice about the Want loosens or
+tightens it; crossing a line in Values moves Values to its opposed category; touching
+the Need thins the Defence. Steadfast is no longer inert: Values deepen one step and a
+named cost becomes the Price they are paying. Arc templates (fall & recovery,
+corruption in three steps, positive change, steadfast, disillusionment) add a whole
+sequence written from the sheet, each step proposed against the sheet as the previous
+steps would leave it; every change still starts unaccepted.
+
+**Tier, lens, wildcard and label derivation.** Personality traits whose names have the
+shape of a learned behaviour ("Receipt-keeper", "Praise-fishing") are tagged secondary
+by rule (`tierSource: "derived"`), so `tierWeight` now covers ~520 traits instead of 55.
+The context lens reads each card's own text and category for its room (strangers, home,
+rank, work, danger, exhaustion) and falls back to axis- and section-level conditions,
+cutting "no rule moves it here" from about half of a sheet to about 5%. The wildcard's
+"survives because" is composed from the exception and the loudest trait it cuts
+against. Emergent archetype labels draw on larger word tables and can borrow a word
+from the sheet's own loudest traits. All of this lives in `js/mechanics.js`.
 
 **Project library.** A project groups the characters, casts, edges, arc events, settings
 and diversity archive of one book or campaign, beside the flat saves rather than
@@ -301,7 +436,29 @@ node tools/studio.js nearest "a phrase"     # what already exists near an idea
 node tools/studio.js review --pack=life     # what is unreviewed, and where
 node tools/studio.js preview --pack=life    # generate with core plus one pack only
 node tools/studio.js packs                  # the manifests and their id ranges
+node tools/studio.js suggest-pol --section=Humor --n=20   # polarity proposals for untagged traits
+node tools/studio.js families --min=0.4     # cluster similar traits into proposed conceptFamily names
+node tools/studio.js worldtag               # worldTags / conditions / exceptions coverage by section
+node tools/studio.js scaffold "Taps the table twice" --section=Mannerisms --category="Micro-Physical Tics" --pack=cells
 ```
+
+`suggest-pol` bases each proposal on the trait's nearest tagged neighbours in its
+section. It proposes an axis only when those neighbours agree on its sign. `families`
+proposes joining an existing family when a cluster already touches one, and flags a
+cluster that spans two families. `scaffold` prints a trait literal with the next free
+id in the pack, the section and category checked against the bank, a polarity
+proposal and the nearest existing traits. None of these commands writes to the bank.
+
+**Engine seams.** The engine can run with no DOM. `setEngineSettings({divergence,
+wildcardToggle, wildcardCount, pressureLevel, rangeFocus, ...})` or
+`withEngineSettings(obj, fn)` supplies values by control id, and any id the object
+leaves out is still read from the page. A build's steering state (avoid set, context
+bias, motivation links, archetype profile, affinity vector, replay mode) is one draw
+context. `captureDrawContext()` reads it, `withDrawContext(ctx, fn)` applies it and
+restores it afterwards, and `buildCharacterState({..., drawContext})` builds inside it.
+Speculative builds restore the whole context. Context rules apply in a fixed order: a
+tag you switched off, then a negated match, then text rules, then age rules. The
+combined per-category multiplier is clamped to 0.2–4×, and a personality nudge to ±36.
 
 ## Rarity
 
@@ -344,7 +501,7 @@ no quiet content to redraw into.
 - `js/data/traits-core.js` — the original hand-authored trait bank, one entry per line
 - `js/data/traits-supplement.js` — the intensity-tail supplements (ids 90000+)
 - `js/data/traits-situational.js` — the thirteen Situational pools (ids 110000+)
-- `js/data/traits-tails.js` — Appearance depth and i1/i5 tail fill (ids 120000+)
+- `js/data/traits-tails.js` — i1/i5 intensity tail fill (ids 120000+)
 - `js/data/traits-depth.js` — Need / Ghost / Defence and listening traits (ids 130000+),
   including the low-intensity depth pass that gave those three pools a quiet tail
 - `js/data/traits-balance.js` — polarity and archetype balancing fill (ids 140000+)
@@ -355,8 +512,9 @@ no quiet content to redraw into.
 - `js/engine.js` — indexes, tagging passes, the weight matrix, and every pick path
 - `js/generate.js` — seeded generation, reroll, pins, undo, scoring
 - `js/render.js` — the sheet, exports, imports, toasts
+- `js/mechanics.js` — cast seats and joint voice optimisation, sheet-built foil premises, relationship web, pressure ladder and recovery, arc reading and templates, derived tiers/lens conditions/wildcard rationale/label words
 - `js/app.js` — storage, cast, relationships, foil, UI wiring
-- `sw.js` — service worker, caches the shell so the bank isn't refetched every visit
+- `sw.js` — service worker: network-first with an offline precache of the whole shell
 - `tools/studio.js` — the content studio: validate, coverage, nearest, review, preview, packs
 - `tests/` — the test harness and suite; `tests/bank-report.js` is the measurement dashboard
 - `package.json` — no build step; it exists to pin the browser-test dependency
@@ -365,3 +523,10 @@ The bank used to live on a single 1.4MB line inside `js/app.js`, which made the 
 unopenable in several editors and every content change an unreviewable diff. It is
 now one trait per line across the data files above; the scripts are plain classic
 scripts loaded in order, sharing one global scope, so there is still nothing to build.
+
+## Never-allowed features
+
+Permanently out of scope. Do not implement or propose these (see `CLAUDE.md`):
+
+- **Name generator.** Names stay user-entered free text.
+- **Appearance generator and Appearance section.** No appearance section, traits, sliders or generation.

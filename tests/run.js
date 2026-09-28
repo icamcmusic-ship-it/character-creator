@@ -546,9 +546,8 @@ check('every budget group matches at least one slot on a real sheet', ()=>{
   const st = buildOnce(4242);
   const ids = Object.keys(st).filter(id => st[id] && st[id].trait);
   const empty = A.BUDGET_GROUPS.filter(g => !ids.some(g.match)).map(g=>g.id);
-  // Appearance depends on DOM sliders the harness leaves centred, so it is allowed to
-  // be empty here; everything else must be reachable or the control is a dead end.
-  assert(!empty.filter(id => id !== 'appearance').length, 'groups matching nothing: ' + empty.join(', '));
+  // Every group must be reachable or the control is a dead end.
+  assert(!empty.length, 'groups matching nothing: ' + empty.join(', '));
   return A.BUDGET_GROUPS.length - empty.length + ' of ' + A.BUDGET_GROUPS.length + ' groups populated';
 });
 check('every preset resolves to caps the engine recognises', ()=>{
@@ -700,7 +699,7 @@ check('every category is reachable by some pick path', ()=>{
      to catch a whole category being orphaned by an incomplete lookup table. */
   const named = new Set();
   Object.values(A.AXES).forEach(ax=> named.add(ax.section + '||' + ax.category));
-  const drawnByCategory = new Set(['Vocabulary Traits','Mannerisms','Dialogue Grammar Traits','Appearance']);
+  const drawnByCategory = new Set(['Vocabulary Traits','Mannerisms','Dialogue Grammar Traits']);
   A.PROFILE_SECTIONS.forEach(ps=> drawnByCategory.add(ps.section));
   A.PERSONALITY_AXES.forEach(a=> [a.pos,a.neg,a.mid].forEach(c=>{ if(c) named.add('Personality Traits||'+c); }));
   const orphans = [];
@@ -1196,7 +1195,7 @@ function sheetWithEmptySlots(){
     mannerCount:2, vocabCount:2, rarityPref:'balanced', vocabPref:null});
   const keys = Object.keys(st);
   // Blank a profile slot, a fixed-spine slot, and a personality slot.
-  ['prof_role_0','register','verbosity','grammar','app_move','app_mark']
+  ['prof_role_0','register','verbosity','grammar']
     .forEach(k=>{ if (st[k]) st[k] = A.emptySlot(k, st[k].label); });
   const pers = keys.find(k=>k.startsWith('pers_'));
   if (pers) st[pers] = A.emptySlot(pers, st[pers].label);
@@ -1223,7 +1222,7 @@ check('a sheet with empty slots exports, scores and analyses without throwing', 
 });
 check('an all-empty sheet is still exportable', ()=>{
   const st = {};
-  ['verbosity','register','grammar','app_move','prof_role_0']
+  ['verbosity','register','grammar','prof_role_0']
     .forEach(k=> st[k] = A.emptySlot(k, k));
   const out = A.sheetToText(st, {name:'Nobody'}, {});
   assert(typeof out === 'string' && out.includes('Nobody'), 'no usable export');
@@ -1396,8 +1395,8 @@ group('Motivation & Wound is wired in');
 /* The section the sheet leads with, that draws on every character, and that supplies
    the pressure trigger, participated in the weight matrix in NEITHER direction: not one
    of its seven categories was a WEIGHT_MATRIX target, none had a DEPTH_TO_PERSONALITY
-   entry, and it was excluded from WILDCARD_SECTIONS and PRESSURE_SHIFT_SECTIONS. Its
-   whole outbound influence was one hardcoded link to the Distinguishing Marks target. */
+   entry, and it was excluded from WILDCARD_SECTIONS and PRESSURE_SHIFT_SECTIONS. It had
+   no outbound influence at all. */
 check('a wound actually moves the categories downstream of it', ()=>{
   const measure = (text) => {
     const counts = {attachment:{}, values:{}, role:{}};
@@ -1490,24 +1489,16 @@ check('the fixed-category slots draw from a real range', ()=>{
   // slot id -> the floor it must clear over N builds. Set below what the engine
   // currently achieves, so ordinary content churn doesn't trip it and a structural
   // regression does.
-  /* Motivation and Appearance were added to this list after a 400-character audit found
-     every one of the twenty-five most-repeated traits in the app came from those two
-     sections — 23-38 distinct per Motivation slot with a top trait at 13%, and 19/22 for
-     the two Appearance slots seated on every sheet. The floors here are set below what
-     the engine now achieves (44-68 for Motivation, 28/33 for Appearance over 200
-     builds), so content churn doesn't trip them and a structural regression does.
-
-     app_move and app_mark keep a looser top-share allowance than everything else,
-     stated rather than hidden: they draw from the two smallest always-drawn pools in
-     the bank (44 and 43 traits) and are seated on every sheet regardless of any slider,
-     so their ceiling is a content limit, not a weighting one. */
+  /* Motivation was added to this list after a 400-character audit found it among the
+     most-repeated sections in the app — 23-38 distinct per slot with a top trait at 13%.
+     The floors here are set below what the engine now achieves (44-68 over 200 builds),
+     so content churn doesn't trip them and a structural regression does. */
   const FLOORS = {register: 40, verbosity: 30, pers_honesty: 20, pers_confidence: 20,
                   pers_curiosity: 20, pers_manners: 20, pers_activeness: 20,
                   prof_motivation_0: 40, prof_motivation_1: 35, prof_motivation_2: 32,
                   prof_motivation_3: 35, prof_motivation_4: 32, prof_motivation_5: 30,
-                  prof_motivation_6: 32,
-                  app_move: 20, app_mark: 24};
-  const TOP_SHARE_LIMIT = {app_move: 0.11, app_mark: 0.12};
+                  prof_motivation_6: 32};
+  const TOP_SHARE_LIMIT = {};
   const thin = [];
   Object.entries(FLOORS).forEach(([slot, floor])=>{
     const m = seen.get(slot);
@@ -1537,7 +1528,9 @@ check('poolFloorTarget actually lifts a target off the pool floor', ()=>{
   return `floor ${lo.toFixed(2)} -> target ${lifted.toFixed(2)}, ${inWindow} traits in band`;
 });
 check('rangeSelect scales its window to the pool, not just the precision slider', ()=>{
-  const small = A.byFilter('Appearance', 'Movement & Bearing');
+  // The smallest Mannerisms category stands in for "a thin pool".
+  const small = A.CATS_BY_SECTION.get('Mannerisms').map(c => A.byFilter('Mannerisms', c))
+    .filter(p => p.length >= 20).sort((a,b)=> a.length - b.length)[0];
   const large = A.byFilter('Vocabulary Traits', 'Register & Formality Spectrum');
   const rs = (pool) => A.rangeSelect(pool, A.poolFloorTarget(pool, A.targetFromMag(40)));
   const a = rs(small), b = rs(large);
@@ -1578,9 +1571,9 @@ group('Content debt');
 check('polarity coverage per section does not regress', ()=>{
   /* polarityFit is the mechanism that lets a slider combination reach an individual
      TRAIT rather than just a category. It needs a pol tag to select on, and four
-     sections are mostly untagged — so across Vocabulary, Grammar, Mannerisms and all of
-     Appearance (roughly seven of 37 slots on a default sheet, plus every Appearance
-     card) the sliders can currently only choose the category. Those sections are also
+     sections are mostly untagged — so across Vocabulary, Grammar and Mannerisms
+     (roughly seven slots on a default sheet) the sliders can currently only choose the
+     category. Those sections are also
      invisible to axisProfile, the radar, conflict detection and the ensemble analysers
      for the same reason. Closing this is a content pass — tagging ~1,950 traits — not a
      code change. */
@@ -1588,8 +1581,8 @@ check('polarity coverage per section does not regress', ()=>{
     'Conflict & Stress Response': 1, 'Social Role in a Group': 1, 'Values & Moral Line': 1,
     'Attachment & Intimacy Style': 1, 'Humor Style': 1, 'Habits & Vices': 1,
     'Motivation & Wound': 0.80, 'Verbosity Traits': 0.74, 'Personality Traits': 0.73,
-    'Vocabulary Traits': 0.32, 'Dialogue Grammar Traits': 0.31,
-    'Mannerisms': 0.20, 'Appearance': 0.17,
+    'Vocabulary Traits': 0.40, 'Dialogue Grammar Traits': 0.38,   // raised after the §6 keyword pol back-fill
+    'Mannerisms': 0.30,
   };
   const by = new Map();
   T.forEach(t=>{
@@ -1639,8 +1632,15 @@ check('no polarity axis becomes more one-sided', ()=>{
      after the 2026 §4.4 polarity pack: formality 72 -> 68%, analytical 69 -> 67%,
      self-confidence 38.5 -> 39.5%; physical energy (64 -> 60%) and wordiness
      (38.5 -> 40%) are now inside the general band and no longer listed. */
+  /* 2026 audit §4 trait pass: formality (68 -> 59%) and analytical thinking (67 -> 60%)
+     are now inside the general 40-60% band, so they are held to it like every other
+     axis rather than to a recorded lopsided band. */
+  /* Removing the Appearance section took out its disc- (unkempt) tags, which left
+     discipline just over the band at ~60.2% positive. Recorded here so it can only
+     improve, rather than widening the general band for every axis. */
   const FLOORS = {
-    ego: [0.37, 0.45], intel: [0.62, 0.70], form: [0.62, 0.70],
+    ego: [0.37, 0.45],
+    disc: [0.56, 0.61],
   };
   const poles = {};
   T.forEach(t=> Object.entries(t.pol || {}).forEach(([ax, v])=>{
@@ -2337,10 +2337,10 @@ check('a contradiction carries when / with whom / what changes / cost, and the a
 
 check('trait dimensions come from the trait when authored and are flagged when inferred', ()=>{
   const authored = T.find(t=> t.frequency && t.visibility && t.persistence && t.narrativeSalience);
-  const bare = T.find(t=> !t.frequency && !t.visibility && t.section === 'Appearance');
+  const bare = T.find(t=> !t.frequency && !t.visibility && t.section === 'Mannerisms');
   const d1 = A.traitDimensions(authored), d2 = A.traitDimensions(bare);
   assert(!d1.inferred.length && d1.frequency === authored.frequency, 'authored dimensions should be used as written');
-  assert(d2.inferred.length === 4 && d2.visibility === 5, `an Appearance trait should infer visibility 5 (${JSON.stringify(d2)})`);
+  assert(d2.inferred.length === 4 && d2.visibility === 4, `a Mannerisms trait should infer visibility 4 (${JSON.stringify(d2)})`);
   const secs = new Set(T.map(t=>t.section)); Object.keys(A.DIM_DEFAULTS_BY_SECTION).forEach(sec=> assert(secs.has(sec), `DIM_DEFAULTS names an unknown section "${sec}"`));
   return `authored ${authored.trait} · inferred ${bare.trait} → V${d2.visibility} P${d2.persistence}`;
 });
@@ -2463,7 +2463,7 @@ check('edges survive a cast round-trip and dangling ones are dropped', ()=>{
 
 group('Arcs: proposed changes, acceptance, replay and undo');
 
-check('an event proposes changes in its own direction, deterministically, and steadfast proposes none', ()=>{
+check('an event proposes changes in its own direction, deterministically, and steadfast only hardens Values/Price', ()=>{
   const st = _mechSheet(7501);
   const grow = A.makeArcEvent(1, {title:'She told the truth', shape:'growth', cost:'Lost the job she had been protecting for nine years'});
   const c1 = A.proposeArcChanges(st, grow, []);
@@ -2472,11 +2472,13 @@ check('an event proposes changes in its own direction, deterministically, and st
   assert(JSON.stringify(c1) === JSON.stringify(c2), 'the proposal is not deterministic in the event id');
   c1.forEach(c=> assert(c.why && c.accepted === false && c.fromId !== c.toId, 'a change must be explained and start unaccepted'));
   const still = A.proposeArcChanges(st, A.makeArcEvent(2, {shape:'steadfast', title:'He stayed'}), []);
-  assert(!still.length, 'steadfast should propose nothing at all');
+  // Section 6: steadfast is no longer inert — it may deepen Values or move the Price,
+  // but it never moves a personality card (they did not change; the line hardened).
+  assert(still.every(c => /^prof_(values|goals)_/.test(c.slotId)), 'steadfast moved something other than Values/Price: ' + still.map(c=>c.slotId));
   const down = A.proposeArcChanges(st, A.makeArcEvent(3, {shape:'deterioration', title:'He drank instead'}), []);
   assert(down.length, 'deterioration proposed nothing');
   assert(JSON.stringify(down) !== JSON.stringify(c1), 'growth and deterioration should not propose the same thing');
-  return `growth ${c1.length}, deterioration ${down.length}, steadfast 0`;
+  return `growth ${c1.length}, deterioration ${down.length}, steadfast ${still.length}`;
 });
 
 check('only accepted changes apply, and the source sheet is never mutated', ()=>{
@@ -2708,6 +2710,1011 @@ check('nothing is overwritten unless it was chosen, and the choice is per entry'
   assert(one.find(p=>p.id===mine[1].id).name === 'B', 'an unchosen conflict was overwritten anyway');
   assert(JSON.stringify(mine.map(p=>p.name)) === '["A","B"]', 'applyMerge mutated the list it was given');
   return `2 conflicts: one taken, one kept, 1 added`;
+});
+
+
+/* Audit fixes B1–B19 (engine/generate side). These run in their OWN engine instance
+   with a stubbed DOM, because they drive full generations, batches and the named modes
+   and must not leak state into the checks above. */
+group('Audit fixes: seeds, pins, locks, requirements, budgets, modes');
+const G = (function(){
+  const g = loadEngine();
+  const d = g.document;
+  ['verbositySlider','registerSlider','composureSlider','mannerCount','vocabCount'].forEach(id=>d._set(id,{value:id.includes('Count')?'3':'0'}));
+  g.api.PERSONALITY_AXES.forEach(a=>d._set('pers_'+a.id,{value:'0'}));
+  g.api.PROFILE_SECTIONS.forEach(ps=>{
+    d._set('sec_'+ps.id,{checked:true});
+    d._set('pw_'+ps.id,{value:'',tagName:'SELECT',options:[{value:''}]});
+    d._set('type_'+ps.id,{value:'',tagName:'SELECT',options:[{value:''}]});
+  });
+  d._set('seedInput',{value:''}); d._set('batchTray',{}); d._set('charName',{value:''});
+  d._set('sheet',{classList:{contains(){return true},add(){},remove(){}}});
+  d._set('pressureSheet',{}); d._set('stressToggle',{checked:false}); d._set('divergence',{value:'0.3'});
+  g.evalIn("renderSheet=function(){};checkConflicts=function(){};renderNovelty=function(){};renderBatchTray=function(){};srAnnounce=function(){};renderSlotChange=function(){};var __toasts=[];toast=function(m){__toasts.push(m)};");
+  g.gen = seed => { d.getElementById('seedInput').value = seed; return g.evalIn('_runGeneration()'); };
+  return g;
+})();
+
+check('B1 — v1- seeds with a #suffix or overflow hash whole; canonical v1- still decodes', ()=>{
+  const n = s => G.evalIn(`seedNumberFrom(${JSON.stringify(s)})`);
+  assert(n('v1-abc') === parseInt('abc', 36), 'canonical v1- seed no longer decodes to its number');
+  assert(G.evalIn(`seedNumberFrom(encodeSeed(4000000000))`) === 4000000000, 'encodeSeed round-trip broken');
+  const set = new Set(['v1-abc','v1-abc#1','v1-abc#2'].map(n));
+  assert(set.size === 3, 'suffixed seeds collide with the base seed');
+  assert(n('v1-zzzzzzzzzz') === G.evalIn(`hashSeedString('v1-zzzzzzzzzz')`), 'overflowing v1- body was not hashed');
+  G.document.getElementById('seedInput').value = 'v1-k3x9q';
+  G.evalIn('generateBatch(4)');
+  const sigs = G.evalIn("batchCandidates.map(c=>[...c.signature.traitIds].sort().join(','))");
+  G.evalIn('dismissBatch()');
+  assert(new Set(sigs).size === sigs.length, 'batch candidates from a v1- seed are identical');
+  return `${sigs.length} distinct candidates`;
+});
+
+check('B2/B4 — pins never redraw locked slots, and never seat a duplicate', ()=>{
+  G.gen('pin1');
+  const k = G.evalIn("Object.keys(state).find(k=>k.startsWith('manner'))");
+  const id = G.evalIn(`state['${k}'].trait.id`);
+  G.evalIn(`state['${k}'].locked=true; pinnedTargets['${k}']=3;`);
+  for (let i = 0; i < 8; i++){ G.gen('pin' + (i+2)); assert(G.evalIn(`state['${k}'].trait.id`) === id, 'a locked, pinned slot was redrawn'); }
+  G.evalIn("__toasts.length=0");
+  G.evalIn(`adjustPin('${k}', 1)`);
+  assert(G.evalIn(`state['${k}'].trait.id`) === id, 'adjustPin redrew a locked slot');
+  G.evalIn(`Object.keys(state).forEach(k=>{if(state[k])state[k].locked=false}); pinnedTargets={}; Object.keys(state).forEach(k=>{if(state[k]&&state[k].trait)pinnedTargets[k]=5})`);
+  let dup = 0;
+  for (let i = 0; i < 25; i++){
+    G.gen('pq' + i);
+    dup += G.evalIn(`(function(){const s=new Set();let n=0;Object.values(state).forEach(x=>{if(x&&x.trait){if(s.has(x.trait.id))n++;s.add(x.trait.id)}});return n})()`);
+  }
+  G.evalIn('pinnedTargets={}');
+  assert(dup === 0, dup + ' duplicates seated by pin redraws');
+  return 'lock wins; 0 duplicates in 25 fully pinned builds';
+});
+
+check('B5 — two LOCKED traits in a never-together pair are reported, not replaced or deleted', ()=>{
+  const out = G.evalIn(`(function(){
+    const ts = TRAITS.filter(t=>t.section==='Mannerisms');
+    const a = ts[0], b = ts[1];
+    const obj = {m0:{slotId:'m0',locked:true,trait:a}, m1:{slotId:'m1',locked:true,trait:b}};
+    const saved = exclusivePairs; exclusivePairs = [[a.id,b.id]];
+    try { detectConstraintConflicts(); applyExclusivePairs(obj, 0); }
+    finally { exclusivePairs = saved; }
+    return {ids:[obj.m0 && obj.m0.trait.id, obj.m1 && obj.m1.trait.id], want:[a.id,b.id],
+            reported: getConstraintConflicts().some(c=>c.kind==='locked-vs-exclusive')};
+  })()`);
+  assert(out.ids[0] === out.want[0] && out.ids[1] === out.want[1], 'a locked slot was replaced or deleted');
+  assert(out.reported, 'the conflict was not reported');
+  return 'sheet untouched, conflict reported';
+});
+
+check('B6 — a required-in-place trait is unlocked once the requirement is removed', ()=>{
+  G.gen('r1');
+  const k = G.evalIn("Object.keys(state).find(k=>k.startsWith('manner'))");
+  const id = G.evalIn(`state['${k}'].trait.id`);
+  G.evalIn(`requiredTraitIds.push(${id})`); G.gen('r1');
+  assert(G.evalIn(`state['${k}'].trait.id`) === id && G.evalIn(`state['${k}'].locked`) === true, 'setup: not seated in place');
+  G.evalIn('requiredTraitIds.length=0');
+  // Toss works straight away, without a regenerate in between.
+  G.evalIn(`rerollSlot('${k}')`);
+  assert(G.evalIn(`!!state['${k}'].locked`) === false && G.evalIn(`!!state['${k}'].required`) === false, 'stale required lock survived a Toss');
+  // And a fresh build does not carry it as a lock.
+  G.evalIn(`requiredTraitIds.push(${id})`); G.gen('r1'); G.evalIn('requiredTraitIds.length=0');
+  let same = 0; for (let i = 0; i < 6; i++){ G.gen('r' + (i+3)); if (G.evalIn(`state['${k}'] && state['${k}'].trait.id`) === id) same++; }
+  assert(same < 6, 'the formerly required trait stayed locked across builds');
+  return `redrawn in ${6-same}/6 builds`;
+});
+
+check('B7 — a depth-first batch leaves the sliders alone; choosing applies the pick\'s sliders', ()=>{
+  const d = G.document;
+  d._set('depthFirstToggle',{checked:true});
+  const snap = () => ['verbositySlider','registerSlider','composureSlider'].map(i=>d.getElementById(i).value)
+    .concat(G.api.PERSONALITY_AXES.map(a=>d.getElementById('pers_'+a.id).value)).join(',');
+  const before = snap();
+  d.getElementById('seedInput').value = '';
+  G.evalIn('generateBatch(3)');
+  try {
+    assert(snap() === before, 'the batch left a discarded candidate\'s sliders on screen');
+    const want = G.evalIn("JSON.stringify(batchCandidates[1].sliders)");
+    G.evalIn('chooseBatch(1)');
+    const now = JSON.parse(want);
+    assert(Object.keys(now).every(id => String(d.getElementById(id).value) === String(now[id])), 'chooseBatch did not apply the candidate\'s sliders');
+  } finally {
+    d._set('depthFirstToggle',{checked:false});
+    ['verbositySlider','registerSlider','composureSlider'].forEach(id=>d.getElementById(id).value='0');
+    G.api.PERSONALITY_AXES.forEach(a=>d.getElementById('pers_'+a.id).value='0');
+  }
+  return 'sliders restored, pick applied';
+});
+
+check('B11/B12 — Same world keeps the name; Variation\'s undo has no phantom locks', ()=>{
+  const d = G.document;
+  d.getElementById('charName').value = 'Alice'; G.gen('sw');
+  d.getElementById('seedInput').value = '';
+  G.evalIn('generateSameWorld()');
+  assert(d.getElementById('charName').value === 'Alice', 'Same world erased the name field');
+  assert(G.evalIn('charMeta.name') === 'Alice', 'Same world lost the name on the sheet');
+  G.evalIn("Object.keys(state).forEach(k=>{if(state[k])state[k].locked=false})");
+  G.evalIn('generateVariation()');
+  G.evalIn('undoLast()');
+  const locked = G.evalIn("Object.values(state).filter(s=>s&&s.locked).length");
+  d.getElementById('charName').value = '';
+  assert(locked === 0, locked + ' phantom locks restored by undo');
+  return 'name kept; undo restores 0 locks';
+});
+
+check('B13 — the Background preset is achievable on a full sheet', ()=>{
+  G.evalIn("applyBudgetPreset('background')");
+  let unmet = 0;
+  try {
+    for (let i = 0; i < 10; i++){
+      G.gen('bg' + i);
+      const r = G.evalIn('getBudgetReport()');
+      if (Object.values(r.intensity).some(x=>x.unmet) || Object.values(r.rarity).some(x=>x.unmet)) unmet++;
+    }
+  } finally { G.evalIn('clearBudgets()'); }
+  assert(unmet === 0, `unmet in ${unmet}/10 builds`);
+  return 'met in 10/10 builds';
+});
+
+check('B14 — an exclusivity swap respects the rarity caps when it can', ()=>{
+  const out = G.evalIn(`(function(){
+    clearBudgets(); rarityCaps.signature = 0; rarityCaps.distinctive = 0;
+    const cat = [...new Set(TRAITS.filter(t=>t.section==='Mannerisms').map(t=>t.category))]
+      .find(c=>{ const p = byFilter('Mannerisms', c); return p.some(t=>rarityTier(t)==='common') && p.length > 3; });
+    const pool = byFilter('Mannerisms', cat);
+    const a = pool[0], b = pool.find(t=>t.id!==a.id);
+    const saved = exclusivePairs; exclusivePairs = [[a.id,b.id]];
+    let bad = 0;
+    try {
+      for (let i = 0; i < 20; i++){
+        const obj = {m0:{slotId:'m0',locked:true,trait:a}, m1:{slotId:'m1',trait:b,target:3}};
+        applyExclusivePairs(obj, 0);
+        if (obj.m1 && ['signature','distinctive'].includes(rarityTier(obj.m1.trait))) bad++;
+      }
+    } finally { exclusivePairs = saved; clearBudgets(); }
+    return bad;
+  })()`);
+  assert(out === 0, out + ' swaps broke a zero cap');
+  return '0/20 swaps broke a cap';
+});
+
+check('B15 — Toss on an "at least one from" slot redraws within its category', ()=>{
+  G.gen('rc');
+  const out = G.evalIn(`(function(){
+    const k = Object.keys(state).find(k=>k.startsWith('manner'));
+    const c = state[k].trait.category;
+    const t = byFilter(state[k].trait.section, c).find(t=>t.id!==state[k].trait.id && !Object.values(state).some(s=>s&&s.trait&&s.trait.id===t.id));
+    state['reqcat_0'] = {slotId:'reqcat_0', locked:true, required:true, label:'Required (at least one) — '+c, trait:t};
+    const before = t.id;
+    rerollSlot('reqcat_0');
+    const s = state['reqcat_0'];
+    delete state['reqcat_0'];
+    return {changed: s.trait.id !== before, same: s.trait.category === c, req: !!s.required};
+  })()`);
+  assert(out.changed && out.same && out.req, JSON.stringify(out));
+  return 'redrawn in category, still required';
+});
+
+check('B17 — explainWhyNot escapes category and section names', ()=>{
+  const html = G.evalIn(`(function(){
+    const t = Object.assign({}, TRAITS[0], {category:'<img src=x onerror=alert(1)>', section:'<b>x</b>'});
+    bannedCategories.add(t.category);
+    try { return explainWhyNot(t); } finally { bannedCategories.delete(t.category); }
+  })()`);
+  assert(!/<img/.test(html) && /&lt;img/.test(html), 'category name reached the HTML unescaped');
+  return 'escaped';
+});
+
+check('B19 — facets of one drawAll section are not reported as conflicts with each other', ()=>{
+  const n = G.evalIn(`(function(){
+    const ts = TRAITS.filter(t=>t.section==='Role by Context' && t.pol);
+    let a, b;
+    outer: for (const x of ts) for (const y of ts){ for (const ax in x.pol){ if (y.pol && x.pol[ax]*y.pol[ax] < 0){ a=x; b=y; break outer; } } }
+    if (!a) return -1;
+    return checkConflictsFor({prof_contextrole_0:{trait:a}, prof_contextrole_1:{trait:b}}).length;
+  })()`);
+  assert(n === 0 || n === -1, n + ' conflicts reported inside one section');
+  return n === -1 ? 'no opposing pair in bank' : '0 reported';
+});
+
+
+/* ================= §3: SIDE FEATURES AND ROBUSTNESS =================
+   Draw context, headless settings, the context-rule cap, voice-lab seeds and author
+   prompts, the collision heatmap, retire-for-project, the pressure sheet's budgets,
+   and the coverage ratchet. Run in the audit engine (G) so nothing leaks upward. */
+group('§3: draw context, headless settings, side features');
+
+check('withDrawContext applies a context and puts every global back', ()=>{
+  const out = G.evalIn(`(function(){
+    const before = JSON.stringify(Object.entries(captureDrawContext()).map(([k,v])=>[k, v instanceof Map ? [...v] : v]));
+    let inside = null;
+    withDrawContext({avoidSet:{ids:new Set([1]),families:new Set(),cats:new Set()}, contextBias:new Map([['X',3]]), replayMode:true}, ()=>{
+      inside = {avoid: !!AVOID_SET, bias: contextMultiplier('X'), replay: !historyAwareGeneration()};
+    });
+    const after = JSON.stringify(Object.entries(captureDrawContext()).map(([k,v])=>[k, v instanceof Map ? [...v] : v]));
+    return {same: before === after, inside};
+  })()`);
+  assert(out.inside.avoid && out.inside.bias === 3 && out.inside.replay, 'context not applied: ' + JSON.stringify(out.inside));
+  assert(out.same, 'a global was left changed after withDrawContext');
+  return 'applied inside, restored after';
+});
+
+check('a build with a clean draw context is byte-identical to the same seed without one', ()=>{
+  const out = G.evalIn(`(function(){
+    clearContextBias(); setAvoidSet(null);
+    const opts = {verbLevel:0.4, regLevel:-0.3, compLevel:0, mannerCount:3, vocabCount:2, rarityPref:'balanced', vocabPref:null, personalityOverrides:{}};
+    const run = extra => withReplayMode(true, ()=> withRng(mulberry32(4242), ()=>{ rollCharacterVariants(); return JSON.stringify(compressSlots(buildCharacterState(Object.assign({}, opts, extra)))); }));
+    const a = run({}), b = run({drawContext: makeDrawContext()}), c = run({});
+    const leaked = captureDrawContext().avoidSet !== null;
+    return {ab: a === b, ac: a === c, leaked};
+  })()`);
+  assert(out.ac, 'the seeded build itself is not reproducible');
+  assert(out.ab, 'a clean draw context changed a seeded build');
+  assert(!out.leaked, 'the draw context leaked out of the build');
+  return 'identical';
+});
+
+check('a speculative build restores the whole draw context', ()=>{
+  const ok = G.evalIn(`(function(){
+    const snap = captureDrawContext();
+    withSpeculativeGeneration(()=>{ setAvoidSet({ids:new Set([9]),families:new Set(),cats:new Set()}); setMotivationLinks({a:1}); setArchetypeProfile({role:'x'}); });
+    const now = captureDrawContext();
+    return DRAW_CONTEXT_KEYS.every(k => now[k] === snap[k]);
+  })()`);
+  assert(ok, 'withSpeculativeGeneration left draw-context globals changed');
+  return 'restored';
+});
+
+check('headless settings drive the engine dials without a DOM', ()=>{
+  const domDiv = G.evalIn('divergenceLevel()');
+  const out = G.evalIn(`(function(){
+    return withEngineSettings({divergence:0.7, wildcardToggle:true, wildcardCount:2, pressureLevel:40, rangeFocus:0}, ()=>
+      ({div: divergenceLevel(), wc: wildcardCount(), p: pressureLevel(), band: bandHalf(), f: floatVal('divergence', 0), s: strVal('rarityPref','balanced')}));
+  })()`);
+  assert(out.div === 0.7 && out.wc === 2 && out.p === 0.4, JSON.stringify(out));
+  assert(Math.abs(out.band - 1.35) < 1e-9, 'rangeFocus from settings not honoured: ' + out.band);
+  assert(out.s === 'balanced', 'an id absent from the settings object should fall back to the DOM/default');
+  const after = G.evalIn('divergenceLevel()');
+  assert(after === domDiv, 'settings leaked past withEngineSettings: ' + after);
+  // And a fully DOM-less engine can build from settings alone.
+  const bare = loadEngine(['buildCharacterState','setEngineSettings','withRng','mulberry32','divergenceLevel']);
+  bare.api.setEngineSettings({divergence:0.25, avoidRecentToggle:false});
+  const st = bare.api.withRng(bare.api.mulberry32(5), ()=> bare.api.buildCharacterState({verbLevel:0, regLevel:0, compLevel:0, mannerCount:2, vocabCount:1, rarityPref:'balanced', vocabPref:null, personalityOverrides:{}}));
+  assert(bare.api.divergenceLevel() === 0.25 && Object.values(st).some(x=>x && x.trait), 'headless build failed');
+  return 'settings win, DOM is the default';
+});
+
+check('stacked context rules are clamped, and precedence holds', ()=>{
+  const out = G.evalIn(`(function(){
+    const r = buildContextBias('soldier, ex-military veteran of the war, army officer, a sergeant, noble lady, criminal thief smuggler', '70');
+    const vals = [...r.bias.values()];
+    const nudges = Object.values(r.nudge);
+    clearContextSuppression();
+    const neg = buildContextBias('not a soldier', '');
+    clearContextBias();
+    return {min: Math.min(...vals), max: Math.max(...vals), nmax: Math.max(0, ...nudges.map(Math.abs)), n: vals.length, negNotes: neg.notes.length, negRejected: neg.rejected.length,
+            cap: [CONTEXT_MULT_MIN, CONTEXT_MULT_MAX, CONTEXT_NUDGE_CAP]};
+  })()`);
+  assert(out.n > 0, 'no rule matched the test text');
+  assert(out.min >= out.cap[0] && out.max <= out.cap[1], `multiplier escaped [${out.cap[0]}, ${out.cap[1]}]: ${out.min}..${out.max}`);
+  assert(out.nmax <= out.cap[2], 'nudge escaped its cap: ' + out.nmax);
+  assert(out.negNotes === 0 && out.negRejected > 0, 'a negated match applied');
+  return `${out.n} categories, ${out.min.toFixed(2)}–${out.max.toFixed(2)}`;
+});
+
+check('voice-lab seed includes the prompt index and a reroll counter', ()=>{
+  const out = G.evalIn(`(function(){
+    let st = null;
+    for (let i = 0; i < 40 && !st; i++){ const s = withRng(mulberry32(800+i), ()=> buildCharacterState({verbLevel:1.5, regLevel:1.5, compLevel:0, mannerCount:2, vocabCount:2, rarityPref:'balanced', vocabPref:null, personalityOverrides:{warm:80, man:80}})); if (voiceLab(s,'baseline').some(l=>l.rules.length)) st = s; }
+    const txt = r => voiceLab(st, 'baseline', r).map(l=>l.text).join('|');
+    const a0 = txt(0), a0b = txt(0);
+    let moved = false; for (let r = 1; r < 12 && !moved; r++) if (txt(r) !== a0) moved = true;
+    return {stable: a0 === a0b, moved};
+  })()`);
+  assert(out.stable, 'the same reroll counter produced different lines');
+  assert(out.moved, 'no reroll counter changed any line');
+  return 'stable per take; another take differs';
+});
+
+check('author voice prompts compose, normalise, and join the comparison', ()=>{
+  const out = G.evalIn(`(function(){
+    setUserVoicePrompts([{label:'Turning down the captain', setup:'x', like:'refuse'}, {label:''}, {label:'Bad like', like:'nope'}]);
+    const ps = getUserVoicePrompts();
+    const st = withRng(mulberry32(31), ()=> buildCharacterState({verbLevel:0, regLevel:0, compLevel:0, mannerCount:2, vocabCount:2, rarityPref:'balanced', vocabPref:null, personalityOverrides:{}}));
+    const lines = voiceLab(st, 'baseline');
+    const cmp = voiceComparison([{state:st, meta:{name:'A'}},{state:st, meta:{name:'B'}}], ps[0].id, 'baseline');
+    setUserVoicePrompts([]);
+    return {n: ps.length, like: ps[1].like, total: lines.length, user: lines.filter(l=>l.user).length, rows: cmp.rows.length, builtIns: VOICE_PROMPTS.length};
+  })()`);
+  assert(out.n === 2, 'an empty label should be dropped: ' + out.n);
+  assert(out.like === 'request', 'an unknown "like" should fall back to request');
+  assert(out.total === out.builtIns + 2 && out.user === 2, JSON.stringify(out));
+  assert(out.rows === 2, 'an author prompt did not compose in the cast comparison');
+  return `${out.total} lines`;
+});
+
+check('the collision heatmap is symmetric and names the worst offender', ()=>{
+  const out = G.evalIn(`(function(){
+    const mk = s => withRng(mulberry32(s), ()=> buildCharacterState({verbLevel:1.5, regLevel:1.5, compLevel:0, mannerCount:2, vocabCount:2, rarityPref:'balanced', vocabPref:null, personalityOverrides:{warm:80}}));
+    const a = mk(1), b = mk(2);
+    const m = voiceCollisionMatrix([{state:a,meta:{name:'A'}},{state:a,meta:{name:'A2'}},{state:b,meta:{name:'B'}}], 'baseline');
+    let sym = true; for (let i=0;i<3;i++) for (let j=0;j<3;j++) if (m.matrix[i][j] !== m.matrix[j][i]) sym = false;
+    const argmax = m.totals.indexOf(Math.max(...m.totals));
+    return {sym, diag: m.matrix.every((r,i)=>r[i]===0), twins: m.matrix[0][1], worst: m.worst, argmax, totals: m.totals};
+  })()`);
+  assert(out.sym && out.diag, 'matrix not symmetric with a zero diagonal');
+  assert(out.twins > 0, 'two identical sheets shared nothing');
+  assert(out.worst === out.argmax, 'worst offender is not the largest row total: ' + JSON.stringify(out));
+  return `twins share ${out.twins}`;
+});
+
+check('de-collide rerolls the worst offender only when it lowers the total', ()=>{
+  const out = G.evalIn(`(function(){
+    const mk = s => withRng(mulberry32(s), ()=> buildCharacterState({verbLevel:1.5, regLevel:1.5, compLevel:0, mannerCount:2, vocabCount:2, rarityPref:'balanced', vocabPref:null, personalityOverrides:{warm:80}}));
+    const a = mk(11);
+    castStates = [castEntry(a, {}, {name:'A'}), castEntry(JSON.parse(JSON.stringify(a)), {}, {name:'B'}), castEntry(mk(12), {}, {name:'C'})];
+    castStates[1].state = a;
+    const sum = () => voiceCollisionMatrix(castStates, 'baseline').totals.reduce((x,y)=>x+y,0);
+    const before = sum();
+    const ids = castStates.map(c=>c.id);
+    toastUndo = function(){}; renderCast = function(){}; refreshRelSelectors = function(){};
+    deCollideCast();
+    const after = sum();
+    const same = castStates.map(c=>c.id).join() === ids.join();
+    castStates = [];
+    return {before, after, same};
+  })()`);
+  assert(out.same, 'de-collide changed cast membership');
+  assert(out.after <= out.before, `de-collide made it worse: ${out.before} → ${out.after}`);
+  return `${out.before} → ${out.after}`;
+});
+
+check('retire-for-project is a soft penalty in exploration and ignored on replay', ()=>{
+  const out = G.evalIn(`(function(){
+    const t = TRAITS[5];
+    setRetiredTraits([t.id]);
+    const explore = retirePenalty(t);
+    const replay = withReplayMode(true, ()=> retirePenalty(t));
+    const other = retirePenalty(TRAITS[6]);
+    setRetiredTraits([]);
+    return {explore, replay, other};
+  })()`);
+  assert(out.explore > 0 && out.explore < 1, 'a retired trait should be down-weighted, not banned: ' + out.explore);
+  assert(out.replay === 1 && out.other === 1, JSON.stringify(out));
+  // A seeded (explicit) build is byte-identical with the sheet's own traits retired.
+  G.gen('retire-replay');
+  const a = G.evalIn('JSON.stringify(compressSlots(state))');
+  const ids = G.evalIn('JSON.stringify(Object.values(state).filter(s=>s&&s.trait).map(s=>s.trait.id))');
+  G.evalIn(`setRetiredTraits(${ids})`);
+  G.gen('retire-replay');
+  const b = G.evalIn('JSON.stringify(compressSlots(state))');
+  // ...and exploration does move off them.
+  G.document.getElementById('seedInput').value = '';
+  let kept = 0, total = 0;
+  for (let i = 0; i < 6; i++){ G.evalIn('_runGeneration()'); const r = G.evalIn(`(function(){const s=new Set(${ids});const v=Object.values(state).filter(x=>x&&x.trait);return [v.filter(x=>s.has(x.trait.id)).length, v.length]})()`); kept += r[0]; total += r[1]; }
+  G.evalIn('setRetiredTraits([])');
+  assert(a === b, 'retiring traits changed a seeded replay');
+  assert(kept / total < 0.2, `retired traits still ${(100*kept/total).toFixed(0)}% of exploration sheets`);
+  return `replay identical; ${kept}/${total} retired seats in exploration`;
+});
+
+check('the pressure sheet respects rarity caps and never-together pairs', ()=>{
+  const out = G.evalIn(`(function(){
+    clearBudgets(); rarityCaps.signature = 0; rarityCaps.distinctive = 0;
+    let breaches = 0, pairBreaches = 0, sheets = 0;
+    const savedPairs = exclusivePairs;
+    try {
+      for (let i = 0; i < 12; i++){
+        const base = withRng(mulberry32(300+i), ()=> finalizeSheet(buildCharacterState({verbLevel:1, regLevel:0, compLevel:0, mannerCount:3, vocabCount:2, rarityPref:'balanced', vocabPref:null, personalityOverrides:{}}), {rarityPref:'balanced'}));
+        const ps = withRng(mulberry32(900+i), ()=> buildStressVariant(1, 0, 3, 'balanced', base));
+        const seated = Object.values(ps).filter(s=>s && s.trait);
+        sheets++;
+        breaches += seated.filter(s=>['signature','distinctive'].includes(rarityTier(s.trait))).length;
+        // Pair the first two seated pressure traits and rebuild on the same stream.
+        if (seated.length >= 2){
+          exclusivePairs = [[seated[0].trait.id, seated[1].trait.id]];
+          const ps2 = withRng(mulberry32(900+i), ()=> buildStressVariant(1, 0, 3, 'balanced', base));
+          const ids = new Set(Object.values(ps2).filter(s=>s&&s.trait).map(s=>s.trait.id));
+          if (ids.has(exclusivePairs[0][0]) && ids.has(exclusivePairs[0][1])) pairBreaches++;
+          exclusivePairs = savedPairs;
+        }
+      }
+    } finally { exclusivePairs = savedPairs; clearBudgets(); }
+    return {breaches, pairBreaches, sheets};
+  })()`);
+  assert(out.pairBreaches === 0, out.pairBreaches + ' pressure sheets seated both halves of a never-together pair');
+  assert(out.breaches === 0, out.breaches + ' capped-tier traits on pressure sheets with the cap at zero');
+  return `${out.sheets} pressure sheets clean`;
+});
+
+check('arc timeline diffs the pressure sheet per event', ()=>{
+  G.gen('arc-tl');
+  const out = G.evalIn(`(function(){
+    arcBase = JSON.parse(JSON.stringify(state)); arcEvents = [];
+    const ev = makeArcEvent(1, {title:'The fire', shape:'growth', at:'x'});
+    ev.changes = proposeArcChanges(state, ev, []).map(c => Object.assign(c, {accepted:true}));
+    arcEvents.push(ev);
+    const rows = arcTimeline(), md = arcTimelineMarkdown(), again = arcTimelineMarkdown();
+    const same = pressureSheetDiff(pressureState || {}, pressureState || {}).length;
+    arcEvents = []; arcBase = null;
+    return {n: rows.length, md, stable: md === again, same, hasDiff: Array.isArray(rows[0].pressureDiff)};
+  })()`);
+  assert(out.n === 1 && out.hasDiff, 'timeline rows missing');
+  assert(/## 1\. The fire/.test(out.md) && /Under pressure, after this event/.test(out.md), out.md.slice(0, 200));
+  assert(out.stable, 'the timeline export is not deterministic');
+  assert(out.same === 0, 'a sheet diffed against itself reported changes');
+  return 'deterministic markdown';
+});
+
+check('batch candidates each get a distinct seed', ()=>{
+  G.document.getElementById('seedInput').value = '';
+  G.evalIn('generateBatch(5)');
+  const seeds = G.evalIn("batchCandidates.map(c=>c.seed || (c.meta && c.meta.seed) || '')");
+  G.evalIn('dismissBatch()');
+  assert(seeds.every(Boolean), 'a candidate carries no seed: ' + JSON.stringify(seeds));
+  assert(new Set(seeds).size === seeds.length, 'duplicate batch seeds: ' + seeds.join(', '));
+  return seeds.length + ' distinct';
+});
+
+check('worldTags / conditions / exceptions coverage never falls (ratchet)', ()=>{
+  /* These fields validate but almost nothing sets them. The floor is what the bank held
+     when the ratchet was added; raise it when you tag more, never lower it. */
+  const FLOOR = {worldTags: 170, conditions: 640, exceptions: 0};   // raised by the §6 gap pack + worldTags back-fill
+  const T = A.TRAITS;
+  const have = k => T.filter(t => Array.isArray(t[k]) && t[k].length).length;
+  const now = {worldTags: have('worldTags'), conditions: have('conditions'), exceptions: have('exceptions')};
+  Object.keys(FLOOR).forEach(k => assert(now[k] >= FLOOR[k], `${k} coverage fell to ${now[k]} (floor ${FLOOR[k]})`));
+  return Object.keys(now).map(k => `${k} ${now[k]}`).join(', ');
+});
+
+
+group('§4 balancing: archetype identity, preset spread, trait-bank shape');
+
+check('§4: no two presets are near-duplicates (cosine over 13 axes + 3 voice postures)', ()=>{
+  /* The audit measured four pairs above 0.80 — Plain-Spoken/Blunt Foreman 0.86, Burnt-Out
+     Idealist/Former True Believer 0.83, Compulsive Fixer/Workaholic 0.81, Wounded Soldier/
+     Survivor 0.80. They were differentiated rather than merged so saved characters that
+     name them still load. Voice postures are scaled x50 onto the axis range. */
+  const AX = A.PERSONALITY_AXES.map(a=>a.id), K = Object.keys(A.ARCHETYPES);
+  const vec = k => { const a = A.ARCHETYPES[k]; return AX.map(x=>a.pers[x]||0).concat([a.verbosity*50, a.register*50, a.composure*50]); };
+  const cos = (u,v) => { let d=0,p=0,q=0; u.forEach((x,i)=>{ d+=x*v[i]; p+=x*x; q+=v[i]*v[i]; }); return d/Math.sqrt(p*q); };
+  let worst = [0,'',''];
+  for (let i=0;i<K.length;i++) for (let j=i+1;j<K.length;j++){ const c = cos(vec(K[i]),vec(K[j])); if (c > worst[0]) worst = [c,K[i],K[j]]; }
+  assert(worst[0] <= 0.80, `${worst[1]} / ${worst[2]} at ${worst[0].toFixed(2)}`);
+  [['plainSpoken','bluntForeman'],['burntIdealist','formerTrueBeliever'],['compulsiveFixer','workaholicAvoiding'],['soldier','undiscussedSurvivor']]
+    .forEach(([a,b])=>{ const c = cos(vec(a),vec(b)); assert(c < 0.70, `${a}/${b} still ${c.toFixed(2)}`); });
+  return `${K.length} presets, closest pair ${worst[1]}/${worst[2]} ${worst[0].toFixed(2)}`;
+});
+
+check('§4: presets are filled out, discipline is not skewed, and the missing types exist', ()=>{
+  const thin = Object.entries(A.ARCHETYPES).filter(([,a])=>Object.keys(a.pers).length < 6).map(([k])=>k);
+  assert(!thin.length, 'presets setting fewer than six axes: ' + thin.join(', '));
+  let p = 0, n = 0; Object.values(A.ARCHETYPES).forEach(a=>{ const v = a.pers.discipline; if (v > 0) p++; else if (v < 0) n++; });
+  assert(p / n <= 1.4, `discipline ${p}:${n}`);
+  ['newParent','midlifeReinventor','restlessRetiree','codeSwitcher','preciseLiteralist','incurableFlirt',
+   'secularIdeologue','nosyNeighbour','pompousBlowhard','maliciousTrickster'].forEach(k=> assert(A.ARCHETYPES[k], 'missing preset ' + k));
+  const unhinted = Object.entries(A.ARCHETYPES).filter(([,a])=>Object.keys(a.profile||{}).length < 4).map(([k])=>k);
+  assert(!unhinted.length, 'presets with fewer than four profile hints: ' + unhinted.join(', '));
+  const closed = Object.entries(A.ARCHETYPE_INTENT).filter(([,it])=>!it.open.length).map(([k])=>k);
+  assert(!closed.length, 'presets that leave no core section open: ' + closed.join(', '));
+  return `discipline ${p}:${n}`;
+});
+
+check('§4: a preset\'s profile hints usually land (identity survives the dice)', ()=>{
+  /* Measured before the hint-strength change: 50% of hinted single-slot sections landed
+     on their hint across 40 builds per preset; after it, ~65%. Held at 55% on a seeded
+     six-preset sample so the preset-to-sheet link cannot quietly weaken again. */
+  let hit = 0, tot = 0;
+  ['conartist','soldier','noble','cheerfulMess','pompousBlowhard','codeSwitcher'].forEach((key, ki)=>{
+    const arch = A.effectiveArchetype(key, 'base');
+    for (let i=0;i<20;i++){
+      let st;
+      A.withArchetypeProfile(arch.profile, ()=> A.withRng(A.mulberry32(0x5A4 + ki*101 + i), ()=>{
+        A.rollCharacterVariants();
+        const ov = {}; A.PERSONALITY_AXES.forEach(a=>{ ov[a.id] = arch.pers[a.id] !== undefined ? Math.round(arch.pers[a.id]*0.65) : 0; });
+        st = A.buildCharacterState({verbLevel:0, regLevel:0, compLevel:0, mannerCount:2, vocabCount:2, rarityPref:'balanced', vocabPref:null, personalityOverrides:ov});
+      }));
+      Object.entries(arch.profile).forEach(([sec, cat])=>{
+        const c = A.slotCat(st['prof_'+sec+'_0']); if (!c) return;
+        tot++; if (c === cat) hit++;
+      });
+    }
+  });
+  A.forgetRecentTraits(); A.forgetSlotDraws();
+  assert(tot > 100, 'too few hinted slots measured: ' + tot);
+  assert(hit / tot >= 0.55, `hints landed ${(100*hit/tot).toFixed(0)}% of ${tot}`);
+  return `${(100*hit/tot).toFixed(0)}% of ${tot} hinted slots`;
+});
+
+check('§4: single-slot profile sections reach most of their pool', ()=>{
+  /* Values, Stress and Attachment drew every primary at one shared target with the
+     narrowest window, so about half of each pool was never seen (45% / 45% / 49% of
+     traits drawn in 1,500 builds). The primary now jitters its target and draws with
+     minCount + flatten + slot memory, like Motivation. Floors at 600 seeded builds. */
+  const seen = {stress:new Set(), values:new Set(), attachment:new Set()};
+  // Earlier checks leave section toggles and type pickers dirty; this one is about the
+  // unforced draw, so make sure these three are on and unpinned.
+  Object.keys(seen).forEach(id=>{
+    ctx.document._set('sec_'+id, {checked:true});
+    ctx.document._set('type_'+id, {value:'', tagName:'SELECT', options:[{value:''}]});
+  });
+  A.withRng(A.mulberry32(0xC0FE), ()=>{
+    for (let i=0;i<600;i++){
+      const o = {}; A.PERSONALITY_AXES.forEach(a=> o[a.id] = Math.round(A.rand() * 200 - 100));
+      A.rollCharacterVariants();
+      const st = A.buildCharacterState({verbLevel:0, regLevel:0, compLevel:0, mannerCount:2, vocabCount:2, rarityPref:'balanced', vocabPref:null, personalityOverrides:o});
+      Object.keys(seen).forEach(k=>{ const s = st['prof_'+k+'_0']; if (s && s.trait) seen[k].add(s.trait.id); });
+    }
+  });
+  A.forgetRecentTraits(); A.forgetSlotDraws();
+  const out = [];
+  Object.entries(seen).forEach(([k, set])=>{
+    const ps = A.PROFILE_SECTIONS.find(p=>p.id===k);
+    const pool = A.TRAITS.filter(t=>t.section === ps.section).length;
+    const share = set.size / pool;
+    out.push(`${k} ${(100*share).toFixed(0)}%`);
+    assert(share >= 0.6, `${k} drew only ${set.size} of ${pool}`);
+  });
+  return out.join(', ');
+});
+
+check('§4: the life sections stay grown and rarity is not a proxy for loudness (ratchet)', ()=>{
+  const size = s => A.TRAITS.filter(t=>t.section === s).length;
+  const FLOOR = {"Goals & Stakes":330, "Competence & Method":240, "Recovery & Repair":80, "Role by Context":66,
+                 "Contradiction Functions":100, "Ordinary Texture":88, "Positive Origins":96};
+  Object.entries(FLOOR).forEach(([s, n])=> assert(size(s) >= n, `${s} fell to ${size(s)} (floor ${n})`));
+  // Cramér's V between rarity tier and intensity — 0.60 at the audit, 0.55 after this pass.
+  const R = ['common','uncommon','distinctive','signature'], m = R.map(()=>[0,0,0,0,0]);
+  A.TRAITS.forEach(t=>{ const r = R.indexOf(t.rarity); if (r >= 0) m[r][t.intensity-1]++; });
+  const N = A.TRAITS.length, rs = m.map(r=>r.reduce((a,b)=>a+b,0)), cs = [0,1,2,3,4].map(j=>m.reduce((a,r)=>a+r[j],0));
+  let chi = 0; m.forEach((r,i)=>r.forEach((o,j)=>{ const e = rs[i]*cs[j]/N; if (e) chi += (o-e)*(o-e)/e; }));
+  const V = Math.sqrt(chi / (N * 3));
+  assert(V <= 0.555, `Cramér's V rose to ${V.toFixed(3)}`);
+  // the suffix duplicates the audit listed were reworded, not deleted (saved ids stay valid)
+  const byId = A.TRAITS_BY_ID;
+  [3871,3878,3944,4195,5160,5169,5179,5192,102029,3723].forEach(id=>{
+    const t = byId.get ? byId.get(id) : byId[id];
+    assert(t, 'reworded trait ' + id + ' is missing');
+    assert(!/ (vocab|discipliner|conformist|fighter)$|with how much it matters$|^Direct-question asker$/.test(t.trait), `#${id} still reads as a suffix duplicate: ${t.trait}`);
+  });
+  return `V ${V.toFixed(3)}; goals ${size("Goals & Stakes")}, competence ${size("Competence & Method")}`;
+});
+
+/* ================= §5 KEEPING OUTPUT FRESH =================
+   Compositional voice lines, seated contradictions, variable sheet shape, best-of-three
+   exploration, lenses and backstory beats. A fresh engine instance so no state from the
+   sections above leaks in (and none leaks out). */
+group('§5 keeping output fresh: voice composer, contradictions, shape, anti-staleness, lenses, beats');
+const F5 = loadEngine();
+const f5 = code => F5.evalIn('(function(){' + code + '})()');
+const F5_BUILD = `const mk = (seed, i) => withRng(mulberry32(seed), ()=> buildCharacterState({verbLevel:((i||0)%5-2)*0.8, regLevel:(((i||0)*3)%5-2)*0.8, compLevel:0, mannerCount:3, vocabCount:2, rarityPref:'balanced', vocabPref:null, personalityOverrides:{}}));`;
+
+check('§5 voice: 100 characters x 7 prompts give mostly distinct lines, with no fixed entity and no unfilled slot', ()=>{
+  const out = f5(F5_BUILD + `
+    const all = new Set(), per = {}; let bad = [];
+    for (let i = 0; i < 100; i++){ const st = mk(5000 + i, i);
+      voiceLab(st, 'baseline').forEach(l => { all.add(l.text); (per[l.promptId] = per[l.promptId] || new Set()).add(l.text);
+        if (/Marcus|\\{|\\}|undefined|null/.test(l.text)) bad.push(l.text); }); }
+    return {all: all.size, lie: per.lie.size, minPer: Math.min(...Object.values(per).map(s=>s.size)), bad: bad.slice(0,3)};`);
+  assert(!out.bad.length, 'bad lines: ' + out.bad.join(' | '));
+  // Before the composer: 124 distinct of 700, and 13 distinct lies in 100 characters.
+  assert(out.all >= 550, `only ${out.all}/700 distinct lines`);
+  assert(out.minPer >= 70, `a prompt collapsed to ${out.minPer} distinct lines in 100 characters`);
+  return `${out.all}/700 distinct (was 124); lie ${out.lie}/100 (was 13)`;
+});
+
+check('§5 voice: the 10-lines view is stable per sheet and mostly distinct takes', ()=>{
+  const out = f5(F5_BUILD + `
+    let tot = 0, stable = true;
+    for (let i = 0; i < 20; i++){ const st = mk(6100 + i, i);
+      const a = voiceLines(st, 'refuse', 'baseline', 10).map(l=>l.text), b = voiceLines(st, 'refuse', 'baseline', 10).map(l=>l.text);
+      if (a.join('|') !== b.join('|') || a.length !== 10) stable = false; tot += new Set(a).size; }
+    return {stable, avg: tot / 20};`);
+  assert(out.stable, 'ten lines differ between two calls on one sheet');
+  assert(out.avg >= 6, `only ${out.avg} distinct of 10 on average`);
+  return `${out.avg.toFixed(1)} distinct of 10`;
+});
+
+check('§5 voice: transforms name their rule, and a lens keeps its taboo topics out of the lines', ()=>{
+  const out = f5(F5_BUILD + `
+    let grammarRule = 0, tabooHits = 0, n = 0;
+    for (let i = 0; i < 40; i++){ const st = mk(6200 + i, i);
+      voiceLab(st, 'baseline').forEach(l => { if (l.rules.some(r => /^grammar: /.test(r))) grammarRule++; }); }
+    withEngineSettings({lensSelect:'child,corporate'}, ()=>{
+      for (let i = 0; i < 40; i++){ const st = mk(6300 + i, i);
+        VOICE_PROMPTS.forEach(p => voiceLines(st, p.id, 'baseline', 3).forEach(l => { n++; if (/money|salary|layoffs/i.test(l.text)) tabooHits++; })); }
+    });
+    return {grammarRule, tabooHits, n};`);
+  assert(out.grammarRule > 50, 'grammar transforms almost never fire: ' + out.grammarRule);
+  assert(out.tabooHits === 0, `${out.tabooHits} of ${out.n} lines used a taboo topic`);
+  return `${out.grammarRule} grammar-shaped lines; 0 taboo hits in ${out.n}`;
+});
+
+check('§5 contradictions: seated on purpose, against the sheet, with every scene question answered', ()=>{
+  const out = f5(F5_BUILD + `
+    let seated = 0, opposing = 0, answered = 0, total = 0, fn = 0;
+    withEngineSettings({seatContradictions:true}, ()=>{
+      for (let i = 0; i < 30; i++){ const st = mk(6400 + i, i);
+        const sc = seatedContradictions(st);
+        if (sc.length) seated++;
+        sc.forEach(c => { total++; if (c.fnTrait) fn++;
+          if (c.exception.pol[c.axis] === -st[c.slotId].contradiction.face) opposing++;
+          if (c.answers.every(a => a.answer && a.answer.length > 8)) answered++; });
+        if (checkConflictsFor(st).some(x => sc.some(c => x.text.includes(c.exception.trait)))) return 'conflict'; }
+    });
+    const a = withEngineSettings({seatContradictions:true}, ()=> JSON.stringify(Object.keys(mk(6400, 0)).map(k=>k)));
+    const b = withEngineSettings({seatContradictions:true}, ()=> JSON.stringify(Object.keys(mk(6400, 0)).map(k=>k)));
+    return {seated, opposing, answered, total, fn, det: a === b};`);
+  assert(typeof out === 'object', 'a seated contradiction was reported as a conflict');
+  assert(out.seated >= 27, `only ${out.seated}/30 sheets seated one`);
+  assert(out.opposing === out.total && out.answered === out.total, JSON.stringify(out));
+  assert(out.fn >= out.total * 0.8, 'the function card is usually missing: ' + out.fn + '/' + out.total);
+  assert(out.det, 'seating is not deterministic for a seed');
+  return `${out.total} contradictions over ${out.seated} sheets, all answered`;
+});
+
+check('§5 settings off: none of the new plans touch the seeded stream', ()=>{
+  const out = f5(F5_BUILD + `
+    const sig = st => Object.keys(st).sort().map(k => k + ':' + (st[k].trait ? st[k].trait.id : '-')).join(',');
+    const a = sig(mk(6500, 3));
+    const b = withEngineSettings({seatContradictions:false, sheetShapeToggle:false, lensSelect:''}, ()=> sig(mk(6500, 3)));
+    return a === b;`);
+  assert(out, 'switching the §5 settings off changed the sheet');
+});
+
+check('§5 shape: the signature budget varies the sheet (doubled, dropped, 0-3 outliers) and replays', ()=>{
+  const out = f5(F5_BUILD + `
+    const sizes = new Set(), shapes = new Set(); let okDouble = true, okDrop = true, wild = new Set(), det = true;
+    withEngineSettings({sheetShapeToggle:true, wildcardToggle:true}, ()=>{
+      for (let i = 0; i < 40; i++){ const st = mk(6600 + i, i); const sh = LAST_SHAPE;
+        sizes.add(Object.keys(st).length); shapes.add(JSON.stringify([[...sh.double].sort(), sh.drop, sh.wild]));
+        sh.double.forEach(id => { if (Object.keys(st).filter(k => k.startsWith('prof_' + id + '_')).length < 2 && byFilter(PROFILE_SECTIONS.find(p=>p.id===id).section, st['prof_' + id + '_0'] ? st['prof_' + id + '_0'].trait.category : '').length > 1) okDouble = false; });
+        if (sh.drop && Object.keys(st).some(k => k.startsWith('prof_' + sh.drop + '_'))) okDrop = false;
+        wild.add(Object.keys(st).filter(k => k.startsWith('wild_')).length);
+        const again = mk(6600 + i, i); if (Object.keys(again).join() !== Object.keys(st).join()) det = false; }
+    });
+    return {sizes: sizes.size, shapes: shapes.size, okDouble, okDrop, wild: [...wild].sort(), det};`);
+  assert(out.okDouble && out.okDrop && out.det, JSON.stringify(out));
+  assert(out.sizes >= 5 && out.shapes >= 15, `sheet shape barely varies: ${JSON.stringify(out)}`);
+  assert(out.wild.length >= 3 && Math.max(...out.wild) <= 3, 'outlier count does not span 0-3: ' + out.wild);
+  return `${out.sizes} sheet sizes, ${out.shapes} shapes in 40 (was 1 and 1)`;
+});
+
+check('§5 anti-staleness: best of three picks the most distinct above the coherence floor', ()=>{
+  const out = f5(F5_BUILD + `
+    forgetArchive();
+    for (let i = 0; i < 6; i++) archiveCharacter(mk(6700 + i, i), {name:'A' + i});
+    const refs = explorationReferences(null);
+    const cands = [0,1,2].map(k => ({num: candidateSeed(99, k), state: mk(candidateSeed(99, k), k)}));
+    const pick = selectDistinctCandidate(cands, refs);
+    const ds = cands.map(c => diversityScore(c.state, refs).score);
+    const eligible = pick.scores.filter(s => s.coherence >= pick.floor).map(s => s.diversity);
+    // A twin of an archived character must lose to anything else.
+    const twin = {num: 1, state: mk(6700, 0)};
+    const p2 = selectDistinctCandidate([twin, cands[1]].map(c => Object.assign({}, c, {coherence: 50})), refs);
+    const seeds = new Set([0,1,2].map(k => candidateSeed(12345, k)));
+    return {best: Math.max(...eligible), chosen: pick.diversity, twinLost: p2.index === 1, c0: candidateSeed(12345, 0) === 12345, seeds: seeds.size};`);
+  assert(Math.abs(out.best - out.chosen) < 1e-3, 'did not keep the most distinct eligible candidate');
+  assert(out.twinLost, 'a twin of an archived character was kept');
+  assert(out.c0 && out.seeds === 3, 'candidate seeds: the first must be the seed itself, all three distinct');
+  return 'most distinct kept; twins lose';
+});
+
+check('§5 anti-staleness: the project tally steers exploration and replay ignores it', ()=>{
+  const out = f5(F5_BUILD + `
+    forgetArchive();
+    const cats = catsOf('Values & Moral Line');
+    for (let i = 0; i < 8; i++) archiveCharacter({x:{trait:{id:900000+i, category:cats[0], section:'Values & Moral Line', pol:{}, intensity:3, rarity:'common'}}, prof_values_0:{sectionId:'values', trait:byFilter('Values & Moral Line', cats[0])[i]}}, {name:'r'});
+    const explore = archiveCategoryMultiplier(cats[0], cats), other = archiveCategoryMultiplier(cats[1], cats);
+    const replay = withReplayMode(true, ()=> archiveCategoryMultiplier(cats[0], cats));
+    const rut = {prof_values_0:{trait:byFilter('Values & Moral Line', cats[0])[0]}}, fresh = {prof_values_0:{trait:byFilter('Values & Moral Line', cats[1])[0]}};
+    const pick = selectDistinctCandidate([{state:rut, coherence:50}, {state:fresh, coherence:50}], []);
+    const sig = st => Object.keys(st).sort().map(k => k + ':' + (st[k].trait ? st[k].trait.id : '-')).join(',');
+    const r1 = withReplayMode(true, ()=> sig(mk(6800, 2)));
+    forgetArchive();
+    const r2 = withReplayMode(true, ()=> sig(mk(6800, 2)));
+    return {explore, other, replay, same: r1 === r2, freshWins: pick.index === 1};`);
+  assert(out.explore < 1 && out.other > 1, 'the tally does not push the over-used category down: ' + JSON.stringify(out));
+  assert(out.replay === 1, 'replay mode read the archive tally');
+  assert(out.same, 'a replay changed with the project archive');
+  assert(out.freshWins, 'candidate selection ignored the long-horizon tally');
+  return `over-used x${out.explore.toFixed(2)}, neglected x${out.other.toFixed(2)}, replay x1`;
+});
+
+check('§5 anti-staleness: divergence now acts within a category too', ()=>{
+  const out = f5(`
+    const pool = byFilter('Vocabulary Traits', 'Register & Formality Spectrum');
+    const count = div => withEngineSettings({divergence: div}, ()=> { const s = new Set(); withRng(mulberry32(7), ()=>{ for (let i = 0; i < 400; i++) s.add(pickInRange(pool, 'balanced', 2.2).id); }); return s.size; });
+    return {off: count(0), on: count(1)};`);
+  assert(out.on > out.off, `divergence did not widen the draw inside a category: ${out.off} -> ${out.on}`);
+  return `${out.off} -> ${out.on} distinct in 400 draws`;
+});
+
+check('§5 lenses: first-class, combinable, capped, wired into worldTags and the normal/deviant reading', ()=>{
+  const out = f5(`
+    const known = c => SECTION_OF_CATEGORY.has(c) || !!_axisForCategory(c);
+    let all = 0, ok = 0; LENSES.forEach(l => (l.up||[]).concat(l.down||[]).forEach(c => { all++; if (known(c)) ok++; }));
+    const kinds = new Set(LENSES.map(l => l.kind));
+    const r = withEngineSettings({lensSelect:'court,latelife,bogus'}, ()=> buildContextBias('', ''));
+    // Personality poles arrive as slider nudges; every other category as a multiplier.
+    const polished = contextMultiplier('Stylized & Elaborate') * (Object.values(r.nudge).some(v => v > 0) ? 1 : 0), crude = contextMultiplier('Directness & Literalness');
+    const max = Math.max(...[...CONTEXT_BIAS.values()]);
+    clearContextBias();
+    const tagged = {worldTags:['futuristic']}, any = {worldTags:['any']};
+    const wt = withEngineSettings({lensSelect:'scifi'}, ()=> [worldTagMultiplier(tagged), worldTagMultiplier(any)]);
+    const wt2 = withEngineSettings({lensSelect:'court'}, ()=> worldTagMultiplier(tagged));
+    const crudeT = TRAITS.find(t => t.category === 'Manners — Crude & Ill-Mannered'), polT = TRAITS.find(t => t.category === 'Manners — Polished & Courteous');
+    const rd = withEngineSettings({lensSelect:'court'}, ()=> [lensReading(crudeT), lensReading(polT)]);
+    return {share: ok / all, settings: LENSES.filter(l=>l.kind==='setting').length, life: LENSES.filter(l=>l.kind==='life').length,
+      lenses: r.lenses, reg: r.lensRegister, polished, crude, max, wt, wt2, rd: rd.map(x => x && x.status), none: lensReading(polT)};`);
+  assert(out.settings === 8 && out.life === 7, 'expected 8 settings and 7 life stages');
+  assert(out.share >= 0.9, 'lens categories that do not exist: ' + out.share);
+  assert(out.lenses.join() === 'court,latelife', 'unknown lens ids should drop, order canonical: ' + out.lenses);
+  assert(out.reg > 0, 'court + late life should nudge register formal');
+  assert(out.polished > 1 && out.crude < 1 && out.max <= 4, JSON.stringify(out));
+  assert(out.wt[0] > 1 && out.wt[1] === 1 && out.wt2 < 1, 'worldTag multiplier: ' + out.wt + ' / ' + out.wt2);
+  assert(out.rd[0] === 'deviant' && out.rd[1] === 'normal' && out.none === null, 'reading: ' + out.rd);
+  return `${out.settings} settings + ${out.life} life stages; register +${out.reg}`;
+});
+
+check('§5 backstory beats: 3-5 dated beats, each tied to a seated card', ()=>{
+  const out = f5(F5_BUILD + `
+    let n = 0, okLen = 0, grounded = 0, dated = 0, total = 0;
+    for (let i = 0; i < 30; i++){ const st = mk(6900 + i, i); const b = backstoryBeats(st, {age: '40'}); if (!b) continue; n++;
+      if (b.length >= 3 && b.length <= 5) okLen++;
+      b.forEach(x => { total++; if (x.from.length) grounded++; if (/around \\d+|within the last year|now/.test(x.when)) dated++; }); }
+    const st = mk(6900, 0);
+    return {n, okLen, grounded, dated, total, det: JSON.stringify(backstoryBeats(st, {})) === JSON.stringify(backstoryBeats(st, {}))};`);
+  assert(out.n >= 28 && out.okLen === out.n, JSON.stringify(out));
+  assert(out.grounded === out.total && out.dated === out.total, JSON.stringify(out));
+  assert(out.det, 'beats are not deterministic');
+  return `${out.total} beats over ${out.n} sheets`;
+});
+
+// ======================================================================
+group('Section 6 mechanics: tiers, casts, foils, relationship web, pressure, arcs, lens, wildcard, labels');
+const S6 = (code) => G.evalIn(code);
+const _s6Sheet = `(s => withRng(mulberry32(s), ()=> buildCharacterState({verbLevel:0, regLevel:0, compLevel:0, mannerCount:3, vocabCount:2, rarityPref:'balanced', vocabPref:null, personalityOverrides:{}})))`;
+
+check('§6 tierWeight: secondary tier is rule-derived well beyond the hand list', ()=>{
+  const r = S6(`(function(){
+    const p = TRAITS.filter(t=>t.section==='Personality Traits');
+    const sec = p.filter(t=>t.tier==='secondary'), der = sec.filter(t=>t.tierSource==='derived');
+    const listedHit = SECONDARY_TRAIT_NAMES.filter(isBehaviouralTraitName).length;
+    return {sec: sec.length, der: der.length, total: p.length, listed: SECONDARY_TRAIT_NAMES.length, listedHit,
+      adjCore: ['Aloof','Frosty','Gregarious'].every(n => !isBehaviouralTraitName(n)), w: tierWeight(der[0], 4.5)};
+  })()`);
+  assert(r.der >= 300, 'derived only ' + r.der);
+  assert(r.listedHit / r.listed >= 0.7, `the rule recovers only ${r.listedHit}/${r.listed} hand-listed names`);
+  assert(r.adjCore, 'a dispositional adjective was classed as behavioural');
+  assert(r.w < 0.5, 'a derived secondary trait is not suppressed at a loud target');
+  return `${r.sec}/${r.total} secondary (${r.der} derived); rule recovers ${r.listedHit}/${r.listed}`;
+});
+
+check('§6 emergent labels: grown tables, signature words, still deterministic per sheet', ()=>{
+  const r = S6(`(function(){
+    const mk = ${_s6Sheet};
+    const names = new Set(); let sig = 0;
+    for (let s = 1; s <= 200; s++){ const st = mk(6000 + s); const n = emergentArchetypeName(st);
+      if (n.name !== emergentArchetypeName(st).name) return {bad: s};
+      names.add(n.name); const w = signatureArchetypeWords(st); if (w.adj.concat(w.noun).some(x => n.name.includes(x))) sig++; }
+    return {distinct: names.size, sig, adjMin: Math.min(...Object.values(ARCH_ADJ).map(a=>a.length))};
+  })()`);
+  assert(!r.bad, 'the same sheet named differently at seed ' + r.bad);
+  assert(r.adjMin >= 4, 'some ARCH_ADJ entry still has fewer than 4 words');
+  assert(r.distinct >= 110, 'only ' + r.distinct + ' distinct labels in 200');
+  assert(r.sig > 0, 'no label ever borrowed a word from the sheet');
+  return `${r.distinct} distinct in 200, ${r.sig} borrow a signature word`;
+});
+
+check('§6 wildcard: "survives because" is composed from the opposed trait pair', ()=>{
+  const r = S6(`(function(){
+    const T = TRAITS.filter(t=>t.pol && t.pol.warm);
+    const hot = T.filter(t=>t.pol.warm===1).slice(0,3), cold = T.find(t=>t.pol.warm===-1);
+    const partial = {}; hot.forEach((t,i)=> partial['x'+i] = {trait:t});
+    const lean = strongestLean(partial);
+    const why = wildcardSurvivesBecause(cold, lean, partial);
+    return {why, again: wildcardSurvivesBecause(cold, lean, partial), cold: cold.trait, hot: hot.map(t=>t.trait)};
+  })()`);
+  assert(r.why === r.again, 'not deterministic');
+  assert(r.why.includes(r.cold.replace(/^['"]|['"]$/g,'')), 'the exception is not named: ' + r.why);
+  assert(r.hot.some(h => r.why.includes(h.replace(/^['"]|['"]$/g,''))), 'the trait it cuts against is not named: ' + r.why);
+  return r.why.slice(0, 90) + '…';
+});
+
+check('§6 context lens: derived conditions cut the "no rule" fallback without overriding rules', ()=>{
+  const r = S6(`(function(){
+    const mk = ${_s6Sheet}; let tot = 0, none = 0, derived = 0, noneOff = 0;
+    for (let s = 1; s <= 25; s++){ const st = mk(6100 + s);
+      ['public','private','authority','threat'].forEach(m => {
+        contextualView(st, m).slots.forEach(x => { tot++; if (x.rule === 'none') none++; if (x.rule === 'derived') derived++; });
+        DERIVED_CONTEXT_ENABLED = false; contextualView(st, m).slots.forEach(x => { if (x.rule === 'none') noneOff++; }); DERIVED_CONTEXT_ENABLED = true;
+      }); }
+    const tags = derivedContextTags({id:-1, trait:'Stage-fright', desc:'Freezes in front of strangers and audiences.', category:'x'});
+    return {tot, none, derived, noneOff, tags};
+  })()`);
+  assert(r.tags.includes('stranger'), 'text tags missed "strangers": ' + r.tags);
+  assert(r.none / r.tot < 0.1, `still ${(100*r.none/r.tot).toFixed(0)}% fallback`);
+  assert(r.noneOff - r.none === r.derived, 'derived verdicts replaced something other than the fallback');
+  return `fallback ${r.noneOff} → ${r.none} of ${r.tot}`;
+});
+
+check('§6 casts: seats are unique, leader and foil always filled, and joint optimisation is seeded and never worse', ()=>{
+  const r = S6(`(function(){
+    const mk = ${_s6Sheet};
+    const ms = [1,2,3,4,5].map(i => ({id:'m'+i, state: mk(6200+i), meta:{name:'M'+i}}));
+    const roles = assignCastRoles(ms);
+    const run = () => { const drafts = [0,1,2].map(i => ({state: mk(6300+i)})); drafts[1] = {state: drafts[0].state};
+      const res = optimiseCastVoices(drafts, 'mech6', () => ({state: withRng(mulberry32(Math.floor(rand()*1e9)), ()=> mk(Math.floor(rand()*1e6)))}));
+      return {res, sig: JSON.stringify(drafts.map(d => Object.keys(d.state).map(k => d.state[k] && d.state[k].trait ? d.state[k].trait.id : 0)))}; };
+    const a = run(), b = run();
+    return {roles: roles.map(x=>x.id), a: a.res, same: a.sig === b.sig};
+  })()`);
+  assert(new Set(r.roles.filter(x=>x!=='ensemble')).size === r.roles.filter(x=>x!=='ensemble').length, 'a seat was given twice');
+  assert(r.roles.includes('leader') && r.roles.includes('foil'), 'no leader/foil: ' + r.roles);
+  assert(r.a.after <= r.a.before, `optimisation made it worse ${r.a.before} → ${r.a.after}`);
+  assert(r.a.after < r.a.before, 'twins in the draft were not separated');
+  assert(r.same, 'optimisation is not reproducible from the seed');
+  return `${r.roles.join(', ')}; shared devices ${r.a.before} → ${r.a.after}`;
+});
+
+check('§6 generateCast runs the joint optimisation and never ends with more shared devices', ()=>{
+  /* Reproducibility of a whole cast from its seed is asserted separately below. */
+  G.document._set('castSeed', {value:'s6cast'}); G.document._set('castCount', {value:'4'});
+  const r = S6(`(function(){ refreshRelSelectors = function(){}; generateCast(); const o = lastCastOptimisation, n = castStates.length;
+    castStates = []; relationshipEdges = []; return {o, n}; })()`);
+  G.document._set('castSeed', {value:''});
+  assert(r.n === 4, 'cast size ' + r.n);
+  assert(r.o && r.o.after <= r.o.before, 'optimisation missing or worse: ' + JSON.stringify(r.o));
+  return `shared devices ${r.o.before} → ${r.o.after}`;
+});
+
+check('§6 two consecutive casts from the same cast seed are the same cast', ()=>{
+  /* A cast build read the session's history (recent traits, slot memory, category use,
+     which every generation and every accepted member feeds), so the same cast seed
+     rebuilt a different cast once anything had been generated in between. Casts now
+     build in replay mode, against empty history. */
+  G.document._set('castSeed', {value:'replay-me'}); G.document._set('castCount', {value:'4'});
+  const r = S6(`(function(){ refreshRelSelectors = function(){};
+    const sig = () => castStates.map(c => Object.keys(c.state).sort().map(k => k + ':' + (c.state[k] && c.state[k].trait ? c.state[k].trait.id : '-')).join(',')).join(' | ');
+    generateCast(); const a = sig(), seedA = lastCastSeed;
+    generateCast(); const b0 = sig();
+    // Ordinary single-character generations in between move the session history
+    // (recent traits, slot memory, category use) that a history-aware build reads.
+    _runGeneration(); _runGeneration();
+    generateCast(); const b = b0 === a ? sig() : 'consecutive casts differed', seedB = lastCastSeed;
+    castStates = []; relationshipEdges = []; return {a, b, seedA, seedB}; })()`);
+  G.document._set('castSeed', {value:''});
+  assert(r.seedA === r.seedB, 'seed label changed between runs');
+  assert(r.a.length > 0 && r.a === r.b, 'the same cast seed built two different casts');
+  return 'seed ' + r.seedA + ' replays';
+});
+
+check('saves written with the removed Appearance section load with those slots dropped', ()=>{
+  const st = buildOnce(777);
+  const base = Object.keys(st).filter(k => st[k] && st[k].trait).length;
+  const oldTrait = {id:94000, section:'Appearance', category:'Build — Imposing', trait:'Takes up slightly more doorway than expected',
+    desc:'Just noticeably broad.', example:'(a half-step)', intensity:2, rarity:'common'};
+  const legacy = A.compressSlots(st);
+  legacy.app_0 = {slotId:'app_0', label:'Appearance — Stature', target:2, trait:{__id:94000, __fb:oldTrait}};
+  legacy.app_move = {slotId:'app_move', label:'Appearance — Movement & Bearing', target:2, trait:null, empty:true};
+  legacy.wild_0 = {slotId:'wild_0', label:'Wildcard', target:3, trait:{__id:95001, __fb:Object.assign({}, oldTrait, {id:95001})}};
+  const r = S6(`(function(){
+    const rec = decodeSavedRecord(${JSON.stringify({state: legacy, charMeta:{name:'Old'},
+      pinnedTargets:{app_0:2}, traitNotes:{app_mark:'scar'}, charVariants:{app_0:'a'}})}, 'Old');
+    const cast = applyCastBundle({format:'character-voice-cast', members:[{id:'x', state: ${JSON.stringify(Object.assign({}, st, {app_mark:{slotId:'app_mark', label:'x', trait:oldTrait}}))}, meta:{name:'Old'}}], edges:[]});
+    const members = castStates.map(c => Object.keys(c.state)); castStates = []; relationshipEdges = [];
+    restoreSettings({fields:{app_stature:'50'}, toggles:{genAppearance:true},
+      constraints:{bannedSections:['Appearance','Humor Style'], requiredCategories:['Movement & Bearing'], intensityCaps:{appearance:3, sheet:40}}});
+    const after = {banned:[...bannedSections], req:requiredCategories.slice(), caps:Object.assign({}, intensityCaps)};
+    restoreSettings({constraints:{}});
+    return {keys:Object.keys(rec.state), pins:Object.keys(rec.pinnedTargets||{}), notes:Object.keys(rec.traitNotes||{}),
+      vars:Object.keys(rec.charVariants||{}), orphans:rec.__orphans, lost:rec.__lost, members, after,
+      text: sheetToText(rec.state, {name:'Old'}, {})};
+  })()`);
+  assert(!r.keys.some(k => k.startsWith('app_')), 'an app_ slot survived decode: ' + r.keys.join(','));
+  assert(!r.keys.includes('wild_0'), 'an Appearance trait seated by a wildcard survived decode');
+  assert(r.keys.length >= base, 'real slots were lost along with the appearance ones');
+  assert(!r.pins.length && !r.notes.length && !r.vars.length, 'per-slot data keyed by an app_ slot survived');
+  assert(!r.orphans && !r.lost, 'dropped slots were reported as orphans/lost');
+  assert(r.members.length === 1 && !r.members[0].some(k => k.startsWith('app_')), 'cast import kept an app_ slot');
+  assert(!r.after.banned.includes('Appearance') && r.after.banned.includes('Humor Style'), 'retired section ban not dropped');
+  assert(!r.after.req.length && r.after.caps.appearance === undefined && r.after.caps.sheet === 40, 'retired constraints not dropped: ' + JSON.stringify(r.after));
+  assert(!/Appearance|How they look/.test(r.text), 'export still mentions the removed section');
+  // Undo snapshots and project saves go through expandSlots directly.
+  const ex = A.expandSlots(legacy);
+  assert(!Object.keys(ex).some(k => k.startsWith('app_')) && !ex.wild_0, 'expandSlots kept a retired slot');
+  return r.keys.length + ' slots kept, 3 retired dropped';
+});
+
+check('§6 foils: the premise is built from the source sheet\'s wound/lie/want/fear/need/values', ()=>{
+  const r = S6(`(function(){
+    const mk = ${_s6Sheet}; let built = 0, cited = 0;
+    for (let s = 1; s <= 20; s++){ const a = mk(6400+s), b = mk(6500+s);
+      const p = foilPremiseFromSheets(a, b, mulberry32(s), {a:'Ann', b:'Bo'}); if (!p) continue; built++;
+      const src = Object.values(a).map(x => x && x.trait && x.trait.trait).filter(Boolean);
+      if (p.from.some(f => src.includes(f)) || p.from.length) cited++; }
+    return {built, cited};
+  })()`);
+  assert(r.built >= 18, 'only ' + r.built + '/20 sheets produced a sheet-built premise');
+  assert(r.cited === r.built, 'a premise did not cite what it was built from');
+  return `${r.built}/20 built from the sheets`;
+});
+
+check('§6 relationships: asymmetric pairs, triads by balance, factions and shared secrets', ()=>{
+  const r = S6(`(function(){
+    const mk = ${_s6Sheet};
+    const ms = [0,1,2,3].map(i => ({id:'r'+i, state: mk(6600+i), meta:{name:'R'+i}}));
+    const [ab, ba] = asymmetricEdgePair(ms[0], ms[1], 'mentor');
+    const E = (f, t, trust, extra) => makeEdge(ms[f].id, ms[t].id, null, Object.assign({trust, dependence:3, status:'equal'}, extra || {}));
+    // 0+1 friends, 1+2 friends, 0-2 enemies: an unstable triad with 1 in the middle.
+    const edges = [E(0,1,5), E(1,2,4), E(0,2,1), E(3,2,3,{knows:'Suspects the old injury.'}), E(0,2,1,{id:'x', knows:'Has noticed the contradiction.'})];
+    const web = relationshipWeb(ms, edges);
+    const html = relationshipWebHTML(ms, edges);
+    return {ab:[ab.status, ab.trust, ab.dependence, ab.role], ba:[ba.status, ba.trust, ba.dependence, ba.role],
+      triads: web.triads.map(t => t.kind), secrets: web.secrets.length, factions: web.factions.map(f => f.members.length), svg: /<svg/.test(html)};
+  })()`);
+  assert(r.ab[0] === 'above' && r.ba[0] === 'below' && r.ba[3] === 'protege', 'mentor pair statuses/roles not mirrored: ' + JSON.stringify(r));
+  assert(r.ab[1] !== r.ba[1] && r.ab[2] !== r.ba[2], 'the pair is not asymmetric: ' + JSON.stringify(r));
+  assert(r.triads.includes('unstable'), 'friend-of-both triad not flagged unstable: ' + r.triads);
+  assert(r.secrets >= 1, 'two people knowing about the same third is not a shared secret');
+  assert(r.svg, 'the web view did not draw');
+  return `triads ${r.triads.join('/')}; ${r.secrets} secret(s); factions ${r.factions}`;
+});
+
+check('§6 pressure: irritated → cornered → broken stages and a recovery sheet, each grounded in cards', ()=>{
+  const r = S6(`(function(){
+    const st = (${_s6Sheet})(6701);
+    const esc = pressureEscalation(st, {__pressure:{level:0.4}}), rec = recoverySheet(st);
+    return {ids: esc.stages.map(s=>s.id), current: esc.current, grounded: esc.stages.every(s => s.signs.every(x => x.from.length)),
+      rows: rec ? rec.rows.length : 0, recGrounded: rec ? rec.rows.every(x => x.from.length) : false, md: pressureEscalationMarkdown(st, null)};
+  })()`);
+  assert(r.ids.join() === 'irritated,cornered,broken', 'stages out of order or missing: ' + r.ids);
+  assert(r.current === 'irritated', 'a 40% dial should sit at irritated, got ' + r.current);
+  assert(r.grounded && r.recGrounded, 'a stage sign or recovery row names no card');
+  assert(r.rows >= 4 && /Recovery sheet/.test(r.md), 'recovery sheet too thin: ' + r.rows);
+  return `${r.ids.length} stages, ${r.rows} recovery rows`;
+});
+
+check('§6 arcs: event text is read against the sheet, steadfast hardens, templates chain', ()=>{
+  const r = S6(`(function(){
+    const st = (${_s6Sheet})(6801);
+    const want = _mxT(st, 'motivation', /Core Want/i);
+    const ev = makeArcEvent(1, {shape:'deterioration', title:'x', choice:'lied to get ' + want.trait + ' ' + want.desc});
+    const p = parseArcEvent(st, ev);
+    const ch = proposeArcChanges(st, ev, []);
+    const stead = proposeArcChanges(st, makeArcEvent(2, {shape:'steadfast', title:'y', cost:'Money they cannot quite afford to risk'}), []);
+    const tpl = arcTemplateEvents(st, 'corruption-3', []), tpl2 = arcTemplateEvents(st, 'corruption-3', []);
+    const fall = arcTemplateEvents(st, 'fall-recovery', []);
+    return {hitWant: p.hits.some(h => h.target === 'want'), implied: p.implied, textChange: ch.some(c => c.fromText && /want/.test(c.why)),
+      stead: stead.map(c=>c.slotId), tplShapes: tpl.map(e=>e.shape), same: JSON.stringify(tpl) === JSON.stringify(tpl2),
+      fallShapes: fall.map(e=>e.shape), valid: tpl.concat(fall).every(e => !validateArcEvent(e).length), unaccepted: tpl.every(e => e.changes.every(c => !c.accepted))};
+  })()`);
+  assert(r.hitWant && r.textChange, 'a choice naming the Want did not move the Want');
+  assert(r.implied === 'deterioration', '"lied" should imply deterioration, got ' + r.implied);
+  assert(r.stead.some(s => /^prof_values_/.test(s)), 'steadfast did not deepen Values: ' + r.stead);
+  assert(r.tplShapes.join() === 'deterioration,deterioration,deterioration', 'corruption template shapes: ' + r.tplShapes);
+  assert(r.fallShapes.join() === 'deterioration,deterioration,growth,growth', 'fall & recovery shapes: ' + r.fallShapes);
+  assert(r.same && r.valid && r.unaccepted, 'templates must be deterministic, valid and start unaccepted');
+  return `steadfast → ${r.stead.join(', ')}`;
+});
+
+check('§6 trait-bank gap sections stay grown, opt-in, and conceptFamily coverage never falls (ratchet)', ()=>{
+  /* js/data/traits-gaps.js. The gap sections ship off (a writer chooses them); the grown
+     Contradiction Functions pool ships on. Floors are what the pack held when added. */
+  const T = A.TRAITS, size = s => T.filter(t => t.section === s).length;
+  const FLOOR = {"Romance & Desire":50, "Dialect & Linguistic Background":80, "Beliefs & Worldview":55, "Occupational Jargon":55,
+                 "Conversation Mechanics":40, "Body in Speech":38, "Money & Class":38, "Fears & Aversions":36, "Family Talk":34};
+  Object.entries(FLOOR).forEach(([s, n]) => assert(size(s) >= n, `${s} fell to ${size(s)} (floor ${n})`));
+  const byId = Object.fromEntries(A.PROFILE_SECTIONS.map(ps => [ps.section, ps]));
+  Object.keys(FLOOR).forEach(s => { assert(byId[s], `${s} is not a profile section`); assert(byId[s].defaultOn === false, `${s} should ship off`); });
+  assert(byId["Contradiction Functions"].defaultOn === true, 'Contradiction Functions should ship on');
+  const gaps = T.filter(t => t.pack === 'gaps' || (t.id >= 180000 && t.id <= 189999));
+  assert(gaps.every(t => t.reviewStatus), 'gap traits carry a reviewStatus');
+  const fam = T.filter(t => t.conceptFamily).length;
+  // Floor lowered from 2300 when the Appearance section (and its ~60 family-tagged
+  // traits) was removed from the bank; it ratchets from the new baseline.
+  assert(fam >= 2240, `conceptFamily coverage fell to ${fam} (floor 2240)`);
+  return `${gaps.length} gap traits, conceptFamily ${fam}/${T.length}`;
 });
 
 console.log('\n' + (failed ? '\x1b[31m' : '\x1b[32m') + passed + ' passed, ' + failed + ' failed\x1b[0m');
