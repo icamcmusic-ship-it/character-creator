@@ -452,6 +452,9 @@ function traitCardHTML(id, s, includeControls, showDiff, accent, tagLabel){
           ${dimsChipHTML(t)}
           ${s.wildcard ? `<span class="wildBadge" title="Deliberately drawn against the grain — see 'the one thing that doesn't fit'">outlier</span>` : ``}
           ${s.derived ? `<span class="wildBadge" style="background:var(--emerald-deep);border-color:var(--emerald-deep);" title="Derived from this character's psychology rather than a slider">derived</span>` : ``}
+          ${(()=>{ const lr = includeControls && typeof lensReading === 'function' ? lensReading(t) : null;
+             return lr ? `<span class="lensBadge lens-${lr.status}" title="${escAttr(lr.why)}">${lr.status === 'normal' ? 'normal here' : 'deviant here'}</span>` : ``; })()}
+          ${s.contradiction ? `<span class="wildBadge contraBadge" title="Seated on purpose: it cuts against the sheet on ${escAttr(AXIS_LABELS[s.contradiction.axis] || '')}">${s.contradiction.role === 'function' ? 'what it is for' : 'contradiction'}</span>` : ``}
           ${s.budgeted ? `<span class="wildBadge budgetBadge" title="${escHTML(s.budgetWhy || 'Adjusted to fit a budget you set')}">budgeted</span>` : ``}
         </div>
         <div class="traitCat">${escHTML(t.category)}</div>
@@ -660,6 +663,17 @@ function summaryCardHTML(){
       chain.links.map(l => `<li><span class="chainKey">${escHTML(l.key)}</span> ${escHTML(l.text)} <span class="chainFrom">← ${escHTML(l.from.join(" · "))}</span></li>`).join("") +
       `</ol></details>`;
   }
+  const beats = (typeof backstoryBeats === 'function') ? backstoryBeats(state, charMeta) : null;
+  if (beats){
+    h += `<details class="chainBox beatsBox"><summary>Backstory beats <span class="chainCount">${beats.length}</span></summary><ol class="chainList beatList">` +
+      beats.map(b => `<li><span class="chainKey">${escHTML(b.title)}</span> <span class="beatWhen">${escHTML(b.when)}</span> ${escHTML(b.text)} <span class="chainFrom">← ${escHTML(b.from.join(" · "))}</span></li>`).join("") +
+      `</ol></details>`;
+  }
+  const shapeBits = [];
+  if (charMeta.lenses && charMeta.lenses.length && typeof lensById === 'function') shapeBits.push(`Lenses: <b>${escHTML(charMeta.lenses.map(id => (lensById(id) || {label:id}).label).join(" + "))}</b>`);
+  if (charMeta.shape && charMeta.shape.text) shapeBits.push(`Shape: ${escHTML(charMeta.shape.text)}`);
+  if (charMeta.exploration) shapeBits.push(`Most distinct of ${charMeta.exploration.considered} drafts from this project's characters`);
+  if (shapeBits.length) h += `<div class="summaryMeta shapeMeta">${shapeBits.join(" · ")}</div>`;
 
   if (loudest.length){
     h += `<ul class="summaryTraits">` + loudest.map(s=>
@@ -802,6 +816,7 @@ function emptyGroupReason(title){
   const ps = PROFILE_SECTIONS.find(p=>p.label === title);
   if (ps){
     if (!profileSectionEnabled(ps)) return "Switched off in the Character Profile panel.";
+    if (charMeta && charMeta.shape && charMeta.shape.dropped === ps.label) return "Dropped by this sheet's shape — the signature budget spent the space on the sections that define them. Switch \"Vary the sheet's shape\" off to always draw it.";
     if (bannedSections.has(ps.section)) return `The whole "${ps.section}" section is banned in your constraints, so nothing here can ever be drawn.`;
     const cats = catsOf(ps.section);
     if (cats.length && cats.every(c => bannedCategories.has(c)))
@@ -910,6 +925,7 @@ function renderSheet(){
     ...profGroups,
     {title:"Appearance", ids:Object.keys(state).filter(k=>k.startsWith("app_"))},
     {title:"The one thing that doesn't fit", ids:Object.keys(state).filter(k=>k.startsWith("wild_"))},
+    {title:"Seated contradictions", ids:Object.keys(state).filter(k=>k.startsWith("contra_"))},
   ];
   SHEET_GROUP_TITLES = groups.map(g=>g.title);
   SHEET_GROUPS = groups;
@@ -1032,6 +1048,14 @@ function renderSheet(){
         <div class="sub" style="margin:6px 0 0;">Not an error to fix. A ${escHTML(contra.tier.toLowerCase())} opposition on one axis is where a character stops being a list of traits — answer the question and the rest of the sheet reorganises around it.</div>
       </div>`;
     }
+    (typeof seatedContradictions === 'function' ? seatedContradictions(state) : []).forEach(sc => {
+      h += `<div class="tensionBlock seatedContra">
+        <div class="tensionTitle">Seated contradiction &mdash; ${escHTML(sc.axisLabel)} <span class="sub">(${escHTML(sc.fn)})</span></div>
+        <div style="margin:6px 0;">${sc.face ? `They are <b>${escHTML(sc.face.trait)}</b> and also ` : `They are also `}<b>${escHTML(sc.exception.trait)}</b>${sc.fnTrait ? ` &mdash; <i>${escHTML(sc.fnTrait.trait)}</i>` : ``}.</div>
+        <div style="margin:6px 0; font-style:italic;">${escHTML(sc.question)}</div>
+        ${sc.answers.map(a => `<div class="contraField"><b>${escHTML(a.prompt)}</b> <span class="contraDerived">${escHTML(a.answer)}</span>${a.from.length ? ` <span class="chainFrom">← ${escHTML(a.from.join(" · "))}</span>` : ``}</div>`).join("")}
+      </div>`;
+    });
     const patterns = secondOrderTensions(state);
     if (patterns.length){
       h += `<div class="tensionBlock" style="border-left-color:var(--dusk-blue);"><div class="tensionTitle" style="color:var(--dusk-blue);">Emergent patterns</div>` +
@@ -1155,6 +1179,8 @@ function renderSheet(){
       head += `<ol class="chainList pressureChain">` + chain.stages.map(sg =>
         `<li><b>${escHTML(sg.title)}.</b> ${escHTML(sg.text)} <span class="chainFrom">← ${escHTML(sg.from.join(" · ") || "the pressure dial")}</span></li>`).join("") + `</ol>`;
     }
+    // Section 6: irritated → cornered → broken, and the day after (mechanics.js).
+    if (typeof pressureEscalationHTML === 'function') head += pressureEscalationHTML(state, pressureState);
     pbody.innerHTML = head;
     const pgroups = [
       {title:"Speech Under Pressure", ids:["verbosity","register","grammar"]},
@@ -1189,7 +1215,7 @@ const SECTION_GLYPHS = {
   "Mannerisms":"●", "Mannerisms Under Pressure":"●", "Motivation & Wound":"◆",
   "Conflict & Stress Response":"◼", "Social Role in a Group":"▲", "Values & Moral Line":"●",
   "Attachment & Intimacy":"◆", "Humor Style":"◼", "Habits & Vices":"▲", "Appearance":"✦",
-  "Required (constraints)":"✚", "The one thing that doesn't fit":"✳",
+  "Required (constraints)":"✚", "The one thing that doesn't fit":"✳", "Seated contradictions":"⇄",
   "Where They Stand Under Pressure":"▲",
   "Competence & Method":"▲", "Positive Origins":"●", "Goals & Stakes":"◆", "Ordinary Texture":"◼",
   "Recovery & Repair":"▲", "Contradiction Functions":"●", "Role by Context":"◼",
@@ -1370,6 +1396,14 @@ function sheetToText(st, meta, pState){
       L.push("", `**The contradiction — ${contra.axisLabel}:** ${contra.hi.trait} and also ${contra.lo.trait}. _${contra.question}_`,
         ...contra.fields.map(f => `- ${f.prompt} ${f.answer || f.derived || "(unanswered)"}`));
     }
+    (typeof seatedContradictions === 'function' ? seatedContradictions(st) : []).forEach(sc => {
+      L.push("", `**Seated contradiction — ${sc.axisLabel}:** ${sc.face ? sc.face.trait + " and also " : ""}${sc.exception.trait}${sc.fnTrait ? ` (for: ${sc.fnTrait.trait})` : ""}. _${sc.question}_`,
+        ...sc.answers.map(a => `- ${a.prompt} ${a.answer}`));
+    });
+    const beats = typeof backstoryBeats === 'function' ? backstoryBeats(st, meta) : null;
+    if (beats) L.push("", "**Backstory beats:**", ...beats.map((b, i) => `${i + 1}. _${b.title}_ (${b.when}) — ${b.text} (from: ${b.from.join(", ")})`));
+    if (meta.lenses && meta.lenses.length && typeof lensById === 'function') L.push("", `_Lenses: ${meta.lenses.map(id => (lensById(id) || {label:id}).label).join(", ")}_`);
+    if (meta.shape && meta.shape.text) L.push("", `_Shape: ${meta.shape.text}_`);
   } catch(e){}
   try {
     const co = coherenceScore(st);
@@ -1402,6 +1436,7 @@ function sheetToText(st, meta, pState){
   // ---- Required constraints ----
   block("Required (constraints)", Object.keys(st).filter(k=>k.startsWith("req_")||k.startsWith("reqcat_")));
   block("The one thing that doesn't fit", Object.keys(st).filter(k=>k.startsWith("wild_")));
+  block("Seated contradictions", Object.keys(st).filter(k=>k.startsWith("contra_")));
 
   // ---- Personality ----
   block("Personality", Object.keys(st).filter(k=>k.startsWith("pers_")));
@@ -1449,6 +1484,7 @@ function sheetToText(st, meta, pState){
       const chain = pressureChain(st, pState);
       if (chain) L.push(...chain.stages.map(sg => `1. **${sg.title}.** ${sg.text} (from: ${sg.from.join(", ") || "the pressure dial"})`), "");
     } catch(e){}
+    try { if (typeof pressureEscalationMarkdown === 'function'){ const esc = pressureEscalationMarkdown(st, pState); if (esc) L.push(esc, ""); } } catch(e){}
     /* The base sheet's `block` helper filters slots whose TRAIT is null; the pressure
        section checked only that the slot existed, so one blanked or banned-out pressure
        slot threw `Cannot read properties of null (reading 'trait')` and aborted the
@@ -1532,6 +1568,7 @@ const CHAR_FORMAT_VERSION = 2;
 const SETTING_FIELDS = ['mannerCount','vocabCount','personalityCount','profileDepth',
   'rarityPref','affinityBoost','rangeFocus','profileWeight','divergence',
   'app_stature','app_upkeep','app_presence','archetypeSelect','archetypeVariation','archetypeBlend','seedInput','sheetDensity','wildcardCount','pressureLevel',
+  'lensSelect',
   /* The cast and foil controls were the one part of the workspace that no capture
      covered, so "export my setup" and Undo both silently dropped them and a cast was
      unreproducible from a settings file even though it now has a seed. A workspace is
@@ -1539,7 +1576,8 @@ const SETTING_FIELDS = ['mannerCount','vocabCount','personalityCount','profileDe
   'charName','charAge','charContext','castCount','castSeed','castSpread','foilSeed'];
 const SETTING_TOGGLES = ['personalityToggle','depthFirstToggle','examplesToggle','stressToggle',
   'genPersonality','genSpeech','genVocab','genManner','genAppearance',
-  'avoidRecentToggle','wildcardToggle','foilOpposeComposure','compactToggle','castAnchor'];
+  'avoidRecentToggle','wildcardToggle','foilOpposeComposure','compactToggle','castAnchor',
+  'sheetShapeToggle','seatContradictions','exploreCandidates'];
 
 function captureSettings(){
   const fields = {}, toggles = {}, sections = {};
@@ -1637,6 +1675,7 @@ function restoreSettings(s){
   if (typeof refreshBudgetChips === 'function') refreshBudgetChips();
   if (typeof togglePersonalityPanel === 'function') togglePersonalityPanel();
   if (typeof toggleExamples === 'function') toggleExamples();
+  if (typeof renderLensPicker === 'function') renderLensPicker();
   invalidateSliderCache();
 }
 

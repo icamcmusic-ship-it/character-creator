@@ -2117,7 +2117,10 @@ function _pickInRangeInner(pool, rarityPref, target, minCount, flatten){
      is a statement about, it does not change shape as the window widens, and a
      singleton inside one window is no longer mistaken for a whole class. */
   const norm = rarityNorm(pool);
-  const prox = proximityWeights(list, centre, half, flatten);
+  /* Divergence used to act only BETWEEN categories (and on the polarity fit); inside a
+     category the proximity kernel still pulled every draw to the same few on-target
+     traits. When this draw's coin diverges, the kernel is flattened too (audit §5). */
+  const prox = proximityWeights(list, centre, half, flatten || _divergeThisDraw);
   const weights = list.map((t, i) => {
     let w = prox[i] * rarityWeight(t, rarityPref, norm) * tierWeight(t, centre);
     if (aff > 0 && CURRENT_AFFINITY_VEC){
@@ -2128,7 +2131,7 @@ function _pickInRangeInner(pool, rarityPref, target, minCount, flatten){
       // The same coin now flips the trait-level fit too.
       if (fit) w *= clamp(1 + aff*fit*(_divergeThisDraw ? -1 : 1), 0.15, 3);
     }
-    w *= recentPenalty(t) * slotRepeatPenalty(t);
+    w *= recentPenalty(t) * slotRepeatPenalty(t) * worldTagMultiplier(t);
     return w;
   });
   const total = weights.reduce((a,b)=>a+b,0);
@@ -2447,6 +2450,28 @@ const WEIGHT_MATRIX = {
     role:{"Peacemaker":TIER_STRONG,"Caretaker":TIER_MODERATE,"Connector":TIER_WEAK}, values:{"Loyalty-Bound":TIER_MODERATE},
     attachment:{"Anxious":TIER_STRONG}, humor:{"Self-Deprecating":TIER_MODERATE} },
 };
+// Inbound links for the §6 gap sections live beside their content (js/data/traits-gaps.js)
+// and are merged here, so a trimmed build without that pack simply has no such links.
+if (typeof GAP_WEIGHT_LINKS !== 'undefined'){
+  const GAP_TIER = {S:TIER_STRONG, M:TIER_MODERATE, W:TIER_WEAK};
+  Object.entries(GAP_WEIGHT_LINKS).forEach(([ax, poles])=>{
+    const e = WEIGHT_MATRIX[ax] = WEIGHT_MATRIX[ax] || {};
+    Object.entries(poles).forEach(([pole, kinds])=>{
+      const p = e[pole] = e[pole] || {};
+      Object.entries(kinds).forEach(([kind, frags])=>{
+        const k = p[kind] = p[kind] || {};
+        Object.entries(frags).forEach(([frag, t])=>{ if (!(frag in k)) k[frag] = GAP_TIER[t] || TIER_WEAK; });
+      });
+    });
+  });
+  if (typeof GAP_SECTION_LINKS !== 'undefined') Object.entries(GAP_SECTION_LINKS).forEach(([key, kinds])=>{
+    const e = WEIGHT_MATRIX[key] = WEIGHT_MATRIX[key] || {};
+    Object.entries(kinds).forEach(([kind, frags])=>{
+      const k = e[kind] = e[kind] || {};
+      Object.entries(frags).forEach(([frag, t])=>{ if (!(frag in k)) k[frag] = GAP_TIER[t] || TIER_WEAK; });
+    });
+  });
+}
 
 // Guarded: this is called from pickCategoryWeighted, which runs on every category
 // draw, including from code paths that have no DOM at all (tests, and any future
@@ -3346,11 +3371,14 @@ function buildContextBias(contextText, ageText){
   CONTEXT_SUPPRESSED.forEach(l=>{
     if (CONTEXT_RULES.some(r=>r.label===l)) CONTEXT_REJECTED.push({label:l, why:'you turned this one off'});
   });
+  // Selected lenses (setting / culture / life stage) compose with the text rules and
+  // share their cap — see LENSES.
+  const lensRegister = applyLensBias(push, CONTEXT_BIAS_NOTES);
   // Step 4 of the precedence above: compose exactly, clamp once.
   CONTEXT_BIAS.forEach((v, k) => CONTEXT_BIAS.set(k, clamp(v, CONTEXT_MULT_MIN, CONTEXT_MULT_MAX)));
   Object.keys(CONTEXT_AXIS_NUDGE).forEach(k => { CONTEXT_AXIS_NUDGE[k] = clamp(CONTEXT_AXIS_NUDGE[k], -CONTEXT_NUDGE_CAP, CONTEXT_NUDGE_CAP); });
   return {bias: CONTEXT_BIAS, nudge: CONTEXT_AXIS_NUDGE, notes: CONTEXT_BIAS_NOTES,
-          rejected: CONTEXT_REJECTED.slice(), age};
+          rejected: CONTEXT_REJECTED.slice(), age, lensRegister, lenses: activeLensIds()};
 }
 /* A slot can legitimately hold trait:null — an exhausted pool, a banned-out category,
    or a save file written by an older build. Three separate crashes (axisProfile,
@@ -3421,6 +3449,8 @@ function checkConflictsFor(stateObj){
       const a = items[i].trait, b = items[j].trait;
       if (!a.pol || !b.pol) continue;
       if (contextual(a) || contextual(b)) continue;
+      // A seated contradiction (audit §5) is the point, not a clash to warn about.
+      if (items[i].contradiction || items[j].contradiction) continue;
       for (const axis of Object.keys(AXIS_LABELS)){
         if (a.pol[axis] === 1 && b.pol[axis] === -1 || a.pol[axis] === -1 && b.pol[axis] === 1){
           const pk = a.trait + '|' + b.trait;
@@ -3965,10 +3995,33 @@ const PROFILE_SECTIONS = [
    blurb:"Preferences, routines, affiliations, a thing practised badly — texture that does not need a rare slot."},
   {id:"repair", section:"Recovery & Repair", label:"Recovery & Repair", drawAll:false, defaultOn:false,
    blurb:"What they do after a conflict, which the pressure sheet's aftermath reads from."},
-  {id:"contradiction", section:"Contradiction Functions", label:"Contradiction Functions", drawAll:false, defaultOn:false,
+  // On by default since the pool reached ~100 (traits-gaps.js): the audit's §5 asks for
+  // one seated contradiction, with its function, on every sheet.
+  {id:"contradiction", section:"Contradiction Functions", label:"Contradiction Functions", drawAll:false, defaultOn:true,
    blurb:"What the contradiction is for — protective hypocrisy, aspirational values, the exceptions they make."},
   {id:"contextrole", section:"Role by Context", label:"Role by Context", drawAll:true, defaultOn:false,
    blurb:"The seat they take among peers, under authority, and with dependents — not one seat in every room."},
+  /* ---- The audit's §6 trait-bank gap sections (js/data/traits-gaps.js) --------------
+     Opt-in facts a writer CHOOSES — a random "military jargon" card on every sheet would
+     be noise, not texture — so all ship off, with the usual toggle / type / weight. */
+  {id:"romance", section:"Romance & Desire", label:"Romance & Desire", drawAll:false, defaultOn:false,
+   blurb:"How they flirt, court, get jealous and pine — attraction as it comes out in speech."},
+  {id:"dialect", section:"Dialect & Linguistic Background", label:"Dialect & Linguistic Background", drawAll:false, defaultOn:false,
+   blurb:"Region, code-switching, a second language, heritage words, class register and the generation they talk like."},
+  {id:"beliefs", section:"Beliefs & Worldview", label:"Beliefs & Worldview", drawAll:false, defaultOn:false,
+   blurb:"Faith kept or lapsed, superstition, how they hold their politics, and the rituals that stand in for either."},
+  {id:"jargon", section:"Occupational Jargon", label:"Occupational Jargon", drawAll:false, defaultOn:false,
+   blurb:"How the job gets into the mouth off-shift: medical, military, legal, trade, tech, academic, service."},
+  {id:"conversation", section:"Conversation Mechanics", label:"Conversation Mechanics", drawAll:false, defaultOn:false,
+   blurb:"Literal uptake, info-dumping, scripts, turn-timing, sensory load and masking — behaviours, not diagnoses."},
+  {id:"body", section:"Body in Speech", label:"Body in Speech", drawAll:false, defaultOn:false,
+   blurb:"Pain, hearing and sight, medication, breath and a stammer — how a body shows up in talk."},
+  {id:"money", section:"Money & Class", label:"Money & Class", drawAll:false, defaultOn:false,
+   blurb:"Thrift, status signals, what they won't say about money, and the tells of having moved class."},
+  {id:"fears", section:"Fears & Aversions", label:"Fears & Aversions", drawAll:false, defaultOn:false,
+   blurb:"The concrete ones — phobias, social dreads, bodily aversions — beside the abstract Core Fear."},
+  {id:"family", section:"Family Talk", label:"Family Talk", drawAll:false, defaultOn:false,
+   blurb:"How much, and how, family comes into their conversation."},
 ];
 
 
@@ -4029,6 +4082,7 @@ function resolveProfileCategories(rarityPref, overrides, forcedCats){
   PROFILE_SECTIONS.forEach(ps=>{
     if (ps.drawAll) return; // Motivation & Wound always draws every category; nothing to "resolve"
     if (!profileSectionEnabled(ps)) return;
+    if (CURRENT_SHAPE && CURRENT_SHAPE.drop === ps.id) return;   // the signature budget dropped it
     if (forcedCats && forcedCats[ps.id]) { chosen[ps.id] = forcedCats[ps.id]; return; }
     const sel = settingEl('type_'+ps.id);
     const manual = (sel && sel.value) ? sel.value : null;
@@ -4150,7 +4204,9 @@ function pickProfileSlots(rarityPref, resolvedCats, onlySectionId, skipSectionId
          of the pool. The primary's target now takes a seeded jitter across the same
          MOTIVATION_TARGET_SPREAD band, draws with minCount + flatten, and remembers
          its own slot. Staggered secondaries keep their offset from the jittered base. */
-      const primaryCount = Math.min(want, 4, Math.max(1, pool.length));
+      // The signature budget gives a defining section one more card (see rollSheetShape).
+      const bonus = CURRENT_SHAPE && CURRENT_SHAPE.double.has(ps.id) ? 1 : 0;
+      const primaryCount = Math.min(want + bonus, 4, Math.max(1, pool.length));
       const jittered = pool.length > 1 ? clamp(target + (rand() - 0.5) * MOTIVATION_TARGET_SPREAD, 1, 5) : target;
       let placed = 0;
       for (let i = 0; i < primaryCount; i++){
@@ -4377,8 +4433,15 @@ function emergentArchetypeName(st){
   const nounSrc = [role, stress, values, attach, humor, vices].filter(c=>c && ARCH_NOUN[c]);
   const composed = (()=>{
     if (adjSrc.length && nounSrc.length){
-      const adj  = pickFrom(ARCH_ADJ[pickFrom(adjSrc, seed+"a")], seed+"a2");
-      const noun = pickFrom(ARCH_NOUN[pickFrom(nounSrc, seed+"n")], seed+"n2");
+      let adj  = pickFrom(ARCH_ADJ[pickFrom(adjSrc, seed+"a")], seed+"a2");
+      let noun = pickFrom(ARCH_NOUN[pickFrom(nounSrc, seed+"n")], seed+"n2");
+      // Section 6: the sheet's own loudest traits can lend a word (mechanics.js).
+      const sig = typeof signatureArchetypeWords === 'function' ? signatureArchetypeWords(st) : null;
+      if (sig){
+        const sk = seed + "|" + sig.adj.concat(sig.noun).join(",");
+        if (sig.adj.length && seededRandom(sk + "sa")() < 0.4) adj = pickFrom(sig.adj, sk + "sa2");
+        else if (sig.noun.length && seededRandom(sk + "sn")() < 0.35) noun = pickFrom(sig.noun, sk + "sn2");
+      }
       // "The Barbed Blade" — an adjective and noun from the same category is a tautology
       if (adj.toLowerCase() === noun.toLowerCase()) return null;
       return "The " + adj + " " + noun;
@@ -5719,7 +5782,9 @@ function pickWildcardSlot(rarityPref, index, partial){
   const slotId = "wild_" + (index || 0);
   const contradicts = lean && trait.pol && Math.sign(trait.pol[lean.ax] || 0) === -Math.sign(lean.v);
   const why = contradicts
-    ? `Cuts against the sheet's strongest lean (${AXIS_LABELS[lean.ax]}, ${lean.v > 0 ? 'high' : 'low'}) — ` + (EXCEPTION_SURVIVES[trait.behaviorFunction] || EXCEPTION_SURVIVES.default) + '.'
+    ? `Cuts against the sheet's strongest lean (${AXIS_LABELS[lean.ax]}, ${lean.v > 0 ? 'high' : 'low'}) — ` + (typeof wildcardSurvivesBecause === 'function'
+        ? wildcardSurvivesBecause(trait, lean, partial)
+        : (EXCEPTION_SURVIVES[trait.behaviorFunction] || EXCEPTION_SURVIVES.default) + '.')
     : `A far-tail draw from ${cat}; nothing in that category opposes the sheet's strongest lean, so this is texture rather than a contradiction.`;
   return {slotId, locked:false, wildcard:true, target,
           label: (contradicts ? "The exception — " : "Doesn't fit the rest — ") + cat, trait,
@@ -5762,6 +5827,12 @@ function buildCharacterState(opts){
     composure: Math.round(clamp(compLevel,-2,2)*50),
   });
   setAffinityVec(fullOverrides);
+  /* §5 plans, rolled up front on the seeded stream — each only when its own setting is
+     on, so a build with both off consumes exactly the draws it always did. */
+  CURRENT_SHAPE = sheetShapeEnabled() ? rollSheetShape() : null;
+  LAST_SHAPE = CURRENT_SHAPE;
+  const contraPlan = contradictionSeatingEnabled() ? planContradictions(fullOverrides) : null;
+  try {
   /* Motivation & Wound genuinely goes first now, rather than nominally. It is drawAll,
      so it needs nothing resolved to draw, and drawing it up front is what lets its
      keywords reach resolveProfileCategories — which is where Stress, Role, Values,
@@ -5822,11 +5893,14 @@ function buildCharacterState(opts){
   // Appearance draws last on purpose: it now reads the Motivation slots this build
   // just seated (see the wound → distinguishing-marks link) and the resolved vice.
   if (on('genAppearance')) Object.assign(obj, pickAppearanceSlots(rarityPref, fullOverrides, resolvedCats, obj));
-  for (let w = 0; w < wildcardCount(); w++){
+  if (contraPlan) Object.assign(obj, seatContradictions(contraPlan, obj));
+  const nWild = CURRENT_SHAPE ? CURRENT_SHAPE.wild : wildcardCount();
+  for (let w = 0; w < nWild; w++){
     const wild = pickWildcardSlot(rarityPref, w, obj);
     if (wild) obj[wild.slotId] = wild;
   }
   return obj;
+  } finally { CURRENT_SHAPE = null; }
 }
 
 // Sections whose resolved type can legitimately CHANGE under pressure. Vices stay
@@ -6188,6 +6262,11 @@ function contextualView(st, contextId){
       else {
         const r = (CONTEXT_LENS_RULES[mode.id] || []).find(r => r.test(t, d, dim));
         if (r){ status = r.status; why = r.why; rule = "section/polarity"; }
+        else {
+          // Section 6: read the room off the card's own text before falling back (mechanics.js).
+          const dv = typeof derivedContextVerdict === 'function' ? (derivedContextVerdict(t, mode) || categoryContextVerdict(t, mode)) : null;
+          if (dv){ status = dv.status; why = dv.why; rule = "derived"; }
+        }
       }
     }
     slots.push({slotId:id, trait:t, status, why, rule});
@@ -6327,7 +6406,7 @@ function edgesToMarkdown(edges, members){
 const ARC_SHAPES = [
   {id:"growth",        label:"Growth",        blurb:"The belief loosened. They move toward the thing they were avoiding.", dir:1},
   {id:"deterioration", label:"Deterioration", blurb:"The belief won. They move further into the defence.", dir:-1},
-  {id:"steadfast",     label:"Steadfast",     blurb:"It cost them and they did not move. Nothing on the sheet changes; the cost is the record.", dir:0},
+  {id:"steadfast",     label:"Steadfast",     blurb:"It cost them and they did not move. Their Values deepen, and the cost becomes the Price they are paying.", dir:0},
   {id:"cyclical",      label:"Cyclical",      blurb:"They have been here before. This undoes the last change of the opposite kind.", dir:0},
 ];
 const ARC_SHAPE_IDS = ARC_SHAPES.map(s => s.id);
@@ -6389,7 +6468,9 @@ function proposeArcChanges(st, event, priorEvents){
     }
     return out;
   }
-  if (shape.dir === 0) return out;   // steadfast: the cost is the record
+  // Steadfast used to propose nothing. Its changes now come from the event text:
+  // Values deepen and the cost becomes the Price (arcTextChanges in mechanics.js).
+  if (shape.dir === 0) return typeof arcTextChanges === 'function' ? out.concat(arcTextChanges(st, event, shape, out)) : out;
   withRng(mulberry32(hashSeedString(event.id + "|" + event.shape)), ()=>{
     // 1. The loudest personality card pointing the wrong way for this shape.
     const pers = Object.keys(st).filter(k => k.startsWith("pers_") && st[k] && st[k].trait)
@@ -6429,7 +6510,7 @@ function proposeArcChanges(st, event, priorEvents){
       }
     }
   });
-  return out;
+  return typeof arcTextChanges === 'function' ? out.concat(arcTextChanges(st, event, shape, out)) : out;
 }
 
 /* Applying an event is applying only its ACCEPTED changes, and never mutating the
@@ -6609,7 +6690,9 @@ const PRESSURE_TAIL = {
 };
 
 function _pickFrag(list, rng){ return list && list.length ? list[Math.floor(rng() * list.length)] : null; }
-function composeVoiceLine(st, promptId, mode, opts){
+/* The original fragment composer, kept as the backing table's reference reader (and for
+   comparison): composeVoiceLine below is the compositional generator that replaced it. */
+function composeVoiceLineFragments(st, promptId, mode, opts){
   const prompt = allVoicePrompts().find(p => p.id === promptId);
   if (!prompt) return null;
   opts = opts || {};
@@ -6712,6 +6795,638 @@ function voiceLabToMarkdown(st, mode){
   return voiceLab(st, mode).map(l =>
     `### ${l.prompt}\n\n_${l.setup}_\n\n> ${l.text}\n\n- Rules: ${l.rules.join("; ") || "none"}${l.device ? `\n- Habitual device: ${l.device.label}` : ""}`
   ).join("\n\n");
+}
+
+// ================= KEEPING OUTPUT FRESH (audit §5) =================
+/* Six mechanisms, one block, because they share their inputs (the seated sheet, the
+   active lenses, the seeded stream) and none of them may consume the build's random
+   stream unless its own setting is on — so a sheet from a seed that predates them
+   replays unchanged with every one of them switched off.
+
+     1. Compositional voice lines        composeVoiceLine / voiceLines
+     2. Seated contradictions            planContradictions / seatContradictions
+     3. Variable sheet shape             rollSheetShape (signature budget)
+     4. Anti-staleness                   selectDistinctCandidate, archiveCategoryMultiplier
+     5. Setting / culture / life lenses  LENSES, lensReading
+     6. Backstory beats                  backstoryBeats
+
+   NOTE: there is no name pool anywhere in this block, on purpose (CLAUDE.md). The
+   voice lines' "entity pool" is roles and relations — "my sister", "the foreman" —
+   never a personal name. */
+
+/* ---------- 5. LENSES ----------
+   The ten context regexes and three age bands were inferred from free text, so there
+   was no way to SAY "court" or "late life" and see what that means. A lens is the same
+   bias made first-class and combinable: category multipliers (through the one
+   contextMultiplier the draw already reads), a register norm (a nudge to the Register
+   dial), preferred worldTags (a soft multiplier on the trait draw), taboo topics (kept
+   out of the voice lines) and extra topics for them. Lenses are SETTINGS, not history,
+   so a seed replays under the same lenses exactly. */
+const LENSES = [
+  {id:"court", kind:"setting", label:"Court",
+   up:["Manners — Polished & Courteous","Register & Formality Spectrum","Stylized & Elaborate","Honesty — Deceptive & Evasive","Loyalty-Bound"],
+   down:["Manners — Crude & Ill-Mannered","Directness & Literalness"], worldTags:["pre-modern","institutional"], register:1,
+   taboo:["money","the body"], topics:{thing:["the seal","the petition","the queen's letter","the ring of office"], place:["the long gallery","the antechamber"], person:["the chamberlain","the heir"]}},
+  {id:"frontier", kind:"setting", label:"Frontier",
+   up:["Directness & Literalness","Hands & Materials","Minimal & Ultra-Brief","Pragmatic & Flexible","Activeness — Energetic & Active"],
+   down:["Stylized & Elaborate","Conceptual Framework & Loanwords"], worldTags:["rural","pre-modern","industrial"], register:-1,
+   taboo:["the law"], topics:{thing:["the water rights","the horse","the claim papers"], place:["the ridge","the creek"], person:["the marshal","the trader"]}},
+  {id:"corporate", kind:"setting", label:"Corporate",
+   up:["Conceptual Framework & Loanwords","Pragmatic Focus & Speech Functions","Systems & Logistics","Self-Interested","Register & Formality Spectrum"],
+   down:["Absurd & Chaotic","Manners — Crude & Ill-Mannered"], worldTags:["modern","institutional","urban"], register:0.5,
+   taboo:["salary","the layoffs"], topics:{thing:["the quarterly numbers","the deck","the org chart"], place:["the third floor","the all-hands"], person:["the VP","legal"]}},
+  {id:"diaspora", kind:"setting", label:"Diaspora",
+   up:["Temporal Orientation & Tense Usage","Loyalty-Bound","Connector","Code-Switching","Stable Care"],
+   down:[], worldTags:["modern","urban","domestic"], register:0,
+   taboo:["going back"], topics:{thing:["the papers","the money we send home","grandmother's recipe"], place:["the consulate","the old country"], person:["my aunt","the cousins"]}},
+  {id:"military", kind:"setting", label:"Military",
+   up:["Discipline — Self-Controlled","Rigid & Principled","Spoken Compression","Morphological & Structural Lexicon","Leader"],
+   down:["Absurd & Chaotic","Discipline — Impulsive & Undisciplined"], worldTags:["military","institutional"], register:0.5,
+   taboo:["the ones we lost"], topics:{thing:["the orders","the duty roster","the sidearm"], place:["the perimeter","the mess"], person:["the sergeant","the CO"]}},
+  {id:"online", kind:"setting", label:"Online-native",
+   up:["Conceptual Framework & Loanwords","Semantic Density & Modifiers","Dry & Deadpan","Absurd & Chaotic","Spoken Compression"],
+   down:["Register & Formality Spectrum","Stylized & Elaborate"], worldTags:["online","modern"], register:-1,
+   taboo:["real names"], topics:{thing:["the screenshot","the group chat","the thread"], place:["the server","the stream"], person:["the mods","my followers"]}},
+  {id:"clergy", kind:"setting", label:"Clergy",
+   up:["Idealistic & Visionary","Register & Formality Spectrum","Caretaker","Loyalty-Bound","Restraint & Discipline"],
+   down:["Cruel & Barbed","Manners — Crude & Ill-Mannered","Substance & Consumption"], worldTags:["institutional","pre-modern"], register:1,
+   taboo:["doubt","the bishop's money"], topics:{thing:["the collection","the confession","the vestry key"], place:["the sacristy","the chapel"], person:["the bishop","the sexton"]}},
+  {id:"scifi", kind:"setting", label:"Sci-fi",
+   up:["Precision & Specificity Level","Systems & Logistics","Morphological & Structural Lexicon","Intelligence — Sharp & Analytical","Curiosity — Inquisitive & Exploratory"],
+   down:[], worldTags:["futuristic"], register:0,
+   taboo:["Earth"], topics:{thing:["the nav log","the air ration","the core key"], place:["the airlock","the hydro bay"], person:["the pilot","the ship's mind"]}},
+  {id:"child", kind:"life", label:"Child",
+   up:["Curiosity — Inquisitive & Exploratory","Absurd & Chaotic","Emotional Capacity — Expressive & Deep","Warm & Playful"],
+   down:["Conceptual Framework & Loanwords","Restraint & Discipline","Substance & Consumption","Self-Interested"], worldTags:["domestic"], register:-1,
+   taboo:["sex","money"], topics:{thing:["the biscuit tin","my drawing","the tablet"], place:["school","the garden"], person:["Mum","my teacher"]}},
+  {id:"adolescent", kind:"life", label:"Adolescent",
+   up:["Rebelliousness — Defiant","Confidence — Insecure or Egotistical","Activeness — Energetic & Active","Risk & Escape"],
+   down:["Curiosity — Incurious & Settled","Rigid & Principled"], worldTags:[], register:-1,
+   taboo:["their body"], topics:{thing:["my phone","the party","my grades"], place:["the bus stop","my room"], person:["my mum","the others"]}},
+  {id:"earlycareer", kind:"life", label:"Early career",
+   up:["Earned Success","Confidence — Situational","Systems & Logistics","Immediate Objective"],
+   down:[], worldTags:[], register:0.3,
+   taboo:["rent"], topics:{thing:["the probation review","the first pay cheque"], place:["the break room"], person:["my manager","the other graduate"]}},
+  {id:"parent", kind:"life", label:"Parent",
+   up:["Caretaker","Restitution & Practical Care","Stable Care","Activeness — Energetic & Active","Discipline — Self-Controlled"],
+   down:["Risk & Escape"], worldTags:["domestic"], register:0,
+   taboo:["what I gave up"], topics:{thing:["the school run","the car seat","the doctor's letter"], place:["the school gate","the kitchen"], person:["the kids","their father"]}},
+  {id:"midlife", kind:"life", label:"Midlife",
+   up:["Pragmatic & Flexible","The Price & The Competing Claim","Positivity — Pessimistic & Cynical","Routines"],
+   down:[], worldTags:[], register:0.3,
+   taboo:["getting older"], topics:{thing:["the mortgage","the test results"], place:["the old house"], person:["my father","the kids"]}},
+  {id:"latelife", kind:"life", label:"Late life",
+   up:["Curiosity — Incurious & Settled","Temporal Orientation & Tense Usage","Activeness — Sedentary & Low-Energy","Dry & Deadpan"],
+   down:["Activeness — Energetic & Active","Rebelliousness — Defiant"], worldTags:[], register:0.5,
+   taboo:["the home"], topics:{thing:["the photographs","the will","my glasses"], place:["the old street","the allotment"], person:["my late husband","the grandchildren"]}},
+  {id:"dying", kind:"life", label:"Dying",
+   up:["The Need (what would actually help)","Repaired Conflict","Apology","Emotional Capacity — Expressive & Deep","Temporal Orientation & Tense Usage"],
+   down:["Immediate Objective","Risk & Escape"], worldTags:[], register:0,
+   taboo:["next year"], topics:{thing:["the letter I haven't sent","the morphine"], place:["the ward"], person:["my son","the night nurse"]}},
+];
+const LENS_IDS = LENSES.map(l => l.id);
+const LENS_UP = 1.8, LENS_DOWN = 0.55;
+function lensById(id){ return LENSES.find(l => l.id === id) || null; }
+/* Active lenses come from a comma-separated control (so the settings object, the save
+   file and the DOM all speak one format). Unknown ids are dropped, order is canonical. */
+function activeLensIds(){
+  const el = settingEl('lensSelect');
+  const raw = el ? String(el.value || '') : '';
+  const want = new Set(raw.split(/[\s,]+/).filter(Boolean));
+  return LENS_IDS.filter(id => want.has(id));
+}
+function activeLenses(){ return activeLensIds().map(lensById); }
+// Folded into buildContextBias's maps before its clamp. Returns the register nudge
+// (-1..1 on the dial's -2..2 scale) for the caller to add to the Register level.
+function applyLensBias(push, notes){
+  const ls = activeLenses();
+  let reg = 0;
+  // A category not in the bank (yet) is skipped rather than stored as a dead multiplier.
+  const known = c => SECTION_OF_CATEGORY.has(c) || !!_axisForCategory(c);
+  ls.forEach(l => {
+    (l.up || []).filter(known).forEach(c => push(c, LENS_UP, 1));
+    (l.down || []).filter(known).forEach(c => push(c, LENS_DOWN, -1));
+    reg += l.register || 0;
+    notes.push("lens: " + l.label);
+  });
+  return clamp(reg * 0.5, -1, 1);
+}
+/* worldTags at draw time. A trait tagged only for a world none of the active lenses
+   name is pushed back; one tagged for a lens's world is pulled forward; untagged and
+   "any" traits are untouched. Soft — never an exclusion. */
+const WORLD_TAG_MATCH = 1.5, WORLD_TAG_MISMATCH = 0.6;
+let _lensWorldTagsCache = null, _lensWorldKey = null;
+function lensWorldTags(){
+  const key = activeLensIds().join(',');
+  if (key !== _lensWorldKey){
+    _lensWorldKey = key;
+    const s = new Set(); activeLenses().forEach(l => (l.worldTags || []).forEach(w => s.add(w)));
+    _lensWorldTagsCache = s;
+  }
+  return _lensWorldTagsCache;
+}
+function worldTagMultiplier(t){
+  const wt = t && t.worldTags;
+  if (!wt || !wt.length || wt.includes('any')) return 1;
+  const want = lensWorldTags();
+  if (!want.size) return 1;
+  return wt.some(w => want.has(w)) ? WORLD_TAG_MATCH : WORLD_TAG_MISMATCH;
+}
+/* "Normal here / deviant here". Read per trait against every active lens: a category
+   the lens favours, a worldTag it names, or a formality pole that matches its register
+   norm reads as normal; the reverse reads as deviant. Deviance wins a tie — a courtier
+   who swears is the thing a reader notices. */
+function lensReading(t, lenses){
+  const ls = lenses || activeLenses();
+  if (!t || !ls.length) return null;
+  let normal = null, deviant = null;
+  ls.forEach(l => {
+    if ((l.down || []).includes(t.category)) deviant = deviant || {lens:l.label, why:`${l.label} disfavours ${t.category}`};
+    else if ((l.up || []).includes(t.category)) normal = normal || {lens:l.label, why:`${l.label} expects ${t.category}`};
+    const wt = t.worldTags || [];
+    if (wt.length && !wt.includes('any') && (l.worldTags || []).length){
+      if (wt.some(w => l.worldTags.includes(w))) normal = normal || {lens:l.label, why:`tagged for a ${wt.join('/')} world`};
+      else deviant = deviant || {lens:l.label, why:`tagged for a ${wt.join('/')} world, not this one`};
+    }
+    const f = t.pol && t.pol.form;
+    if (f && l.register && Math.abs(l.register) >= 0.5){
+      if (Math.sign(f) === Math.sign(l.register)) normal = normal || {lens:l.label, why:`${l.register > 0 ? 'formal' : 'plain'} speech is the norm`};
+      else deviant = deviant || {lens:l.label, why:`${l.register > 0 ? 'formal' : 'plain'} speech is the norm, and this is not`};
+    }
+  });
+  if (deviant) return Object.assign({status:'deviant'}, deviant);
+  if (normal) return Object.assign({status:'normal'}, normal);
+  return null;
+}
+function lensTaboos(){ const out = []; activeLenses().forEach(l => (l.taboo || []).forEach(x => out.push(x))); return out; }
+
+/* ---------- 3. VARIABLE SHEET SHAPE (the signature budget) ----------
+   Every sheet was the same template: one card per profile section, the same outlier
+   count, ~42 slots every time. With the shape on, a build rolls — from its OWN seeded
+   stream, before anything is drawn — which one or two sections define this person (they
+   get a second card), which thin section is dropped, and how many outliers (0-3) they
+   carry. Off (or absent), nothing is rolled and the stream is untouched. */
+let CURRENT_SHAPE = null;   // {double:Set, drop:string|null, wild:number} during a build
+let LAST_SHAPE = null;      // the most recent build's shape, for the sheet to report
+function sheetShapeEnabled(){ const el = settingEl('sheetShapeToggle'); return el ? !!el.checked : false; }
+const SHAPE_WILD_ODDS = [0.25, 0.35, 0.25, 0.15];   // 0, 1, 2, 3 outliers
+function rollSheetShape(){
+  const eligible = PROFILE_SECTIONS.filter(ps => !ps.drawAll && profileSectionEnabled(ps));
+  const ids = eligible.map(ps => ps.id);
+  const take = () => ids.length ? ids.splice(Math.floor(rand() * ids.length), 1)[0] : null;
+  const double = new Set();
+  const nDouble = rand() < 0.45 ? 2 : 1;
+  for (let i = 0; i < nDouble; i++){ const id = take(); if (id) double.add(id); }
+  /* "Thin" = the section with the least content behind it among what is left, with a
+     coin so the same thin section is not always the one to go. */
+  let drop = null;
+  if (ids.length > 2 && rand() < 0.7){
+    const size = id => { const ps = PROFILE_SECTIONS.find(p => p.id === id); return catsOf(ps.section).reduce((n, c) => n + byFilter(ps.section, c).length, 0); };
+    const sorted = ids.slice().sort((a, b) => size(a) - size(b));
+    drop = sorted[Math.floor(rand() * Math.min(2, sorted.length))];
+  }
+  let r = rand(), wild = 0;
+  for (let i = 0; i < SHAPE_WILD_ODDS.length; i++){ r -= SHAPE_WILD_ODDS[i]; if (r <= 0){ wild = i; break; } }
+  return {double, drop, wild};
+}
+function shapeSummary(shape){
+  const s = shape || LAST_SHAPE;
+  if (!s) return null;
+  const label = id => { const ps = PROFILE_SECTIONS.find(p => p.id === id); return ps ? ps.label : id; };
+  return {doubled: [...s.double].map(label), dropped: s.drop ? label(s.drop) : null, wildcards: s.wild,
+    text: `Defined by ${[...s.double].map(label).join(" and ") || "nothing in particular"}${s.drop ? `; no ${label(s.drop)} card` : ``}; ${s.wild} outlier${s.wild === 1 ? '' : 's'}.`};
+}
+
+/* ---------- 2. SEATED CONTRADICTIONS ----------
+   contradictionFor finds a contradiction if the dice happened to produce one. This
+   seats one or two ON PURPOSE: the axis and the function it serves (protect, soothe,
+   perform…) are chosen before the sheet is drawn, the exception trait is drawn against
+   the sheet's actual lean on that axis once it exists, and a Contradiction Functions
+   card says what the contradiction is for. Its scene questions are answered from the
+   sheet rather than left blank. */
+function contradictionSeatingEnabled(){ const el = settingEl('seatContradictions'); return el ? !!el.checked : false; }
+const CONTRA_FUNCTIONS = ["protect","soothe","perform","control","connect","avoid","provide","repair"];
+function planContradictions(overrides){
+  const axes = Object.values(AXIS_TO_POLCODE);
+  const lean = {};
+  PERSONALITY_AXES.forEach(a => { const code = AXIS_TO_POLCODE[a.id]; if (code) lean[code] = Math.abs((overrides && overrides[a.id]) || 0) / 100; });
+  const n = rand() < 0.55 ? 1 : 2;
+  const pool = axes.slice(), plan = [];
+  for (let i = 0; i < n && pool.length; i++){
+    // A leaning axis is likelier to be the one the contradiction cuts across.
+    const w = pool.map(ax => 0.4 + (lean[ax] || 0));
+    let r = rand() * w.reduce((a, b) => a + b, 0), k = 0;
+    for (; k < pool.length - 1; k++){ r -= w[k]; if (r <= 0) break; }
+    const axis = pool.splice(k, 1)[0];
+    const fnCats = catsOf("Contradiction Functions");
+    plan.push({axis, fn: CONTRA_FUNCTIONS[Math.floor(rand() * CONTRA_FUNCTIONS.length)],
+      fnCat: fnCats.length ? fnCats[Math.floor(rand() * fnCats.length)] : null, coin: rand()});
+  }
+  return plan;
+}
+function _axisLean(obj, axis){
+  let s = 0; Object.values(obj || {}).forEach(sl => { const v = sl && sl.trait && sl.trait.pol ? sl.trait.pol[axis] : 0; if (v) s += v; });
+  return s;
+}
+function _weightedPick(list, weightOf){
+  if (!list.length) return null;
+  const w = list.map(weightOf);
+  let r = rand() * w.reduce((a, b) => a + b, 0);
+  for (let i = 0; i < list.length; i++){ r -= w[i]; if (r <= 0) return list[i]; }
+  return list[list.length - 1];
+}
+function seatContradictions(plan, obj){
+  const out = {};
+  (plan || []).forEach((p, i) => {
+    let sign = Math.sign(_axisLean(obj, p.axis));
+    if (!sign) sign = p.coin < 0.5 ? 1 : -1;
+    const pool = [];
+    WILDCARD_SECTIONS.forEach(s => catsOf(s).forEach(c => byFilter(s, c).forEach(t => {
+      if (t.pol && t.pol[p.axis] === -sign && !_buildUsedIds.has(t.id)) pool.push(t);
+    })));
+    const ex = _weightedPick(pool, t => (t.behaviorFunction === p.fn ? 4 : 1) * (t.intensity >= 3 ? 1.5 : 1) * recentPenalty(t));
+    if (!ex) return;
+    _markUsed(ex);
+    const fnPool = p.fnCat ? byFilter("Contradiction Functions", p.fnCat).filter(t => !_buildUsedIds.has(t.id)) : [];
+    const fnTrait = _weightedPick(fnPool, t => (t.behaviorFunction === p.fn ? 4 : 1) * recentPenalty(t));
+    if (fnTrait) _markUsed(fnTrait);
+    const id = "contra_" + i;
+    out[id] = {slotId:id, locked:false, label:`Seated contradiction — ${AXIS_LABELS[p.axis]}`, trait:ex, target:ex.intensity,
+      contradiction:{axis:p.axis, face:sign, fn:p.fn}};
+    if (fnTrait) out[id + "_fn"] = {slotId:id + "_fn", locked:false, label:`What it is for — ${p.fnCat}`, trait:fnTrait, target:fnTrait.intensity,
+      contradiction:{axis:p.axis, face:sign, fn:p.fn, role:"function"}};
+  });
+  return out;
+}
+/* The scene questions, answered from the sheet. Each answer names the card it read. */
+function seatedContradictions(st){
+  const ids = Object.keys(st || {}).filter(k => /^contra_\d+$/.test(k) && st[k] && st[k].trait && st[k].contradiction);
+  return ids.map(id => {
+    const s = st[id], c = s.contradiction, ex = s.trait;
+    const fnSlot = st[id + "_fn"], fnT = fnSlot && fnSlot.trait;
+    // The face: the loudest other card that leans the sheet's way on this axis.
+    const face = Object.keys(st).filter(k => k !== id && !k.startsWith("contra_") && st[k] && st[k].trait && st[k].trait.pol && st[k].trait.pol[c.axis] === c.face)
+      .map(k => st[k].trait).sort((a, b) => (b.intensity || 0) - (a.intensity || 0))[0] || null;
+    const words = t => (t && t.conditions || []).map(x => CONTEXT_WORDS[x] || x);
+    const fear = _profTrait(st, "motivation", /Core Fear/i), ghost = _profTrait(st, "motivation", /The Ghost/i);
+    const attach = _profTrait(st, "attachment"), price = _profTrait(st, "goals", /Price/i), wound = _profTrait(st, "motivation", /Core Wound/i);
+    const role = ["Under Authority","With Dependents","Among Peers"].map(r => _profTrait(st, "contextrole", new RegExp("^" + r + "$"))).filter(Boolean)[0];
+    const when = words(ex).length ? `${words(ex).join(" or ")} — that is when ${ex.trait.toLowerCase()} comes out.`
+      : fear ? `When anything looks like ${fear.trait.toLowerCase()}.` : `Only when nobody who knows the other face is watching.`;
+    const who = ghost ? `Around anything that touches ${ghost.trait.toLowerCase()}.`
+      : role ? `${role.category}: they are ${role.trait.toLowerCase()} there.`
+      : attach ? `With the people their ${attach.category.toLowerCase()} attachment lets close.` : `With strangers, who have no earlier version to compare it to.`;
+    const change = face ? `${face.trait} gives way to ${ex.trait} — ${AXIS_LABELS[c.axis].toLowerCase()} flips.` : `${ex.trait}, against the rest of the sheet on ${AXIS_LABELS[c.axis].toLowerCase()}.`;
+    const cost = fnT ? `${fnT.trait}${fnT.desc ? `: ${fnT.desc}` : ``}${price ? ` And it is paid out of ${price.trait.toLowerCase()}.` : wound ? ` It keeps ${wound.trait.toLowerCase()} covered.` : ``}`
+      : price ? `It is paid out of ${price.trait.toLowerCase()}.` : `Someone eventually sees both faces.`;
+    const answers = [
+      {key:"for", prompt:"What is it for?", answer:(EXCEPTION_SURVIVES[c.fn] || EXCEPTION_SURVIVES.default).replace(/^it survives because /, ""), from:[fnT && fnT.trait].filter(Boolean)},
+      {key:"when", prompt:"When does the second face appear?", answer:when, from:[words(ex).length ? ex.trait : fear && fear.trait].filter(Boolean)},
+      {key:"who", prompt:"With whom?", answer:who, from:[(ghost || role || attach || {}).trait].filter(Boolean)},
+      {key:"change", prompt:"What actually changes?", answer:change, from:[face && face.trait, ex.trait].filter(Boolean)},
+      {key:"cost", prompt:"What does it cost them?", answer:cost, from:[fnT && fnT.trait, (price || wound || {}).trait].filter(Boolean)},
+    ];
+    return {slotId:id, axis:c.axis, axisLabel:AXIS_LABELS[c.axis], fn:c.fn, face, exception:ex, fnTrait:fnT || null, answers,
+      question: CONTRADICTION_QUESTIONS[c.axis] || "When does each of these come out, and what decides it?"};
+  });
+}
+
+/* ---------- 4. ANTI-STALENESS ----------
+   (a) A long-horizon per-project category tally: the archive already holds every
+   accepted character's resolved categories, so the tally is derived from it rather
+   than kept as a second store that could drift. A category this project keeps landing
+   in reads below 1, one it has neglected above 1 — and a replay (REPLAY_MODE) reads 1.
+
+   It steers through CANDIDATE SELECTION, not inside the draw. Multiplying it into the
+   category weights made the drawn sheet depend on the archive, so the seed an
+   exploration build printed no longer replayed the sheet on screen ("What a seed
+   promises"). Scoring the three candidates with it keeps every candidate a pure
+   function of its own seed and still moves the project away from its ruts. */
+const ARCHIVE_TALLY_MIN = 3, ARCHIVE_TALLY_STRENGTH = 0.35;
+function projectCategoryTally(){
+  const m = new Map();
+  PROJECT_ARCHIVE.forEach(a => a.cats.forEach(c => m.set(c, (m.get(c) || 0) + 1)));
+  return m;
+}
+let _tallyCache = null, _tallyKey = -1;
+function archiveCategoryMultiplier(cat, cats){
+  if (!historyAwareGeneration() || PROJECT_ARCHIVE.length < ARCHIVE_TALLY_MIN || !cats || cats.length < 2) return 1;
+  if (_tallyKey !== PROJECT_ARCHIVE.length){ _tallyCache = projectCategoryTally(); _tallyKey = PROJECT_ARCHIVE.length; }
+  const n = c => _tallyCache.get(c) || 0;
+  const mean = cats.reduce((s, c) => s + n(c), 0) / cats.length;
+  if (!mean) return 1;
+  return clamp(1 + ARCHIVE_TALLY_STRENGTH * (mean - n(cat)) / mean, 0.6, 1.4);
+}
+/* (b) Best of three. An exploration build draws three candidates on three sub-seeds
+   and keeps the one furthest (diversityScore, nearest-reference) from the project
+   archive, among those whose coherence is within COHERENCE_FLOOR_DROP points of the
+   best — distinct but not incoherent. Pure selection, so it can be tested; the
+   building lives in generate.js, and a replay never calls it. */
+const EXPLORE_CANDIDATES = 3;
+const COHERENCE_FLOOR_DROP = 12;
+function candidateSeed(seedNum, k){ return k ? hashSeedString(String(seedNum >>> 0) + "|candidate|" + k) : (seedNum >>> 0); }
+/* How far a sheet's resolved profile categories lean INTO this project's ruts: the
+   mean of (1 - tally multiplier) over its profile slots, so positive = over-used. */
+const TALLY_WEIGHT = 1.0;
+function tallyOveruse(st){
+  const cats = new Map();
+  Object.keys(st || {}).forEach(k => { const sl = st[k]; if (k.startsWith("prof_") && sl && sl.trait && !sl.counterpoint) cats.set(sl.trait.category, sl.trait.section); });
+  if (!cats.size) return 0;
+  let s = 0; cats.forEach((sec, c) => { s += 1 - archiveCategoryMultiplier(c, catsOf(sec)); });
+  return s / cats.size;
+}
+function selectDistinctCandidate(cands, references){
+  if (!cands || !cands.length) return null;
+  const scored = cands.map((c, i) => {
+    const co = c.coherence !== undefined ? c.coherence : ((typeof coherenceScore === 'function' && coherenceScore(c.state)) || {pct:0}).pct;
+    const d = (references && references.length ? diversityScore(c.state, references).score : 0) - TALLY_WEIGHT * tallyOveruse(c.state);
+    return Object.assign({}, c, {index:i, coherence:co, diversity:d});
+  });
+  const best = Math.max(...scored.map(c => c.coherence));
+  const ok = scored.filter(c => c.coherence >= best - COHERENCE_FLOOR_DROP);
+  ok.sort((a, b) => (b.diversity - a.diversity) || (a.index - b.index));
+  return Object.assign({}, ok[0], {considered: scored.length, floor: best - COHERENCE_FLOOR_DROP,
+    scores: scored.map(c => ({index:c.index, diversity:+c.diversity.toFixed(3), coherence:c.coherence}))});
+}
+function explorationReferences(currentState){
+  const refs = PROJECT_ARCHIVE.slice(-60);
+  if (currentState && Object.keys(currentState).length) refs.push(referenceFromState(currentState, "current"));
+  return refs;
+}
+
+/* ---------- 6. BACKSTORY BEATS ----------
+   motivationChain says want → belief → origin → need as logic; a writer also needs it
+   as TIME. Three to five beats — formative event, the lesson, a turning point, the most
+   recent failure, where it stands now — each tied to a seated card, and dated from the
+   character's age when there is one. Deterministic: phrasing variants are chosen by a
+   hash of the sheet, not the dice. */
+function backstoryBeats(st, meta){
+  const chain = motivationChain(st);
+  if (!chain) return null;
+  let h = 7; Object.values(st || {}).forEach(s => { if (s && s.trait) h = (h * 31 + s.trait.id) >>> 0; });
+  const pick = (arr, salt) => arr[hashSeedString(h + "|" + salt) % arr.length];
+  const age = parseAgeHint(meta && meta.age);
+  const at = (frac, lo, hi, word) => age ? `around ${clamp(Math.round(age * frac), lo, Math.max(lo, Math.min(hi, age - 1)))}` : word;
+  const {wound, lie, defence, origin, stress, values, want, need, ghost} = chain;
+  const competence = _profTrait(st, "competence"), vice = _profTrait(st, "vices"), aim = _profTrait(st, "goals", /Immediate|Longer Aim/i);
+  const role = _profTrait(st, "role"), price = _profTrait(st, "goals", /Price/i);
+  const beats = [];
+  const add = (key, title, when, text, from) => beats.push({key, title, when, text, from: from.filter(Boolean).map(t => t.trait)});
+  if (wound || origin){
+    const src = wound || origin;
+    add("formative", "Formative event", at(0.25, 5, 14, "in childhood"),
+      wound ? `${pick(["It starts with","Before anything else there was","The first thing that happened to them was"], "f")} ${wound.trait.toLowerCase()}${ghost ? `, and it is still tied to ${ghost.trait.toLowerCase()}` : ``}.${origin ? ` What kept it from being everything: ${origin.trait.toLowerCase()}.` : ``}`
+            : `${pick(["What went right early:","The thing that held:"], "o")} ${origin.trait.toLowerCase()}.`, [src, ghost, wound && origin]);
+  }
+  if (lie) add("lesson", "What they took from it", at(0.4, 8, 20, "in their teens"),
+    `${pick(["They drew the conclusion","They learned, wrongly,","It taught them"], "l")} that ${lie.trait.replace(/^I /, "they ").toLowerCase()}.`, [lie]);
+  if (defence || values || competence){
+    const pivot = competence || values || defence;
+    add("turning", "Turning point", at(0.6, 14, 40, "in early adulthood"),
+      `${pick(["The turn came when","Everything changed when","The first time it paid off was when"], "t")} ${competence ? `${competence.trait.toLowerCase()} made them useful` : values ? `they chose ${STRATEGY_BY_VALUES[values.category] || values.trait.toLowerCase()} over the easier thing` : `they found the defence would hold`}${defence ? ` — ${defence.trait.toLowerCase()} set, from then on, into how they operate` : ``}.`, [pivot, defence]);
+  }
+  if (stress || vice){
+    add("failure", "Most recent failure", age ? "within the last year" : "recently",
+      `${pick(["The latest time it broke:","Most recently it went wrong when"], "r")} under pressure they ${stress ? (STRATEGY_BY_STRESS[stress.category] || stress.trait.toLowerCase()) : "fell back on the old habit"}${vice ? `, and ${vice.trait.toLowerCase()} did the rest` : ``}${price ? ` — the bill was ${price.trait.toLowerCase()}` : need ? ` — which is the opposite of ${need.trait.toLowerCase()}` : ``}.`, [stress, vice, price]);
+  }
+  if (want || aim || role) add("now", "Where it stands", "now",
+    `${want ? `They want ${want.trait.toLowerCase()}` : `They are after ${aim.trait.toLowerCase()}`}${aim && want ? `, which right now means ${aim.trait.toLowerCase()}` : ``}${role ? `, and in any room they are the ${role.category.toLowerCase()}` : ``}.`, [want, aim, role]);
+  return beats.length >= 3 ? beats.slice(0, 5) : (beats.length ? beats : null);
+}
+
+/* ---------- 1. COMPOSITIONAL VOICE LINES ----------
+   VOICE_FRAGMENTS had one to three fixed lines per lean, so every slippery liar said
+   "I was with Marcus. All evening." A line is now composed:
+
+     clause template (per speech act and lean — the same leans and rule names as the
+     fragments, which stay as the backing table)
+       + slots filled from a topic/entity pool (roles and things, never names),
+         the lenses' own topics, and noun phrases lifted from the sheet's vocabulary
+         examples
+       + transforms driven by the sheet's grammar, verbosity and vocabulary traits:
+         compression, fillers, false starts, afterthoughts, echoes, hedges, ellipsis,
+         tense habits, tag questions, contractions.
+
+   Every transform that fires adds the rule that fired it, so the "shaped by" list is
+   still the literal list of what shaped the line. */
+const VOICE_TOPIC_POOL = {
+  thing: ["the ledger","the key to the back room","the letter","the money","the boat","the recording","the dog","the ring","the report","the car","the medicine","the map","the second set of books","the photographs","the contract","the spare key","the shipment","the password","the draft","the tin under the sink","the van","the lease","the rota","the box in the loft"],
+  person: ["my sister","your father","the landlord","the new one","the foreman","my ex","the neighbour","the priest","the kid from downstairs","the captain","the nurse on nights","my brother-in-law","the old man at the gate","the client","her mother","the driver","my supervisor","the woman at the counter","my cousin","the lodger","the man from the council"],
+  place: ["the kitchen","the station","the harbour","the back office","the car park","the chapel","the stairwell","the far field","the hospital","the bar on the corner","the roof","the garage","the waiting room","the market","the ferry","my mother's","the depot","the laundrette"],
+  time: ["last night","on Tuesday","all evening","after the funeral","before the storm","this morning","around nine","the whole weekend","after the meeting","before you got here","at the weekend","until close","in the spring"],
+  task: ["carry this","sign for it","talk to them","drive","hold the door","look at the numbers","keep an eye on it","cover for me","tell her","wait with me","make the call","fix it","go back there","lend it"],
+};
+const _VT = (templates, rule) => ({templates, rule});
+const VOICE_CLAUSES = {
+  refuse: {
+    direct:  _VT(["No.","I'm not going to {task}.","No. Not {time}, not for {person}.","Find someone else to {task}.","You've asked the wrong person. No.","I won't {task}. Don't ask again.","The answer's no, and it was no before you asked."], "high assertiveness — the refusal is the whole sentence"),
+    yielding:_VT(["I don't think I can {task}, I'm sorry — it's not that I don't want to.","I'd rather not, if that's all right.","It's just that I told {person} I'd be at {place} {time}.","Could someone else {task}? Only this once.","I wish I could. I really do.","I'm not sure I'm the right one to {task}."], "low assertiveness — the refusal arrives wrapped"),
+    mid:     _VT(["I'm going to say no to that.","Not {thing}. Anything else, maybe.","I can't {task} {time}.","That's not something I'll do.","No — but ask {person}.","Not this one."], "no strong assertiveness lean"),
+  },
+  apologise: {
+    straight:_VT(["I was wrong. That's all it is.","I got it wrong about {thing}, and I'm sorry.","That was my fault. Nobody else's.","I should have told you {time}. I didn't. I'm sorry."], "high honesty — the apology concedes the point"),
+    slippery:_VT(["I'm sorry you took it that way.","Mistakes were made. {person} would say the same.","If anything I did about {thing} upset you, then of course.","I'm sorry it came out the way it did."], "low honesty — the apology moves the fault"),
+    open:    _VT(["I've been sick about it since.","I haven't slept since {time}. I'm so sorry.","I keep going over it — {thing}, all of it. I'm sorry."], "high emotional expression"),
+    guarded: _VT(["It won't happen again.","Noted. It won't be repeated.","I'll sort {thing}. That's the end of it."], "guarded emotion — the feeling stays off the page"),
+  },
+  persuade: {
+    direct:  _VT(["Here's what you're going to do, and here's why you'll want to.","You'll {task}, because nobody else can.","Do it {time}. I'll handle {person}."], "high assertiveness"),
+    warm:    _VT(["I wouldn't ask if there were another way to do it.","You're the only one {person} listens to. Please.","Do this for me and I'll owe you — properly."], "high warmth"),
+    cold:    _VT(["You can do it now or you can do it later with more paperwork.","Either you {task}, or {person} hears about {thing}.","It's not a request, it's the cheaper option."], "low warmth"),
+    mid:     _VT(["I think this is the better road. Let me show you why.","Look at {thing} and tell me I'm wrong.","If you {task}, the rest takes care of itself."], "no strong lean"),
+  },
+  conceal: {
+    slippery:_VT(["That's a long story, and not a very interesting one.","Oh, {thing}? Nothing. Ask {person}, they'll bore you with it.","You know, I honestly couldn't tell you.","Funny you should ask about {place} — have you eaten?"], "low honesty — deflection by boredom"),
+    straight:_VT(["I'm not going to answer that.","That's mine. I'm not discussing it.","I won't lie to you, so I'm not going to say anything."], "high honesty — refuses rather than lies"),
+    guarded: _VT(["Nothing worth the telling.","It's handled.","Leave {thing} alone."], "guarded emotion"),
+    mid:     _VT(["Ask me another time.","Not {time}.","Some other day, maybe."], "no strong lean"),
+  },
+  request: {
+    mannered:_VT(["When you have a moment — and only then — could I trouble you?","Would you be so kind as to {task}?","I hate to ask, but might you {task}?"], "high manners"),
+    blunt:   _VT(["Give me a hand with this.","{task}. Now's good.","You — {task}."], "low manners"),
+    terse:   _VT(["Need a minute.","Hand me {thing}.","You free {time}?"], "low verbosity"),
+    mid:     _VT(["Could you help me with something?","Could you {task}? It won't take long.","Have you got {thing}? I'll bring it back."], "no strong lean"),
+  },
+  askhelp: {
+    open:    _VT(["I can't do this on my own and I've stopped pretending otherwise.","I need you. With {thing}. I can't — I need you.","I've been trying since {time} and I can't."], "high emotional expression"),
+    guarded: _VT(["There's a piece of this that's outside my remit. That's all.","I'd need someone to {task}. Operationally.","It's a two-person job. That's the only reason."], "guarded emotion — the ask is reframed as logistics"),
+    yielding:_VT(["Only if you've got time. Really, only if you have.","If it's no trouble — could you {task}?","You don't have to. But {person} said you might."], "low assertiveness"),
+    mid:     _VT(["I need help with this part.","Can you {task}? I can't manage it.","I'm stuck on {thing}."], "no strong lean"),
+  },
+  lie: {
+    slippery:_VT(["I was with {person}. {time}.","I was at {place} {time}. Ask anyone.","{thing}? Never saw it.","I left before {person} even got there.","It was {person}'s idea, not mine."], "low honesty — a specific, checkable lie, told smoothly"),
+    straight:_VT(["...Yes. Yes, that's right.","I — no. I mean yes. I was at {place}.","That's — yes. {time}. Yes.","Yes. {place}. I — yes.","I was — I was with {person}.","{time}? Yes. Of course. Yes."], "high honesty — the lie comes out badly because lying is not what they do"),
+    mid:     _VT(["Something like that.","More or less.","I was at {place}, I think."], "no strong lean"),
+  },
+};
+const VOICE_ELABORATIONS = ["{person} was there {time}, if you want to check.","It's to do with {thing}, mostly.","And before you say it — yes, I know about {place}.","I've been thinking about it since {time}.","Which is more than {person} ever did."];
+// Pull noun phrases out of the sheet's own vocabulary examples, so the words a
+// character reaches for turn up in what they talk about.
+function _examplePhrases(traits){
+  const out = [];
+  (traits || []).forEach(t => {
+    const ex = t && t.example ? String(t.example) : "";
+    const re = /\b(the|my|your|his|her|their|our) ([a-z][a-z'-]{2,}(?: [a-z][a-z'-]{2,})?)\b/gi;
+    let m; while ((m = re.exec(ex))) out.push({text: (m[1] + " " + m[2]).toLowerCase().replace(/^the the /, "the "), from: t.trait});
+  });
+  return out;
+}
+function _exampleSentence(t){
+  if (!t || !t.example) return null;
+  const parts = String(t.example).split(/(?<=[.!?])\s+/).map(s => s.trim()).filter(s => s.split(/\s+/).length >= 3 && s.length <= 60 && !/[()]/.test(s));
+  return parts.length ? parts[0] : null;
+}
+const _sentences = s => s.split(/(?<=[.!?])\s+/).filter(Boolean);
+const _cap = s => s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
+const _lowerFirst = s => /^(I\b|I'|[A-Z]{2})/.test(s) ? s : s.charAt(0).toLowerCase() + s.slice(1);
+const CONTRACT = [["I am","I'm"],["do not","don't"],["cannot","can't"],["will not","won't"],["it is","it's"],["I would","I'd"],["you are","you're"],["that is","that's"],["I have","I've"],["is not","isn't"]];
+function _topicPools(rng, vocabPhrases){
+  const taboo = lensTaboos().map(x => x.toLowerCase());
+  const pools = {};
+  Object.keys(VOICE_TOPIC_POOL).forEach(k => { pools[k] = VOICE_TOPIC_POOL[k].slice(); });
+  activeLenses().forEach(l => Object.entries(l.topics || {}).forEach(([k, arr]) => { if (pools[k]) pools[k] = arr.concat(arr, pools[k]); }));
+  vocabPhrases.forEach(p => { pools.thing.unshift(p.text); pools.thing.unshift(p.text); });
+  Object.keys(pools).forEach(k => { pools[k] = pools[k].filter(x => !taboo.some(tb => x.toLowerCase().includes(tb))); });
+  return pools;
+}
+function _fill(template, pools, rng, used, vocabPhrases){
+  return template.replace(/\{(\w+)\}/g, (m, k) => {
+    const arr = pools[k];
+    if (!arr || !arr.length) return k;
+    const v = arr[Math.floor(rng() * arr.length)];
+    const vp = vocabPhrases.find(p => p.text === v);
+    if (vp && !used.includes("vocabulary: " + vp.from)) used.push("vocabulary: " + vp.from);
+    return v;
+  });
+}
+function composeVoiceLine(st, promptId, mode, opts){
+  const prompt = allVoicePrompts().find(p => p.id === promptId);
+  if (!prompt) return null;
+  opts = opts || {};
+  const r = voiceRules(st);
+  const underPressure = mode === "pressure";
+  let seed = 11;
+  Object.values(st || {}).forEach(s => { if (s && s.trait) seed = (seed * 31 + s.trait.id) >>> 0; });
+  const idx = Number.isInteger(opts.index) ? opts.index : -1, reroll = Number.isInteger(opts.reroll) ? opts.reroll : 0;
+  const take = Number.isInteger(opts.take) ? opts.take : 0;
+  const rng = mulberry32(hashSeedString(String(seed) + "|" + promptId + "|" + (mode || "baseline") + "|c2" +
+    (idx >= 0 || reroll ? "|" + idx + "|" + reroll : "") + (take ? "|t" + take : "")));
+  const kind = prompt.like || promptId;
+  const table = VOICE_CLAUSES[kind];
+  const used = [];
+  const vocabPhrases = _examplePhrases(r.vocab);
+  const pools = _topicPools(rng, vocabPhrases);
+  const fill = t => _fill(t, pools, rng, used, vocabPhrases);
+  const gcat = r.grammar ? r.grammar.category : null, vcat = r.verbosity ? r.verbosity.category : null;
+  const minimal = vcat === "Minimal & Ultra-Brief" || r.terse;
+  // Opener — the politeness layer, dropped under pressure (as before).
+  let opener = "";
+  if (!underPressure){
+    const asked = kind === "refuse" || kind === "request" || kind === "askhelp";
+    let f = null;
+    if (r.mannered && asked) f = _pickFrag(VOICE_FRAGMENTS.opener.mannered, rng);
+    else if (r.formal) f = _pickFrag(VOICE_FRAGMENTS.opener.formal, rng);
+    else if (r.casual) f = _pickFrag(VOICE_FRAGMENTS.opener.casual.concat([_VF("Listen.", "casual register"), _VF("Okay, so.", "casual register")]), rng);
+    if (f){ if (f.text && !minimal) opener = f.text; used.push(f.rule); }
+  }
+  // Core clause, same lean priority as the fragment composer.
+  const order = ["direct","yielding","slippery","straight","open","guarded","warm","cold","mannered","blunt","terse"];
+  let entry = null;
+  for (const k of order){ if (r[k] && table[k]){ entry = table[k]; break; } }
+  if (!entry) entry = table.mid || table.straight || Object.values(table)[0];
+  used.push(entry.rule);
+  let core = _cap(fill(entry.templates[Math.floor(rng() * entry.templates.length)]));
+  const rule = x => { if (!used.includes(x)) used.push(x); };
+  // Verbosity shapes how much survives.
+  if (minimal){ core = _sentences(core)[0]; rule("low verbosity — only one clause survives"); }
+  // Hedges go on before the grammar reshapes the clause, so a cut-in stays a cut-in.
+  if (r.yielding && !minimal && !/^(I think|Maybe|I mean|\.\.\.|—)/.test(core) && rng() < 0.7){
+    core = ["I think ","Maybe ","I mean, ","Sort of — "][Math.floor(rng() * 4)] + _lowerFirst(core); rule("hedged (low assertiveness)");
+  }
+  const extra = [];
+  if (!minimal && !underPressure && (r.long || vcat === "High-Volume & Wordy")){
+    extra.push(_cap(fill(VOICE_ELABORATIONS[Math.floor(rng() * VOICE_ELABORATIONS.length)])));
+    if (r.long) extra.push(_pickFrag(VOICE_FRAGMENTS.tail.long, rng).text);
+    rule("high verbosity");
+  }
+  if (!underPressure && r.warm && !minimal){ const w = _pickFrag(VOICE_FRAGMENTS.tail.warm, rng); extra.push(w.text); rule(w.rule); }
+  // Grammar transforms, keyed on the grammar card's category and fed by its example.
+  const gName = r.grammar ? r.grammar.trait : "";
+  if (gcat === "Spoken Compression"){
+    core = core.replace(/(^|[.!?] )(I'm going to|I'm|I am|I|It's|That's|There's|You've) (?=[a-z])/g, (m, p) => p).replace(/\b(the|a) (?=\w)/g, (m, a, off) => off > 0 && rng() < 0.5 ? "" : m);
+    core = _cap(core.trim()); rule("grammar: " + gName + " — pronouns and articles dropped");
+  } else if (gcat === "Anchors & Fillers"){
+    const m = r.grammar.example && r.grammar.example.match(/—\s*([^—]{2,18}?)\s*—|,\s*(like|you know|right|yeah|see|so|mind)\b/i);
+    const filler = m ? (m[1] || m[2]).toLowerCase().replace(/[.,!?]/g, "") : "you know";
+    const ss = _sentences(core);
+    core = ss.length > 1 ? ss[0].replace(/[.!?]$/, "") + ` — ${filler} — ` + ss.slice(1).join(" ") : core.replace(/([.!?])$/, `, ${filler}$1`);
+    rule("grammar: " + gName + " — a filler anchors the line");
+  } else if (gcat === "Disfluencies & Flow"){
+    const w = core.split(" ")[0];
+    core = `${w.replace(/[.,!?]$/, "")} — ${_lowerFirst(core)}`; rule("grammar: " + gName + " — a false start");
+  } else if (gcat === "Structural Shifts"){
+    extra.push(_cap(fill(["If {person} lets me.","Probably.","Which it won't be.","Or {time}.","Mostly."][Math.floor(rng() * 5)])));
+    rule("grammar: " + gName + " — an afterthought tacked on");
+  } else if (gcat === "Turn-Taking Grammar"){
+    core = ["—no, let me finish — ","Before you start — ","Wait — "][Math.floor(rng() * 3)] + _lowerFirst(core); rule("grammar: " + gName + " — cuts in");
+  } else if (gcat === "Repetition & Echo Patterns"){
+    const words = core.replace(/[.!?]+$/, "").split(" ");
+    const last = words[words.length - 1].replace(/[,;]/g, "");
+    core = core.replace(/[.!?]+$/, "") + `, ${last}.`; rule("grammar: " + gName + " — echoes itself");
+  }
+  // Hedges, ellipsis, tense habits and tag questions.
+  if ((r.guarded && rng() < 0.5) || (underPressure && r.stress && /Freeze/.test(r.stress.category))){
+    core = core.replace(/[.!?]$/, "...").replace(/ — /, "... "); rule("ellipsis (the sentence trails off)");
+  }
+  const temporal = r.vocab.find(t => t.category === "Temporal Orientation & Tense Usage");
+  if (temporal && !minimal){
+    const past = /past|nostalg|used|retro|memor|history/i.test(temporal.trait + " " + (temporal.example || ""));
+    const fut = /future|forecast|plan|prospect|will/i.test(temporal.trait);
+    if (past){ extra.push(["It used to be simpler.","Like it always was.","Same as back then."][Math.floor(rng() * 3)]); rule("tense habit: " + temporal.trait); }
+    else if (fut){ extra.push(["We'll see how it looks tomorrow.","It'll matter later.","Ask me again next week."][Math.floor(rng() * 3)]); rule("tense habit: " + temporal.trait); }
+  }
+  const asksQuestions = gcat === "Turn-Taking Grammar" || /question|tag|checking|confirm/i.test(gName) || (r.warm && r.yielding);
+  if (asksQuestions && !minimal && !underPressure){
+    const tag = [", right?",", yeah?",", don't you think?",", okay?"][Math.floor(rng() * 4)];
+    const addTag = x => /\.\.\.$/.test(x) ? x + tag.replace(/^, /, " ") : x.replace(/[.!]$/, tag);
+    if (extra.length) extra[extra.length - 1] = addTag(extra[extra.length - 1]);
+    else core = addTag(core);
+    rule("tag question (checks the listener is still with them)");
+  }
+  // Pressure: the stress response closes the line.
+  if (underPressure && r.stress && PRESSURE_TAIL[r.stress.category]){ extra.push(PRESSURE_TAIL[r.stress.category].text); rule(PRESSURE_TAIL[r.stress.category].rule); }
+  // The habitual device: a sentence lifted whole from a vocabulary example, now and then.
+  const deviceT = r.vocab.filter(t => t.example)[0] || r.grammar;
+  const devSentence = r.vocab.map(_exampleSentence).filter(Boolean)[0];
+  if (devSentence && !minimal && rng() < 0.35){ extra.push(devSentence); rule("vocabulary: " + r.vocab.find(t => _exampleSentence(t) === devSentence).trait); }
+  let text = [opener, core].concat(extra).filter(Boolean).join(" ").replace(/\s+/g, " ").trim()
+    .replace(/([^.][.!?] )([a-z])/g, (m, a, b) => a + b.toUpperCase());
+  // Register: formal speech drops its contractions, casual speech takes them. Not under
+  // pressure — the politeness layer is the first thing to go.
+  if (!underPressure && r.formal && !r.casual){
+    let n = 0; CONTRACT.forEach(([full, short]) => { const re = new RegExp("\\b" + short.replace("'", "'") + "\\b", "g"); text = text.replace(re, () => { n++; return full; }); });
+    if (n) rule("formal register — no contractions");
+  } else if (!underPressure && r.casual){
+    let n = 0; CONTRACT.forEach(([full, short]) => { const re = new RegExp("\\b" + full + "\\b", "g"); text = text.replace(re, () => { n++; return short; }); });
+    if (n) rule("casual register — contracts everything");
+  }
+  return {
+    prompt: prompt.label, promptId, setup: prompt.setup, mode: underPressure ? "pressure" : "baseline",
+    text: text || "(this sheet has no voice traits to compose from)",
+    rules: [...new Set(used.filter(Boolean))],
+    device: deviceT ? {label: deviceT.trait, example: deviceT.example || ""} : null,
+  };
+}
+/* The "10 lines" view: ten takes of one prompt from one sheet. Each take is its own
+   sub-seed, so the list is stable for a sheet and the same take always reads the same. */
+function voiceLines(st, promptId, mode, n, reroll){
+  const index = allVoicePrompts().findIndex(p => p.id === promptId);
+  const out = [];
+  for (let k = 0; k < (n || 10); k++){
+    const l = composeVoiceLine(st, promptId, mode, {index, reroll: reroll || 0, take: k});
+    if (l) out.push(l);
+  }
+  return out;
 }
 
 // ================= PROJECT LIBRARY AND BACKUP BUNDLE (MVP) =================

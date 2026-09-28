@@ -1588,8 +1588,8 @@ check('polarity coverage per section does not regress', ()=>{
     'Conflict & Stress Response': 1, 'Social Role in a Group': 1, 'Values & Moral Line': 1,
     'Attachment & Intimacy Style': 1, 'Humor Style': 1, 'Habits & Vices': 1,
     'Motivation & Wound': 0.80, 'Verbosity Traits': 0.74, 'Personality Traits': 0.73,
-    'Vocabulary Traits': 0.32, 'Dialogue Grammar Traits': 0.31,
-    'Mannerisms': 0.20, 'Appearance': 0.17,
+    'Vocabulary Traits': 0.40, 'Dialogue Grammar Traits': 0.38,   // raised after the §6 keyword pol back-fill
+    'Mannerisms': 0.30, 'Appearance': 0.17,
   };
   const by = new Map();
   T.forEach(t=>{
@@ -2466,7 +2466,7 @@ check('edges survive a cast round-trip and dangling ones are dropped', ()=>{
 
 group('Arcs: proposed changes, acceptance, replay and undo');
 
-check('an event proposes changes in its own direction, deterministically, and steadfast proposes none', ()=>{
+check('an event proposes changes in its own direction, deterministically, and steadfast only hardens Values/Price', ()=>{
   const st = _mechSheet(7501);
   const grow = A.makeArcEvent(1, {title:'She told the truth', shape:'growth', cost:'Lost the job she had been protecting for nine years'});
   const c1 = A.proposeArcChanges(st, grow, []);
@@ -2475,11 +2475,13 @@ check('an event proposes changes in its own direction, deterministically, and st
   assert(JSON.stringify(c1) === JSON.stringify(c2), 'the proposal is not deterministic in the event id');
   c1.forEach(c=> assert(c.why && c.accepted === false && c.fromId !== c.toId, 'a change must be explained and start unaccepted'));
   const still = A.proposeArcChanges(st, A.makeArcEvent(2, {shape:'steadfast', title:'He stayed'}), []);
-  assert(!still.length, 'steadfast should propose nothing at all');
+  // Section 6: steadfast is no longer inert — it may deepen Values or move the Price,
+  // but it never moves a personality card (they did not change; the line hardened).
+  assert(still.every(c => /^prof_(values|goals)_/.test(c.slotId)), 'steadfast moved something other than Values/Price: ' + still.map(c=>c.slotId));
   const down = A.proposeArcChanges(st, A.makeArcEvent(3, {shape:'deterioration', title:'He drank instead'}), []);
   assert(down.length, 'deterioration proposed nothing');
   assert(JSON.stringify(down) !== JSON.stringify(c1), 'growth and deterioration should not propose the same thing');
-  return `growth ${c1.length}, deterioration ${down.length}, steadfast 0`;
+  return `growth ${c1.length}, deterioration ${down.length}, steadfast ${still.length}`;
 });
 
 check('only accepted changes apply, and the source sheet is never mutated', ()=>{
@@ -3159,7 +3161,7 @@ check('batch candidates each get a distinct seed', ()=>{
 check('worldTags / conditions / exceptions coverage never falls (ratchet)', ()=>{
   /* These fields validate but almost nothing sets them. The floor is what the bank held
      when the ratchet was added; raise it when you tag more, never lower it. */
-  const FLOOR = {worldTags: 5, conditions: 68, exceptions: 0};
+  const FLOOR = {worldTags: 170, conditions: 640, exceptions: 0};   // raised by the §6 gap pack + worldTags back-fill
   const T = A.TRAITS;
   const have = k => T.filter(t => Array.isArray(t[k]) && t[k].length).length;
   const now = {worldTags: have('worldTags'), conditions: have('conditions'), exceptions: have('exceptions')};
@@ -3261,7 +3263,7 @@ check('§4: single-slot profile sections reach most of their pool', ()=>{
 check('§4: the life sections stay grown and rarity is not a proxy for loudness (ratchet)', ()=>{
   const size = s => A.TRAITS.filter(t=>t.section === s).length;
   const FLOOR = {"Goals & Stakes":330, "Competence & Method":240, "Recovery & Repair":80, "Role by Context":66,
-                 "Contradiction Functions":66, "Ordinary Texture":88, "Positive Origins":96};
+                 "Contradiction Functions":100, "Ordinary Texture":88, "Positive Origins":96};
   Object.entries(FLOOR).forEach(([s, n])=> assert(size(s) >= n, `${s} fell to ${size(s)} (floor ${n})`));
   // Cramér's V between rarity tier and intensity — 0.60 at the audit, 0.55 after this pass.
   const R = ['common','uncommon','distinctive','signature'], m = R.map(()=>[0,0,0,0,0]);
@@ -3278,6 +3280,386 @@ check('§4: the life sections stay grown and rarity is not a proxy for loudness 
     assert(!/ (vocab|discipliner|conformist|fighter)$|with how much it matters$|^Direct-question asker$/.test(t.trait), `#${id} still reads as a suffix duplicate: ${t.trait}`);
   });
   return `V ${V.toFixed(3)}; goals ${size("Goals & Stakes")}, competence ${size("Competence & Method")}`;
+});
+
+/* ================= §5 KEEPING OUTPUT FRESH =================
+   Compositional voice lines, seated contradictions, variable sheet shape, best-of-three
+   exploration, lenses and backstory beats. A fresh engine instance so no state from the
+   sections above leaks in (and none leaks out). */
+group('§5 keeping output fresh: voice composer, contradictions, shape, anti-staleness, lenses, beats');
+const F5 = loadEngine();
+const f5 = code => F5.evalIn('(function(){' + code + '})()');
+const F5_BUILD = `const mk = (seed, i) => withRng(mulberry32(seed), ()=> buildCharacterState({verbLevel:((i||0)%5-2)*0.8, regLevel:(((i||0)*3)%5-2)*0.8, compLevel:0, mannerCount:3, vocabCount:2, rarityPref:'balanced', vocabPref:null, personalityOverrides:{}}));`;
+
+check('§5 voice: 100 characters x 7 prompts give mostly distinct lines, with no fixed entity and no unfilled slot', ()=>{
+  const out = f5(F5_BUILD + `
+    const all = new Set(), per = {}; let bad = [];
+    for (let i = 0; i < 100; i++){ const st = mk(5000 + i, i);
+      voiceLab(st, 'baseline').forEach(l => { all.add(l.text); (per[l.promptId] = per[l.promptId] || new Set()).add(l.text);
+        if (/Marcus|\\{|\\}|undefined|null/.test(l.text)) bad.push(l.text); }); }
+    return {all: all.size, lie: per.lie.size, minPer: Math.min(...Object.values(per).map(s=>s.size)), bad: bad.slice(0,3)};`);
+  assert(!out.bad.length, 'bad lines: ' + out.bad.join(' | '));
+  // Before the composer: 124 distinct of 700, and 13 distinct lies in 100 characters.
+  assert(out.all >= 550, `only ${out.all}/700 distinct lines`);
+  assert(out.minPer >= 70, `a prompt collapsed to ${out.minPer} distinct lines in 100 characters`);
+  return `${out.all}/700 distinct (was 124); lie ${out.lie}/100 (was 13)`;
+});
+
+check('§5 voice: the 10-lines view is stable per sheet and mostly distinct takes', ()=>{
+  const out = f5(F5_BUILD + `
+    let tot = 0, stable = true;
+    for (let i = 0; i < 20; i++){ const st = mk(6100 + i, i);
+      const a = voiceLines(st, 'refuse', 'baseline', 10).map(l=>l.text), b = voiceLines(st, 'refuse', 'baseline', 10).map(l=>l.text);
+      if (a.join('|') !== b.join('|') || a.length !== 10) stable = false; tot += new Set(a).size; }
+    return {stable, avg: tot / 20};`);
+  assert(out.stable, 'ten lines differ between two calls on one sheet');
+  assert(out.avg >= 6, `only ${out.avg} distinct of 10 on average`);
+  return `${out.avg.toFixed(1)} distinct of 10`;
+});
+
+check('§5 voice: transforms name their rule, and a lens keeps its taboo topics out of the lines', ()=>{
+  const out = f5(F5_BUILD + `
+    let grammarRule = 0, tabooHits = 0, n = 0;
+    for (let i = 0; i < 40; i++){ const st = mk(6200 + i, i);
+      voiceLab(st, 'baseline').forEach(l => { if (l.rules.some(r => /^grammar: /.test(r))) grammarRule++; }); }
+    withEngineSettings({lensSelect:'child,corporate'}, ()=>{
+      for (let i = 0; i < 40; i++){ const st = mk(6300 + i, i);
+        VOICE_PROMPTS.forEach(p => voiceLines(st, p.id, 'baseline', 3).forEach(l => { n++; if (/money|salary|layoffs/i.test(l.text)) tabooHits++; })); }
+    });
+    return {grammarRule, tabooHits, n};`);
+  assert(out.grammarRule > 50, 'grammar transforms almost never fire: ' + out.grammarRule);
+  assert(out.tabooHits === 0, `${out.tabooHits} of ${out.n} lines used a taboo topic`);
+  return `${out.grammarRule} grammar-shaped lines; 0 taboo hits in ${out.n}`;
+});
+
+check('§5 contradictions: seated on purpose, against the sheet, with every scene question answered', ()=>{
+  const out = f5(F5_BUILD + `
+    let seated = 0, opposing = 0, answered = 0, total = 0, fn = 0;
+    withEngineSettings({seatContradictions:true}, ()=>{
+      for (let i = 0; i < 30; i++){ const st = mk(6400 + i, i);
+        const sc = seatedContradictions(st);
+        if (sc.length) seated++;
+        sc.forEach(c => { total++; if (c.fnTrait) fn++;
+          if (c.exception.pol[c.axis] === -st[c.slotId].contradiction.face) opposing++;
+          if (c.answers.every(a => a.answer && a.answer.length > 8)) answered++; });
+        if (checkConflictsFor(st).some(x => sc.some(c => x.text.includes(c.exception.trait)))) return 'conflict'; }
+    });
+    const a = withEngineSettings({seatContradictions:true}, ()=> JSON.stringify(Object.keys(mk(6400, 0)).map(k=>k)));
+    const b = withEngineSettings({seatContradictions:true}, ()=> JSON.stringify(Object.keys(mk(6400, 0)).map(k=>k)));
+    return {seated, opposing, answered, total, fn, det: a === b};`);
+  assert(typeof out === 'object', 'a seated contradiction was reported as a conflict');
+  assert(out.seated >= 27, `only ${out.seated}/30 sheets seated one`);
+  assert(out.opposing === out.total && out.answered === out.total, JSON.stringify(out));
+  assert(out.fn >= out.total * 0.8, 'the function card is usually missing: ' + out.fn + '/' + out.total);
+  assert(out.det, 'seating is not deterministic for a seed');
+  return `${out.total} contradictions over ${out.seated} sheets, all answered`;
+});
+
+check('§5 settings off: none of the new plans touch the seeded stream', ()=>{
+  const out = f5(F5_BUILD + `
+    const sig = st => Object.keys(st).sort().map(k => k + ':' + (st[k].trait ? st[k].trait.id : '-')).join(',');
+    const a = sig(mk(6500, 3));
+    const b = withEngineSettings({seatContradictions:false, sheetShapeToggle:false, lensSelect:''}, ()=> sig(mk(6500, 3)));
+    return a === b;`);
+  assert(out, 'switching the §5 settings off changed the sheet');
+});
+
+check('§5 shape: the signature budget varies the sheet (doubled, dropped, 0-3 outliers) and replays', ()=>{
+  const out = f5(F5_BUILD + `
+    const sizes = new Set(), shapes = new Set(); let okDouble = true, okDrop = true, wild = new Set(), det = true;
+    withEngineSettings({sheetShapeToggle:true, wildcardToggle:true}, ()=>{
+      for (let i = 0; i < 40; i++){ const st = mk(6600 + i, i); const sh = LAST_SHAPE;
+        sizes.add(Object.keys(st).length); shapes.add(JSON.stringify([[...sh.double].sort(), sh.drop, sh.wild]));
+        sh.double.forEach(id => { if (Object.keys(st).filter(k => k.startsWith('prof_' + id + '_')).length < 2 && byFilter(PROFILE_SECTIONS.find(p=>p.id===id).section, st['prof_' + id + '_0'] ? st['prof_' + id + '_0'].trait.category : '').length > 1) okDouble = false; });
+        if (sh.drop && Object.keys(st).some(k => k.startsWith('prof_' + sh.drop + '_'))) okDrop = false;
+        wild.add(Object.keys(st).filter(k => k.startsWith('wild_')).length);
+        const again = mk(6600 + i, i); if (Object.keys(again).join() !== Object.keys(st).join()) det = false; }
+    });
+    return {sizes: sizes.size, shapes: shapes.size, okDouble, okDrop, wild: [...wild].sort(), det};`);
+  assert(out.okDouble && out.okDrop && out.det, JSON.stringify(out));
+  assert(out.sizes >= 5 && out.shapes >= 15, `sheet shape barely varies: ${JSON.stringify(out)}`);
+  assert(out.wild.length >= 3 && Math.max(...out.wild) <= 3, 'outlier count does not span 0-3: ' + out.wild);
+  return `${out.sizes} sheet sizes, ${out.shapes} shapes in 40 (was 1 and 1)`;
+});
+
+check('§5 anti-staleness: best of three picks the most distinct above the coherence floor', ()=>{
+  const out = f5(F5_BUILD + `
+    forgetArchive();
+    for (let i = 0; i < 6; i++) archiveCharacter(mk(6700 + i, i), {name:'A' + i});
+    const refs = explorationReferences(null);
+    const cands = [0,1,2].map(k => ({num: candidateSeed(99, k), state: mk(candidateSeed(99, k), k)}));
+    const pick = selectDistinctCandidate(cands, refs);
+    const ds = cands.map(c => diversityScore(c.state, refs).score);
+    const eligible = pick.scores.filter(s => s.coherence >= pick.floor).map(s => s.diversity);
+    // A twin of an archived character must lose to anything else.
+    const twin = {num: 1, state: mk(6700, 0)};
+    const p2 = selectDistinctCandidate([twin, cands[1]].map(c => Object.assign({}, c, {coherence: 50})), refs);
+    const seeds = new Set([0,1,2].map(k => candidateSeed(12345, k)));
+    return {best: Math.max(...eligible), chosen: pick.diversity, twinLost: p2.index === 1, c0: candidateSeed(12345, 0) === 12345, seeds: seeds.size};`);
+  assert(Math.abs(out.best - out.chosen) < 1e-3, 'did not keep the most distinct eligible candidate');
+  assert(out.twinLost, 'a twin of an archived character was kept');
+  assert(out.c0 && out.seeds === 3, 'candidate seeds: the first must be the seed itself, all three distinct');
+  return 'most distinct kept; twins lose';
+});
+
+check('§5 anti-staleness: the project tally steers exploration and replay ignores it', ()=>{
+  const out = f5(F5_BUILD + `
+    forgetArchive();
+    const cats = catsOf('Values & Moral Line');
+    for (let i = 0; i < 8; i++) archiveCharacter({x:{trait:{id:900000+i, category:cats[0], section:'Values & Moral Line', pol:{}, intensity:3, rarity:'common'}}, prof_values_0:{sectionId:'values', trait:byFilter('Values & Moral Line', cats[0])[i]}}, {name:'r'});
+    const explore = archiveCategoryMultiplier(cats[0], cats), other = archiveCategoryMultiplier(cats[1], cats);
+    const replay = withReplayMode(true, ()=> archiveCategoryMultiplier(cats[0], cats));
+    const rut = {prof_values_0:{trait:byFilter('Values & Moral Line', cats[0])[0]}}, fresh = {prof_values_0:{trait:byFilter('Values & Moral Line', cats[1])[0]}};
+    const pick = selectDistinctCandidate([{state:rut, coherence:50}, {state:fresh, coherence:50}], []);
+    const sig = st => Object.keys(st).sort().map(k => k + ':' + (st[k].trait ? st[k].trait.id : '-')).join(',');
+    const r1 = withReplayMode(true, ()=> sig(mk(6800, 2)));
+    forgetArchive();
+    const r2 = withReplayMode(true, ()=> sig(mk(6800, 2)));
+    return {explore, other, replay, same: r1 === r2, freshWins: pick.index === 1};`);
+  assert(out.explore < 1 && out.other > 1, 'the tally does not push the over-used category down: ' + JSON.stringify(out));
+  assert(out.replay === 1, 'replay mode read the archive tally');
+  assert(out.same, 'a replay changed with the project archive');
+  assert(out.freshWins, 'candidate selection ignored the long-horizon tally');
+  return `over-used x${out.explore.toFixed(2)}, neglected x${out.other.toFixed(2)}, replay x1`;
+});
+
+check('§5 anti-staleness: divergence now acts within a category too', ()=>{
+  const out = f5(`
+    const pool = byFilter('Vocabulary Traits', 'Register & Formality Spectrum');
+    const count = div => withEngineSettings({divergence: div}, ()=> { const s = new Set(); withRng(mulberry32(7), ()=>{ for (let i = 0; i < 400; i++) s.add(pickInRange(pool, 'balanced', 2.2).id); }); return s.size; });
+    return {off: count(0), on: count(1)};`);
+  assert(out.on > out.off, `divergence did not widen the draw inside a category: ${out.off} -> ${out.on}`);
+  return `${out.off} -> ${out.on} distinct in 400 draws`;
+});
+
+check('§5 lenses: first-class, combinable, capped, wired into worldTags and the normal/deviant reading', ()=>{
+  const out = f5(`
+    const known = c => SECTION_OF_CATEGORY.has(c) || !!_axisForCategory(c);
+    let all = 0, ok = 0; LENSES.forEach(l => (l.up||[]).concat(l.down||[]).forEach(c => { all++; if (known(c)) ok++; }));
+    const kinds = new Set(LENSES.map(l => l.kind));
+    const r = withEngineSettings({lensSelect:'court,latelife,bogus'}, ()=> buildContextBias('', ''));
+    // Personality poles arrive as slider nudges; every other category as a multiplier.
+    const polished = contextMultiplier('Stylized & Elaborate') * (Object.values(r.nudge).some(v => v > 0) ? 1 : 0), crude = contextMultiplier('Directness & Literalness');
+    const max = Math.max(...[...CONTEXT_BIAS.values()]);
+    clearContextBias();
+    const tagged = {worldTags:['futuristic']}, any = {worldTags:['any']};
+    const wt = withEngineSettings({lensSelect:'scifi'}, ()=> [worldTagMultiplier(tagged), worldTagMultiplier(any)]);
+    const wt2 = withEngineSettings({lensSelect:'court'}, ()=> worldTagMultiplier(tagged));
+    const crudeT = TRAITS.find(t => t.category === 'Manners — Crude & Ill-Mannered'), polT = TRAITS.find(t => t.category === 'Manners — Polished & Courteous');
+    const rd = withEngineSettings({lensSelect:'court'}, ()=> [lensReading(crudeT), lensReading(polT)]);
+    return {share: ok / all, settings: LENSES.filter(l=>l.kind==='setting').length, life: LENSES.filter(l=>l.kind==='life').length,
+      lenses: r.lenses, reg: r.lensRegister, polished, crude, max, wt, wt2, rd: rd.map(x => x && x.status), none: lensReading(polT)};`);
+  assert(out.settings === 8 && out.life === 7, 'expected 8 settings and 7 life stages');
+  assert(out.share >= 0.9, 'lens categories that do not exist: ' + out.share);
+  assert(out.lenses.join() === 'court,latelife', 'unknown lens ids should drop, order canonical: ' + out.lenses);
+  assert(out.reg > 0, 'court + late life should nudge register formal');
+  assert(out.polished > 1 && out.crude < 1 && out.max <= 4, JSON.stringify(out));
+  assert(out.wt[0] > 1 && out.wt[1] === 1 && out.wt2 < 1, 'worldTag multiplier: ' + out.wt + ' / ' + out.wt2);
+  assert(out.rd[0] === 'deviant' && out.rd[1] === 'normal' && out.none === null, 'reading: ' + out.rd);
+  return `${out.settings} settings + ${out.life} life stages; register +${out.reg}`;
+});
+
+check('§5 backstory beats: 3-5 dated beats, each tied to a seated card', ()=>{
+  const out = f5(F5_BUILD + `
+    let n = 0, okLen = 0, grounded = 0, dated = 0, total = 0;
+    for (let i = 0; i < 30; i++){ const st = mk(6900 + i, i); const b = backstoryBeats(st, {age: '40'}); if (!b) continue; n++;
+      if (b.length >= 3 && b.length <= 5) okLen++;
+      b.forEach(x => { total++; if (x.from.length) grounded++; if (/around \\d+|within the last year|now/.test(x.when)) dated++; }); }
+    const st = mk(6900, 0);
+    return {n, okLen, grounded, dated, total, det: JSON.stringify(backstoryBeats(st, {})) === JSON.stringify(backstoryBeats(st, {}))};`);
+  assert(out.n >= 28 && out.okLen === out.n, JSON.stringify(out));
+  assert(out.grounded === out.total && out.dated === out.total, JSON.stringify(out));
+  assert(out.det, 'beats are not deterministic');
+  return `${out.total} beats over ${out.n} sheets`;
+});
+
+// ======================================================================
+group('Section 6 mechanics: tiers, casts, foils, relationship web, pressure, arcs, lens, wildcard, labels');
+const S6 = (code) => G.evalIn(code);
+const _s6Sheet = `(s => withRng(mulberry32(s), ()=> buildCharacterState({verbLevel:0, regLevel:0, compLevel:0, mannerCount:3, vocabCount:2, rarityPref:'balanced', vocabPref:null, personalityOverrides:{}})))`;
+
+check('§6 tierWeight: secondary tier is rule-derived well beyond the hand list', ()=>{
+  const r = S6(`(function(){
+    const p = TRAITS.filter(t=>t.section==='Personality Traits');
+    const sec = p.filter(t=>t.tier==='secondary'), der = sec.filter(t=>t.tierSource==='derived');
+    const listedHit = SECONDARY_TRAIT_NAMES.filter(isBehaviouralTraitName).length;
+    return {sec: sec.length, der: der.length, total: p.length, listed: SECONDARY_TRAIT_NAMES.length, listedHit,
+      adjCore: ['Aloof','Frosty','Gregarious'].every(n => !isBehaviouralTraitName(n)), w: tierWeight(der[0], 4.5)};
+  })()`);
+  assert(r.der >= 300, 'derived only ' + r.der);
+  assert(r.listedHit / r.listed >= 0.7, `the rule recovers only ${r.listedHit}/${r.listed} hand-listed names`);
+  assert(r.adjCore, 'a dispositional adjective was classed as behavioural');
+  assert(r.w < 0.5, 'a derived secondary trait is not suppressed at a loud target');
+  return `${r.sec}/${r.total} secondary (${r.der} derived); rule recovers ${r.listedHit}/${r.listed}`;
+});
+
+check('§6 emergent labels: grown tables, signature words, still deterministic per sheet', ()=>{
+  const r = S6(`(function(){
+    const mk = ${_s6Sheet};
+    const names = new Set(); let sig = 0;
+    for (let s = 1; s <= 200; s++){ const st = mk(6000 + s); const n = emergentArchetypeName(st);
+      if (n.name !== emergentArchetypeName(st).name) return {bad: s};
+      names.add(n.name); const w = signatureArchetypeWords(st); if (w.adj.concat(w.noun).some(x => n.name.includes(x))) sig++; }
+    return {distinct: names.size, sig, adjMin: Math.min(...Object.values(ARCH_ADJ).map(a=>a.length))};
+  })()`);
+  assert(!r.bad, 'the same sheet named differently at seed ' + r.bad);
+  assert(r.adjMin >= 4, 'some ARCH_ADJ entry still has fewer than 4 words');
+  assert(r.distinct >= 110, 'only ' + r.distinct + ' distinct labels in 200');
+  assert(r.sig > 0, 'no label ever borrowed a word from the sheet');
+  return `${r.distinct} distinct in 200, ${r.sig} borrow a signature word`;
+});
+
+check('§6 wildcard: "survives because" is composed from the opposed trait pair', ()=>{
+  const r = S6(`(function(){
+    const T = TRAITS.filter(t=>t.pol && t.pol.warm);
+    const hot = T.filter(t=>t.pol.warm===1).slice(0,3), cold = T.find(t=>t.pol.warm===-1);
+    const partial = {}; hot.forEach((t,i)=> partial['x'+i] = {trait:t});
+    const lean = strongestLean(partial);
+    const why = wildcardSurvivesBecause(cold, lean, partial);
+    return {why, again: wildcardSurvivesBecause(cold, lean, partial), cold: cold.trait, hot: hot.map(t=>t.trait)};
+  })()`);
+  assert(r.why === r.again, 'not deterministic');
+  assert(r.why.includes(r.cold.replace(/^['"]|['"]$/g,'')), 'the exception is not named: ' + r.why);
+  assert(r.hot.some(h => r.why.includes(h.replace(/^['"]|['"]$/g,''))), 'the trait it cuts against is not named: ' + r.why);
+  return r.why.slice(0, 90) + '…';
+});
+
+check('§6 context lens: derived conditions cut the "no rule" fallback without overriding rules', ()=>{
+  const r = S6(`(function(){
+    const mk = ${_s6Sheet}; let tot = 0, none = 0, derived = 0, noneOff = 0;
+    for (let s = 1; s <= 25; s++){ const st = mk(6100 + s);
+      ['public','private','authority','threat'].forEach(m => {
+        contextualView(st, m).slots.forEach(x => { tot++; if (x.rule === 'none') none++; if (x.rule === 'derived') derived++; });
+        DERIVED_CONTEXT_ENABLED = false; contextualView(st, m).slots.forEach(x => { if (x.rule === 'none') noneOff++; }); DERIVED_CONTEXT_ENABLED = true;
+      }); }
+    const tags = derivedContextTags({id:-1, trait:'Stage-fright', desc:'Freezes in front of strangers and audiences.', category:'x'});
+    return {tot, none, derived, noneOff, tags};
+  })()`);
+  assert(r.tags.includes('stranger'), 'text tags missed "strangers": ' + r.tags);
+  assert(r.none / r.tot < 0.1, `still ${(100*r.none/r.tot).toFixed(0)}% fallback`);
+  assert(r.noneOff - r.none === r.derived, 'derived verdicts replaced something other than the fallback');
+  return `fallback ${r.noneOff} → ${r.none} of ${r.tot}`;
+});
+
+check('§6 casts: seats are unique, leader and foil always filled, and joint optimisation is seeded and never worse', ()=>{
+  const r = S6(`(function(){
+    const mk = ${_s6Sheet};
+    const ms = [1,2,3,4,5].map(i => ({id:'m'+i, state: mk(6200+i), meta:{name:'M'+i}}));
+    const roles = assignCastRoles(ms);
+    const run = () => { const drafts = [0,1,2].map(i => ({state: mk(6300+i)})); drafts[1] = {state: drafts[0].state};
+      const res = optimiseCastVoices(drafts, 'mech6', () => ({state: withRng(mulberry32(Math.floor(rand()*1e9)), ()=> mk(Math.floor(rand()*1e6)))}));
+      return {res, sig: JSON.stringify(drafts.map(d => Object.keys(d.state).map(k => d.state[k] && d.state[k].trait ? d.state[k].trait.id : 0)))}; };
+    const a = run(), b = run();
+    return {roles: roles.map(x=>x.id), a: a.res, same: a.sig === b.sig};
+  })()`);
+  assert(new Set(r.roles.filter(x=>x!=='ensemble')).size === r.roles.filter(x=>x!=='ensemble').length, 'a seat was given twice');
+  assert(r.roles.includes('leader') && r.roles.includes('foil'), 'no leader/foil: ' + r.roles);
+  assert(r.a.after <= r.a.before, `optimisation made it worse ${r.a.before} → ${r.a.after}`);
+  assert(r.a.after < r.a.before, 'twins in the draft were not separated');
+  assert(r.same, 'optimisation is not reproducible from the seed');
+  return `${r.roles.join(', ')}; shared devices ${r.a.before} → ${r.a.after}`;
+});
+
+check('§6 generateCast runs the joint optimisation and never ends with more shared devices', ()=>{
+  /* (Two consecutive seeded casts already differed before this change — the acceptance
+     archive feeds the next build — so reproducibility of the optimiser is asserted on
+     fixed drafts above rather than through generateCast.) */
+  G.document._set('castSeed', {value:'s6cast'}); G.document._set('castCount', {value:'4'});
+  const r = S6(`(function(){ refreshRelSelectors = function(){}; generateCast(); const o = lastCastOptimisation, n = castStates.length;
+    castStates = []; relationshipEdges = []; return {o, n}; })()`);
+  G.document._set('castSeed', {value:''});
+  assert(r.n === 4, 'cast size ' + r.n);
+  assert(r.o && r.o.after <= r.o.before, 'optimisation missing or worse: ' + JSON.stringify(r.o));
+  return `shared devices ${r.o.before} → ${r.o.after}`;
+});
+
+check('§6 foils: the premise is built from the source sheet\'s wound/lie/want/fear/need/values', ()=>{
+  const r = S6(`(function(){
+    const mk = ${_s6Sheet}; let built = 0, cited = 0;
+    for (let s = 1; s <= 20; s++){ const a = mk(6400+s), b = mk(6500+s);
+      const p = foilPremiseFromSheets(a, b, mulberry32(s), {a:'Ann', b:'Bo'}); if (!p) continue; built++;
+      const src = Object.values(a).map(x => x && x.trait && x.trait.trait).filter(Boolean);
+      if (p.from.some(f => src.includes(f)) || p.from.length) cited++; }
+    return {built, cited};
+  })()`);
+  assert(r.built >= 18, 'only ' + r.built + '/20 sheets produced a sheet-built premise');
+  assert(r.cited === r.built, 'a premise did not cite what it was built from');
+  return `${r.built}/20 built from the sheets`;
+});
+
+check('§6 relationships: asymmetric pairs, triads by balance, factions and shared secrets', ()=>{
+  const r = S6(`(function(){
+    const mk = ${_s6Sheet};
+    const ms = [0,1,2,3].map(i => ({id:'r'+i, state: mk(6600+i), meta:{name:'R'+i}}));
+    const [ab, ba] = asymmetricEdgePair(ms[0], ms[1], 'mentor');
+    const E = (f, t, trust, extra) => makeEdge(ms[f].id, ms[t].id, null, Object.assign({trust, dependence:3, status:'equal'}, extra || {}));
+    // 0+1 friends, 1+2 friends, 0-2 enemies: an unstable triad with 1 in the middle.
+    const edges = [E(0,1,5), E(1,2,4), E(0,2,1), E(3,2,3,{knows:'Suspects the old injury.'}), E(0,2,1,{id:'x', knows:'Has noticed the contradiction.'})];
+    const web = relationshipWeb(ms, edges);
+    const html = relationshipWebHTML(ms, edges);
+    return {ab:[ab.status, ab.trust, ab.dependence, ab.role], ba:[ba.status, ba.trust, ba.dependence, ba.role],
+      triads: web.triads.map(t => t.kind), secrets: web.secrets.length, factions: web.factions.map(f => f.members.length), svg: /<svg/.test(html)};
+  })()`);
+  assert(r.ab[0] === 'above' && r.ba[0] === 'below' && r.ba[3] === 'protege', 'mentor pair statuses/roles not mirrored: ' + JSON.stringify(r));
+  assert(r.ab[1] !== r.ba[1] && r.ab[2] !== r.ba[2], 'the pair is not asymmetric: ' + JSON.stringify(r));
+  assert(r.triads.includes('unstable'), 'friend-of-both triad not flagged unstable: ' + r.triads);
+  assert(r.secrets >= 1, 'two people knowing about the same third is not a shared secret');
+  assert(r.svg, 'the web view did not draw');
+  return `triads ${r.triads.join('/')}; ${r.secrets} secret(s); factions ${r.factions}`;
+});
+
+check('§6 pressure: irritated → cornered → broken stages and a recovery sheet, each grounded in cards', ()=>{
+  const r = S6(`(function(){
+    const st = (${_s6Sheet})(6701);
+    const esc = pressureEscalation(st, {__pressure:{level:0.4}}), rec = recoverySheet(st);
+    return {ids: esc.stages.map(s=>s.id), current: esc.current, grounded: esc.stages.every(s => s.signs.every(x => x.from.length)),
+      rows: rec ? rec.rows.length : 0, recGrounded: rec ? rec.rows.every(x => x.from.length) : false, md: pressureEscalationMarkdown(st, null)};
+  })()`);
+  assert(r.ids.join() === 'irritated,cornered,broken', 'stages out of order or missing: ' + r.ids);
+  assert(r.current === 'irritated', 'a 40% dial should sit at irritated, got ' + r.current);
+  assert(r.grounded && r.recGrounded, 'a stage sign or recovery row names no card');
+  assert(r.rows >= 4 && /Recovery sheet/.test(r.md), 'recovery sheet too thin: ' + r.rows);
+  return `${r.ids.length} stages, ${r.rows} recovery rows`;
+});
+
+check('§6 arcs: event text is read against the sheet, steadfast hardens, templates chain', ()=>{
+  const r = S6(`(function(){
+    const st = (${_s6Sheet})(6801);
+    const want = _mxT(st, 'motivation', /Core Want/i);
+    const ev = makeArcEvent(1, {shape:'deterioration', title:'x', choice:'lied to get ' + want.trait + ' ' + want.desc});
+    const p = parseArcEvent(st, ev);
+    const ch = proposeArcChanges(st, ev, []);
+    const stead = proposeArcChanges(st, makeArcEvent(2, {shape:'steadfast', title:'y', cost:'Money they cannot quite afford to risk'}), []);
+    const tpl = arcTemplateEvents(st, 'corruption-3', []), tpl2 = arcTemplateEvents(st, 'corruption-3', []);
+    const fall = arcTemplateEvents(st, 'fall-recovery', []);
+    return {hitWant: p.hits.some(h => h.target === 'want'), implied: p.implied, textChange: ch.some(c => c.fromText && /want/.test(c.why)),
+      stead: stead.map(c=>c.slotId), tplShapes: tpl.map(e=>e.shape), same: JSON.stringify(tpl) === JSON.stringify(tpl2),
+      fallShapes: fall.map(e=>e.shape), valid: tpl.concat(fall).every(e => !validateArcEvent(e).length), unaccepted: tpl.every(e => e.changes.every(c => !c.accepted))};
+  })()`);
+  assert(r.hitWant && r.textChange, 'a choice naming the Want did not move the Want');
+  assert(r.implied === 'deterioration', '"lied" should imply deterioration, got ' + r.implied);
+  assert(r.stead.some(s => /^prof_values_/.test(s)), 'steadfast did not deepen Values: ' + r.stead);
+  assert(r.tplShapes.join() === 'deterioration,deterioration,deterioration', 'corruption template shapes: ' + r.tplShapes);
+  assert(r.fallShapes.join() === 'deterioration,deterioration,growth,growth', 'fall & recovery shapes: ' + r.fallShapes);
+  assert(r.same && r.valid && r.unaccepted, 'templates must be deterministic, valid and start unaccepted');
+  return `steadfast → ${r.stead.join(', ')}`;
+});
+
+check('§6 trait-bank gap sections stay grown, opt-in, and conceptFamily coverage never falls (ratchet)', ()=>{
+  /* js/data/traits-gaps.js. The gap sections ship off (a writer chooses them); the grown
+     Contradiction Functions pool ships on. Floors are what the pack held when added. */
+  const T = A.TRAITS, size = s => T.filter(t => t.section === s).length;
+  const FLOOR = {"Romance & Desire":50, "Dialect & Linguistic Background":80, "Beliefs & Worldview":55, "Occupational Jargon":55,
+                 "Conversation Mechanics":40, "Body in Speech":38, "Money & Class":38, "Fears & Aversions":36, "Family Talk":34};
+  Object.entries(FLOOR).forEach(([s, n]) => assert(size(s) >= n, `${s} fell to ${size(s)} (floor ${n})`));
+  const byId = Object.fromEntries(A.PROFILE_SECTIONS.map(ps => [ps.section, ps]));
+  Object.keys(FLOOR).forEach(s => { assert(byId[s], `${s} is not a profile section`); assert(byId[s].defaultOn === false, `${s} should ship off`); });
+  assert(byId["Contradiction Functions"].defaultOn === true, 'Contradiction Functions should ship on');
+  const gaps = T.filter(t => t.pack === 'gaps' || (t.id >= 180000 && t.id <= 189999));
+  assert(gaps.every(t => t.reviewStatus), 'gap traits carry a reviewStatus');
+  const fam = T.filter(t => t.conceptFamily).length;
+  assert(fam >= 2300, `conceptFamily coverage fell to ${fam} (floor 2300)`);
+  return `${gaps.length} gap traits, conceptFamily ${fam}/${T.length}`;
 });
 
 console.log('\n' + (failed ? '\x1b[31m' : '\x1b[32m') + passed + ' passed, ' + failed + ' failed\x1b[0m');

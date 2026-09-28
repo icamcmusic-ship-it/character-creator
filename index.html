@@ -81,6 +81,11 @@
           <input type="text" id="charContext" placeholder="e.g. dockside smuggler, ex-military">
         </div>
       </div>
+      <div class="lensRow">
+        <div class="lensLabel" id="lensLabel">Lenses <span class="sub">— setting, culture and life stage; combine freely</span></div>
+        <input type="hidden" id="lensSelect" value="">
+        <div class="lensPicker" id="lensPicker" role="group" aria-labelledby="lensLabel"></div>
+      </div>
       <div class="row dialBox">
         <div class="field">
           <label for="verbositySlider">Verbosity (Terse &rarr; Voluble)</label>
@@ -378,6 +383,19 @@
           <div class="scaleLabels"><span>0</span><span>1</span><span>2</span><span>3</span></div>
           <div class="sub" style="margin:2px 0 0;">Outliers can now land in the deep profile sections too — "the devoted caretaker whose actual vice is gambling" is a better outlier than "the terse person who sometimes rambles".</div>
         </div>
+      </div>
+
+      <div class="stressToggleRow checkboxRow advOnly" style="margin-top:8px;">
+        <input type="checkbox" id="sheetShapeToggle" checked>
+        <label style="margin:0; text-transform:none; font-size:.85rem; color:var(--text);" for="sheetShapeToggle">Vary the sheet's shape — two cards where the character is defined, drop a thin section, 0–3 outliers (overrides "How many outliers")</label>
+      </div>
+      <div class="stressToggleRow checkboxRow advOnly" style="margin-top:8px;">
+        <input type="checkbox" id="seatContradictions" checked>
+        <label style="margin:0; text-transform:none; font-size:.85rem; color:var(--text);" for="seatContradictions">Seat 1–2 deliberate contradictions, each with what it is for</label>
+      </div>
+      <div class="stressToggleRow checkboxRow advOnly" style="margin-top:8px;">
+        <input type="checkbox" id="exploreCandidates" checked>
+        <label style="margin:0; text-transform:none; font-size:.85rem; color:var(--text);" for="exploreCandidates">Best of three — when the seed box is blank, draw three and keep the one least like this project's characters (a pasted seed always replays exactly)</label>
       </div>
 
       <div class="stressToggleRow checkboxRow advOnly" style="margin-top:8px;">
@@ -713,6 +731,8 @@
         <div class="actionRow" style="margin:0 0 10px;">
           <select id="arcShape" aria-label="Arc shape for the next event"></select>
           <button class="btn-secondary" data-on="click" data-act="addArcEvent" data-args="[]">Add an event</button>
+          <select id="arcTemplate" aria-label="Multi-step arc template"><option value="">Arc template…</option></select>
+          <button class="btn-secondary" data-on="click" data-act="applyArcTemplate" data-args="[]" title="Add a whole multi-step arc (fall &amp; recovery, corruption in three steps…) written from this sheet">Add template</button>
           <button class="btn-secondary" id="arcTimelineBtn" data-on="click" data-act="exportArcTimeline" data-args="[]" title="Markdown timeline: each event, the changes you accepted, and how the pressure sheet moved">Export timeline</button>
           <span class="sub" id="arcStamp">No events yet. The sheet is where they start.</span>
         </div>
@@ -764,6 +784,10 @@
             <input type="range" id="castSpread" min="0.15" max="1" step="0.05" value="0.55" data-on="input" data-act="updateCastSpreadReadout" data-args="[]">
             <div class="sub" style="margin:2px 0 0;" id="castSpreadReadout">Related, but their own people</div>
           </div>
+        </div>
+        <div class="field" style="max-width:240px;">
+          <label for="castOptimise">Distinct voices</label>
+          <label class="inlineCheck"><input type="checkbox" id="castOptimise" checked> Optimise the cast jointly so members don't share voice devices</label>
         </div>
         <div class="field">
           <label>&nbsp;</label>
@@ -833,11 +857,15 @@
           <div class="actionRow">
             <button class="btn-secondary" data-on="click" data-act="addRelationshipEdge" data-args="[]" title="Add a directed edge A → B with defaults read from both sheets">Add edge A → B</button>
             <button class="btn-secondary" data-on="click" data-act="generateForRole" data-args="[]" title="Generate a new cast member built to sit in this role opposite A">Generate a member in this role</button>
+            <button class="btn-secondary" data-on="click" data-act="addAsymmetricPair" data-args="[]" title="Add A → B and B → A together; statuses mirror and one side is built to lean in harder">Add both directions</button>
           </div>
         </div>
       </div>
       <div class="sub" id="edgeStamp">No edges yet.</div>
       <div id="relEdges" class="edgeList"></div>
+      <h3 style="margin:14px 0 4px;">Relationship web</h3>
+      <div class="sub" style="margin:0 0 8px;">The whole cast at once: factions, triads (stable or about to break), shared secrets and lopsided edges.</div>
+      <div id="relWeb"></div>
     </div>
     <div class="sheet" id="relSheet">
       <div class="sheetHeader"><h2 id="relTitle">Relationship</h2></div>
@@ -885,9 +913,11 @@
 <script src="js/data/traits-cells.js" defer></script>
 <script src="js/data/traits-polarity.js" defer></script>
 <script src="js/data/traits-life.js" defer></script>
+<script src="js/data/traits-gaps.js" defer></script>
 <script src="js/engine.js" defer></script>
 <script src="js/generate.js" defer></script>
 <script src="js/render.js" defer></script>
+<script src="js/mechanics.js" defer></script>
 <script src="js/app.js" defer></script>
 </body>
 </html>

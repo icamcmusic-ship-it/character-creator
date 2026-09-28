@@ -647,6 +647,112 @@ await step('dark theme resolves real colours', async ()=>{
   console.log('       dark --bg=' + c.bg + ' --text=' + c.text);
   await page.emulateMedia({colorScheme:'light'});
 });
+// ---------------- Section 6 mechanics ----------------
+await step('§6 cast: joint optimisation runs in reasonable time and every card shows a seat', async ()=>{
+  const r = await page.evaluate(()=>{
+    switchTab('cast'); setVal('castCount','5'); setVal('castSeed','s6-browser');
+    const t0 = performance.now(); generateCast(); const ms = performance.now() - t0;
+    setVal('castSeed','');
+    return {ms, badges: document.querySelectorAll('#castGrid .castRoleBadge').length, n: castStates.length,
+      readout: document.getElementById('castSeedReadout').textContent};
+  });
+  if (r.badges !== r.n) throw new Error(JSON.stringify(r));
+  if (r.ms > 8000) throw new Error('cast generation took ' + Math.round(r.ms) + 'ms');
+  console.log('       cast of ' + r.n + ' in ' + Math.round(r.ms) + 'ms — ' + r.readout);
+});
+await step('§6 relationship web: "Add both directions" draws the web with an asymmetric pair', async ()=>{
+  await page.evaluate(()=>{ switchTab('rel'); refreshRelSelectors(); });
+  const opts = await page.evaluate(()=> [...document.getElementById('relA').options].map(o=>o.value).filter(v=>v && v !== '__single__'));
+  await page.selectOption('#relA', opts[0]); await page.selectOption('#relB', opts[1]);
+  await page.locator('[data-act="addAsymmetricPair"]').click();
+  const r = await page.evaluate(()=>({edges: relationshipEdges.length, svg: !!document.querySelector('#relWeb svg.relWebSvg'),
+    lines: document.querySelectorAll('#relWeb svg line').length, t: relationshipEdges.map(e=>e.trust+'/'+e.dependence)}));
+  if (r.edges !== 2 || !r.svg || r.lines < 1) throw new Error(JSON.stringify(r));
+  if (r.t[0] === r.t[1]) throw new Error('the pair came out symmetric: ' + r.t);
+});
+await step('§6 relationship web fits a phone width', async ()=>{
+  await page.setViewportSize({width: 375, height: 800});
+  const over = await page.evaluate(()=> document.documentElement.scrollWidth - window.innerWidth);
+  await page.setViewportSize({width: 1280, height: 900});
+  await page.evaluate(()=>{ relationshipEdges = []; castStates = []; renderCast(); renderEdges(); });
+  if (over > 1) throw new Error('page scrolls horizontally by ' + over + 'px');
+});
+await step('§6 pressure ladder and recovery sheet render under pressure', async ()=>{
+  const r = await page.evaluate(()=>{
+    switchTab('single'); const was = document.getElementById('stressToggle').checked;
+    document.getElementById('stressToggle').checked = true; setVal('seedInput','s6-pressure'); runGeneration(); setVal('seedInput','');
+    const out = {stages: document.querySelectorAll('#pressureBody .pStage').length, current: document.querySelectorAll('#pressureBody .pStage.current').length,
+      rec: !!document.querySelector('#pressureBody .recoverySheet dl dt')};
+    document.getElementById('stressToggle').checked = was;
+    return out;
+  });
+  if (r.stages < 2 || r.current !== 1 || !r.rec) throw new Error(JSON.stringify(r));
+});
+await step('§6 arc template adds a multi-step arc with a reading of each event', async ()=>{
+  const r = await page.evaluate(()=>{
+    arcEvents = []; arcBase = null; renderArc();
+    setVal('arcTemplate', 'corruption-3'); applyArcTemplate();
+    const out = {events: arcEvents.length, shapes: arcEvents.map(e=>e.shape).join(), cards: document.querySelectorAll('#arcBody .arcEvent').length};
+    arcEvents = []; arcBase = null; renderArc();
+    return out;
+  });
+  if (r.events !== 3 || r.cards !== 3 || r.shapes !== 'deterioration,deterioration,deterioration') throw new Error(JSON.stringify(r));
+});
+// ---- §5 keeping output fresh (lenses, 10 lines, seated contradictions, shape, beats) ----
+await step('§5 lens chips toggle, reach the draw, and mark cards normal/deviant here', async ()=>{
+  await page.evaluate(()=> switchTab('single'));
+  await page.locator('#lensPicker [data-act="toggleLens"]').first().click();
+  const r = await page.evaluate(()=>{
+    toggleLens('latelife');
+    setVal('seedInput', 's5-lens'); runGeneration(); setVal('seedInput', '');
+    const out = {sel: document.getElementById('lensSelect').value, on: document.querySelectorAll('#lensPicker .lensChip.on').length,
+      badges: document.querySelectorAll('#sheetBody .lensBadge').length, meta: (document.querySelector('#summaryCard .shapeMeta') || {}).textContent || '',
+      notes: (charMeta.contextNotes || []).join(',')};
+    setVal('lensSelect', ''); renderLensPicker();
+    return out;
+  });
+  if (r.sel !== 'court,latelife' || r.on !== 2) throw new Error('lens selection: ' + JSON.stringify(r));
+  if (!/Court/.test(r.meta) || !/lens: Court/.test(r.notes)) throw new Error('lenses not reported: ' + JSON.stringify(r));
+  if (r.badges < 1) throw new Error('no card read as normal/deviant under two lenses');
+});
+await step('§5 seated contradictions, sheet shape and backstory beats render', async ()=>{
+  const r = await page.evaluate(()=>{
+    document.getElementById('sheetShapeToggle').checked = true;
+    document.getElementById('seatContradictions').checked = true;
+    setVal('seedInput', 's5-shape'); runGeneration(); setVal('seedInput', '');
+    return {contra: document.querySelectorAll('.seatedContra').length, answers: document.querySelectorAll('.seatedContra .contraField').length,
+      group: !!document.getElementById(sectionAnchorId('Seated contradictions')), beats: document.querySelectorAll('.beatList li').length,
+      shape: !!(charMeta.shape && charMeta.shape.text), text: /Seated contradiction/.test(sheetToText(state, charMeta, null))};
+  });
+  if (!r.contra || r.answers < 5 || !r.group || r.beats < 3 || !r.shape || !r.text) throw new Error(JSON.stringify(r));
+});
+await step('§5 voice lab "10 lines" opens ten takes of one situation', async ()=>{
+  await page.locator('#voiceLabBody [data-act="toggleVoiceTen"]').first().click();
+  const n = await page.evaluate(()=> document.querySelectorAll('#voiceLabBody .vlTenList li').length);
+  if (n !== 10) throw new Error(n + ' lines');
+  await page.locator('#voiceLabBody [data-act="toggleVoiceTen"]').first().click();
+});
+await step('§5 an exploration build with a project archive picks the most distinct of three, and its seed replays', async ()=>{
+  const r = await page.evaluate(()=>{
+    const fp = st => Object.keys(st).filter(k=>st[k] && st[k].trait).sort().map(k=>k + ':' + st[k].trait.id).join('|');
+    for (let i = 0; i < 4; i++){ setVal('seedInput', 's5-arch-' + i); runGeneration(); archiveCharacter(state, {name:'a' + i}); }
+    setVal('seedInput', ''); forgetRecentTraits(); forgetSlotDraws(); forgetCategoryUse(); runGeneration();
+    const ex = charMeta.exploration, a = fp(state), shown = lastSeedUsed;
+    forgetRecentTraits(); forgetSlotDraws(); forgetCategoryUse();
+    setVal('seedInput', shown); runGeneration(); setVal('seedInput', '');
+    const out = {ex, same: fp(state) === a};
+    forgetArchive();
+    return out;
+  });
+  if (!r.ex || r.ex.considered !== 3) throw new Error('no best-of-three on an exploration build: ' + JSON.stringify(r.ex));
+  if (!r.same) throw new Error('the printed seed of the chosen candidate did not replay it');
+});
+await step('§5 lens row fits a phone width', async ()=>{
+  await page.setViewportSize({width: 375, height: 800});
+  const over = await page.evaluate(()=> document.documentElement.scrollWidth - window.innerWidth);
+  await page.setViewportSize({width: 1280, height: 900});
+  if (over > 1) throw new Error('page scrolls horizontally by ' + over + 'px');
+});
 await b.close();
 if (process.env.CSP) console.log(csp.length ? '\nCSP violations:\n' + csp.slice(0,6).map(v=>'  '+v).join('\n') : '\nNo CSP violations under script-src \'self\'.');
 const real = errs.filter(e => !/favicon|sw\.js|ServiceWorker|Failed to load resource|Content Security Policy/i.test(e)).concat(process.env.CSP ? csp : []);

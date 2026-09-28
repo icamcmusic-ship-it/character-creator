@@ -53,9 +53,11 @@ const ENGINE_FILES = [
   'js/data/traits-cells.js',
   'js/data/traits-polarity.js',
   'js/data/traits-life.js',
+  'js/data/traits-gaps.js',
   'js/engine.js',
   'js/generate.js',
   'js/render.js',
+  'js/mechanics.js',
   /* js/app.js was omitted from this list, so roughly two thousand lines — storage,
      save/load, cast generation, relationship analysis, the foil finder, ensemble
      balance, preferences, tab switching and the keyboard map — had no invariant

@@ -586,6 +586,11 @@ function runGeneration(){
   }
 }
 
+/* Best-of-three on exploration builds (audit §5). On unless the control says otherwise. */
+function exploreCandidatesEnabled(){
+  const el = settingEl('exploreCandidates');
+  return el ? !!el.checked : true;
+}
 function _runGeneration(){
   snapshotHistory();
   diffLog = {};
@@ -671,14 +676,45 @@ function _runGeneration(){
   // (withRng, engine.js) rather than reassigning Math.random globally.
   const seedInput = document.getElementById('seedInput');
   const seed = resolveSeed(seedInput ? seedInput.value : "");
-  const seedNum = seed.num;
+  let seedNum = seed.num;
   lastSeedUsed = seed.label;
   const wantStress = !!(document.getElementById('stressToggle')||{}).checked;
   // An explicit seed means "give me this character again", so it suppresses the
   // session-history branch of divergence (see REPLAY_MODE in engine.js). An
   // unseeded roll is exploration and keeps it.
   const replay = seed.explicit;
-  let newState0, newState, newPressure = null;
+  // Setting / culture / life-stage lenses carry a register norm: a nudge on the dial.
+  if (ctxInfo && ctxInfo.lensRegister) regLevel = clamp(regLevel + ctxInfo.lensRegister, -2, 2);
+  /* §5 ANTI-STALENESS: best of three. An exploration build (blank seed box) draws three
+     candidates on three sub-seeds, each speculatively (nothing they touch survives),
+     and keeps the one most distinct from the project archive and the sheet on screen,
+     above a coherence floor — see selectDistinctCandidate. The winner's own seed is the
+     one printed, so pasting it back replays that candidate. A replay never gets here:
+     choosing against the archive is history, and a seed promises no history. */
+  let exploreInfo = null;
+  if (!replay && !wantDepthFirst && exploreCandidatesEnabled()){
+    const refs = explorationReferences(state);
+    if (refs.length){
+      const want0 = variantsFromProtected(state).want;
+      const cands = [];
+      for (let k = 0; k < EXPLORE_CANDIDATES; k++){
+        const num = candidateSeed(seedNum, k);
+        const st = withSpeculativeGeneration(()=> withReplayMode(false, ()=>
+          withArchetypeProfile(arch && arch.profile, ()=> withRng(mulberry32(num), ()=>{
+            rollCharacterVariants(want0);
+            return buildCharacterState({verbLevel, regLevel, compLevel, mannerCount, rarityPref,
+              vocabPref: arch?arch.vocabPref:null, vocabCount, personalityOverrides: archOverrides});
+          }))));
+        cands.push({num, state: st});
+      }
+      const pick = selectDistinctCandidate(cands, refs);
+      if (pick){
+        exploreInfo = {chosen: pick.index, considered: pick.considered, scores: pick.scores};
+        if (pick.index > 0){ seedNum = pick.num; lastSeedUsed = encodeSeed(seedNum); }
+      }
+    }
+  }
+  let newState0, newState, newPressure = null, newShape = null;
   // The archetype's profile hints are live for the whole build and nothing else — see
   // ARCHETYPE PROFILE HINTS in engine.js. Cast, foil and gap-filler deliberately do not
   // inherit them; they are not this archetype's character.
@@ -713,6 +749,7 @@ function _runGeneration(){
     }
     newState0 = buildCharacterState({verbLevel, regLevel, compLevel, mannerCount, rarityPref,
       vocabPref: arch?arch.vocabPref:null, vocabCount, personalityOverrides: archOverrides});
+    newShape = (typeof shapeSummary === 'function') ? shapeSummary(LAST_SHAPE) : null;
     /* One finalizer, one order — see finalizeSheet in engine.js. The locked slots the
        user kept are seated HERE, before budgets, exclusivity and the pressure sheet,
        rather than being merged back in afterwards over the top of everything those
@@ -761,6 +798,10 @@ function _runGeneration(){
     seed: charMetaSeed
   };
   charMeta.viewContext = (typeof viewContext !== 'undefined') ? viewContext : 'baseline';
+  // §5: which lenses, what shape, and whether it was the most distinct of three.
+  charMeta.lenses = ctxInfo && ctxInfo.lenses && ctxInfo.lenses.length ? ctxInfo.lenses.slice() : null;
+  charMeta.shape = newShape;
+  charMeta.exploration = exploreInfo;
   // A freshly generated character starts its arc over — see resetArc in app.js.
   if (typeof resetArc === 'function') resetArc(false);
   charMeta.archFidelity = arch ? archetypeFidelity(state, arch) : null;

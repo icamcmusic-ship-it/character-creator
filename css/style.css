@@ -1387,3 +1387,49 @@
     color:var(--dusk-blue); margin:0; user-select:none;
   }
   .fileMenu[open] > summary.btn-secondary { border-color:var(--dusk-blue); }
+
+  /* ---------- §5 keeping output fresh: lenses, shape, seated contradictions, 10 lines ---------- */
+  .lensRow { margin:8px 0 4px; }
+  .lensLabel { font-size:.78rem; font-weight:600; color:var(--text); margin-bottom:4px; }
+  .lensPicker { display:flex; flex-wrap:wrap; gap:6px 14px; }
+  .lensGroup { display:flex; flex-wrap:wrap; gap:4px; align-items:center; max-width:100%; }
+  .lensKind { font-family:var(--font-mono); font-size:.62rem; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); margin-right:2px; }
+  .lensChip { font-size:.76rem; padding:3px 10px; border-radius:999px; border:1px solid var(--border-strong); background:transparent; color:var(--text); cursor:pointer; min-height:28px; }
+  .lensChip.on { background:var(--dusk-blue); border-color:var(--dusk-blue); color:#fff; }
+  .lensTaboo { flex-basis:100%; font-size:.74rem; margin:2px 0 0; }
+  .lensBadge { font-family:var(--font-mono); font-size:.58rem; text-transform:uppercase; letter-spacing:.06em; padding:2px 7px; border-radius:999px; margin-left:8px; vertical-align:middle; border:1px solid var(--border-strong); cursor:help; }
+  .lens-normal { color:var(--emerald-deep); border-color:var(--emerald-deep); }
+  .lens-deviant { color:var(--accent-rust); border-color:var(--accent-rust); }
+  .contraBadge { background:var(--golden-deep); border-color:var(--golden-deep); }
+  .seatedContra { border-left-color:var(--golden-deep); margin-top:10px; }
+  .seatedContra .tensionTitle { color:var(--golden-deep); }
+  .beatWhen { font-family:var(--font-mono); font-size:.68rem; color:var(--muted); margin-right:4px; }
+  .shapeMeta { margin-top:4px; }
+  .vlTen { font-size:.74rem; padding:2px 10px; margin-top:6px; }
+  .vlTenList { margin:6px 0 0; padding-left:22px; font-size:.84rem; line-height:1.45; overflow-wrap:anywhere; }
+  .vlTenList li { margin-bottom:3px; }
+
+/* ---------- Section 6 mechanics: cast seats, relationship web, pressure ladder ---------- */
+.castRoleBadge { display:inline-block; margin-left:8px; padding:1px 8px; border-radius:999px; font-size:.7rem; font-weight:600;
+  background:var(--dusk-blue-light); color:var(--dusk-blue); border:1px solid var(--border-strong); vertical-align:middle; }
+.castRole-leader { background:var(--golden-light); color:var(--golden-deep); }
+.castRole-foil { background:var(--bubblegum-light); color:var(--bubblegum); }
+.castRole-comic, .castRole-heart { background:var(--emerald-light); color:var(--emerald-deep); }
+.relWeb { display:grid; grid-template-columns:minmax(0, 340px) minmax(0, 1fr); gap:14px; align-items:start; }
+.relWebSvg { width:100%; max-width:340px; height:auto; display:block; }
+.relWebList ul { margin:4px 0 10px; padding-left:18px; }
+.relWebList li { margin:2px 0; font-size:.85rem; }
+.pressureStages { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:10px; margin:10px 0; }
+.pStage { border:1px solid var(--border); border-radius:var(--radius-sm); padding:8px 10px; background:var(--panel2); min-width:0; }
+.pStage.current { border-color:var(--bubblegum); box-shadow:0 0 0 1px var(--bubblegum) inset; }
+.pStage ul { margin:6px 0 0; padding-left:16px; font-size:.83rem; }
+.pStageNow { font-size:.7rem; color:var(--bubblegum); margin-left:4px; }
+.recoverySheet { margin:8px 0 12px; }
+.recoverySheet dl { margin:6px 0 0; display:grid; grid-template-columns:max-content minmax(0, 1fr); gap:4px 12px; font-size:.85rem; }
+.recoverySheet dt { font-weight:600; color:var(--dusk-blue-mid); }
+.recoverySheet dd { margin:0; }
+.arcReading { margin:4px 0; font-style:italic; }
+@media (max-width: 640px){
+  .relWeb, .pressureStages { grid-template-columns:minmax(0, 1fr); }
+  .recoverySheet dl { grid-template-columns:minmax(0, 1fr); }
+}

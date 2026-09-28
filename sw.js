@@ -39,9 +39,11 @@ const ASSETS = [
   './js/data/traits-cells.js',
   './js/data/traits-polarity.js',
   './js/data/traits-life.js',
+  './js/data/traits-gaps.js',
   './js/engine.js',
   './js/generate.js',
   './js/render.js',
+  './js/mechanics.js',
   './js/app.js',
 ];
 

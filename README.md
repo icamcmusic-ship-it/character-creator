@@ -62,6 +62,46 @@ differs.
 
 Rerolls stay deliberately un-seeded — a reroll is you overriding the dice.
 
+Exploration also runs **best of three**: a blank-seed build draws three candidates on
+three sub-seeds and keeps the one least like the project's archived characters (and the
+sheet on screen), among those within 12 coherence points of the best. The long-horizon
+per-project category tally (derived from the archive) is a term in that choice, not a
+weight inside the draw — so every candidate is a pure function of its own seed, and the
+seed printed is the *winner's* seed, which replays it exactly. A pasted seed skips the
+candidate step entirely. Lenses and the new sheet options are settings, not history:
+the same seed under the same lenses and toggles gives the same sheet.
+
+## Keeping output fresh (audit §5)
+
+- **Compositional voice lines.** Each Voice lab line is a clause template for the
+  speech act and the sheet's lean, filled from a topic pool of roles, things, places and
+  times (never personal names), the active lenses' own topics and noun phrases lifted
+  from the sheet's vocabulary examples, then reshaped by the grammar and verbosity cards
+  (compression, fillers, false starts, afterthoughts, echoes, cut-ins), hedges, ellipsis,
+  tense habits, tag questions and contractions. Every transform names its rule. **10
+  lines** under any situation shows ten takes. Measured over 100 characters: 124 → ~640
+  distinct lines of 700; the lie prompt 13 → ~94 distinct. Author prompts compose the
+  same way through the situation they are "like".
+- **Seated contradictions** (Advanced, on by default). One or two axes are chosen before
+  the draw; afterwards a trait against the sheet's actual lean on that axis is seated
+  with a Contradiction Functions card saying what it is for, and its scene questions
+  (what it is for, when, with whom, what changes, the cost) are answered from the sheet.
+- **Variable sheet shape** (on by default). A seeded signature budget gives one or two
+  defining profile sections a second card, drops one thin section, and sets 0–3
+  outliers. 40 seeds give ~6 sheet sizes and ~37 shapes, where every sheet used to be 42
+  slots in one shape.
+- **Divergence within categories.** When "Surprise me" diverges a draw, the proximity
+  kernel is flattened too, not only the category choice.
+- **Lenses.** Eight settings (court, frontier, corporate, diaspora, military,
+  online-native, clergy, sci-fi) and seven life stages (child, adolescent, early career,
+  parent, midlife, late life, dying), combinable. Each bundles category multipliers
+  (sharing the context rules' cap), a register nudge, preferred `worldTags` (a soft
+  ×1.5 / ×0.6 on the trait draw) and taboo topics kept out of the voice lines. Cards
+  read "normal here" or "deviant here" against the active lenses.
+- **Backstory beats.** The motivation chain is laid out in time: formative event, what
+  they took from it, turning point, most recent failure, where it stands now — each tied
+  to a seated card and dated from the age field when there is one.
+
 ## Generation order
 
 Single characters, batch candidates, casts, foils and the gap-filler all run the same
@@ -324,6 +364,54 @@ antagonist, ally, the ex) will also generate a new member built to sit opposite 
 anchor, with the edge recorded. Edges travel in the cast JSON and markdown, are
 validated on import, and are dropped when a member leaves.
 
+**Cast seats and distinct voices.** A generated cast is optimised jointly: after the
+roll, the member who shares the most voice devices with the others is rerolled (a few
+attempts per pass, seeded off the cast seed) and kept only if the cast's shared-device
+total drops. The seed readout reports the before/after; the "Distinct voices" checkbox
+turns it off. Each card carries a seat — Leader, Foil (furthest from the leader), Comic
+relief, Heart, Skeptic, Wildcard — read off Role, Humor, Attachment and the axis
+profile, with the reason on hover.
+
+**Foils** get a premise built from the source sheet: the foil who lives as if the
+source's Lie were false, who was there for the Wound and chose other Values, who wants
+the same thing by the same door. The generic premise list is the fallback.
+
+**Relationship web.** "Add both directions" creates A→B and B→A together, asymmetric by
+construction: statuses mirror (mentor/protégé), and whichever side leans in harder
+(anxious attachment, lower self-assurance, more warmth) is given more dependence and a
+different trust. Below the edges, the web draws the whole cast and lists factions
+(components of positive edges; shared Values when there are no edges yet), triads judged
+by structural balance ("R1 likes both R0 and R2, who cannot stand each other") or as a
+broker, shared secrets (two people who "know" something about the same third) and
+lopsided pairs.
+
+**Pressure ladder and recovery.** The Under Pressure panel shows three stages —
+irritated, cornered, broken — each built from named cards (first tell, stress response,
+the line in Values, the Defence, then the Lie, attachment and vice), with the current
+pressure dial highlighted, followed by a recovery sheet: first hours, who they go to,
+what helps (the Need), what grounds them, what does not help, how they repair it, and
+the story they tell afterwards. Both go into the markdown export.
+
+**Arcs read the event.** The belief/choice/cost text is matched against the Lie, Want,
+Need, Defence, Fear, Values and Price by shared content words, and the choice's verbs
+imply a shape ("lied" reads as deterioration). A choice about the Want loosens or
+tightens it; crossing a line in Values moves Values to its opposed category; touching
+the Need thins the Defence. Steadfast is no longer inert: Values deepen one step and a
+named cost becomes the Price they are paying. Arc templates (fall & recovery,
+corruption in three steps, positive change, steadfast, disillusionment) add a whole
+sequence written from the sheet, each step proposed against the sheet as the previous
+steps would leave it; every change still starts unaccepted.
+
+**Tier, lens, wildcard and label derivation.** Personality traits whose names have the
+shape of a learned behaviour ("Receipt-keeper", "Praise-fishing") are tagged secondary
+by rule (`tierSource: "derived"`), so `tierWeight` now covers ~520 traits instead of 55.
+The context lens reads each card's own text and category for its room (strangers, home,
+rank, work, danger, exhaustion) and falls back to axis- and section-level conditions,
+cutting "no rule moves it here" from about half of a sheet to about 5%. The wildcard's
+"survives because" is composed from the exception and the loudest trait it cuts
+against. Emergent archetype labels draw on larger word tables and can borrow a word
+from the sheet's own loudest traits. All of this lives in `js/mechanics.js`.
+
 **Project library.** A project groups the characters, casts, edges, arc events, settings
 and diversity archive of one book or campaign, beside the flat saves rather than
 replacing them. A backup bundle carries every project and every saved character to
@@ -424,6 +512,7 @@ no quiet content to redraw into.
 - `js/engine.js` — indexes, tagging passes, the weight matrix, and every pick path
 - `js/generate.js` — seeded generation, reroll, pins, undo, scoring
 - `js/render.js` — the sheet, exports, imports, toasts
+- `js/mechanics.js` — cast seats and joint voice optimisation, sheet-built foil premises, relationship web, pressure ladder and recovery, arc reading and templates, derived tiers/lens conditions/wildcard rationale/label words
 - `js/app.js` — storage, cast, relationships, foil, UI wiring
 - `sw.js` — service worker: network-first with an offline precache of the whole shell
 - `tools/studio.js` — the content studio: validate, coverage, nearest, review, preview, packs
@@ -440,3 +529,4 @@ scripts loaded in order, sharing one global scope, so there is still nothing to 
 Permanently out of scope. Do not implement or propose these (see `CLAUDE.md`):
 
 - **Name generator.** Names stay user-entered free text.
+- **Appearance generator and Appearance section.** No appearance section, traits, sliders or generation.

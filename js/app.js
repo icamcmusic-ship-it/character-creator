@@ -519,6 +519,7 @@ function castEntry(state, variants, meta, extra){
 }
 let castStates = [];
 let lastCastSeed = null;
+let lastCastOptimisation = null;   // {before, after, rerolled} from optimiseCastVoices
 function randomAxisLevel(){ return (rand()*4) - 2; }
 
 function generateCast(){
@@ -578,43 +579,57 @@ function generateCast(){
 
   let rerolled = 0;
   withoutContextBias(()=> withSpeculativeGeneration(()=> withRng(mulberry32(seedNum), ()=>{
+    const rollOne = () => {
+      const verbLevel = anchored ? around(baseVerb, spread) : randomAxisLevel();
+      const regLevel  = anchored ? around(baseReg,  spread) : randomAxisLevel();
+      const compLevel = anchored ? around(baseComp, spread) : randomAxisLevel();
+      const personalityOverrides = {};
+      PERSONALITY_AXES.forEach(axis=>{
+        personalityOverrides[axis.id] = anchored
+          ? Math.round(clamp(intVal('pers_'+axis.id, 0) + (rand()*2 - 1) * 100 * spread, -100, 100))
+          : Math.round(randomAxisLevel()*50);
+      });
+      rollCharacterVariants();
+      /* Cast members used to call buildCharacterState and stop there — no required
+         traits, no budgets, no exclusivity — so a cast generated with a named
+         required trait and every rarity cap at zero honoured none of them, while the
+         chips on screen said otherwise. Same finalizer as everything else; pins are
+         the single-character sheet's and deliberately do not travel. */
+      const cand = finalizeSheet(buildCharacterState({verbLevel, regLevel, compLevel, mannerCount, vocabCount,
+        rarityPref, vocabPref:null, personalityOverrides}), {rarityPref, applyPins:false});
+      return {state: cand, variants: Object.assign({}, charVariants)};
+    };
+    const drafts = [];
     for (let i=0;i<count;i++){
-      let st = null, variants = null;
+      let d = null;
       // Accept immediately at <=1 shared key section; try a few times to beat 2+.
       for (let attempt = 0; attempt < 6; attempt++){
-        const verbLevel = anchored ? around(baseVerb, spread) : randomAxisLevel();
-        const regLevel  = anchored ? around(baseReg,  spread) : randomAxisLevel();
-        const compLevel = anchored ? around(baseComp, spread) : randomAxisLevel();
-        const personalityOverrides = {};
-        PERSONALITY_AXES.forEach(axis=>{
-          personalityOverrides[axis.id] = anchored
-            ? Math.round(clamp(intVal('pers_'+axis.id, 0) + (rand()*2 - 1) * 100 * spread, -100, 100))
-            : Math.round(randomAxisLevel()*50);
-        });
-        rollCharacterVariants();
-        /* Cast members used to call buildCharacterState and stop there — no required
-           traits, no budgets, no exclusivity — so a cast generated with a named
-           required trait and every rarity cap at zero honoured none of them, while the
-           chips on screen said otherwise. Same finalizer as everything else; pins are
-           the single-character sheet's and deliberately do not travel. */
-        const cand = finalizeSheet(buildCharacterState({verbLevel, regLevel, compLevel, mannerCount, vocabCount,
-          rarityPref, vocabPref:null, personalityOverrides}), {rarityPref, applyPins:false});
-        st = cand; variants = Object.assign({}, charVariants);
-        if (overlapWith(cand) <= 1) break;
+        d = rollOne();
+        if (overlapWith(d.state) <= 1) break;
         rerolled++;
       }
-      placed.push(st);
+      placed.push(d.state);
+      drafts.push(d);
+    }
+    /* JOINT OPTIMISATION (Section 6): members were independent rolls; now the member
+       sharing the most voice devices with the rest is rerolled until the cast's total
+       stops dropping. Seeded off the cast seed, so a replay rebuilds the same cast. */
+    if (boolVal('castOptimise', true) && typeof optimiseCastVoices === 'function'){
+      lastCastOptimisation = optimiseCastVoices(drafts, String(lastCastSeed), () => rollOne());
+    } else lastCastOptimisation = null;
+    drafts.forEach((d, i)=>{
       // Carried on the cast entry rather than left in the global, so a cast member's
       // own locks travel with it (relationship analysis, cast export) instead of
       // whichever member happened to be generated last.
-      castStates.push(castEntry(st, variants,
+      castStates.push(castEntry(d.state, d.variants,
         {name:"Character " + (i+1), age:"", context:"",
          archetypeLabel: anchored ? "Cast member (around your character)" : "Cast member"}));
-    }
+    });
   })));
   if (rerolled) console.info(`[cast] re-rolled ${rerolled} time(s) to keep members distinct`);
   const out = document.getElementById('castSeedReadout');
-  if (out) out.textContent = "Cast seed: " + lastCastSeed;
+  if (out) out.textContent = "Cast seed: " + lastCastSeed + (lastCastOptimisation && lastCastOptimisation.rerolled
+    ? ` · voices optimised jointly: shared devices ${lastCastOptimisation.before} → ${lastCastOptimisation.after}` : ``);
   renderCast();
   // BUG FIX: the Relationships dropdowns were only rebuilt by switchTab('rel'), so a
   // cast generated while sitting on that tab left stale (or empty) selectors behind.
@@ -654,9 +669,12 @@ function renderCast(){
       overlay.style.display = "block";
     } else overlay.style.display = "none";
   }
+  // Section 6: ensemble seats (leader, foil, comic relief…) read off the sheets.
+  const castRoles = (typeof assignCastRoles === 'function' && castStates.length >= 2) ? assignCastRoles(castStates) : [];
   castStates.forEach((c, idx)=>{
     const card = document.createElement('div');
     card.className = "castCard";
+    const seat = castRoles[idx];
     // Cast names are editable (rename below), so this is interpolated user text:
     // escape it rather than waiting for the day someone types a "<".
     /* A cast was add-only: nothing anywhere removed a member, so a mis-generated or
@@ -664,6 +682,7 @@ function renderCast(){
        overlay radar and both Relationship selectors) until the whole cast was
        regenerated from scratch. */
     let inner = `<h3><span>${escHTML(c.meta.name)}</span>` +
+      (seat ? `<span class="castRoleBadge castRole-${escAttr(seat.id)}" title="${escAttr(seat.why)}">${escHTML(seat.label)}</span>` : ``) +
       `<button class="savedAct" ${actAttr('click', 'renameCastMember', idx)}>rename</button>` +
       `<button class="savedAct savedDel" ${actAttr('click', 'removeCastMember', idx)} ` +
       `aria-label="Remove ${escAttr(c.meta.name)} from the cast" title="Remove this character from the cast">remove</button></h3>`;
@@ -682,6 +701,7 @@ function renderCast(){
     grid.appendChild(card);
   });
   if (typeof renderVoiceHeatmap === 'function') renderVoiceHeatmap();
+  if (typeof renderRelWeb === 'function') renderRelWeb();
 }
 async function renameCastMember(i){
   const c = castStates[i];
@@ -808,6 +828,24 @@ function addRelationshipEdge(){
   renderEdges();
   toast(`Added ${A.meta.name} → ${B.meta.name}${d.why.length ? ` (${d.why.join("; ")})` : ``}.`, "ok", 5000);
 }
+/* Both directions at once, asymmetric by construction — see asymmetricEdgePair. */
+function addAsymmetricPair(){
+  const from = _relPartyId(strVal('relA', '')), to = _relPartyId(strVal('relB', ''));
+  if (!from || !to){ toast("Edges join cast members. Add the current character to the cast first (Cast tab → Add current).", "warn", 5000); return; }
+  if (from === to){ toast("Pick two different characters.", "warn"); return; }
+  const A = castMemberById(from), B = castMemberById(to);
+  const [ab, ba, leaner] = asymmetricEdgePair(A, B, strVal('relRole', '') || null);
+  const added = [ab, ba].filter(e => !relationshipEdges.some(x => x.id === e.id));
+  if (!added.length){ toast("Both edges already exist — edit them below.", "warn"); return; }
+  relationshipEdges.push(...added);
+  renderEdges();
+  toast(`Added ${A.meta.name} ⇄ ${B.meta.name}: ${(leaner === "a" ? A : B).meta.name} leans in harder.`, "ok", 5000);
+}
+function renderRelWeb(){
+  const host = document.getElementById('relWeb');
+  if (!host || typeof relationshipWebHTML !== 'function') return;
+  host.innerHTML = relationshipWebHTML(castStates, relationshipEdges);
+}
 function removeRelationshipEdge(id){
   relationshipEdges = relationshipEdges.filter(e => e.id !== id);
   renderEdges();
@@ -848,6 +886,7 @@ function renderEdges(){
       ${text(e, 'notes', 'Anything else')}
     </div>`;
   }).join("");
+  renderRelWeb();
 }
 /* Generate a cast member INTO a role opposite the character in selector A. */
 function generateForRole(){
@@ -958,13 +997,27 @@ async function addArcEvent(){
   renderArc();
   toast(ev.changes.length
     ? `Event added with ${ev.changes.length} proposed change${ev.changes.length===1?'':'s'} — accept the ones you want.`
-    : `Event added. ${shape === 'steadfast' ? "Steadfast: the cost is the record, nothing on the sheet moves." : "Nothing on this sheet moved for it."}`, "ok", 6000);
+    : `Event added. ${shape === 'steadfast' ? "Steadfast: fill in the cost — it becomes the Price, and their Values deepen." : "Nothing on this sheet moved for it."}`, "ok", 6000);
+}
+/* Section 6: a multi-step template becomes ordinary events with proposals. */
+function applyArcTemplate(){
+  if (!Object.keys(state).length){ toast("Generate a character first — an arc happens to someone.", "warn"); return; }
+  const id = strVal('arcTemplate', '');
+  if (!id){ toast("Pick a template first.", "warn"); return; }
+  if (!arcBase) arcBase = JSON.parse(JSON.stringify(state));
+  const evs = arcTemplateEvents(state, id, arcEvents);
+  evs.forEach(ev => { ev.at = new Date().toISOString(); arcEvents.push(ev); });
+  renderArc();
+  toast(`${evs.length} events added from “${(ARC_TEMPLATES.find(t => t.id === id) || {}).label}”. Accept the changes you want, step by step.`, "ok", 6000);
 }
 function editArcEvent(id, field, el){
   const e = arcEvents.find(x => x.id === id);
   if (!e || !el) return;
-  if (field === 'shape'){
-    e.shape = ARC_SHAPE_IDS.includes(el.value) ? el.value : 'growth';
+  if (field === 'shape' || field === 'beliefChallenged' || field === 'choice' || field === 'cost'){
+    // Section 6: the belief/choice/cost text is read against the sheet, so editing it
+    // is a new proposal too (arcTextChanges in mechanics.js).
+    if (field === 'shape') e.shape = ARC_SHAPE_IDS.includes(el.value) ? el.value : 'growth';
+    else e[field] = String(el.value || "").slice(0, 600);
     // A new shape is a different proposal, and only unaccepted changes are re-proposed:
     // a change the author has already taken is theirs, not the shape's.
     const kept = (e.changes || []).filter(c => c.accepted);
@@ -1000,6 +1053,10 @@ function renderArc(){
   if (panel) panel.style.display = Object.keys(state).length ? "block" : "none";
   const stamp = document.getElementById('arcStamp');
   if (stamp) stamp.textContent = arcSummary(arcEvents).line;
+  const tsel = document.getElementById('arcTemplate');
+  if (tsel && tsel.options.length <= 1 && typeof ARC_TEMPLATES !== 'undefined'){
+    tsel.innerHTML = `<option value="">Arc template…</option>` + ARC_TEMPLATES.map(t => `<option value="${escHTML(t.id)}" title="${escAttr(t.blurb)}">${escHTML(t.label)} (${t.steps.length})</option>`).join("");
+  }
   const sel = document.getElementById('arcShape');
   if (sel && !sel.options.length){
     sel.innerHTML = ARC_SHAPES.map(s => `<option value="${escHTML(s.id)}" title="${escAttr(s.blurb)}">${escHTML(s.label)}</option>`).join("");
@@ -1024,7 +1081,8 @@ function renderArc(){
       ${field(e, 'beliefChallenged', 'belief', 'Which belief this tested')}
       ${field(e, 'choice', 'choice', 'What they chose to do')}
       ${field(e, 'cost', 'cost', 'What it cost them')}
-      ${changes || `<div class="sub">${e.shape === 'steadfast' ? "Steadfast — nothing on the sheet moves; the cost is the record." : "No changes proposed."}</div>`}
+      ${(() => { const r = typeof arcReadingLine === 'function' ? arcReadingLine(replayArc(arcBase, arcEvents.filter(x => x.seq < e.seq)), e) : ""; return r ? `<div class="sub arcReading">${escHTML(r)}</div>` : ``; })()}
+      ${changes || `<div class="sub">${e.shape === 'steadfast' ? "Steadfast — name the cost: it becomes the Price they pay, and the line they held deepens." : "No changes proposed."}</div>`}
     </div>`;
   }).join("") || `<div class="sub">No events yet.</div>`;
 }
@@ -1058,7 +1116,39 @@ function renderVoiceLab(){
         ? ` <button class="savedAct savedDel" ${actAttr('click', 'removeVoicePrompt', l.promptId)} aria-label="Remove the prompt ${escAttr(l.prompt)}">remove</button>` : ``}</div>
       <blockquote class="voiceLine">${escHTML(l.text)}</blockquote>
       <div class="sub">Shaped by: ${escHTML(l.rules.join("; ") || "nothing on this sheet")}${l.device ? ` · habitual device: <b>${escHTML(l.device.label)}</b>` : ``}</div>
+      <button class="btn-secondary vlTen" ${actAttr('click', 'toggleVoiceTen', l.promptId)} aria-expanded="${voiceTenOpen === l.promptId ? 'true' : 'false'}">${voiceTenOpen === l.promptId ? 'Hide the 10 lines' : '10 lines'}</button>
+      ${voiceTenOpen === l.promptId ? `<ol class="vlTenList">${voiceLines(state, l.promptId, voiceLabMode, 10, voiceLabReroll).map(x => `<li>${escHTML(x.text)}</li>`).join("")}</ol>` : ``}
     </div>`).join("");
+}
+/* The "10 lines" view (audit §5): ten composed takes of one situation, so the range of
+   a voice is visible rather than one sample of it. One prompt open at a time. */
+let voiceTenOpen = null;
+function toggleVoiceTen(promptId){
+  voiceTenOpen = voiceTenOpen === promptId ? null : promptId;
+  renderVoiceLab();
+}
+
+/* ---- Lenses (audit §5): setting / culture / life stage, combinable ----
+   The chips write a comma list into #lensSelect, which is what the engine reads
+   (activeLensIds) and what captureSettings saves. */
+function renderLensPicker(){
+  const host = document.getElementById('lensPicker');
+  if (!host || typeof LENSES === 'undefined') return;
+  const on = new Set(activeLensIds());
+  const chip = l => `<button type="button" class="lensChip${on.has(l.id) ? ' on' : ''}" aria-pressed="${on.has(l.id)}" ${actAttr('click', 'toggleLens', l.id)}
+      title="${escAttr((l.up || []).slice(0, 3).join(', ') + (l.taboo && l.taboo.length ? ' · taboo: ' + l.taboo.join(', ') : ''))}">${escHTML(l.label)}</button>`;
+  host.innerHTML = `<span class="lensGroup"><span class="lensKind">Setting</span>${LENSES.filter(l => l.kind === 'setting').map(chip).join('')}</span>`
+    + `<span class="lensGroup"><span class="lensKind">Life stage</span>${LENSES.filter(l => l.kind === 'life').map(chip).join('')}</span>`
+    + (on.size ? `<span class="sub lensTaboo">Off-limits in their lines: ${escHTML(lensTaboos().join(', ') || 'nothing')}</span>` : ``);
+}
+function toggleLens(id){
+  const el = document.getElementById('lensSelect');
+  if (!el || !lensById(id)) return;
+  const cur = new Set(activeLensIds());
+  if (cur.has(id)) cur.delete(id); else cur.add(id);
+  el.value = LENS_IDS.filter(x => cur.has(x)).join(',');
+  renderLensPicker();
+  if (typeof onSliderChange === 'function') onSliderChange();
 }
 function renderVoiceCompare(){
   const host = document.getElementById('voiceCompareBody');
@@ -2813,7 +2903,13 @@ function _generateFoilInner(seedLabel){
     // doesn't return the same two lines.
     return FOIL_PREMISES_BY_SECTION[id].concat(FOIL_PREMISES.slice(0, 2));
   })();
-  const premise = premisePool[Math.floor(rand()*premisePool.length)];
+  const genericPremise = premisePool[Math.floor(rand()*premisePool.length)];
+  /* Section 6: build the premise from the SOURCE sheet's wound, lie, want, fear, need
+     and values against the foil's own — drawn after the generic pick so the stream
+     (and every seeded foil) stays reproducible. The generic list is the fallback. */
+  const sheetPremise = typeof foilPremiseFromSheets === 'function'
+    ? foilPremiseFromSheets(state, foilState, rand, {a: charMeta.name || "The character", b: "the foil"}) : null;
+  const premise = sheetPremise ? sheetPremise.text : genericPremise;
 
   // The whole point of a foil is contrast — without the source character also on the
   // Cast tab, the "Opposed on... Shared ground on..." rationale below refers to a
@@ -2842,6 +2938,7 @@ function _generateFoilInner(seedLabel){
   note.className = "castCard";
   note.innerHTML = `<h3><span>Foil rationale</span></h3>
     <div class="traitDesc"><b>Premise:</b> ${escHTML(premise)}</div>
+    ${sheetPremise ? `<div class="sub" style="margin-top:4px;">Built from: ${escHTML(sheetPremise.from.join(" · "))}</div>` : ``}
     <div class="traitDesc" style="margin-top:6px;"><b>Opposed on (personality):</b> ${escHTML(opposedNames)}</div>
     ${profOpposedNames.length ? `<div class="traitDesc" style="margin-top:6px;"><b>Opposed on (profile):</b> ${escHTML(profOpposedNames.join(", "))}</div>` : ``}
     <div class="traitDesc" style="margin-top:6px;"><b>Shared ground on:</b> ${escHTML(alignedNames||"—")}</div>
@@ -3688,6 +3785,7 @@ announceStorageMode();
 loadCustomArchetypes();
 populateBanCategorySelect();
 refreshConstraintChips();
+renderLensPicker();
 buildBudgetUI();
 // Live trait count in the tagline — the old hardcoded number went stale every time
 // the pool grew.
