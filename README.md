@@ -2,7 +2,7 @@
 
 Axis-based, per-trait conflict-aware, intensity & rarity-weighted character voice
 generator drawing from a bank of several thousand speech, vocabulary, grammar,
-mannerism, psychology and appearance traits. Generate single characters, compare
+mannerism and psychology traits. Generate single characters, compare
 casts for voice collisions, and model relationship dynamics — all client-side, no
 build step required.
 
@@ -237,7 +237,7 @@ the console.
 Shape is the easy half. The commoner failure in a bank this size is content that is
 well-formed and *missing*, so the same flag also reports coverage: polarity tagging per
 section, per-axis pole balance, category size, how many of its 20 (rarity × intensity)
-cells each category populates, and how much of each Motivation and Appearance pool is
+cells each category populates, and how much of each Motivation pool is
 actually reachable at default settings. Those are grouped and warned, never thrown —
 they say "this section is thin", not "this build is broken". It costs a normal load
 nothing. The app links to it from its own footer.
@@ -267,9 +267,9 @@ the same set in the browser, per category, for whoever is editing the files.
 * **Polarity coverage.** `polarityFit` is what lets a slider *combination* reach an
   individual trait rather than only a category. It needs a `pol` tag to select on, and
   four sections mostly do not have one: Vocabulary 34% tagged, Dialogue Grammar 33%,
-  Mannerisms 21%, Appearance 18% — against 100% for the seven profile sections and 75%
-  for Personality. Across those sections (about seven of 37 slots on a default sheet,
-  plus every Appearance card) the sliders currently choose the category and the dice
+  Mannerisms 21% — against 100% for the seven profile sections and 75%
+  for Personality. Across those sections (about seven slots on a default sheet)
+  the sliders currently choose the category and the dice
   choose the trait. Those traits are also invisible to `axisProfile`, the radar,
   conflict detection and the Relationship/Ensemble analysers, for the same reason.
 * **The (rarity × intensity) grid, per category.** On average a category populates 10.7
@@ -501,7 +501,7 @@ no quiet content to redraw into.
 - `js/data/traits-core.js` — the original hand-authored trait bank, one entry per line
 - `js/data/traits-supplement.js` — the intensity-tail supplements (ids 90000+)
 - `js/data/traits-situational.js` — the thirteen Situational pools (ids 110000+)
-- `js/data/traits-tails.js` — Appearance depth and i1/i5 tail fill (ids 120000+)
+- `js/data/traits-tails.js` — i1/i5 intensity tail fill (ids 120000+)
 - `js/data/traits-depth.js` — Need / Ghost / Defence and listening traits (ids 130000+),
   including the low-intensity depth pass that gave those three pools a quiet tail
 - `js/data/traits-balance.js` — polarity and archetype balancing fill (ids 140000+)

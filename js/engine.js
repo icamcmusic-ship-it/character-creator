@@ -525,8 +525,8 @@ const COVERAGE_LIMITS = {
      below that, polarityFit has nothing to select on and the sliders reach the CATEGORY
      but not the trait within it. Measured: the seven profile sections are at 100%,
      Personality 75%, Verbosity 76% — and then Vocabulary 34%, Dialogue Grammar 33%,
-     Mannerisms 21%, Appearance 18%. That is roughly seven of 37 slots on a default
-     sheet, plus all of Appearance, where the sliders can only choose a category.
+     Mannerisms 21%. That is roughly seven slots on a default sheet where the sliders
+     can only choose a category.
      One target for all of them, deliberately: these numbers report a standing content
      debt, and setting the bar under where the thin sections already sit would report
      nothing, which is the state that let this go unnoticed. */
@@ -609,8 +609,6 @@ function assertDrawWindows(){
   };
   const motivTarget = targetFromMag(55);
   catsOf("Motivation & Wound").forEach(cat=> check("Motivation & Wound", cat, motivTarget, `Motivation > ${cat}`));
-  check("Appearance", "Movement & Bearing", targetFromMag(40), "Appearance > Movement & Bearing");
-  check("Appearance", "Distinguishing Marks", targetFromMag(15), "Appearance > Distinguishing Marks");
   return problems;
 }
 if (typeof location !== 'undefined' && /[?&]dev=1\b/.test(location.search || '')){
@@ -1902,12 +1900,9 @@ function referenceFromState(st, name){
 
      Register (neutral slot)               83-trait pool ->  15 distinct, top trait 28.4%
      Situational Friendliness @ slider 0   41-trait pool ->  15 distinct, top trait 35.0%
-     Movement & Bearing @ default          39-trait pool ->  11 distinct, top trait 33.4%
-     Distinguishing Marks @ default        38-trait pool ->   9 distinct, top trait 26.1%
 
    And over 300 default-settings characters the consequence is visible from orbit:
-   "Hushed-deliberate" in 83 of 300, "Sailor's roll on dry land" in 81, "Enters a room
-   backwards" in 79. Nothing is more corrosive to a generator than a distinctive image
+   "Hushed-deliberate" in 83 of 300. Nothing is more corrosive to a generator than a distinctive image
    turning up every fourth time.
 
    The cause is targetFromMag(18) = 1.20 (and targetFromMag(15) = 1.09 for Marks)
@@ -1934,8 +1929,8 @@ function quantile(values, q){
    everywhere, the lift produced 0.90, and max(1.20, 0.90) returned the ORIGINAL target
    unchanged. Every pool this function was written for was still being aimed below its
    own material — Register (neutral) was measured at 15 distinct traits out of 83, and
-   app_move's most frequent draw was still "Enters a room backwards", the exact trait
-   the original fix names as its symptom.
+   the most-seated fixed slot kept returning the exact trait the original fix names
+   as its symptom.
 
    A single tail trait must not be allowed to define where the pool "starts". Use the
    25th percentile of the pool's positions instead: robust to one or two outliers at
@@ -2687,9 +2682,8 @@ const CROSSLINK_STRENGTH = 0.45;
    The section the sheet leads with, that draws on every character, that supplies the
    pressure trigger, participated in the weight matrix in NEITHER direction: not one of
    its seven categories was a WEIGHT_MATRIX target, none had a DEPTH_TO_PERSONALITY
-   entry, and it was excluded from WILDCARD_SECTIONS and PRESSURE_SHIFT_SECTIONS. Its
-   entire outbound influence was one hardcoded link, wound intensity -> Distinguishing
-   Marks target.
+   entry, and it was excluded from WILDCARD_SECTIONS and PRESSURE_SHIFT_SECTIONS. It had
+   no outbound influence at all.
 
    The reason is real but it is an implementation constraint, not a design decision:
    Motivation is drawAll:true, so it never resolves to a single category the cross-link
@@ -4149,18 +4143,18 @@ function pickProfileSlots(rarityPref, resolvedCats, onlySectionId, skipSectionId
 
          MEASURED STALENESS, and the three mechanical causes. Over 400 characters at
          default settings, every one of the twenty-five most repeated traits came from
-         this section or Appearance — nothing from Personality, Vocabulary, Mannerisms
+         this section — nothing from Personality, Vocabulary, Mannerisms
          or Speech appeared at all. The Motivation slots returned 23-38 distinct traits
          in 400 draws against 44-64 for every pers_* slot, with a top trait at 13%.
 
          Three fixes already existed in this file and had simply never been extended
-         here, because they were written when app_move and the personality axes were
+         here, because they were written when the fixed slots and the personality axes were
          the worst offenders and this section was not yet measured:
 
           (a) withSlotMemory — the slot-repeat penalty. Applied to five slots; these
               seven, now the worst in the bank, were not among them.
-          (b) minCount + flatten — the same widen-and-soften treatment app_move and
-              register get. These drew with a bare pickInRange: narrowest window, most
+          (b) minCount + flatten — the same widen-and-soften treatment register
+              gets. These drew with a bare pickInRange: narrowest window, most
               concentrated falloff.
           (c) A per-category target. All seven primaries drew at the identical
               profileTarget('motivation') = 2.41, so all seven asked for the same slice
@@ -4523,7 +4517,7 @@ const SECOND_ORDER_RULES = [
    test:(c,ax)=> c.has("Connector") && (ax.warm||0) <= -1,
    note:"Runs everyone's relationships while staying personally unreachable. The web of introductions and favours is real infrastructure — and it's also the wall."},
   {name:"The volatile perfectionist",
-   test:(c,ax)=> (c.has("Compulsion & Ritual") || c.has("Upkeep — Immaculate")) && (ax.mood||0) <= -2,
+   test:(c,ax)=> c.has("Compulsion & Ritual") && (ax.mood||0) <= -2,
    note:"Ritual and immaculate order maintained on top of visible emotional volatility: the discipline isn't a personality, it's a container. Watch what happens to the routine on the bad days — that's the barometer everyone learns to read."},
   {name:"The doubting idealist",
    test:(c,ax)=> c.has("Idealistic & Visionary") && (ax.pos||0) <= -1,
@@ -5257,6 +5251,33 @@ function traitTombstone(t){
   TOMBSTONE_FIELDS.forEach(f=>{ if (t[f] !== undefined) fb[f] = t[f]; });
   return fb;
 }
+/* RETIRED SLOTS. The Appearance section was removed from the tool for good (it is out of
+   scope: this generates voice and personality only). Saves, backups, projects, casts and
+   undo snapshots written before that still carry its slots — app_0..app_2, app_move,
+   app_mark — and occasionally an Appearance trait seated by a wildcard or a constraint.
+   Every decode path runs through this so those load cleanly with the slots dropped,
+   rather than rendering orphan cards for a section that no longer exists. Returns the
+   number of slots removed; mutates in place. */
+const RETIRED_SECTIONS = new Set(["Appearance"]);
+const RETIRED_CATEGORIES = new Set(["Build \u2014 Imposing","Build \u2014 Slight","Upkeep \u2014 Immaculate",
+  "Upkeep \u2014 Unkempt","Presence \u2014 Striking","Presence \u2014 Unremarkable","Movement & Bearing","Distinguishing Marks"]);
+function isRetiredSlotId(id){ return typeof id === 'string' && id.startsWith('app_'); }
+function dropRetiredSlots(st){
+  if (!st || typeof st !== 'object') return 0;
+  let n = 0;
+  Object.keys(st).forEach(k=>{
+    const sl = st[k];
+    const t = sl && sl.trait;
+    const sec = t && (t.section || (t.__fb && t.__fb.section));
+    if (isRetiredSlotId(k) || (sec && RETIRED_SECTIONS.has(sec))){ delete st[k]; n++; }
+  });
+  return n;
+}
+function dropRetiredKeys(obj){
+  if (!obj || typeof obj !== 'object') return obj;
+  Object.keys(obj).forEach(k=>{ if (isRetiredSlotId(k)) delete obj[k]; });
+  return obj;
+}
 function compressSlots(st){
   if (!st) return st;
   const out = {};
@@ -5271,6 +5292,7 @@ function compressSlots(st){
 }
 function expandSlots(st){
   if (!st) return st;
+  if (typeof st === 'object') { st = Object.assign({}, st); dropRetiredSlots(st); }
   const out = {};
   Object.entries(st).forEach(([k, slot])=>{
     if (!slot){ out[k] = slot; return; }
@@ -5517,129 +5539,21 @@ function pickMannerSlots(count, compLevel, regLevel, rarityPref, forcePool, prof
   });
 }
 
-/* ================= APPEARANCE CRAFTER =================
-   Same engine, new domain. Three dedicated sliders map to pos/neg category pairs
-   with continuous intensity, exactly like personality axes:
-     Stature:  + Build - Imposing      / - Build - Slight
-     Upkeep:   + Upkeep - Immaculate   / - Upkeep - Unkempt
-     Presence: + Presence - Striking   / - Presence - Unremarkable
-   Movement & Bearing is deliberately NOT its own slider: it draws from the existing
-   Activeness personality axis, so a sedentary character moves like one - appearance
-   stays causally downstream of who the character is, same as voice. Distinguishing
-   Marks draws at the Presence magnitude: the more striking the design intent, the
-   stronger the mark. Near-centre sliders (|raw| < 8) skip their slot entirely,
-   so an untouched appearance panel adds only Movement + a mild Mark. */
-const APPEARANCE_AXES = [
-  {id:"stature",  label:"Stature",  pos:"Build \u2014 Imposing",    neg:"Build \u2014 Slight"},
-  {id:"upkeep",   label:"Upkeep",   pos:"Upkeep \u2014 Immaculate", neg:"Upkeep \u2014 Unkempt"},
-  {id:"presence", label:"Presence", pos:"Presence \u2014 Striking", neg:"Presence \u2014 Unremarkable"},
-];
-/* Appearance used to be the only section with no causal link back to the psychology
-   beyond "Movement derives from Activeness" \u2014 it read as a bolt-on, and a functional
-   drinker with a Compulsion-and-Ritual habit looked exactly like anyone else. These
-   two rules close that gap without adding another slider:
-
-     Upkeep  \u2014 a CENTRED upkeep slider no longer means "no slot". It means "no
-               deliberate statement", which is precisely when the character's own
-               habits should decide: a substance or avoidance vice pulls unkempt, a
-               ritual or restraint vice pulls immaculate. An off-centre slider still
-               wins outright; this only fills the silence.
-     Marks   \u2014 the mark target rises with the intensity of the actual wound, so a
-               life-defining injury tends to have left something visible.  */
-const UPKEEP_FROM_VICE = {
-  "Substance & Consumption": -1, "Avoidance & Procrastination": -1, "Risk & Escape": -1,
-  "Compulsion & Ritual": 1, "Restraint & Discipline": 1,
-};
-/* app_move and app_mark are the only two slots in the app that are seated on EVERY
-   sheet regardless of any slider, and they draw from the two smallest always-drawn
-   pools in the bank (44 and 43). Measured over 400 default characters they returned 19
-   and 22 distinct traits with a top trait at 8-13% — the worst two slots in the app,
-   and the only place a user sees the same line twice in an afternoon.
-
-   Two of the three causes are mechanical and fixed here. The window was the same 8-wide
-   slice of a 44-trait pool every time, and the target was a fixed number at neutral
-   sliders, so the same slice was asked for on every build. A wider minimum window plus
-   a small per-build jitter of the target between them make most of each pool reachable.
-
-   The third cause is content: two guaranteed cards drawn 400 times cannot be hidden
-   behind any amount of weighting, and these two categories want more entries. That is
-   a data pass, not a code fix. */
-const APPEARANCE_MIN_WINDOW = 16;
-function appearanceJitter(target){ return clamp(target + (rand() - 0.5) * 1.4, 1, 5); }
-function pickAppearanceSlots(rarityPref, overrides, resolvedCats, sourceState){
-  const out = {};
-  const derivedUpkeep = resolvedCats ? UPKEEP_FROM_VICE[resolvedCats.vices] : 0;
-  APPEARANCE_AXES.forEach((axis,i)=>{
-    const el = settingEl('app_'+axis.id);
-    const raw = intVal(el, 0);
-    let cat, target, derived = false;
-    if (Math.abs(raw) < 8){
-      // centred slider = no deliberate statement
-      if (!(axis.id === 'upkeep' && derivedUpkeep)) return;
-      cat = derivedUpkeep > 0 ? axis.pos : axis.neg;
-      target = targetFromMag(38);   // a real but unemphatic statement
-      derived = true;
-    } else {
-      cat = raw >= 0 ? axis.pos : axis.neg;
-      target = targetFromMag(Math.abs(raw));
-    }
-    const trait = pickInRange(byFilter("Appearance", cat), rarityPref, target);
-    /* BUG FIX: none of the five Appearance slots registered their draw in the build's
-       uniqueness registry, so an Appearance trait could be seated here AND drawn again
-       by the wildcard (which draws across sections, Appearance included) — the same
-       line twice on one sheet. Every other multi-draw path marks; these were simply
-       missed. */
-    if (trait){
-      _markUsed(trait);
-      out['app_'+i] = {slotId:'app_'+i, locked:false, derived,
-        label:"Appearance \u2014 "+axis.label + (derived ? " (from their habits)" : ""), target, trait};
-    }
-  });
-  const actLevel = axisLevel('activeness', overrides);
-  // Floor raised from 25 to 40. Movement & Bearing has no material down at the
-  // intensity a magnitude of 25 asks for (target 1.35), so a neutral Activeness
-  // slider aimed the picker below the pool entirely — 7 distinct traits in 400
-  // characters. 40 lands inside the pool's real content.
-  const mvPool = byFilter("Appearance","Movement & Bearing");
-  const mvTarget = appearanceJitter(poolFloorTarget(mvPool, targetFromMag(Math.max(40, Math.abs(actLevel)*50))));
-  const mv = withSlotMemory("app_move", ()=>pickInRange(mvPool, rarityPref, mvTarget, APPEARANCE_MIN_WINDOW, true));
-  _markUsed(mv);
-  out['app_move'] = mkSlot('app_move', "Appearance \u2014 Movement & Bearing", mvTarget, mv);
-  const pEl = settingEl('app_presence');
-  const pMag = Math.abs(intVal(pEl, 0));
-  // Wound intensity, read off whichever Motivation slots this build has already seated.
-  let woundMag = 0;
-  const st = sourceState || null;
-  if (st) Object.keys(st).forEach(k=>{
-    if (!k.startsWith('prof_motivation_')) return;
-    const t = st[k] && st[k].trait;
-    if (t && /Wound/i.test(t.category)) woundMag = Math.max(woundMag, (t.intensity||3) * 18);
-  });
-  const mkPool = byFilter("Appearance","Distinguishing Marks");
-  // targetFromMag(15) = 1.09 against a pool whose floor is well above it — 38 traits
-  // were returning 9, and two of them were showing up in a quarter of all characters.
-  const mkTarget = appearanceJitter(poolFloorTarget(mkPool, targetFromMag(Math.max(15, pMag, woundMag))));
-  const mk = withSlotMemory("app_mark", ()=>pickInRange(mkPool, rarityPref, mkTarget, APPEARANCE_MIN_WINDOW, true));
-  _markUsed(mk);
-  out['app_mark'] = mkSlot('app_mark', "Appearance \u2014 Distinguishing Marks", mkTarget, mk);
-  return out;
-}
-
 // Robustness: one registry of trait ids already placed in the CURRENT build, so
 // multi-trait sections (profile depth, doubled personality axes) never seat the
 // same trait twice on one sheet. Reset per build; consulted by the multi-draw paths.
 let _buildUsedIds = new Set();
 function _markUsed(t){ if (t) _buildUsedIds.add(t.id); }
 // BUG FIX: this used to hand back the duplicate after exhausting its attempts, so in a
-// thin category (Appearance sits at 15–24 per category) the same trait could be seated
+// thin category the same trait could be seated
 // twice on one sheet with nothing said about it. Return null instead: every caller
 // already handles an empty draw, and traitCardHTML renders "no trait available at
 // these settings", which is the truth — a pool gap, visible as a pool gap.
 /* ================= THE EMPTY-SLOT CONVENTION =================
    A draw can come back with nothing: the pool was banned out, a constraint emptied it,
    the precision band is too tight, or _drawUnique exhausted a thin category. Three
-   different call sites had three different answers to that. pickProfileSlots and
-   pickAppearanceSlots guarded with `if (!trait) return;`, so the slot silently vanished
+   different call sites had three different answers to that. pickProfileSlots
+   guarded with `if (!trait) return;`, so the slot silently vanished
    from the sheet. pickVerbositySlot, pickRegisterSlot and pickGrammarSlot returned the
    slot object with trait:null, which then propagated into every consumer — and the
    consumers that did not guard it (sheetToText, sheetToHTML, coherenceScore,
@@ -5650,12 +5564,12 @@ function _markUsed(t){ if (t) _buildUsedIds.add(t.id); }
      A slot the sheet ALWAYS has stays on the sheet as an explicit empty slot.
      A slot that only exists because something asked for it is omitted when empty.
 
-   The first case is the fixed spine of the sheet — verbosity, register, grammar,
-   movement, marks. Those disappearing is worse than useless: the user has no way to
+   The first case is the fixed spine of the sheet — verbosity, register, grammar.
+   Those disappearing is worse than useless: the user has no way to
    tell "this pool is empty at your settings" from "this section doesn't exist", and
    traitCardHTML already renders exactly that message. The second case is the optional
-   depth — the fourth motivation facet, a counterpoint, an appearance axis the user left
-   centred. Nobody asked for those specifically, and an empty card for each would be
+   depth — the fourth motivation facet, a counterpoint. Nobody asked for those
+   specifically, and an empty card for each would be
    noise.
 
    Every empty slot carries `empty:true` so a consumer can tell a deliberate gap from a
@@ -5847,7 +5761,7 @@ function buildCharacterState(opts){
   // Decide WHO they are first (motivation-adjacent facts), then let that inform HOW they speak.
   const resolvedCats = resolveProfileCategories(rarityPref, fullOverrides, forcedProfileCats);
   // Group toggles: users generating only one kind of content (just a voice, just a
-  // psychology, just an appearance) can switch whole blocks off. Profile sections
+  // psychology) can switch whole blocks off. Profile sections
   // already have per-section toggles; these cover the rest. Unchecked = skipped
   // entirely, not hidden — the slots simply don't exist on the sheet.
   const on = id => { const el = settingEl(id); return !el || el.checked; };
@@ -5890,9 +5804,6 @@ function buildCharacterState(opts){
   if (on('genPersonality')) Object.assign(obj, pickPersonalitySlots(rarityPref, fullOverrides));
   Object.assign(obj, motivationSlots);
   Object.assign(obj, pickProfileSlots(rarityPref, resolvedCats, null, MOTIVATION_SECTION_ID));
-  // Appearance draws last on purpose: it now reads the Motivation slots this build
-  // just seated (see the wound → distinguishing-marks link) and the resolved vice.
-  if (on('genAppearance')) Object.assign(obj, pickAppearanceSlots(rarityPref, fullOverrides, resolvedCats, obj));
   if (contraPlan) Object.assign(obj, seatContradictions(contraPlan, obj));
   const nWild = CURRENT_SHAPE ? CURRENT_SHAPE.wild : wildcardCount();
   for (let w = 0; w < nWild; w++){
@@ -6117,7 +6028,6 @@ function structuredContradiction(st, meta){
    and the export can carry them — with the inference flagged so nobody mistakes a
    default for an authored judgment. */
 const DIM_DEFAULTS_BY_SECTION = {
-  "Appearance":            {visibility:5, persistence:5},
   "Mannerisms":            {visibility:4, persistence:4},
   "Habits & Vices":        {visibility:3, persistence:4},
   "Verbosity Traits":      {visibility:4, persistence:4},
@@ -6191,7 +6101,7 @@ function contextMode(id){ return CONTEXT_MODES.find(m => m.id === id) || CONTEXT
 
 /* Per-context rules on section and polarity. Each entry is {test, status, why}; the
    first matching rule after the authored ones wins, so the order is the priority. */
-const _SURFACE_SECTIONS = new Set(["Appearance","Mannerisms","Verbosity Traits","Vocabulary Traits","Dialogue Grammar Traits","Humor Style"]);
+const _SURFACE_SECTIONS = new Set(["Mannerisms","Verbosity Traits","Vocabulary Traits","Dialogue Grammar Traits","Humor Style"]);
 const _INTERIOR_SECTIONS = new Set(["Motivation & Wound","Positive Origins","Attachment & Intimacy Style","Contradiction Functions"]);
 const CONTEXT_LENS_RULES = {
   public: [
@@ -6210,7 +6120,6 @@ const CONTEXT_LENS_RULES = {
     {test:(t,d,dim)=> dim.selfPresent > 0.3 && t.pol && t.pol.ego === 1, status:"suppressed", why:"the grandiose face is a performance, and there is no audience"},
     {test:(t,d,dim)=> dim.emoDepth > 0.3 && t.pol && t.pol.emo === 1, status:"amplified", why:"emotional depth runs high; in private the guard comes down"},
     {test:(t,d)=> t.section === "Ordinary Texture" || t.section === "Habits & Vices", status:"amplified", why:"habits and small pleasures belong to unwatched time"},
-    {test:(t,d)=> t.section === "Appearance" && d.visibility >= 5, status:"active", why:"still there; nobody is looking"},
   ],
   authority: [
     {test:(t,d)=> t.category === "Under Authority", status:"amplified", why:"exactly the room this role is for"},
@@ -7989,7 +7898,6 @@ const BUDGET_GROUPS = [
   {id:'profile',     label:'Deep profile',         match: id => id.startsWith('prof_') && !id.startsWith('prof_motivation_')},
   {id:'voice',       label:'Speech & Vocabulary',  match: id => ['verbosity','register','grammar'].includes(id) || id.startsWith('vocab')},
   {id:'manner',      label:'Mannerisms',           match: id => id.startsWith('manner')},
-  {id:'appearance',  label:'Appearance',           match: id => id.startsWith('app_')},
   {id:'sheet',       label:'Whole sheet',          match: () => true},
 ];
 

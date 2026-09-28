@@ -578,7 +578,13 @@ function generateCast(){
   };
 
   let rerolled = 0;
-  withoutContextBias(()=> withSpeculativeGeneration(()=> withRng(mulberry32(seedNum), ()=>{
+  /* REPLAY. Two consecutive casts from the same seed used to differ: every member that
+     joins the cast is archived (castEntry -> archiveCharacter), and the archive, recent
+     traits and slot memory all weight the next build — so the first cast fed the second.
+     A cast is always built as a replay (see withReplayMode in engine.js): it runs against
+     empty session history, so the seed in the readout rebuilds exactly this cast, from
+     any session, whether it was typed in or rolled. */
+  withReplayMode(true, ()=> withoutContextBias(()=> withSpeculativeGeneration(()=> withRng(mulberry32(seedNum), ()=>{
     const rollOne = () => {
       const verbLevel = anchored ? around(baseVerb, spread) : randomAxisLevel();
       const regLevel  = anchored ? around(baseReg,  spread) : randomAxisLevel();
@@ -625,7 +631,7 @@ function generateCast(){
         {name:"Character " + (i+1), age:"", context:"",
          archetypeLabel: anchored ? "Cast member (around your character)" : "Cast member"}));
     });
-  })));
+  }))));
   if (rerolled) console.info(`[cast] re-rolled ${rerolled} time(s) to keep members distinct`);
   const out = document.getElementById('castSeedReadout');
   if (out) out.textContent = "Cast seed: " + lastCastSeed + (lastCastOptimisation && lastCastOptimisation.rerolled
@@ -692,10 +698,6 @@ function renderCast(){
     addAll(["verbosity","register","grammar"].filter(id=>c.state[id]));
     addAll(Object.keys(c.state).filter(k=>k.startsWith("vocab")));
     addAll(Object.keys(c.state).filter(k=>k.startsWith("manner")));
-    // Appearance was generated (on by default) and exported by sheetToText, but never
-    // shown here — so the cast card and the copied markdown disagreed about what the
-    // character looked like.
-    addAll(Object.keys(c.state).filter(k=>k.startsWith("app_")));
     addAll(Object.keys(c.state).filter(k=>k.startsWith("wild_")));
     card.innerHTML = inner;
     grid.appendChild(card);
@@ -1681,18 +1683,6 @@ function updateSliderReadouts(){
     note.textContent = bits.length ? "In force: " + bits.join("; ") + "." : "";
     note.title = "Both are adjustable — the first on the Surprise me dial above, the second under Tinker Mode.";
   })();
-  /* The three Appearance sliders were the last controls in the app announced as a bare
-     number: "minus thirty-five", with no <label for> either, so a screen reader had
-     neither the control's name nor what its value meant. Same treatment as the
-     personality axes, off the same axis tables. */
-  APPEARANCE_AXES.forEach(axis=>{
-    const el = document.getElementById('app_'+axis.id);
-    if (!el) return;
-    const raw = intVal(el, 0);
-    setValueText('app_'+axis.id, Math.abs(raw) < 14
-      ? `${raw} — no deliberate statement`
-      : `${raw} — ${axisReadout(axis, raw)}`);
-  });
   const rf = document.getElementById('rangeFocus');
   if (rf){
     const v = parseFloat(rf.value);
@@ -2001,7 +1991,6 @@ function applyStartingPoint(key){
 const DEFAULTS = {
   fields: {
     verbositySlider: "0", registerSlider: "0", composureSlider: "0",
-    app_stature: "0", app_upkeep: "0", app_presence: "0",
     mannerCount: "3", vocabCount: "2", personalityCount: "13", profileDepth: "1",
     rarityPref: "0", affinityBoost: "2.5", rangeFocus: "0.62",
     sheetDensity: "standard", wildcardCount: "1", pressureLevel: "100",
@@ -2012,7 +2001,7 @@ const DEFAULTS = {
     // The anti-staleness pair ships ON. This is the whole point of the table.
     avoidRecentToggle: true, wildcardToggle: true,
     personalityToggle: true, examplesToggle: true,
-    genPersonality: true, genSpeech: true, genVocab: true, genManner: true, genAppearance: true,
+    genPersonality: true, genSpeech: true, genVocab: true, genManner: true,
     compactToggle: false, stressToggle: false, depthFirstToggle: false,
     foilOpposeComposure: false,
   },

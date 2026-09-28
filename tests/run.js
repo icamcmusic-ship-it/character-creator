@@ -546,9 +546,8 @@ check('every budget group matches at least one slot on a real sheet', ()=>{
   const st = buildOnce(4242);
   const ids = Object.keys(st).filter(id => st[id] && st[id].trait);
   const empty = A.BUDGET_GROUPS.filter(g => !ids.some(g.match)).map(g=>g.id);
-  // Appearance depends on DOM sliders the harness leaves centred, so it is allowed to
-  // be empty here; everything else must be reachable or the control is a dead end.
-  assert(!empty.filter(id => id !== 'appearance').length, 'groups matching nothing: ' + empty.join(', '));
+  // Every group must be reachable or the control is a dead end.
+  assert(!empty.length, 'groups matching nothing: ' + empty.join(', '));
   return A.BUDGET_GROUPS.length - empty.length + ' of ' + A.BUDGET_GROUPS.length + ' groups populated';
 });
 check('every preset resolves to caps the engine recognises', ()=>{
@@ -700,7 +699,7 @@ check('every category is reachable by some pick path', ()=>{
      to catch a whole category being orphaned by an incomplete lookup table. */
   const named = new Set();
   Object.values(A.AXES).forEach(ax=> named.add(ax.section + '||' + ax.category));
-  const drawnByCategory = new Set(['Vocabulary Traits','Mannerisms','Dialogue Grammar Traits','Appearance']);
+  const drawnByCategory = new Set(['Vocabulary Traits','Mannerisms','Dialogue Grammar Traits']);
   A.PROFILE_SECTIONS.forEach(ps=> drawnByCategory.add(ps.section));
   A.PERSONALITY_AXES.forEach(a=> [a.pos,a.neg,a.mid].forEach(c=>{ if(c) named.add('Personality Traits||'+c); }));
   const orphans = [];
@@ -1196,7 +1195,7 @@ function sheetWithEmptySlots(){
     mannerCount:2, vocabCount:2, rarityPref:'balanced', vocabPref:null});
   const keys = Object.keys(st);
   // Blank a profile slot, a fixed-spine slot, and a personality slot.
-  ['prof_role_0','register','verbosity','grammar','app_move','app_mark']
+  ['prof_role_0','register','verbosity','grammar']
     .forEach(k=>{ if (st[k]) st[k] = A.emptySlot(k, st[k].label); });
   const pers = keys.find(k=>k.startsWith('pers_'));
   if (pers) st[pers] = A.emptySlot(pers, st[pers].label);
@@ -1223,7 +1222,7 @@ check('a sheet with empty slots exports, scores and analyses without throwing', 
 });
 check('an all-empty sheet is still exportable', ()=>{
   const st = {};
-  ['verbosity','register','grammar','app_move','prof_role_0']
+  ['verbosity','register','grammar','prof_role_0']
     .forEach(k=> st[k] = A.emptySlot(k, k));
   const out = A.sheetToText(st, {name:'Nobody'}, {});
   assert(typeof out === 'string' && out.includes('Nobody'), 'no usable export');
@@ -1396,8 +1395,8 @@ group('Motivation & Wound is wired in');
 /* The section the sheet leads with, that draws on every character, and that supplies
    the pressure trigger, participated in the weight matrix in NEITHER direction: not one
    of its seven categories was a WEIGHT_MATRIX target, none had a DEPTH_TO_PERSONALITY
-   entry, and it was excluded from WILDCARD_SECTIONS and PRESSURE_SHIFT_SECTIONS. Its
-   whole outbound influence was one hardcoded link to the Distinguishing Marks target. */
+   entry, and it was excluded from WILDCARD_SECTIONS and PRESSURE_SHIFT_SECTIONS. It had
+   no outbound influence at all. */
 check('a wound actually moves the categories downstream of it', ()=>{
   const measure = (text) => {
     const counts = {attachment:{}, values:{}, role:{}};
@@ -1490,24 +1489,16 @@ check('the fixed-category slots draw from a real range', ()=>{
   // slot id -> the floor it must clear over N builds. Set below what the engine
   // currently achieves, so ordinary content churn doesn't trip it and a structural
   // regression does.
-  /* Motivation and Appearance were added to this list after a 400-character audit found
-     every one of the twenty-five most-repeated traits in the app came from those two
-     sections — 23-38 distinct per Motivation slot with a top trait at 13%, and 19/22 for
-     the two Appearance slots seated on every sheet. The floors here are set below what
-     the engine now achieves (44-68 for Motivation, 28/33 for Appearance over 200
-     builds), so content churn doesn't trip them and a structural regression does.
-
-     app_move and app_mark keep a looser top-share allowance than everything else,
-     stated rather than hidden: they draw from the two smallest always-drawn pools in
-     the bank (44 and 43 traits) and are seated on every sheet regardless of any slider,
-     so their ceiling is a content limit, not a weighting one. */
+  /* Motivation was added to this list after a 400-character audit found it among the
+     most-repeated sections in the app — 23-38 distinct per slot with a top trait at 13%.
+     The floors here are set below what the engine now achieves (44-68 over 200 builds),
+     so content churn doesn't trip them and a structural regression does. */
   const FLOORS = {register: 40, verbosity: 30, pers_honesty: 20, pers_confidence: 20,
                   pers_curiosity: 20, pers_manners: 20, pers_activeness: 20,
                   prof_motivation_0: 40, prof_motivation_1: 35, prof_motivation_2: 32,
                   prof_motivation_3: 35, prof_motivation_4: 32, prof_motivation_5: 30,
-                  prof_motivation_6: 32,
-                  app_move: 20, app_mark: 24};
-  const TOP_SHARE_LIMIT = {app_move: 0.11, app_mark: 0.12};
+                  prof_motivation_6: 32};
+  const TOP_SHARE_LIMIT = {};
   const thin = [];
   Object.entries(FLOORS).forEach(([slot, floor])=>{
     const m = seen.get(slot);
@@ -1537,7 +1528,9 @@ check('poolFloorTarget actually lifts a target off the pool floor', ()=>{
   return `floor ${lo.toFixed(2)} -> target ${lifted.toFixed(2)}, ${inWindow} traits in band`;
 });
 check('rangeSelect scales its window to the pool, not just the precision slider', ()=>{
-  const small = A.byFilter('Appearance', 'Movement & Bearing');
+  // The smallest Mannerisms category stands in for "a thin pool".
+  const small = A.CATS_BY_SECTION.get('Mannerisms').map(c => A.byFilter('Mannerisms', c))
+    .filter(p => p.length >= 20).sort((a,b)=> a.length - b.length)[0];
   const large = A.byFilter('Vocabulary Traits', 'Register & Formality Spectrum');
   const rs = (pool) => A.rangeSelect(pool, A.poolFloorTarget(pool, A.targetFromMag(40)));
   const a = rs(small), b = rs(large);
@@ -1578,9 +1571,9 @@ group('Content debt');
 check('polarity coverage per section does not regress', ()=>{
   /* polarityFit is the mechanism that lets a slider combination reach an individual
      TRAIT rather than just a category. It needs a pol tag to select on, and four
-     sections are mostly untagged — so across Vocabulary, Grammar, Mannerisms and all of
-     Appearance (roughly seven of 37 slots on a default sheet, plus every Appearance
-     card) the sliders can currently only choose the category. Those sections are also
+     sections are mostly untagged — so across Vocabulary, Grammar and Mannerisms
+     (roughly seven slots on a default sheet) the sliders can currently only choose the
+     category. Those sections are also
      invisible to axisProfile, the radar, conflict detection and the ensemble analysers
      for the same reason. Closing this is a content pass — tagging ~1,950 traits — not a
      code change. */
@@ -1589,7 +1582,7 @@ check('polarity coverage per section does not regress', ()=>{
     'Attachment & Intimacy Style': 1, 'Humor Style': 1, 'Habits & Vices': 1,
     'Motivation & Wound': 0.80, 'Verbosity Traits': 0.74, 'Personality Traits': 0.73,
     'Vocabulary Traits': 0.40, 'Dialogue Grammar Traits': 0.38,   // raised after the §6 keyword pol back-fill
-    'Mannerisms': 0.30, 'Appearance': 0.17,
+    'Mannerisms': 0.30,
   };
   const by = new Map();
   T.forEach(t=>{
@@ -1642,8 +1635,12 @@ check('no polarity axis becomes more one-sided', ()=>{
   /* 2026 audit §4 trait pass: formality (68 -> 59%) and analytical thinking (67 -> 60%)
      are now inside the general 40-60% band, so they are held to it like every other
      axis rather than to a recorded lopsided band. */
+  /* Removing the Appearance section took out its disc- (unkempt) tags, which left
+     discipline just over the band at ~60.2% positive. Recorded here so it can only
+     improve, rather than widening the general band for every axis. */
   const FLOORS = {
     ego: [0.37, 0.45],
+    disc: [0.56, 0.61],
   };
   const poles = {};
   T.forEach(t=> Object.entries(t.pol || {}).forEach(([ax, v])=>{
@@ -2340,10 +2337,10 @@ check('a contradiction carries when / with whom / what changes / cost, and the a
 
 check('trait dimensions come from the trait when authored and are flagged when inferred', ()=>{
   const authored = T.find(t=> t.frequency && t.visibility && t.persistence && t.narrativeSalience);
-  const bare = T.find(t=> !t.frequency && !t.visibility && t.section === 'Appearance');
+  const bare = T.find(t=> !t.frequency && !t.visibility && t.section === 'Mannerisms');
   const d1 = A.traitDimensions(authored), d2 = A.traitDimensions(bare);
   assert(!d1.inferred.length && d1.frequency === authored.frequency, 'authored dimensions should be used as written');
-  assert(d2.inferred.length === 4 && d2.visibility === 5, `an Appearance trait should infer visibility 5 (${JSON.stringify(d2)})`);
+  assert(d2.inferred.length === 4 && d2.visibility === 4, `a Mannerisms trait should infer visibility 4 (${JSON.stringify(d2)})`);
   const secs = new Set(T.map(t=>t.section)); Object.keys(A.DIM_DEFAULTS_BY_SECTION).forEach(sec=> assert(secs.has(sec), `DIM_DEFAULTS names an unknown section "${sec}"`));
   return `authored ${authored.trait} · inferred ${bare.trait} → V${d2.visibility} P${d2.persistence}`;
 });
@@ -3561,9 +3558,7 @@ check('§6 casts: seats are unique, leader and foil always filled, and joint opt
 });
 
 check('§6 generateCast runs the joint optimisation and never ends with more shared devices', ()=>{
-  /* (Two consecutive seeded casts already differed before this change — the acceptance
-     archive feeds the next build — so reproducibility of the optimiser is asserted on
-     fixed drafts above rather than through generateCast.) */
+  /* Reproducibility of a whole cast from its seed is asserted separately below. */
   G.document._set('castSeed', {value:'s6cast'}); G.document._set('castCount', {value:'4'});
   const r = S6(`(function(){ refreshRelSelectors = function(){}; generateCast(); const o = lastCastOptimisation, n = castStates.length;
     castStates = []; relationshipEdges = []; return {o, n}; })()`);
@@ -3571,6 +3566,64 @@ check('§6 generateCast runs the joint optimisation and never ends with more sha
   assert(r.n === 4, 'cast size ' + r.n);
   assert(r.o && r.o.after <= r.o.before, 'optimisation missing or worse: ' + JSON.stringify(r.o));
   return `shared devices ${r.o.before} → ${r.o.after}`;
+});
+
+check('§6 two consecutive casts from the same cast seed are the same cast', ()=>{
+  /* A cast build read the session's history (recent traits, slot memory, category use,
+     which every generation and every accepted member feeds), so the same cast seed
+     rebuilt a different cast once anything had been generated in between. Casts now
+     build in replay mode, against empty history. */
+  G.document._set('castSeed', {value:'replay-me'}); G.document._set('castCount', {value:'4'});
+  const r = S6(`(function(){ refreshRelSelectors = function(){};
+    const sig = () => castStates.map(c => Object.keys(c.state).sort().map(k => k + ':' + (c.state[k] && c.state[k].trait ? c.state[k].trait.id : '-')).join(',')).join(' | ');
+    generateCast(); const a = sig(), seedA = lastCastSeed;
+    generateCast(); const b0 = sig();
+    // Ordinary single-character generations in between move the session history
+    // (recent traits, slot memory, category use) that a history-aware build reads.
+    _runGeneration(); _runGeneration();
+    generateCast(); const b = b0 === a ? sig() : 'consecutive casts differed', seedB = lastCastSeed;
+    castStates = []; relationshipEdges = []; return {a, b, seedA, seedB}; })()`);
+  G.document._set('castSeed', {value:''});
+  assert(r.seedA === r.seedB, 'seed label changed between runs');
+  assert(r.a.length > 0 && r.a === r.b, 'the same cast seed built two different casts');
+  return 'seed ' + r.seedA + ' replays';
+});
+
+check('saves written with the removed Appearance section load with those slots dropped', ()=>{
+  const st = buildOnce(777);
+  const base = Object.keys(st).filter(k => st[k] && st[k].trait).length;
+  const oldTrait = {id:94000, section:'Appearance', category:'Build — Imposing', trait:'Takes up slightly more doorway than expected',
+    desc:'Just noticeably broad.', example:'(a half-step)', intensity:2, rarity:'common'};
+  const legacy = A.compressSlots(st);
+  legacy.app_0 = {slotId:'app_0', label:'Appearance — Stature', target:2, trait:{__id:94000, __fb:oldTrait}};
+  legacy.app_move = {slotId:'app_move', label:'Appearance — Movement & Bearing', target:2, trait:null, empty:true};
+  legacy.wild_0 = {slotId:'wild_0', label:'Wildcard', target:3, trait:{__id:95001, __fb:Object.assign({}, oldTrait, {id:95001})}};
+  const r = S6(`(function(){
+    const rec = decodeSavedRecord(${JSON.stringify({state: legacy, charMeta:{name:'Old'},
+      pinnedTargets:{app_0:2}, traitNotes:{app_mark:'scar'}, charVariants:{app_0:'a'}})}, 'Old');
+    const cast = applyCastBundle({format:'character-voice-cast', members:[{id:'x', state: ${JSON.stringify(Object.assign({}, st, {app_mark:{slotId:'app_mark', label:'x', trait:oldTrait}}))}, meta:{name:'Old'}}], edges:[]});
+    const members = castStates.map(c => Object.keys(c.state)); castStates = []; relationshipEdges = [];
+    restoreSettings({fields:{app_stature:'50'}, toggles:{genAppearance:true},
+      constraints:{bannedSections:['Appearance','Humor Style'], requiredCategories:['Movement & Bearing'], intensityCaps:{appearance:3, sheet:40}}});
+    const after = {banned:[...bannedSections], req:requiredCategories.slice(), caps:Object.assign({}, intensityCaps)};
+    restoreSettings({constraints:{}});
+    return {keys:Object.keys(rec.state), pins:Object.keys(rec.pinnedTargets||{}), notes:Object.keys(rec.traitNotes||{}),
+      vars:Object.keys(rec.charVariants||{}), orphans:rec.__orphans, lost:rec.__lost, members, after,
+      text: sheetToText(rec.state, {name:'Old'}, {})};
+  })()`);
+  assert(!r.keys.some(k => k.startsWith('app_')), 'an app_ slot survived decode: ' + r.keys.join(','));
+  assert(!r.keys.includes('wild_0'), 'an Appearance trait seated by a wildcard survived decode');
+  assert(r.keys.length >= base, 'real slots were lost along with the appearance ones');
+  assert(!r.pins.length && !r.notes.length && !r.vars.length, 'per-slot data keyed by an app_ slot survived');
+  assert(!r.orphans && !r.lost, 'dropped slots were reported as orphans/lost');
+  assert(r.members.length === 1 && !r.members[0].some(k => k.startsWith('app_')), 'cast import kept an app_ slot');
+  assert(!r.after.banned.includes('Appearance') && r.after.banned.includes('Humor Style'), 'retired section ban not dropped');
+  assert(!r.after.req.length && r.after.caps.appearance === undefined && r.after.caps.sheet === 40, 'retired constraints not dropped: ' + JSON.stringify(r.after));
+  assert(!/Appearance|How they look/.test(r.text), 'export still mentions the removed section');
+  // Undo snapshots and project saves go through expandSlots directly.
+  const ex = A.expandSlots(legacy);
+  assert(!Object.keys(ex).some(k => k.startsWith('app_')) && !ex.wild_0, 'expandSlots kept a retired slot');
+  return r.keys.length + ' slots kept, 3 retired dropped';
 });
 
 check('§6 foils: the premise is built from the source sheet\'s wound/lie/want/fear/need/values', ()=>{
@@ -3658,7 +3711,9 @@ check('§6 trait-bank gap sections stay grown, opt-in, and conceptFamily coverag
   const gaps = T.filter(t => t.pack === 'gaps' || (t.id >= 180000 && t.id <= 189999));
   assert(gaps.every(t => t.reviewStatus), 'gap traits carry a reviewStatus');
   const fam = T.filter(t => t.conceptFamily).length;
-  assert(fam >= 2300, `conceptFamily coverage fell to ${fam} (floor 2300)`);
+  // Floor lowered from 2300 when the Appearance section (and its ~60 family-tagged
+  // traits) was removed from the bank; it ratchets from the new baseline.
+  assert(fam >= 2240, `conceptFamily coverage fell to ${fam} (floor 2240)`);
   return `${gaps.length} gap traits, conceptFamily ${fam}/${T.length}`;
 });
 

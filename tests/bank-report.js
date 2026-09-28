@@ -46,7 +46,7 @@ T.forEach(t=>{
 say('  traits  polarised  share    section');
 sec.forEach(r=>{ out.sections.push(r); say(`  ${String(r.traits).padStart(6)}  ${String(r.polarised).padStart(9)}  ${pct(r.polarised,r.traits).padStart(6)}   ${r.section}`); });
 const untagged = out.sections.reduce((n,r)=>n+r.traits-r.polarised,0);
-say(`  ${untagged} traits (${pct(untagged,T.length)}) carry no directional polarity. Not a defect for appearance or a deliberately neutral situational entry; it does mean the sliders reach the category but not the trait there.`);
+say(`  ${untagged} traits (${pct(untagged,T.length)}) carry no directional polarity. Not a defect for a deliberately neutral situational entry; it does mean the sliders reach the category but not the trait there.`);
 
 // ---------------- rarity x intensity ----------------
 head('Rarity x intensity');
@@ -81,12 +81,6 @@ out.thin = cells.slice(0, 16);
 head(`Thinnest categories by occupied (rarity x intensity) cells — mean ${out.cells.mean}/20`);
 say('  cells  traits  category');
 out.thin.forEach(c=> say(`  ${String(c.cells).padStart(5)}  ${String(c.traits).padStart(6)}  ${c.key.replace('||',' > ')}`));
-
-head('Appearance (the fixed slots that draw from the smallest local pools)');
-(A.CATS_BY_SECTION.get('Appearance')||[]).forEach(c=>{
-  const list = byCat.get('Appearance||'+c)||[]; const s=new Set(); list.forEach(t=>s.add(A.rarityTier(t)+':'+t.intensity));
-  say(`  ${String(list.length).padStart(4)} traits  ${String(s.size).padStart(2)}/20  ${c}`);
-});
 
 // ---------------- polarity balance ----------------
 head('Polarity balance per axis (share of directional tags that are positive)');

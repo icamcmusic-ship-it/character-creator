@@ -27,10 +27,7 @@
       three are the most writerly categories in the tool — they are what turns a
       wound into a story — and they were the thinnest in their own section.
 
-   3. APPEARANCE. 31-41 per category across eight categories, six of them thin at
-      both i1 and i5, and the least causally connected section in the bank.
-
-   4. MICRO-PHYSICAL TICS (3 at i4, 2 at i5) and CONCEPTUAL FRAMEWORK & LOANWORDS
+   3. MICRO-PHYSICAL TICS (3 at i4, 2 at i5) and CONCEPTUAL FRAMEWORK & LOANWORDS
       (4 at i4, 3 at i5) — the audit's example of a setting that is simply not
       reachable: "aggressively jargon-heavy" had almost nothing to draw.
 
@@ -197,35 +194,7 @@ const TRAITS_TAILS2 = [
 {id:150139,section:"Motivation & Wound",category:"The Defence (what they built on top)",trait:"One friend, load-bearing",desc:"Everything routes through a single relationship, which is efficient and structurally terrifying.",example:"I'd have to ask Ruth. — Yeah, I'd have to ask Ruth about that too.",intensity:5,rarity:"signature",pol:{warm:1,emo:1}},
 
 /* ================================================================
-   3. APPEARANCE — the i1 and i5 tails
-   ================================================================ */
-{id:150150,section:"Appearance",category:"Build — Imposing",trait:"Slightly wider than expected",desc:"Not large — just consistently a size up from what people had estimated.",example:"<i>(the doorway is fine, and there is less of it than there was)</i>",intensity:1,rarity:"common",pol:{}},
-{id:150151,section:"Appearance",category:"Build — Imposing",trait:"Changes the acoustics of a room",desc:"So physically present that the sound of a space alters when they enter it.",example:"<i>(the room got quieter, and not because anyone stopped talking)</i>",intensity:5,rarity:"signature",pol:{}},
-{id:150152,section:"Appearance",category:"Build — Imposing",trait:"Hands that end a conversation",desc:"Enormous and entirely unremarked upon, and everyone adjusts.",example:"<i>(the mug looks like a thimble and nobody says anything)</i>",intensity:5,rarity:"distinctive",pol:{}},
-{id:150153,section:"Appearance",category:"Build — Slight",trait:"A half-size too small for the coat",desc:"Everything they wear was bought for a slightly larger person.",example:"<i>(cuffs at the knuckle)</i>",intensity:1,rarity:"common",pol:{}},
-{id:150154,section:"Appearance",category:"Build — Slight",trait:"Looks like they might not eat",desc:"Thin to the point that strangers comment, and have for years.",example:"<i>(the second offer of food in ten minutes)</i>",intensity:5,rarity:"distinctive",pol:{}},
-{id:150155,section:"Appearance",category:"Build — Slight",trait:"Disappears behind furniture",desc:"So slight that they are genuinely, repeatedly, physically overlooked.",example:"Sorry — I didn't see you there. — <i>(again)</i>",intensity:5,rarity:"signature",pol:{}},
-{id:150156,section:"Appearance",category:"Upkeep — Immaculate",trait:"Shoes always clean",desc:"One standard, quietly maintained, in an otherwise ordinary presentation.",example:"<i>(whatever the weather, whatever the day)</i>",intensity:1,rarity:"common",pol:{disc:1}},
-{id:150157,section:"Appearance",category:"Upkeep — Immaculate",trait:"Not a thread out of place, ever",desc:"A completeness of presentation so total it reads as a statement, and is one.",example:"<i>(at six in the morning, in a hospital corridor, immaculate)</i>",intensity:5,rarity:"signature",pol:{disc:1,ego:1}},
-{id:150158,section:"Appearance",category:"Upkeep — Immaculate",trait:"Visibly ironed everything",desc:"Every garment pressed, including the ones nobody irons.",example:"<i>(a crease down the front of the jeans)</i>",intensity:5,rarity:"distinctive",pol:{disc:1}},
-{id:150159,section:"Appearance",category:"Upkeep — Unkempt",trait:"One button undone",desc:"A single small disorder in an otherwise ordinary turnout.",example:"<i>(cuff hanging open all day; hasn't noticed)</i>",intensity:1,rarity:"common",pol:{disc:-1}},
-{id:150160,section:"Appearance",category:"Upkeep — Unkempt",trait:"Beyond neglect and into evidence",desc:"State of dress that has stopped being untidiness and become information about their week.",example:"<i>(nobody asks. Everybody has noticed.)</i>",intensity:5,rarity:"signature",pol:{disc:-1,mood:-1}},
-{id:150161,section:"Appearance",category:"Upkeep — Unkempt",trait:"Hair cut by themselves",desc:"Obviously, repeatedly, and without embarrassment.",example:"<i>(the back is a different length from the front)</i>",intensity:5,rarity:"distinctive",pol:{disc:-1,rebel:1}},
-{id:150162,section:"Appearance",category:"Presence — Striking",trait:"One feature people describe first",desc:"Otherwise ordinary; there is a single thing everybody leads with.",example:"You know — tall bloke — the eyebrows.",intensity:1,rarity:"common",pol:{}},
-{id:150163,section:"Appearance",category:"Presence — Striking",trait:"People stop mid-sentence",desc:"An arrival that visibly interrupts whatever the room was doing.",example:"<i>(three conversations lost the thread at once)</i>",intensity:5,rarity:"signature",pol:{}},
-{id:150164,section:"Appearance",category:"Presence — Striking",trait:"Photographed by strangers",desc:"Distinctive enough that it happens, and has happened often enough to be tiring.",example:"<i>(the phone comes up again, across the platform)</i>",intensity:5,rarity:"distinctive",pol:{}},
-{id:150165,section:"Appearance",category:"Presence — Unremarkable",trait:"Described by their job",desc:"Nothing physical comes to mind, so people reach for what they do instead.",example:"You know — from the office — the accounts one.",intensity:1,rarity:"common",pol:{}},
-{id:150166,section:"Appearance",category:"Presence — Unremarkable",trait:"Cannot be picked out of a group",desc:"So thoroughly unremarkable that people who know them well fail to spot them.",example:"<i>(waved for a full minute. She was looking straight at him.)</i>",intensity:5,rarity:"signature",pol:{}},
-{id:150167,section:"Appearance",category:"Presence — Unremarkable",trait:"Repeatedly mistaken for someone else",desc:"Has the kind of face that is apparently also several other people's face.",example:"I get it about once a fortnight. I've stopped correcting them.",intensity:5,rarity:"distinctive",pol:{}},
-{id:150168,section:"Appearance",category:"Movement & Bearing",trait:"Turns with the whole body",desc:"A small stiffness in the neck that shows in every turn.",example:"<i>(shoulders come round with the head)</i>",intensity:1,rarity:"common",pol:{},conceptFamily:"fam-turns-the-whole-body-to-look"},
-{id:150169,section:"Appearance",category:"Movement & Bearing",trait:"Moves like the floor might give",desc:"Every step tested, everywhere, with no apparent cause.",example:"<i>(weight on the back foot until the front one is sure)</i>",intensity:5,rarity:"signature",pol:{}},
-{id:150170,section:"Appearance",category:"Movement & Bearing",trait:"Cannot be hurried",desc:"Moves at exactly one speed regardless of circumstance, including emergencies.",example:"<i>(the same pace across the burning yard)</i>",intensity:5,rarity:"distinctive",pol:{pace:-1,act:-1}},
-{id:150171,section:"Appearance",category:"Distinguishing Marks",trait:"A slightly crooked finger",desc:"An old small break, set imperfectly, entirely unremarked.",example:"<i>(the ring finger doesn't quite straighten)</i>",intensity:1,rarity:"common",pol:{}},
-{id:150172,section:"Appearance",category:"Distinguishing Marks",trait:"Marked where it cannot be hidden",desc:"A permanent, unmissable feature that shapes every first meeting they will ever have.",example:"<i>(from the jaw to the collarbone; people decide about it before he speaks)</i>",intensity:5,rarity:"signature",pol:{}},
-{id:150173,section:"Appearance",category:"Distinguishing Marks",trait:"Missing something people count",desc:"An absence that is noticed immediately and asked about never.",example:"<i>(two fingers on the left hand. Nobody has ever raised it.)</i>",intensity:5,rarity:"distinctive",pol:{}},
-
-/* ================================================================
-   4. THE UNREACHABLE SETTINGS
+   3. THE UNREACHABLE SETTINGS
    ----------------------------------------------------------------
    Micro-Physical Tics ran 3 at i4 and 2 at i5; Conceptual Framework
    & Loanwords 4 and 3 — so "aggressively jargon-heavy" was a slider

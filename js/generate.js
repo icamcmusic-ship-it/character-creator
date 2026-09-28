@@ -1002,15 +1002,6 @@ function rerollSlot(slotId){
     const axisId = slotId.replace("pers_","").replace(/__2$/,"");
     const axis = PERSONALITY_AXES.find(a=>a.id===axisId);
     if (axis) replacement = drawFresh(()=>pickPersonalitySlot(axis, rawToLevel(rawOf('pers_'+axisId)), rarityPref));
-  } else if (slotId.startsWith("app_")){
-    /* BUG FIX: renderSheet gives every card the full control strip, but rerollSlot
-       only ever branched on the voice, profile and personality families — so Toss on
-       an Appearance card (a section that is ON by default) fell through to the bail-out
-       below and did nothing at all, with no feedback. Everything the draw needs is
-       already on the slot: same section and category, same intensity target. */
-    const cat = old.trait.category, tgt = old.target;
-    replacement = drawFresh(()=>({slotId, locked:false, label: old.label, derived: old.derived,
-      target: tgt, trait: pickInRange(byFilter("Appearance", cat), rarityPref, tgt, 3)}));
   } else if (slotId.startsWith("wild_")){
     // The outlier's whole premise is "a category chosen at random" — so rerolling it
     // draws a new category too, rather than another sample of the same one.

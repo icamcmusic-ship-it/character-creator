@@ -109,7 +109,6 @@ SECTION_COLORS["Ordinary Texture"] = "var(--dusk-blue)";
 SECTION_COLORS["Recovery & Repair"] = "var(--emerald-deep)";
 SECTION_COLORS["Contradiction Functions"] = "var(--golden-deep)";
 SECTION_COLORS["Role by Context"] = "var(--dusk-blue)";
-SECTION_COLORS["Appearance"] = "var(--accent-violet)";
 SECTION_COLORS["Required (constraints)"] = "var(--accent-amber)";
 SECTION_COLORS["The one thing that doesn't fit"] = "var(--accent-rust)";
 SECTION_COLORS["Where They Stand Under Pressure"] = "var(--bubblegum)";
@@ -518,7 +517,6 @@ const RARITY_TIER_HINT = {
   signature:   "Defines the voice. Two of these is a caricature.",
 };
 function titleForSlotId(id){
-  if (id.startsWith("app_")) return "Appearance";
   if (id.startsWith("req_") || id.startsWith("reqcat_")) return "Required (constraints)";
   if (id.startsWith("wild_")) return "The one thing that doesn't fit";
   if (id.startsWith("pers_")) return "Personality";
@@ -553,7 +551,7 @@ function toggleGroup(title){ collapsedGroups[title] = !collapsedGroups[title]; r
    Applied on the first render after a generate only — once you have started opening and
    closing sections by hand, that is your arrangement and the setting stops overriding it. */
 const DENSITY_DEEP_GROUPS = ["Motivation & Wound","Conflict & Stress Response","Social Role in a Group",
-  "Values & Moral Line","Attachment & Intimacy","Humor Style","Habits & Vices","Appearance","Vocabulary","Mannerisms"];
+  "Values & Moral Line","Attachment & Intimacy","Humor Style","Habits & Vices","Vocabulary","Mannerisms"];
 function sheetDensity(){
   const el = document.getElementById('sheetDensity');
   return el ? el.value : 'standard';
@@ -789,7 +787,7 @@ function whyThisCharacterHTML(){
    optional group), so the sheet does not fill up with notes about nothing. */
 const GROUP_TOGGLE_IDS = {
   "Personality": "genPersonality", "Speech Pattern": "genSpeech",
-  "Vocabulary": "genVocab", "Mannerisms": "genManner", "Appearance": "genAppearance",
+  "Vocabulary": "genVocab", "Mannerisms": "genManner",
 };
 /* Which trait sections feed each sheet group. Lets a question asked from a section
    header ("why didn't I get X here?") be answered against the pools that section
@@ -799,7 +797,6 @@ const GROUP_TOGGLE_IDS = {
 const SECTIONS_FOR_GROUP = (function(){
   const m = {
     "Personality": ["Personality Traits"],
-    "Appearance": ["Appearance"],
     "Speech Pattern": ["Verbosity Traits", "Vocabulary Traits", "Dialogue Grammar Traits"],
     "Vocabulary": ["Vocabulary Traits"],
     "Mannerisms": ["Mannerisms"],
@@ -923,7 +920,6 @@ function renderSheet(){
     {title:"Vocabulary", ids:Object.keys(state).filter(k=>k.startsWith("vocab"))},
     {title:"Mannerisms", ids:Object.keys(state).filter(k=>k.startsWith("manner"))},
     ...profGroups,
-    {title:"Appearance", ids:Object.keys(state).filter(k=>k.startsWith("app_"))},
     {title:"The one thing that doesn't fit", ids:Object.keys(state).filter(k=>k.startsWith("wild_"))},
     {title:"Seated contradictions", ids:Object.keys(state).filter(k=>k.startsWith("contra_"))},
   ];
@@ -1214,7 +1210,7 @@ const SECTION_GLYPHS = {
   "Personality":"◆", "Speech Pattern":"◼", "Speech Under Pressure":"◼", "Vocabulary":"▲",
   "Mannerisms":"●", "Mannerisms Under Pressure":"●", "Motivation & Wound":"◆",
   "Conflict & Stress Response":"◼", "Social Role in a Group":"▲", "Values & Moral Line":"●",
-  "Attachment & Intimacy":"◆", "Humor Style":"◼", "Habits & Vices":"▲", "Appearance":"✦",
+  "Attachment & Intimacy":"◆", "Humor Style":"◼", "Habits & Vices":"▲",
   "Required (constraints)":"✚", "The one thing that doesn't fit":"✳", "Seated contradictions":"⇄",
   "Where They Stand Under Pressure":"▲",
   "Competence & Method":"▲", "Positive Origins":"●", "Goals & Stakes":"◆", "Ordinary Texture":"◼",
@@ -1448,9 +1444,6 @@ function sheetToText(st, meta, pState){
     });
   }
 
-  // ---- Appearance ----
-  block("Appearance", Object.keys(st).filter(k=>k.startsWith("app_")));
-
   // ---- Voice ----
   block("Speech Pattern", ["verbosity","register","grammar"]);
   block("Vocabulary", Object.keys(st).filter(k=>k.startsWith("vocab")));
@@ -1567,7 +1560,7 @@ const CHAR_FORMAT_VERSION = 2;
 // Every control that changes what a generation produces.
 const SETTING_FIELDS = ['mannerCount','vocabCount','personalityCount','profileDepth',
   'rarityPref','affinityBoost','rangeFocus','profileWeight','divergence',
-  'app_stature','app_upkeep','app_presence','archetypeSelect','archetypeVariation','archetypeBlend','seedInput','sheetDensity','wildcardCount','pressureLevel',
+  'archetypeSelect','archetypeVariation','archetypeBlend','seedInput','sheetDensity','wildcardCount','pressureLevel',
   'lensSelect',
   /* The cast and foil controls were the one part of the workspace that no capture
      covered, so "export my setup" and Undo both silently dropped them and a cast was
@@ -1575,7 +1568,7 @@ const SETTING_FIELDS = ['mannerCount','vocabCount','personalityCount','profileDe
      everything that decides what the next generation produces. */
   'charName','charAge','charContext','castCount','castSeed','castSpread','foilSeed'];
 const SETTING_TOGGLES = ['personalityToggle','depthFirstToggle','examplesToggle','stressToggle',
-  'genPersonality','genSpeech','genVocab','genManner','genAppearance',
+  'genPersonality','genSpeech','genVocab','genManner',
   'avoidRecentToggle','wildcardToggle','foilOpposeComposure','compactToggle','castAnchor',
   'sheetShapeToggle','seatContradictions','exploreCandidates'];
 
@@ -1651,16 +1644,20 @@ function restoreSettings(s){
   });
   if (s.sliders) restoreSliders(s.sliders);
   const c = s.constraints || {};
-  bannedCategories = new Set(c.bannedCategories || []);
-  bannedSections   = new Set(c.bannedSections || []);
+  // Settings saved while the removed Appearance section existed can name its section,
+  // categories or budget group; those have nothing left to act on, so they are dropped.
+  const liveCat = x => !RETIRED_CATEGORIES.has(x);
+  bannedCategories = new Set((c.bannedCategories || []).filter(liveCat));
+  bannedSections   = new Set((c.bannedSections || []).filter(x => !RETIRED_SECTIONS.has(x)));
   bannedTraitIds   = new Set(c.bannedTraitIds || []);
   requiredTraitIds = (c.requiredTraitIds || []).slice();
-  requiredCategories = (c.requiredCategories || []).slice();
+  requiredCategories = (c.requiredCategories || []).filter(liveCat);
   exclusivePairs   = (c.exclusivePairs || []).map(p=>p.slice());
-  categoryTiers    = new Map(c.categoryTiers || []);
+  categoryTiers    = new Map((c.categoryTiers || []).filter(e => Array.isArray(e) && liveCat(e[0])));
   clearBudgets();
-  Object.assign(rarityCaps, c.rarityCaps || {});
-  Object.assign(intensityCaps, c.intensityCaps || {});
+  const liveGroups = caps => { const o = Object.assign({}, caps || {}); delete o.appearance; return o; };
+  Object.assign(rarityCaps, liveGroups(c.rarityCaps));
+  Object.assign(intensityCaps, liveGroups(c.intensityCaps));
   setBudgetMode(c.budgetMode || 'redraw');
   if (typeof setMutationBudgetMode === 'function') setMutationBudgetMode(c.mutationBudgetMode || 'enforce');
   const mbm = document.getElementById('mutationBudgetMode');
@@ -1947,6 +1944,10 @@ function validateSheetPayload(p){
       if (t.variant !== undefined && t.variant !== 'a' && t.variant !== 'b') delete t.variant;
     });
   };
+  // Sheets written while the (since removed) Appearance section existed: drop its slots
+  // and anything keyed by them before validating, so old files import cleanly.
+  dropRetiredSlots(p.state); dropRetiredSlots(p.pressureState);
+  dropRetiredKeys(p.pinnedTargets); dropRetiredKeys(p.charVariants); dropRetiredKeys(p.traitNotes);
   checkSlots(p.state, "state");
   checkSlots(p.pressureState, "pressureState");
 
@@ -2305,7 +2306,6 @@ function sheetToPrompt(st, meta){
   sec("Who they are", keys.filter(k=>k.startsWith("pers_") || k.startsWith("req_") || k.startsWith("reqcat_")));
   sec("What drives them", keys.filter(k=>k.startsWith("prof_")));
   sec("The one thing that doesn't fit", keys.filter(k=>k.startsWith("wild_")));
-  sec("How they look", keys.filter(k=>k.startsWith("app_")));
   try {
     const contra = (typeof structuredContradiction === 'function') ? structuredContradiction(st, meta) : null;
     if (contra) L.push("", `## Central contradiction`, `${contra.hi.trait} — and also ${contra.lo.trait}. ${contra.question}`);

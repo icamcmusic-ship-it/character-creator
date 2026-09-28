@@ -136,28 +136,6 @@
            every draw. Say what is actually in force, where the controls are. -->
       <div class="sub" id="defaultsNote" style="margin:-4px 0 12px;"></div>
 
-      <details class="advanced advOnly" style="margin:0 0 14px;">
-        <summary><h3>Appearance crafter</h3></summary>
-        <div class="row" style="margin-top:10px;">
-          <div class="field">
-            <label for="app_stature">Stature (Slight &rarr; Imposing)</label>
-            <input type="range" id="app_stature" min="-100" max="100" value="0" step="1" data-on="input" data-act="onSliderChange" data-args="[]">
-            <div class="scaleLabels"><span>Slight</span><span>Average</span><span>Imposing</span></div>
-          </div>
-          <div class="field">
-            <label for="app_upkeep">Upkeep (Unkempt &rarr; Immaculate)</label>
-            <input type="range" id="app_upkeep" min="-100" max="100" value="0" step="1" data-on="input" data-act="onSliderChange" data-args="[]">
-            <div class="scaleLabels"><span>Unkempt</span><span>Ordinary</span><span>Immaculate</span></div>
-          </div>
-          <div class="field">
-            <label for="app_presence">Presence (Unremarkable &rarr; Striking)</label>
-            <input type="range" id="app_presence" min="-100" max="100" value="0" step="1" data-on="input" data-act="onSliderChange" data-args="[]">
-            <div class="scaleLabels"><span>Forgettable</span><span>Ordinary</span><span>Striking</span></div>
-          </div>
-        </div>
-        <div class="sub" style="margin:6px 0 0;">Sliders left at centre make no statement and add no card. Movement &amp; Bearing derives from your Activeness personality slider — a sedentary character moves like one — and Distinguishing Marks scale with Presence. Same engine as everything else: distance from centre sets intensity, and each card shows its active range.</div>
-      </details>
-
       <div class="row">
         <div class="field" style="max-width:280px;">
           <label for="seedInput">Seed (optional — reproducible generation)</label>
@@ -296,9 +274,8 @@
         <label style="margin:0; text-transform:none; font-size:.85rem; color:var(--text); display:flex; align-items:center; gap:5px;"><input type="checkbox" id="genSpeech" checked>Speech pattern</label>
         <label style="margin:0; text-transform:none; font-size:.85rem; color:var(--text); display:flex; align-items:center; gap:5px;"><input type="checkbox" id="genVocab" checked>Vocabulary</label>
         <label style="margin:0; text-transform:none; font-size:.85rem; color:var(--text); display:flex; align-items:center; gap:5px;"><input type="checkbox" id="genManner" checked>Mannerisms</label>
-        <label style="margin:0; text-transform:none; font-size:.85rem; color:var(--text); display:flex; align-items:center; gap:5px;"><input type="checkbox" id="genAppearance" checked>Appearance</label>
       </div>
-      <div class="sub advOnly" style="margin:4px 0 12px;">Unchecked groups are skipped entirely, not hidden — use this to generate just a voice, just a psychology, or just an appearance. Deep profile sections (Motivation, Values, etc.) have their own per-section toggles below.</div>
+      <div class="sub advOnly" style="margin:4px 0 12px;">Unchecked groups are skipped entirely, not hidden — use this to generate just a voice or just a psychology. Deep profile sections (Motivation, Values, etc.) have their own per-section toggles below.</div>
 
       <div class="row">
         <div class="field">
