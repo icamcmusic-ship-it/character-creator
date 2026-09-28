@@ -3199,15 +3199,37 @@ const CONFLICT_TIERS = [
   {min:0, label:"Mild",      note:"Both are quiet enough that a real person could carry both without anyone noticing."},
 ];
 function conflictTier(severity){ return CONFLICT_TIERS.find(t => severity >= t.min); }
+const CONFLICT_EXEMPT_SECTIONS = new Set(["Role by Context", "Contradiction Functions"]);
 function checkConflictsFor(stateObj){
-  const items = Object.values(stateObj).filter(s=>s && s.trait);
+  const keys = Object.keys(stateObj).filter(k=>stateObj[k] && stateObj[k].trait);
+  const items = keys.map(k=>stateObj[k]);
+  /* B19: cards drawn together as facets of ONE profile section (prof_<section>_N, e.g.
+     Role by Context: "the confidant" with the friend, "confides in" the child) or two
+     facets of one personality axis (pers_x / pers_x__2) are meant to differ — flagging
+     them as contradictions was most of the ~55 "conflicts" per sheet. */
+  const groupOf = k => {
+    let m = /^prof_(.+)_\d+$/.exec(k); if (m) return 'prof:' + m[1];
+    m = /^pers_(.+?)(?:__2)?$/.exec(k); if (m) return 'pers:' + m[1];
+    return null;
+  };
+  const groups = keys.map(groupOf);
+  /* Traits that are contextual BY DESIGN — a role that changes with the room, a named
+     contradiction, a "— Situational" facet — describe variation, so opposing another
+     card is their content rather than a tension to warn about. */
+  const contextual = t => CONFLICT_EXEMPT_SECTIONS.has(t.section) || /Situational/.test(t.category || '');
   const found = new Map();   // dedupe key -> graded conflict
+  const pairSeen = new Set(); // one entry per trait pair, not one per shared axis
   for (let i=0;i<items.length;i++){
     for (let j=i+1;j<items.length;j++){
+      if (groups[i] && groups[i] === groups[j]) continue;
       const a = items[i].trait, b = items[j].trait;
       if (!a.pol || !b.pol) continue;
+      if (contextual(a) || contextual(b)) continue;
       for (const axis of Object.keys(AXIS_LABELS)){
         if (a.pol[axis] === 1 && b.pol[axis] === -1 || a.pol[axis] === -1 && b.pol[axis] === 1){
+          const pk = a.trait + '|' + b.trait;
+          if (pairSeen.has(pk)) break;
+          pairSeen.add(pk);
           const severity = (a.intensity||3) + (b.intensity||3);
           const tier = conflictTier(severity);
           const key = `${a.trait}|${b.trait}|${axis}`;
@@ -4530,21 +4552,24 @@ function sessionDistinctiveness(prof){
 function explainWhyNot(trait){
   if (!trait) return "No trait by that name.";
   const out = [];
+  // B17: category/section/label names can come from custom packs or imports; they go
+  // into HTML here, so escape every one of them.
+  const e = v => String(v == null ? '' : v).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const cat = trait.category;
   if (bannedTraitIds.has(trait.id)) out.push(`It is <b>banned by name</b> in your constraints, so nothing else matters until you remove that.`);
-  if (bannedCategories.has(cat)) out.push(`Its whole category, "${cat}", is <b>banned</b> in your constraints.`);
-  if (typeof bannedSections !== 'undefined' && bannedSections.has(trait.section)) out.push(`Its whole section, "${trait.section}", is <b>banned</b> in your constraints.`);
+  if (bannedCategories.has(cat)) out.push(`Its whole category, "${e(cat)}", is <b>banned</b> in your constraints.`);
+  if (typeof bannedSections !== 'undefined' && bannedSections.has(trait.section)) out.push(`Its whole section, "${e(trait.section)}", is <b>banned</b> in your constraints.`);
   const spec = PRESENTATION_VARIANTS[cat];
   if (rarityCaps[rarityTier(trait)] === 0){
-    out.push(`You have capped <b>${rarityTier(trait)}</b> traits at zero for this sheet, and this is one — see Budgets.`);
+    out.push(`You have capped <b>${e(rarityTier(trait))}</b> traits at zero for this sheet, and this is one — see Budgets.`);
   }
   if (spec && trait.variant && charVariants[cat] && charVariants[cat] !== trait.variant){
-    out.push(`This character is locked to the <b>${spec[charVariants[cat]].label}</b> presentation of "${cat}", and this trait belongs to the other one. Regenerate to reroll the presentation lock.`);
+    out.push(`This character is locked to the <b>${e(spec[charVariants[cat]].label)}</b> presentation of "${e(cat)}", and this trait belongs to the other one. Regenerate to reroll the presentation lock.`);
   }
   const tierNote = categoryTiers.get(cat);
-  if (tierNote === 'rarely') out.push(`You've set "${cat}" to <b>rarely</b> (×¼), so its whole category is being suppressed.`);
+  if (tierNote === 'rarely') out.push(`You've set "${e(cat)}" to <b>rarely</b> (×¼), so its whole category is being suppressed.`);
   if (cat === AXES.circular.category && tierNote !== 'prefer'){
-    out.push(`"${cat}" is only reached through the high-volume branch of the Verbosity slider, as a minority of those draws. ` +
+    out.push(`"${e(cat)}" is only reached through the high-volume branch of the Verbosity slider, as a minority of those draws. ` +
              `Push <b>Verbosity</b> up, or set this category to <b>prefer</b> in Constraints to make it the likely outcome instead.`);
   }
   // The band: the real, checkable reason most of the time.
@@ -4555,15 +4580,15 @@ function explainWhyNot(trait){
   else if (trait.section === "Verbosity Traits"){ cur = Math.abs(intVal('verbositySlider', 0)); driver = "Verbosity"; }
   else if (cat === "Register & Formality Spectrum" || cat === "Stylized & Elaborate"){ cur = Math.abs(intVal('registerSlider', 0)); driver = "Register"; }
   if (cur !== null){
-    if (cur < lo) out.push(`Its active range is <b>${lo}–${hi}</b> and your <b>${driver}</b> slider is at magnitude <b>${cur}</b> — below the window. Push that slider further from centre and it becomes eligible.`);
-    else if (cur > hi) out.push(`Its active range is <b>${lo}–${hi}</b> and your <b>${driver}</b> slider is at magnitude <b>${cur}</b> — past the window. This trait is too quiet for the intensity you're asking for; ease that slider back toward centre.`);
-    else out.push(`It <b>is</b> eligible right now: its active range is ${lo}–${hi} and your <b>${driver}</b> slider sits at ${cur}. It simply hasn't come up — the draw is weighted, never guaranteed. Use "Always include" if you want it every time.`);
+    if (cur < lo) out.push(`Its active range is <b>${lo}–${hi}</b> and your <b>${e(driver)}</b> slider is at magnitude <b>${cur}</b> — below the window. Push that slider further from centre and it becomes eligible.`);
+    else if (cur > hi) out.push(`Its active range is <b>${lo}–${hi}</b> and your <b>${e(driver)}</b> slider is at magnitude <b>${cur}</b> — past the window. This trait is too quiet for the intensity you're asking for; ease that slider back toward centre.`);
+    else out.push(`It <b>is</b> eligible right now: its active range is ${lo}–${hi} and your <b>${e(driver)}</b> slider sits at ${cur}. It simply hasn't come up — the draw is weighted, never guaranteed. Use "Always include" if you want it every time.`);
   } else {
     if (axis && axis.mid === cat) out.push(`Situational traits only draw while that axis sits inside the neutral band.`);
-    out.push(`It sits at continuous intensity position <b>${traitPos(trait).toFixed(2)}</b>, giving it an active range of <b>${lo}–${hi}</b>. Whichever signal drives "${cat}" has to land inside that window before it is eligible at all.`);
+    out.push(`It sits at continuous intensity position <b>${traitPos(trait).toFixed(2)}</b>, giving it an active range of <b>${lo}–${hi}</b>. Whichever signal drives "${e(cat)}" has to land inside that window before it is eligible at all.`);
   }
   const pool = TRAITS_BY_KEY.get(trait.section+"||"+cat) || [];
-  out.push(`For scale: "${cat}" holds ${pool.length} traits, so even when everything lines up this one is competing with ${pool.length-1} others.`);
+  out.push(`For scale: "${e(cat)}" holds ${pool.length} traits, so even when everything lines up this one is competing with ${pool.length-1} others.`);
   return out.map(x=>`<div style="margin:4px 0;">${x}</div>`).join("");
 }
 
@@ -6884,6 +6909,18 @@ function detectConstraintConflicts(){
   return out;
 }
 
+/* A trait that was required and happened to be drawn in place is flagged locked+
+   required. Once the requirement is removed those flags are stale: the slot must go
+   back to being an ordinary (or user-locked) card, or it stays locked forever. */
+function clearStaleRequirement(slot){
+  if (!slot || !slot.requiredSatisfiedInPlace || !slot.trait) return slot;
+  if (requiredTraitIds.includes(slot.trait.id)) return slot;
+  const out = Object.assign({}, slot);
+  delete out.required; delete out.requiredSatisfiedInPlace;
+  if (out.lockedByRequirement) out.locked = false;
+  delete out.lockedByRequirement;
+  return out;
+}
 function applyRequiredTraits(obj){
   // PERF: this rebuilt a 7,073-entry Map on every single generation, and TRAITS_BY_ID
   // has existed the whole time. Same for the linear TRAITS.find below.
@@ -6898,8 +6935,12 @@ function applyRequiredTraits(obj){
     const t = TRAITS_BY_ID.get(id); if (!t) return;
     const already = seatedBy.get(id);
     if (already !== undefined && !already.startsWith('req_')){
-      obj[already] = Object.assign({}, obj[already], {locked:true, required:true,
-        requiredSatisfiedInPlace:true});
+      // lockedByRequirement records that the LOCK came from the requirement, not the
+      // user, so it can be lifted once the requirement goes (see clearStaleRequirement).
+      const prev = obj[already];
+      obj[already] = Object.assign({}, prev, {locked:true, required:true,
+        requiredSatisfiedInPlace:true,
+        lockedByRequirement: !prev.locked || !!prev.lockedByRequirement});
       return;
     }
     if (already !== undefined) return;          // already seated as a req_ slot
@@ -6915,7 +6956,7 @@ function applyRequiredTraits(obj){
     if (present.has(cat)) return;
     const section = SECTION_OF_CATEGORY.get(cat);
     if (!section) return;
-    const pool = byFilter(section, cat);
+    const pool = budgetFriendlyPool(obj, 'reqcat_'+i, byFilter(section, cat));
     const pick = pool.length ? pickInRange(pool, 0, profileTarget(), 4) : null;
     if (pick) obj['reqcat_'+i] = {slotId:'reqcat_'+i, locked:true, required:true,
       label:'Required (at least one) — '+cat, trait:pick};
@@ -6939,6 +6980,8 @@ function applyRequiredTraits(obj){
    That is signature-cap 1 plus a tight intensity budget everywhere else. */
 const rarityCaps  = {common:null, uncommon:null, distinctive:null, signature:null};
 const intensityCaps = {};      // budget group id -> max total intensity, or null
+const intensityPerSlot = {};         // group id -> max average intensity per slot (see BUDGET_PRESETS)
+const intensityPerSlotResolved = {}; // the absolute cap last derived from it
 let budgetMode    = 'redraw';  // 'redraw' | 'drop' | 'warn'
 let lastBudgetReport = null;
 
@@ -6960,6 +7003,7 @@ const BUDGET_GROUPS = [
 function clearBudgets(){
   RTIER_ORDER.forEach(t=>{ rarityCaps[t] = null; });
   Object.keys(intensityCaps).forEach(k=>{ delete intensityCaps[k]; });
+  Object.keys(intensityPerSlot).forEach(k=>{ delete intensityPerSlot[k]; delete intensityPerSlotResolved[k]; });
   budgetMode = 'redraw';
   lastBudgetReport = null;
 }
@@ -7007,6 +7051,7 @@ function excludedByPairs(id, seated){
    from the finished sheet at the end rather than accumulated from intermediate counts,
    so an unmet cap is always the truth about what the user is looking at. */
 function applyBudgets(obj, rarityPref){
+  if (typeof resolveRelativeCaps === 'function') resolveRelativeCaps(obj);
   const report = {rarity:{}, intensity:{}, actions:[], active: budgetsActive()};
   lastBudgetReport = report;
   if (!report.active) return obj;
@@ -7091,10 +7136,13 @@ function applyBudgets(obj, rarityPref){
        honest answer — it doubles as a data-gap finder, surfacing exactly the thin pools
        that have no low tail to redraw into. */
     let guard = 0;
-    while (total() > cap && guard++ < 60){
+    // Slots whose category has nothing quieter: skip them and keep going with the next
+    // loudest, instead of giving up on the whole budget at the first thin category.
+    const stuck = new Set();
+    while (total() > cap && guard++ < 200){
       if (budgetMode === 'warn') break;
       // Always redraw the loudest mutable slot: the one spending the most budget.
-      const id = ids().filter(mutable)
+      const id = ids().filter(id => mutable(id) && !stuck.has(id))
         .sort((a,b)=> obj[b].trait.intensity - obj[a].trait.intensity)[0];
       if (!id) break;                                   // everything left is user-locked
       const slot = obj[id];
@@ -7108,7 +7156,8 @@ function applyBudgets(obj, rarityPref){
           delete obj[id];
           continue;
         }
-        break;   // nothing quieter exists in this category — a real content gap
+        stuck.add(id);   // nothing quieter exists in this category — a real content gap
+        continue;
       }
       obj[id] = Object.assign({}, slot, {trait: repl, target: want, budgeted: 'intensity',
         budgetWhy: `redrawn quieter — ${g.label} intensity budget`});
@@ -7174,12 +7223,16 @@ function budgetCapacity(obj){
 /* §9.6 — the four presets. "One loud thing" is the case the tool could not express at
    all before budgets existed, and it is the one most writers reach for. */
 const BUDGET_PRESETS = {
+  /* B13: the whole-sheet caps were absolute (45/65/90), but a default sheet has 43+
+     slots and every trait is at least intensity 1, so "Background" (45) could never
+     be met. They are now PER SLOT, resolved against the sheet being budgeted
+     (intensityPerSlot); `intensity` is only the starting figure shown before a build. */
   background: {label:"Background character",
-    rarity:{signature:0, distinctive:2}, intensity:{sheet:45}},
+    rarity:{signature:0, distinctive:2}, intensity:{sheet:70}, intensityPerSlot:{sheet:1.6}},
   supporting: {label:"Supporting",
-    rarity:{signature:1, distinctive:5}, intensity:{sheet:65}},
+    rarity:{signature:1, distinctive:5}, intensity:{sheet:95}, intensityPerSlot:{sheet:2.2}},
   protagonist:{label:"Protagonist",
-    rarity:{signature:3}, intensity:{sheet:90}},
+    rarity:{signature:3}, intensity:{sheet:130}, intensityPerSlot:{sheet:3}},
   oneLoud:    {label:"One loud thing",
     rarity:{signature:1}, intensity:{personality:18, manner:6, voice:8}},
 };
@@ -7189,7 +7242,32 @@ function applyBudgetPreset(key){
   clearBudgets();
   Object.entries(p.rarity || {}).forEach(([tier,v])=>{ rarityCaps[tier] = v; });
   Object.entries(p.intensity || {}).forEach(([g,v])=>{ intensityCaps[g] = v; });
+  Object.entries(p.intensityPerSlot || {}).forEach(([g,v])=>{
+    intensityPerSlot[g] = v;
+    // Show a figure for the sheet on screen now, if there is one.
+    const grp = BUDGET_GROUPS.find(x => x.id === g);
+    if (grp && typeof state !== 'undefined' && state){
+      const n = Object.keys(state).filter(id => state[id] && state[id].trait && grp.match(id)).length;
+      if (n) intensityCaps[g] = Math.ceil(v * n);
+    }
+    intensityPerSlotResolved[g] = intensityCaps[g];
+  });
   return true;
+}
+/* Relative caps: group id -> max average intensity per slot. Resolved to an absolute
+   cap against each sheet in applyBudgets. If the user edits the cap by hand (it no
+   longer equals what we last resolved), the relative rule is dropped. */
+function resolveRelativeCaps(obj){
+  Object.keys(intensityPerSlot).forEach(g=>{
+    if (intensityCaps[g] !== intensityPerSlotResolved[g]){
+      delete intensityPerSlot[g]; delete intensityPerSlotResolved[g]; return;
+    }
+    const grp = BUDGET_GROUPS.find(x => x.id === g);
+    if (!grp) return;
+    const n = Object.keys(obj).filter(id => obj[id] && obj[id].trait && grp.match(id)).length;
+    if (!n) return;
+    intensityCaps[g] = intensityPerSlotResolved[g] = Math.ceil(intensityPerSlot[g] * n);
+  });
 }
 
 /* ================= THE ONE FINALIZER =================
@@ -7220,7 +7298,7 @@ function finalizeSheet(obj, opts){
   const rarityPref = (opts.rarityPref === undefined) ? 0 : opts.rarityPref;
   if (opts.carryLocked){
     Object.keys(opts.carryLocked).forEach(id=>{
-      const old = opts.carryLocked[id];
+      const old = clearStaleRequirement(opts.carryLocked[id]);
       if (old && old.locked && obj[id] !== undefined) obj[id] = old;
     });
   }
@@ -7238,6 +7316,30 @@ function finalizeSheet(obj, opts){
 // conflict only exists once both are actually seated, and resolving it here means the
 // loser's slot gets a genuine replacement draw from its own pool instead of the slot
 // silently disappearing. A locked or explicitly required slot always wins the tie.
+/* B14: the required and exclusivity passes run after budgets, so their draws must not
+   undo them. Narrow a replacement pool to traits that fit every rarity cap (counting
+   the rest of the sheet) and, when an intensity budget is on, are no louder than what
+   the slot holds now. Where that leaves nothing, fall back to the pool as given — the
+   seat matters more, and auditBudgets reports the breach. */
+function budgetFriendlyPool(obj, slotId, pool){
+  if (!pool.length || !budgetsActive()) return pool;
+  const counts = {};
+  Object.keys(obj).forEach(id=>{
+    if (id === slotId || !obj[id] || !obj[id].trait) return;
+    const t = rarityTier(obj[id].trait); counts[t] = (counts[t] || 0) + 1;
+  });
+  const cur = obj[slotId] && obj[slotId].trait;
+  const intensityOn = BUDGET_GROUPS.some(g => intensityCaps[g.id] != null);
+  const fits = pool.filter(t=>{
+    const tier = rarityTier(t), cap = rarityCaps[tier];
+    if (cap != null && (counts[tier] || 0) >= cap) return false;
+    if (intensityOn && cur && (t.intensity || 0) > (cur.intensity || 0)) return false;
+    return true;
+  });
+  if (fits.length) return fits;
+  const tierOnly = pool.filter(t=>{ const c = rarityCaps[rarityTier(t)]; return c == null || (counts[rarityTier(t)] || 0) < c; });
+  return tierOnly.length ? tierOnly : pool;
+}
 function applyExclusivePairs(obj, rarityPref){
   if (!exclusivePairs.length) return obj;
   exclusivePairs.forEach(([a, b])=>{
@@ -7257,12 +7359,24 @@ function applyExclusivePairs(obj, rarityPref){
     const priority = k => (obj[k].required ? 2 : obj[k].locked ? 1 : 0);
     const loser = priority(seatedA) >= priority(seatedB) ? seatedB : seatedA;
     const slot = obj[loser];
+    /* B5: the loser is itself locked (or required) — both halves are user intent.
+       Replacing one silently (the replacement even inherited the lock) or deleting a
+       locked slot are both wrong; leave the sheet alone and report the conflict. */
+    if (priority(loser) > 0){
+      const ta = obj[seatedA].trait, tb = obj[seatedB].trait;
+      if (!Array.isArray(lastConstraintConflicts)) lastConstraintConflicts = [];
+      if (!lastConstraintConflicts.some(c => c.kind === 'locked-vs-exclusive' && c.ids[0] === a && c.ids[1] === b)){
+        lastConstraintConflicts.push({kind:'locked-vs-exclusive', ids:[a,b],
+          message: `"${ta.trait}" and "${tb.trait}" are both locked or required, but marked never together. Unlock one or drop the rule.`});
+      }
+      return;
+    }
     // The replacement has to respect every other rule too: not the trait it is
     // replacing, not a trait already on the sheet, and not the other half of any
     // exclusive pair that is currently seated.
     const seated = seatedIdSet(obj, loser);
-    const pool = byFilter(slot.trait.section, slot.trait.category)
-      .filter(t=>t.id !== slot.trait.id && !seated.has(t.id) && !excludedByPairs(t.id, seated));
+    const pool = budgetFriendlyPool(obj, loser, byFilter(slot.trait.section, slot.trait.category)
+      .filter(t=>t.id !== slot.trait.id && !seated.has(t.id) && !excludedByPairs(t.id, seated)));
     const repl = pool.length ? pickInRange(pool, rarityPref, slot.target, 3) : null;
     if (repl) obj[loser] = Object.assign({}, slot, {trait: repl, exclusiveSwap: true});
     else delete obj[loser];

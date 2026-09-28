@@ -114,6 +114,29 @@ step-backs, loads, imports, note edits, pin changes and bulk lock sweeps are all
 undoable. A single card's lock is deliberately not — its own button toggles it straight
 back.
 
+Destructive actions outside the sheet — removing a cast member, deleting a save,
+replacing the cast from a file, importing a workspace — show a toast with an **Undo**
+button instead of (or as well as) a confirm.
+
+## Files, sharing and keyboard
+
+* **File ▾ → Open file…** reads the `format` stamp every export carries and routes the
+  file to the right importer: character, cast, workspace, archetype library or backup.
+  The same menu exports each of those, the markdown sheet, and an **LLM prompt** — a
+  condensed markdown voice spec with sample lines, for pasting into a system prompt.
+* **Copy share link** puts the seed and the settings that shaped the build in the URL
+  hash (`#share=…`). Opening the link replays that character once, then clears the hash.
+* **Compare** on a saved character lays it beside the current sheet slot by slot; the
+  saved list can be searched and sorted.
+* **Why does this feel familiar?** lists traits recurring across your recent characters,
+  each with a one-click ban.
+* Trait cards are focusable: **R** tosses and **L** keeps the focused (or hovered) card.
+  **Ctrl/⌘+Enter** generates, **Ctrl/⌘+Z** undoes, **Shift+Ctrl/⌘+Z** / **Ctrl+Y**
+  redoes, **?** opens help. None of them fire while you are typing or a dialog is open.
+* The service worker is network-first (the cache is the offline fallback), so a deploy
+  appears on the next load and never mixes files from two builds; a deploy that lands
+  during a session offers a **Reload** toast.
+
 ## Saving
 
 Saves are compressed by trait id and carry a compact tombstone alongside each id, so a
@@ -356,7 +379,7 @@ no quiet content to redraw into.
 - `js/generate.js` — seeded generation, reroll, pins, undo, scoring
 - `js/render.js` — the sheet, exports, imports, toasts
 - `js/app.js` — storage, cast, relationships, foil, UI wiring
-- `sw.js` — service worker, caches the shell so the bank isn't refetched every visit
+- `sw.js` — service worker: network-first with an offline precache of the whole shell
 - `tools/studio.js` — the content studio: validate, coverage, nearest, review, preview, packs
 - `tests/` — the test harness and suite; `tests/bank-report.js` is the measurement dashboard
 - `package.json` — no build step; it exists to pin the browser-test dependency

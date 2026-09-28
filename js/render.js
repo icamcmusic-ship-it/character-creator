@@ -421,7 +421,7 @@ function traitCardHTML(id, s, includeControls, showDiff, accent, tagLabel){
   const tier = t.rtier || (typeof rarityTier === 'function' ? rarityTier(t) : t.rarity);
   const lockedClass = s.locked ? "locked" : "";
   const diff = showDiff ? diffLog[id] : null;
-  const style = accent ? ` style="--section-accent:${escHTML(accent)}"` : ``;
+  const style = accent ? ` style="--section-accent:${escHTML(cssColor(accent))}"` : ``;
   const history = includeControls && rerollHistory[id] && rerollHistory[id].length;
   // Flash slots that a full regeneration actually moved. renderChangeList already knew
   // WHICH slots changed but only reported it in a collapsed list; the highlight was
@@ -443,7 +443,7 @@ function traitCardHTML(id, s, includeControls, showDiff, accent, tagLabel){
   const ctxNote = cv && cv.status !== 'active'
     ? `<div class="traitNote ctxNote"><b>${escHTML(CONTEXT_VIEW.label)}:</b> ${cv.status} — ${escHTML(cv.why)}.</div>` : ``;
   return `
-    <div class="traitCard${s.wildcard ? ' wildcardCard' : ''}${changedClass}${tag ? ' tagged' : ''}${openNow ? ' controlsOpen' : ''}${ctxClass}"${style} data-slot="${escAttr(id)}">
+    <div class="traitCard${s.wildcard ? ' wildcardCard' : ''}${changedClass}${tag ? ' tagged' : ''}${openNow ? ' controlsOpen' : ''}${ctxClass}"${style} data-slot="${escAttr(id)}"${includeControls ? ` tabindex="0" role="group" aria-label="${escHTML(t.trait)}" aria-keyshortcuts="R L" title="R to toss, L to keep"` : ``}>
       ${tag}
       <div class="traitMain">
         <div class="traitName">${escHTML(t.trait)}
@@ -933,7 +933,7 @@ function renderSheet(){
     const collapsed = !!collapsedGroups[g.title];
     div.className = "axisGroup" + (collapsed ? " collapsed" : "");
     div.id = sectionAnchorId(g.title);
-    div.style.setProperty('--section-accent', sectionColor(g.title));
+    div.style.setProperty('--section-accent', cssColor(sectionColor(g.title)));
     // PERF FIX: innerHTML += inside a loop re-parses the accumulated HTML on every
     // iteration (quadratic), which was the main source of visible lag on large
     // sheets. Build the string once, assign once.
@@ -1163,7 +1163,7 @@ function renderSheet(){
       if(!validIds.length) return;
       const div = document.createElement('div');
       div.className = "axisGroup";
-      div.style.setProperty('--section-accent', sectionColor(g.title));
+      div.style.setProperty('--section-accent', cssColor(sectionColor(g.title)));
       let inner = `<div class="axisTitle static"><span class="axisGlyph" aria-hidden="true">${sectionGlyph(g.title)}</span>${escHTML(g.title)}</div>`;
       validIds.forEach(id=>{
         const slot = pressureState[id];
@@ -2189,4 +2189,98 @@ function copySheet(btnEl){
 function downloadSheet(){
   const fn = (charMeta.name || "character").replace(/[^a-z0-9]+/gi,"_").replace(/^_|_$/g,"") + ".md";
   downloadText(sheetToText(state, charMeta, pressureState), fn);
+}
+
+/* ================= SAFE CSS COLOURS (B18) =================
+   Colours reach inline `background:` / `--section-accent` declarations. escHTML is the
+   wrong context for that — it stops a quote breaking the attribute, not a `;` injecting
+   another declaration. Accept only shapes a colour can take; anything else falls back. */
+function cssColor(v, fallback){
+  const s = String(v == null ? "" : v).trim();
+  if (/^#[0-9a-f]{3,8}$/i.test(s) ||
+      /^var\(--[a-z0-9-]+\)$/i.test(s) ||
+      /^(rgb|rgba|hsl|hsla)\(\s*[0-9.%,\s/+-]+\)$/i.test(s) ||
+      /^[a-z]{3,20}$/i.test(s)) return s;
+  return fallback || "var(--dusk-blue)";
+}
+
+/* A toast with an Undo button, for destructive actions that do not go through the sheet
+   undo stack (cast removal, deleting a save, replacing a cast). `onUndo` runs at most
+   once; the toast stays a little longer than a plain one so there is time to reach it. */
+function toastUndo(message, onUndo, ms, label){
+  const host = document.getElementById('toastHost');
+  if (!host){ console.log(message); return null; }
+  const el = document.createElement('div');
+  el.className = 'toast toast-ok toastUndo';
+  el.setAttribute('role', 'status');
+  const text = document.createElement('span');
+  text.textContent = message;
+  el.appendChild(text);
+  const undo = document.createElement('button');
+  undo.type = 'button';
+  undo.className = 'toastUndoBtn';
+  undo.textContent = label || 'Undo';
+  let used = false;
+  undo.onclick = async ()=>{
+    if (used) return; used = true;
+    el.remove();
+    try { await onUndo(); } catch(e){ console.error(e); toast("Could not undo: " + (e && e.message || e), "warn"); }
+  };
+  el.appendChild(undo);
+  const close = document.createElement('button');
+  close.className = 'toastClose'; close.textContent = '×';
+  close.setAttribute('aria-label', 'Dismiss');
+  close.onclick = ()=> el.remove();
+  el.appendChild(close);
+  host.appendChild(el);
+  setTimeout(()=>{ el.classList.add('toastOut'); setTimeout(()=>el.remove(), 300); }, ms || 9000);
+  return el;
+}
+
+/* ================= EXPORT AS AN LLM PROMPT =================
+   A condensed voice spec for pasting into a model's system prompt: who they are, how
+   they talk, what they would never do, and a handful of sample lines — without the
+   intensity/rarity bookkeeping sheetToText carries for a human reader. */
+function sheetToPrompt(st, meta){
+  meta = meta || {};
+  const name = meta.name && meta.name !== "Unnamed Character" ? meta.name : "this character";
+  const L = [`# Voice spec: ${meta.name || "Unnamed Character"}`, ""];
+  L.push(`You are writing dialogue and narration for ${name}. Stay inside this voice. Do not name or list these traits in the character's speech; let them show.`);
+  const bits = [];
+  if (meta.age) bits.push(`Age: ${meta.age}`);
+  if (meta.context) bits.push(`Context: ${meta.context}`);
+  if (meta.archetypeLabel) bits.push(`Archetype: ${meta.archetypeLabel}`);
+  if (bits.length) L.push("", bits.map(b=>`- ${b}`).join("\n"));
+  try {
+    const fp = (typeof voiceFingerprint === 'function') ? voiceFingerprint(st, meta) : null;
+    if (fp) L.push("", `**In one line:** ${fp}`);
+  } catch(e){}
+  const valid = ids => ids.filter(id => st[id] && st[id].trait);
+  const keys = Object.keys(st || {});
+  const line = id => `- **${st[id].trait.trait}** — ${st[id].trait.desc}`;
+  const sec = (title, ids) => { const v = valid(ids); if (v.length) L.push("", `## ${title}`, ...v.map(line)); };
+  sec("How they speak", ["verbosity","register","grammar"].concat(keys.filter(k=>k.startsWith("vocab")), keys.filter(k=>k.startsWith("manner"))));
+  sec("Who they are", keys.filter(k=>k.startsWith("pers_") || k.startsWith("req_") || k.startsWith("reqcat_")));
+  sec("What drives them", keys.filter(k=>k.startsWith("prof_")));
+  sec("The one thing that doesn't fit", keys.filter(k=>k.startsWith("wild_")));
+  sec("How they look", keys.filter(k=>k.startsWith("app_")));
+  try {
+    const contra = (typeof structuredContradiction === 'function') ? structuredContradiction(st, meta) : null;
+    if (contra) L.push("", `## Central contradiction`, `${contra.hi.trait} — and also ${contra.lo.trait}. ${contra.question}`);
+  } catch(e){}
+  const samples = valid(keys).map(id => st[id].trait.example).filter(Boolean).slice(0, 8);
+  if (samples.length) L.push("", "## Sample lines (for rhythm, not to repeat verbatim)", ...samples.map(x => `> ${x}`));
+  L.push("", "## Rules", "- Keep the verbosity, register and grammar above consistent line to line.",
+    "- Use the mannerisms sparingly; a habit shown every line stops reading as a habit.",
+    "- Under stress, let the voice slip rather than become someone else.");
+  return L.join("\n") + "\n";
+}
+function copyPrompt(btnEl){
+  if (!Object.keys(state).length){ toast("Generate a character first.", "warn"); return; }
+  copyText(sheetToPrompt(state, charMeta), btnEl);
+}
+function downloadPrompt(){
+  if (!Object.keys(state).length){ toast("Generate a character first.", "warn"); return; }
+  const fn = (charMeta.name || "character").replace(/[^a-z0-9]+/gi,"_").replace(/^_|_$/g,"") + ".prompt.md";
+  downloadText(sheetToPrompt(state, charMeta), fn);
 }

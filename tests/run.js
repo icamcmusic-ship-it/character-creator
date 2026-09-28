@@ -2710,6 +2710,210 @@ check('nothing is overwritten unless it was chosen, and the choice is per entry'
   return `2 conflicts: one taken, one kept, 1 added`;
 });
 
+
+/* Audit fixes B1–B19 (engine/generate side). These run in their OWN engine instance
+   with a stubbed DOM, because they drive full generations, batches and the named modes
+   and must not leak state into the checks above. */
+group('Audit fixes: seeds, pins, locks, requirements, budgets, modes');
+const G = (function(){
+  const g = loadEngine();
+  const d = g.document;
+  ['verbositySlider','registerSlider','composureSlider','mannerCount','vocabCount'].forEach(id=>d._set(id,{value:id.includes('Count')?'3':'0'}));
+  g.api.PERSONALITY_AXES.forEach(a=>d._set('pers_'+a.id,{value:'0'}));
+  g.api.PROFILE_SECTIONS.forEach(ps=>{
+    d._set('sec_'+ps.id,{checked:true});
+    d._set('pw_'+ps.id,{value:'',tagName:'SELECT',options:[{value:''}]});
+    d._set('type_'+ps.id,{value:'',tagName:'SELECT',options:[{value:''}]});
+  });
+  d._set('seedInput',{value:''}); d._set('batchTray',{}); d._set('charName',{value:''});
+  d._set('sheet',{classList:{contains(){return true},add(){},remove(){}}});
+  d._set('pressureSheet',{}); d._set('stressToggle',{checked:false}); d._set('divergence',{value:'0.3'});
+  g.evalIn("renderSheet=function(){};checkConflicts=function(){};renderNovelty=function(){};renderBatchTray=function(){};srAnnounce=function(){};renderSlotChange=function(){};var __toasts=[];toast=function(m){__toasts.push(m)};");
+  g.gen = seed => { d.getElementById('seedInput').value = seed; return g.evalIn('_runGeneration()'); };
+  return g;
+})();
+
+check('B1 — v1- seeds with a #suffix or overflow hash whole; canonical v1- still decodes', ()=>{
+  const n = s => G.evalIn(`seedNumberFrom(${JSON.stringify(s)})`);
+  assert(n('v1-abc') === parseInt('abc', 36), 'canonical v1- seed no longer decodes to its number');
+  assert(G.evalIn(`seedNumberFrom(encodeSeed(4000000000))`) === 4000000000, 'encodeSeed round-trip broken');
+  const set = new Set(['v1-abc','v1-abc#1','v1-abc#2'].map(n));
+  assert(set.size === 3, 'suffixed seeds collide with the base seed');
+  assert(n('v1-zzzzzzzzzz') === G.evalIn(`hashSeedString('v1-zzzzzzzzzz')`), 'overflowing v1- body was not hashed');
+  G.document.getElementById('seedInput').value = 'v1-k3x9q';
+  G.evalIn('generateBatch(4)');
+  const sigs = G.evalIn("batchCandidates.map(c=>[...c.signature.traitIds].sort().join(','))");
+  G.evalIn('dismissBatch()');
+  assert(new Set(sigs).size === sigs.length, 'batch candidates from a v1- seed are identical');
+  return `${sigs.length} distinct candidates`;
+});
+
+check('B2/B4 — pins never redraw locked slots, and never seat a duplicate', ()=>{
+  G.gen('pin1');
+  const k = G.evalIn("Object.keys(state).find(k=>k.startsWith('manner'))");
+  const id = G.evalIn(`state['${k}'].trait.id`);
+  G.evalIn(`state['${k}'].locked=true; pinnedTargets['${k}']=3;`);
+  for (let i = 0; i < 8; i++){ G.gen('pin' + (i+2)); assert(G.evalIn(`state['${k}'].trait.id`) === id, 'a locked, pinned slot was redrawn'); }
+  G.evalIn("__toasts.length=0");
+  G.evalIn(`adjustPin('${k}', 1)`);
+  assert(G.evalIn(`state['${k}'].trait.id`) === id, 'adjustPin redrew a locked slot');
+  G.evalIn(`Object.keys(state).forEach(k=>{if(state[k])state[k].locked=false}); pinnedTargets={}; Object.keys(state).forEach(k=>{if(state[k]&&state[k].trait)pinnedTargets[k]=5})`);
+  let dup = 0;
+  for (let i = 0; i < 25; i++){
+    G.gen('pq' + i);
+    dup += G.evalIn(`(function(){const s=new Set();let n=0;Object.values(state).forEach(x=>{if(x&&x.trait){if(s.has(x.trait.id))n++;s.add(x.trait.id)}});return n})()`);
+  }
+  G.evalIn('pinnedTargets={}');
+  assert(dup === 0, dup + ' duplicates seated by pin redraws');
+  return 'lock wins; 0 duplicates in 25 fully pinned builds';
+});
+
+check('B5 — two LOCKED traits in a never-together pair are reported, not replaced or deleted', ()=>{
+  const out = G.evalIn(`(function(){
+    const ts = TRAITS.filter(t=>t.section==='Mannerisms');
+    const a = ts[0], b = ts[1];
+    const obj = {m0:{slotId:'m0',locked:true,trait:a}, m1:{slotId:'m1',locked:true,trait:b}};
+    const saved = exclusivePairs; exclusivePairs = [[a.id,b.id]];
+    try { detectConstraintConflicts(); applyExclusivePairs(obj, 0); }
+    finally { exclusivePairs = saved; }
+    return {ids:[obj.m0 && obj.m0.trait.id, obj.m1 && obj.m1.trait.id], want:[a.id,b.id],
+            reported: getConstraintConflicts().some(c=>c.kind==='locked-vs-exclusive')};
+  })()`);
+  assert(out.ids[0] === out.want[0] && out.ids[1] === out.want[1], 'a locked slot was replaced or deleted');
+  assert(out.reported, 'the conflict was not reported');
+  return 'sheet untouched, conflict reported';
+});
+
+check('B6 — a required-in-place trait is unlocked once the requirement is removed', ()=>{
+  G.gen('r1');
+  const k = G.evalIn("Object.keys(state).find(k=>k.startsWith('manner'))");
+  const id = G.evalIn(`state['${k}'].trait.id`);
+  G.evalIn(`requiredTraitIds.push(${id})`); G.gen('r1');
+  assert(G.evalIn(`state['${k}'].trait.id`) === id && G.evalIn(`state['${k}'].locked`) === true, 'setup: not seated in place');
+  G.evalIn('requiredTraitIds.length=0');
+  // Toss works straight away, without a regenerate in between.
+  G.evalIn(`rerollSlot('${k}')`);
+  assert(G.evalIn(`!!state['${k}'].locked`) === false && G.evalIn(`!!state['${k}'].required`) === false, 'stale required lock survived a Toss');
+  // And a fresh build does not carry it as a lock.
+  G.evalIn(`requiredTraitIds.push(${id})`); G.gen('r1'); G.evalIn('requiredTraitIds.length=0');
+  let same = 0; for (let i = 0; i < 6; i++){ G.gen('r' + (i+3)); if (G.evalIn(`state['${k}'] && state['${k}'].trait.id`) === id) same++; }
+  assert(same < 6, 'the formerly required trait stayed locked across builds');
+  return `redrawn in ${6-same}/6 builds`;
+});
+
+check('B7 — a depth-first batch leaves the sliders alone; choosing applies the pick\'s sliders', ()=>{
+  const d = G.document;
+  d._set('depthFirstToggle',{checked:true});
+  const snap = () => ['verbositySlider','registerSlider','composureSlider'].map(i=>d.getElementById(i).value)
+    .concat(G.api.PERSONALITY_AXES.map(a=>d.getElementById('pers_'+a.id).value)).join(',');
+  const before = snap();
+  d.getElementById('seedInput').value = '';
+  G.evalIn('generateBatch(3)');
+  try {
+    assert(snap() === before, 'the batch left a discarded candidate\'s sliders on screen');
+    const want = G.evalIn("JSON.stringify(batchCandidates[1].sliders)");
+    G.evalIn('chooseBatch(1)');
+    const now = JSON.parse(want);
+    assert(Object.keys(now).every(id => String(d.getElementById(id).value) === String(now[id])), 'chooseBatch did not apply the candidate\'s sliders');
+  } finally {
+    d._set('depthFirstToggle',{checked:false});
+    ['verbositySlider','registerSlider','composureSlider'].forEach(id=>d.getElementById(id).value='0');
+    G.api.PERSONALITY_AXES.forEach(a=>d.getElementById('pers_'+a.id).value='0');
+  }
+  return 'sliders restored, pick applied';
+});
+
+check('B11/B12 — Same world keeps the name; Variation\'s undo has no phantom locks', ()=>{
+  const d = G.document;
+  d.getElementById('charName').value = 'Alice'; G.gen('sw');
+  d.getElementById('seedInput').value = '';
+  G.evalIn('generateSameWorld()');
+  assert(d.getElementById('charName').value === 'Alice', 'Same world erased the name field');
+  assert(G.evalIn('charMeta.name') === 'Alice', 'Same world lost the name on the sheet');
+  G.evalIn("Object.keys(state).forEach(k=>{if(state[k])state[k].locked=false})");
+  G.evalIn('generateVariation()');
+  G.evalIn('undoLast()');
+  const locked = G.evalIn("Object.values(state).filter(s=>s&&s.locked).length");
+  d.getElementById('charName').value = '';
+  assert(locked === 0, locked + ' phantom locks restored by undo');
+  return 'name kept; undo restores 0 locks';
+});
+
+check('B13 — the Background preset is achievable on a full sheet', ()=>{
+  G.evalIn("applyBudgetPreset('background')");
+  let unmet = 0;
+  try {
+    for (let i = 0; i < 10; i++){
+      G.gen('bg' + i);
+      const r = G.evalIn('getBudgetReport()');
+      if (Object.values(r.intensity).some(x=>x.unmet) || Object.values(r.rarity).some(x=>x.unmet)) unmet++;
+    }
+  } finally { G.evalIn('clearBudgets()'); }
+  assert(unmet === 0, `unmet in ${unmet}/10 builds`);
+  return 'met in 10/10 builds';
+});
+
+check('B14 — an exclusivity swap respects the rarity caps when it can', ()=>{
+  const out = G.evalIn(`(function(){
+    clearBudgets(); rarityCaps.signature = 0; rarityCaps.distinctive = 0;
+    const cat = [...new Set(TRAITS.filter(t=>t.section==='Mannerisms').map(t=>t.category))]
+      .find(c=>{ const p = byFilter('Mannerisms', c); return p.some(t=>rarityTier(t)==='common') && p.length > 3; });
+    const pool = byFilter('Mannerisms', cat);
+    const a = pool[0], b = pool.find(t=>t.id!==a.id);
+    const saved = exclusivePairs; exclusivePairs = [[a.id,b.id]];
+    let bad = 0;
+    try {
+      for (let i = 0; i < 20; i++){
+        const obj = {m0:{slotId:'m0',locked:true,trait:a}, m1:{slotId:'m1',trait:b,target:3}};
+        applyExclusivePairs(obj, 0);
+        if (obj.m1 && ['signature','distinctive'].includes(rarityTier(obj.m1.trait))) bad++;
+      }
+    } finally { exclusivePairs = saved; clearBudgets(); }
+    return bad;
+  })()`);
+  assert(out === 0, out + ' swaps broke a zero cap');
+  return '0/20 swaps broke a cap';
+});
+
+check('B15 — Toss on an "at least one from" slot redraws within its category', ()=>{
+  G.gen('rc');
+  const out = G.evalIn(`(function(){
+    const k = Object.keys(state).find(k=>k.startsWith('manner'));
+    const c = state[k].trait.category;
+    const t = byFilter(state[k].trait.section, c).find(t=>t.id!==state[k].trait.id && !Object.values(state).some(s=>s&&s.trait&&s.trait.id===t.id));
+    state['reqcat_0'] = {slotId:'reqcat_0', locked:true, required:true, label:'Required (at least one) — '+c, trait:t};
+    const before = t.id;
+    rerollSlot('reqcat_0');
+    const s = state['reqcat_0'];
+    delete state['reqcat_0'];
+    return {changed: s.trait.id !== before, same: s.trait.category === c, req: !!s.required};
+  })()`);
+  assert(out.changed && out.same && out.req, JSON.stringify(out));
+  return 'redrawn in category, still required';
+});
+
+check('B17 — explainWhyNot escapes category and section names', ()=>{
+  const html = G.evalIn(`(function(){
+    const t = Object.assign({}, TRAITS[0], {category:'<img src=x onerror=alert(1)>', section:'<b>x</b>'});
+    bannedCategories.add(t.category);
+    try { return explainWhyNot(t); } finally { bannedCategories.delete(t.category); }
+  })()`);
+  assert(!/<img/.test(html) && /&lt;img/.test(html), 'category name reached the HTML unescaped');
+  return 'escaped';
+});
+
+check('B19 — facets of one drawAll section are not reported as conflicts with each other', ()=>{
+  const n = G.evalIn(`(function(){
+    const ts = TRAITS.filter(t=>t.section==='Role by Context' && t.pol);
+    let a, b;
+    outer: for (const x of ts) for (const y of ts){ for (const ax in x.pol){ if (y.pol && x.pol[ax]*y.pol[ax] < 0){ a=x; b=y; break outer; } } }
+    if (!a) return -1;
+    return checkConflictsFor({prof_contextrole_0:{trait:a}, prof_contextrole_1:{trait:b}}).length;
+  })()`);
+  assert(n === 0 || n === -1, n + ' conflicts reported inside one section');
+  return n === -1 ? 'no opposing pair in bank' : '0 reported';
+});
+
 console.log('\n' + (failed ? '\x1b[31m' : '\x1b[32m') + passed + ' passed, ' + failed + ' failed\x1b[0m');
 if (failed){
   console.log('\nFailures:');

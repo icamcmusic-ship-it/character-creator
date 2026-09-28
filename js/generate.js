@@ -34,8 +34,13 @@ function seedNumberFrom(str){
   const t = String(str == null ? '' : str).trim();
   if (!t) return null;
   if (t.startsWith(SEED_PREFIX)){
-    const n = parseInt(t.slice(SEED_PREFIX.length), 36);
-    if (!Number.isNaN(n)) return n >>> 0;
+    // Only a strict v1-<base36> that fits in 32 bits decodes; "v1-abc#2" or an
+    // overflowing body is user text and is hashed whole, so it cannot collide.
+    const body = t.slice(SEED_PREFIX.length);
+    if (/^[0-9a-z]+$/.test(body)){
+      const n = parseInt(body, 36);
+      if (n <= 0xFFFFFFFF) return n >>> 0;
+    }
   }
   return hashSeedString(t);
 }
@@ -345,7 +350,10 @@ function generateBatch(n){
   const before = {state, charMeta, pressureState, lastSheetTraits,
                   lastGeneratedSliders, lastSeedUsed, charMetaSeed,
                   seedReadout: (document.getElementById('lastSeedReadout')||{}).textContent,
-                  budgetReport: getBudgetReport()};
+                  budgetReport: getBudgetReport(),
+                  // The DOM sliders: depth-first moves them per candidate, so each
+                  // candidate starts from these and the tray leaves them untouched.
+                  domSliders: captureSliders()};
   /* withSpeculativeGeneration: a batch runs `count` complete builds that the user has
      not accepted, and a complete build writes to the presentation locks, the undo and
      redo stacks, the anti-repetition window, lastBySlot, sessionProfiles, the novelty
@@ -358,6 +366,7 @@ function generateBatch(n){
       const seedEl = document.getElementById('seedInput');
       const userSeed = seedEl ? seedEl.value : "";
       if (seedEl && userSeed) seedEl.value = userSeed + "#" + (i + 1);
+      restoreSliders(before.domSliders);
       try {
         if (!_runGeneration()) continue;
         /* The candidate's presentation locks are part of the candidate. They used to be
@@ -378,6 +387,7 @@ function generateBatch(n){
     state = before.state; charMeta = before.charMeta;
     pressureState = before.pressureState; lastSheetTraits = before.lastSheetTraits;
     lastGeneratedSliders = before.lastGeneratedSliders;
+    restoreSliders(before.domSliders);
     lastSeedUsed = before.lastSeedUsed; charMetaSeed = before.charMetaSeed;
     const seedOut = document.getElementById('lastSeedReadout');
     if (seedOut && before.seedReadout !== undefined) seedOut.textContent = before.seedReadout;
@@ -443,7 +453,8 @@ function chooseBatch(i){
      belongs — on the one character the user kept, not on all five. The batch itself is
      isolated (see withSpeculativeGeneration); this is the deliberate commit. */
   if (pick.variants) charVariants = pick.variants;
-  if (pick.sliders) lastGeneratedSliders = pick.sliders;
+  // Put the chosen candidate's sliders on screen too, so controls match the sheet.
+  if (pick.sliders){ lastGeneratedSliders = pick.sliders; restoreSliders(pick.sliders); }
   if (pick.budgetReport && typeof setBudgetReport === 'function') setBudgetReport(pick.budgetReport);
   /* The seed readout was left showing the LAST candidate's seed, so "Seed: …" next to a
      kept character named a different one — and pasting it back reproduced the candidate
@@ -520,8 +531,15 @@ function generateSameWorld(){
   if (nameEl) nameEl.value = '';
   unlockAll();
   setAvoidSet(avoid);
-  try { runGeneration(); }
-  finally { setAvoidSet(null); if (nameEl && !nameEl.value) nameEl.value = ''; }
+  let ok = false;
+  try { ok = runGeneration(); }
+  finally {
+    setAvoidSet(null);
+    // Put the user's name back (the old line assigned '' to an empty field: a no-op).
+    if (nameEl) nameEl.value = keptName;
+    if (ok && keptName && charMeta) charMeta.name = keptName;
+  }
+  if (!ok) return;
   charMeta.mode = 'same-world';
   toast(`Built someone else in the same world${keptName ? ' as "' + keptName + '"' : ''}: their traits, concept families and profile categories were all avoided.`);
 }
@@ -536,13 +554,22 @@ function generateVariation(){
   const div = document.getElementById('divergence');
   const prevDiv = div ? div.value : null;
   if (div) div.value = '0';
-  try { runGeneration(); }
+  const topBefore = history[history.length - 1];
+  let ok = false;
+  try { ok = runGeneration(); }
   finally {
     if (div && prevDiv !== null) div.value = prevDiv;
+    // The undo snapshot was taken with the temporary locks on; strip them there too,
+    // or Undo would restore five locks the user never set.
+    if (history[history.length - 1] !== topBefore){
+      const snap = history[history.length - 1];
+      if (snap && snap.state) defining.forEach(k=>{ if (snap.state[k] && !wasLocked[k]) snap.state[k].locked = false; });
+    }
     // The locks were the mechanism, not a decision the user made: put them back.
     defining.forEach(k=>{ if (state[k] && !wasLocked[k]) state[k].locked = false; });
     renderSheet();
   }
+  if (!ok) return;
   charMeta.mode = 'variation';
   toast(`A variation: the ${defining.length} most defining cards were held, everything else re-rolled without divergence.`);
 }
@@ -827,14 +854,24 @@ function rerollSlot(slotId){
   // BUG FIX: snapshotHistory() ran before the lock check and before validating the
   // slot, so rerolling a locked (or missing) slot pushed a junk no-op entry onto
   // the undo stack. Validate first, snapshot only once we know we'll change something.
-  if (!old || !old.trait || old.locked) return;
+  if (!old || !old.trait) return;
+  // A requirement that was satisfied in place and has since been removed leaves stale
+  // locked/required flags; lift them so Toss works on the card again.
+  if (old.requiredSatisfiedInPlace && typeof clearStaleRequirement === 'function'){
+    const cleaned = clearStaleRequirement(old);
+    if (cleaned !== old){ state[slotId] = cleaned; return rerollSlot(slotId); }
+  }
   /* BUG FIX: a required slot rendered a Toss button that could not work — req_* is
      the user's own "always include this exact trait", so there is nothing to draw.
-     Say so instead of failing silently. */
-  if (old.required && slotId.startsWith("req_")){
+     Say so instead of failing silently. (Checked BEFORE the lock test: required slots
+     are also locked, so this toast used to be unreachable.) */
+  if (old.required && (slotId.startsWith("req_") || old.requiredSatisfiedInPlace)){
     toast("This trait is here because you required it by name — remove the constraint to change it.", "warn");
     return;
   }
+  // reqcat_ slots are locked by construction but mandate only the CATEGORY, so Toss
+  // redraws within it (the branch below); every other locked slot stays put.
+  if (old.locked && !(old.required && slotId.startsWith("reqcat_"))) return;
   const rarityPref = rarityPrefVal();
   // Reroll always operates on the single main-character UI, so the live DOM sliders
   // ARE the correct source for trait-level polarity affinity here (no per-call
@@ -1135,6 +1172,13 @@ function togglePin(slotId){
 }
 function adjustPin(slotId, delta){
   if (pinnedTargets[slotId] === undefined) return;
+  // A locked or required card is never redrawn — the lock wins over the pin.
+  const cur0 = state[slotId];
+  if (cur0 && (cur0.locked || cur0.required)){
+    toast(cur0.required ? "That card holds a required trait — remove the requirement to change it."
+                        : "That card is locked — unlock it to nudge its intensity.", "warn");
+    return;
+  }
   // A nudge redraws the card, so it is a content change and belongs on the stack.
   snapshotHistory();
   pinnedTargets[slotId] = clamp(pinnedTargets[slotId] + delta, 1, 5);
@@ -1180,9 +1224,15 @@ function applyPinnedTargets(obj, rarityPref){
   Object.keys(pinnedTargets).forEach(slotId=>{
     const cur = obj[slotId];
     if (!cur || !cur.trait){ delete pinnedTargets[slotId]; return; }
-    const pool = byFilter(cur.trait.section, cur.trait.category);
+    // Lock (and a required trait) wins over a pin: never redraw those slots.
+    if (cur.locked || cur.required) return;
+    // Never seat a trait that is already elsewhere on the sheet, or one that would
+    // break a "never together" pair with what is seated (as applyBudgets does).
+    const seated = seatedIdSet(obj, slotId);
+    const full = byFilter(cur.trait.section, cur.trait.category);
+    const pool = full.filter(t => t.id === cur.trait.id || (!seated.has(t.id) && !excludedByPairs(t.id, seated)));
     const tgt = pinnedTargets[slotId];
-    const picked = pickInRange(pool, rarityPref, tgt, 3);
+    const picked = pool.length ? pickInRange(pool, rarityPref, tgt, 3) : null;
     obj[slotId] = {...cur, target: tgt, pinned: true, trait: picked || cur.trait};
   });
   return obj;

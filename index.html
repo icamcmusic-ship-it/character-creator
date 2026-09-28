@@ -51,7 +51,7 @@
       <p style="margin:0 0 8px;"><b style="color:var(--text);">4 · Trait-level polarity.</b> Beyond categories, most traits carry their own small psychology vector ("this trait leans +honesty, −warmth"). At pick time that vector is scored against your current combined slider posture: agreeing traits get boosted, conflicting ones suppressed, scaled by Boost strength. So two characters can resolve the same category — say, "Core Want" — and still draw systematically different <i>traits</i> from it depending on posture. The why? panel reports this whenever it applied.</p>
       <p style="margin:0;"><b style="color:var(--text);">5 · Order of authority.</b> When systems disagree: <b>lock</b> beats everything; <b>pin</b> beats sliders for that slot's intensity; archetype blends with (never replaces) your sliders; depth-first derives sliders but leaves any axis its resolved categories don't speak to untouched. Reroll always honours the slot's own current target, and remembers what you've rejected. Every one of these decisions is inspectable per-card via why?.</p>
       <p style="margin:8px 0 0;"><b style="color:var(--text);">6 · Keeping it from going stale.</b> Three controls exist specifically to fight sameness. <b>Avoid recent traits</b> softly penalises anything drawn in your last few characters. <b>Divergence</b> inverts the correlation matrix on a share of category draws, so the system stops optimising toward the most typical member of each cluster — coherence becomes a dial you set rather than a score you're graded on. <b>The one thing that doesn't fit</b> forces a single slot from the far tail of a random category with your slider posture switched off, because real people have exactly one trait that doesn't follow from the others. The sheet also reports <b>distinctiveness</b> against everything you've generated this session, which is a different question from the novelty note (that one only compares you to your last character).</p>
-      <p style="margin:8px 0 0;"><b style="color:var(--text);">Keyboard.</b> <b>Ctrl/&#8984;+Enter</b> generates, <b>Ctrl/&#8984;+Z</b> undoes, <b>Shift+Ctrl/&#8984;+Z</b> (or <b>Ctrl/&#8984;+Y</b>) redoes, <b>R</b> rerolls the card under the pointer, <b>?</b> opens this panel. The tab strip takes <b>Left/Right</b>, and the trait search boxes take <b>Up/Down</b>, <b>Enter</b> and <b>Escape</b>.</p>
+      <p style="margin:8px 0 0;"><b style="color:var(--text);">Keyboard.</b> <b>Ctrl/&#8984;+Enter</b> generates, <b>Ctrl/&#8984;+Z</b> undoes, <b>Shift+Ctrl/&#8984;+Z</b> (or <b>Ctrl/&#8984;+Y</b>) redoes, <b>R</b> tosses and <b>L</b> keeps the focused card (Tab to a card, or hover it), <b>?</b> opens this panel. The tab strip takes <b>Left/Right</b>, and the trait search boxes take <b>Up/Down</b>, <b>Enter</b> and <b>Escape</b>.</p>
     </div>
   </details>
   <div id="toastHost" class="toastHost" aria-live="polite"></div>
@@ -482,7 +482,7 @@
               <button class="btn-secondary" data-on="click" data-act="applyArchetypeSetup" data-args="[]">Restore selected archetype's full setup</button>
               <button class="btn-secondary" data-on="click" data-act="deleteCustomArchetype" data-args="[]">Delete selected</button>
               <button class="btn-secondary" data-on="click" data-act="exportArchetypes" data-args="[]">Export library</button>
-              <label class="btn-secondary" style="cursor:pointer;">Import library<input type="file" accept=".json,application/json" style="display:none;" data-on="change" data-act="importArchetypes" data-args="[&quot;$el&quot;]"></label>
+              <label class="btn-secondary" style="cursor:pointer;">Import library<input type="file" accept=".json,application/json" class="srOnly" data-on="change" data-act="importArchetypes" data-args="[&quot;$el&quot;]"></label>
             </div>
           </div>
         </div>
@@ -519,30 +519,39 @@
         <div class="actionGroup">
           <span class="actionGroupLabel">Refine</span>
           <div class="actionRow">
-            <button class="btn-secondary" data-on="click" data-act="undoLast" data-args="[]" id="undoBtn" disabled>Undo</button>
-            <button class="btn-secondary" data-on="click" data-act="redoLast" data-args="[]" id="redoBtn" disabled title="Step forward again through anything you have undone">Redo</button>
+            <button class="btn-secondary" data-on="click" data-act="undoLast" data-args="[]" id="undoBtn" disabled aria-keyshortcuts="Control+Z Meta+Z" title="Undo (Ctrl/&#8984;+Z)">Undo</button>
+            <button class="btn-secondary" data-on="click" data-act="redoLast" data-args="[]" id="redoBtn" disabled aria-keyshortcuts="Control+Shift+Z Control+Y Meta+Shift+Z" title="Step forward again through anything you have undone (Shift+Ctrl/&#8984;+Z or Ctrl+Y)">Redo</button>
             <button class="btn-secondary" data-on="click" data-act="duplicateCharacter" data-args="[]" title="Add the sheet you are looking at to the Cast tab, so you can keep it (and compare it on the Relationships tab) while you carry on tweaking this one">Add to cast</button>
             <button class="btn-secondary" data-on="click" data-act="resetAllToDefaults" data-args="[]">↺ Reset to Defaults</button>
             <button class="btn-secondary" data-on="click" data-act="saveCharacter" data-args="[&quot;$el&quot;]">Save Character</button>
           </div>
         </div>
         <div class="actionGroup">
-          <span class="actionGroupLabel">Export</span>
+          <span class="actionGroupLabel">File</span>
           <div class="actionRow">
             <button class="btn-secondary" data-on="click" data-act="copySheet" data-args="[&quot;$el&quot;]">Copy Sheet</button>
-            <button class="btn-secondary" data-on="click" data-act="downloadSheet" data-args="[]">Download .md</button>
-            <button class="btn-secondary" data-on="click" data-act="exportCharacterJSON" data-args="[]" title="Full-fidelity save: traits, pins, sliders, constraints, counts and toggles — re-importable exactly as-is">Export .json</button>
-            <label class="btn-secondary" style="cursor:pointer;" title="Restore a previously exported .character.json exactly, including the settings that produced it">Import .json<input type="file" accept=".json,application/json" style="display:none;" data-on="change" data-act="importCharacterJSON" data-args="[&quot;$el&quot;]"></label>
+            <!-- One menu instead of five Import buttons and a row of Exports. "Open file…"
+                 reads the format stamp every export carries and routes the file to the
+                 importer that owns it — character, cast, workspace, archetypes, backup. -->
+            <details class="fileMenu" id="fileMenu">
+              <summary class="btn-secondary" aria-haspopup="true">File &#9662;</summary>
+              <div class="fileMenuList">
+                <button type="button" data-on="click" data-act="openFilePicker" data-args="[]" title="Open any file this app exported: a character, cast, workspace, archetype library or backup">Open file&hellip;</button>
+                <input type="file" id="fileMenuInput" class="srOnly" tabindex="-1" aria-hidden="true" accept=".json,application/json" data-on="change" data-act="importAnyFile" data-args="[&quot;$el&quot;]">
+                <hr>
+                <button type="button" data-on="click" data-act="copyShareLink" data-args="[&quot;$el&quot;]" title="A link that replays this character: its seed and the settings that shaped it, in the URL">Copy share link</button>
+                <button type="button" data-on="click" data-act="copyPrompt" data-args="[&quot;$el&quot;]" title="A condensed voice spec in markdown, ready to paste into an LLM's system prompt">Copy as LLM prompt</button>
+                <button type="button" data-on="click" data-act="downloadPrompt" data-args="[]">Download LLM prompt .md</button>
+                <hr>
+                <button type="button" data-on="click" data-act="downloadSheet" data-args="[]">Download .md</button>
+                <button type="button" data-on="click" data-act="exportCharacterJSON" data-args="[]" title="Full-fidelity save: traits, pins, sliders, constraints, counts and toggles — re-importable exactly as-is">Export character .json</button>
+                <button type="button" data-on="click" data-act="exportWorkspaceJSON" data-args="[]" title="Your whole setup in one file: constraints, budgets, category tiers, section settings and every custom archetype with the setup it was saved with">Export workspace .json</button>
+                <button type="button" data-on="click" data-act="exportCastJSON" data-args="[]">Export cast .json</button>
+                <button type="button" data-on="click" data-act="exportBackupBundle" data-args="[]">Export full backup</button>
+              </div>
+            </details>
             <button class="btn-secondary" data-on="click" data-act="printSheet" data-args="[false]">Print</button>
             <button class="btn-secondary" data-on="click" data-act="printSheet" data-args="[true]" title="One page: the name, the brief, the headline traits and the voice fingerprint — the card you keep at the desk">Print summary</button>
-          </div>
-          <!-- Characters and casts both round-trip as files. The workspace — the
-               constraint sets, budgets, category tiers, section settings and custom
-               archetypes — did not, and it is the state that takes the longest to
-               build. -->
-          <div class="actionRow" style="margin-top:6px;">
-            <button class="btn-secondary" data-on="click" data-act="exportWorkspaceJSON" data-args="[]" title="Your whole setup in one file: constraints, budgets, category tiers, section settings and every custom archetype with the setup it was saved with">Export workspace</button>
-            <label class="btn-secondary" style="cursor:pointer;" title="Replace your constraints, budgets, tiers, section settings and custom archetypes with the contents of a workspace file">Import workspace<input type="file" accept=".json,application/json" style="display:none;" data-on="change" data-act="importWorkspaceJSON" data-args="[&quot;$el&quot;]"></label>
           </div>
         </div>
         <div class="actionGroup advOnly">
@@ -557,7 +566,21 @@
         </div>
       </div>
       <div class="storageStatus" id="storageStatus" role="status" style="display:none;"></div>
-            <div class="savedList" id="savedList"></div>
+      <div class="savedTools" id="savedTools" hidden>
+        <input type="text" inputmode="search" role="searchbox" id="savedFilter" placeholder="Search saved characters" aria-label="Search saved characters" data-on="input" data-act="applySavedFilter" data-args="[]">
+        <select id="savedSort" aria-label="Sort saved characters" data-on="change" data-act="onSavedSortChange" data-args="[]">
+          <option value="recent">Newest first</option>
+          <option value="oldest">Oldest first</option>
+          <option value="name">Name A&ndash;Z</option>
+          <option value="size">Largest first</option>
+        </select>
+      </div>
+      <div class="savedList" id="savedList"></div>
+      <div class="comparePanel tensionBlock" id="comparePanel" role="region" aria-label="Comparison with a saved character" style="display:none;"></div>
+      <details class="advanced" id="familiarPanel">
+        <summary><h3>Why does this feel familiar?</h3></summary>
+        <div id="familiarBody" role="status"></div>
+      </details>
       <details class="advanced" id="projectPanel">
         <summary><h3>Project library &amp; backup</h3></summary>
         <div class="sub" style="margin:8px 0;">A project groups the characters, cast, relationship edges and arc events of one book or campaign. A backup bundle carries every project and every saved character to another machine, and shows you what it would overwrite before it writes anything.</div>
@@ -565,7 +588,7 @@
           <button class="btn-secondary" data-on="click" data-act="newProject" data-args="[]">New project</button>
           <button class="btn-secondary" data-on="click" data-act="fileIntoProject" data-args="[]" title="File the character, cast, edges and arc on screen into the current project">File what's on screen</button>
           <button class="btn-secondary" data-on="click" data-act="exportBackupBundle" data-args="[]">Export backup</button>
-          <label class="btn-secondary" style="cursor:pointer;">Import backup<input type="file" accept=".json,application/json" style="display:none;" data-on="change" data-act="importBackupBundle" data-args="[&quot;$el&quot;]"></label>
+          <label class="btn-secondary" style="cursor:pointer;">Import backup<input type="file" accept=".json,application/json" class="srOnly" data-on="change" data-act="importBackupBundle" data-args="[&quot;$el&quot;]"></label>
         </div>
         <div id="projectList"></div>
         <div id="backupPreview" class="tensionBlock" style="display:none;"></div>
@@ -577,6 +600,14 @@
     <!-- The generate -> lock -> regenerate loop was documented only inside the folded
          help text, which is the one place a first-time user has not looked yet. -->
     <div id="emptyState" class="emptyState">
+      <div class="onboard" id="onboard" hidden>
+        <b class="onboardTitle">New here?</b>
+        <p>One click gets you a whole character to react to. The short version of the controls is on; you can switch every dial on at any time with Tinker Mode.</p>
+        <div class="onboardBtns">
+          <button type="button" class="btn-primary" data-on="click" data-act="onboardChoose" data-args="[&quot;quick&quot;]">&#10022; Generate your first character</button>
+          <button type="button" class="btn-secondary" data-on="click" data-act="onboardChoose" data-args="[&quot;advanced&quot;]">Show me every control</button>
+        </div>
+      </div>
       <b>Nothing generated yet.</b>
       <p>Press <b>Build &amp; Roll</b> (or Ctrl/&#8984;+Enter). Then work the loop this tool is built around:
       <b>keep</b> the cards you want, <b>toss</b> the ones you don't, and build again — kept cards survive.
@@ -730,7 +761,7 @@
             <button class="btn-secondary" data-on="click" data-act="downloadCast" data-args="[]">Download .md</button>
             <button class="btn-secondary" data-on="click" data-act="exportCastJSON" data-args="[]" title="Round-trips the whole ensemble, re-importable exactly as-is">Export cast .json</button>
             <label class="btn-secondary" style="cursor:pointer;">Import cast .json
-              <input type="file" accept="application/json,.json" style="display:none;" data-on="change" data-act="importCastJSON" data-args="[&quot;$el&quot;]">
+              <input type="file" accept="application/json,.json" class="srOnly" data-on="change" data-act="importCastJSON" data-args="[&quot;$el&quot;]">
             </label>
             <button class="btn-secondary" data-on="click" data-act="checkEnsembleBalance" data-args="[]">⚖ Check Ensemble Balance</button>
             <button class="btn-secondary" data-on="click" data-act="printSheet" data-args="[]">Print</button>
@@ -802,7 +833,7 @@
   </div>
 
   <div class="stickyBar" id="stickyBar">
-    <button class="btn-primary" data-on="click" data-act="generateCharacter" data-args="[]">✦ Build &amp; Roll</button>
+    <button class="btn-primary" data-on="click" data-act="generateCharacter" data-args="[]" aria-keyshortcuts="Control+Enter Meta+Enter" title="Build a character (Ctrl/&#8984;+Enter)">✦ Build &amp; Roll</button>
     <button class="btn-secondary" data-on="click" data-act="generateBatch" data-args="[5]" title="Roll five and pick one">Roll 5</button>
     <!-- Was randomizeSliders('all') + generate, which rolls the thirteen personality
          sliders and nothing else. surpriseMe rolls the archetype, the profile sections
@@ -811,7 +842,7 @@
          something, since the empty state is gone by then and the Advanced copy is
          hidden in quick mode. -->
     <button class="btn-secondary" data-on="click" data-act="surpriseMe" data-args="[]" title="Roll everything — sliders, archetype, sections, divergence — and generate">🎲 Surprise me</button>
-    <button class="btn-secondary" data-on="click" data-act="undoLast" data-args="[]">Undo</button>
+    <button class="btn-secondary" data-on="click" data-act="undoLast" data-args="[]" aria-keyshortcuts="Control+Z Meta+Z" title="Undo (Ctrl/&#8984;+Z)">Undo</button>
     <!-- A ~37-card sheet on a phone is a very long scroll, and the only navigation was
          collapse-all. This jumps straight to a section. -->
     <select id="jumpToSection" class="jumpSelect" aria-label="Jump to a section of the sheet"
@@ -819,6 +850,7 @@
       <option value="">Jump to…</option>
     </select>
     <span class="stickySeed" id="stickySeed">no character yet</span>
+    <button type="button" class="stickyHelp" data-on="click" data-act="openHelpPanel" data-args="[]" aria-keyshortcuts="Shift+?" title="Keyboard shortcuts and how this works (?)" aria-label="Keyboard shortcuts and help">?</button>
   </div>
 
   <div class="footerNote" id="footerTraitCount">Intensity, rarity, and conflict polarity are heuristically scored — a starting point, not gospel.</div>

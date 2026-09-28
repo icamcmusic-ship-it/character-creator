@@ -54,6 +54,9 @@ await step('no inline on* handlers remain in the DOM', async ()=>{
   });
   if (found.length) throw new Error(found.length + ' remain: ' + found.slice(0,5).join(', '));
 });
+await step('first visit shows the onboarding call to action', async ()=>{
+  await page.waitForFunction(()=> document.getElementById('onboard') && !document.getElementById('onboard').hidden, null, {timeout:4000});
+});
 await step('Build & Roll renders a sheet', async ()=>{
   await page.locator('[data-act="generateCharacter"]:visible').first().click({timeout:8000});
   await page.waitForSelector('.traitCard', {timeout:5000});
@@ -316,6 +319,10 @@ await step('B28 — an exclusivity swap repaints both cards, not just the one pr
     // Declare the two seated traits mutually exclusive, then mutate ONE of them by
     // hand and repaint through the single-card path the way a reroll does.
     exclusivePairs = [[state[a].trait.id, state[b].trait.id]];
+    // Earlier steps keep cards; a pair of two KEPT cards is deliberately left alone
+    // and reported (audit B5), so release both for this repaint check.
+    const locks = [state[a].locked, state[b].locked];
+    state[a].locked = false; state[b].locked = false;
     const bBefore = state[b].trait.id;
     reapplyConstraintsAfterMutation();
     renderSlotChange(a);
@@ -324,6 +331,7 @@ await step('B28 — an exclusivity swap repaints both cards, not just the one pr
     const paintedName = painted ? (painted.querySelector('.traitName')||{}).textContent : null;
     const liveName = state[b] && state[b].trait ? state[b].trait.trait : null;
     exclusivePairs = savedPairs;
+    if (state[a]) state[a].locked = locks[0];
     return {changed: bBefore !== bAfter, paintedName, liveName};
   });
   if (r.skip) return;
@@ -442,6 +450,136 @@ await step('B15 — a cast honours the same required trait and budgets the sheet
 await step('B21 — the app states whether this browser actually persists saves', async ()=>{
   const present = await page.evaluate(()=> !!document.getElementById('storageStatus') && typeof storageIsDurable === 'function');
   if (!present) throw new Error('no storage capability indicator exists');
+});
+/* ---- Audit section 1/2 follow-ups: keyboard, file menu, share, undo, compare ---- */
+await step('B3 — every file input stays in the accessibility tree (no display:none)', async ()=>{
+  const bad = await page.evaluate(()=> [...document.querySelectorAll('input[type=file]')]
+    .filter(i => getComputedStyle(i).display === 'none').length);
+  if (bad) throw new Error(bad + ' file input(s) are display:none');
+});
+await step('onboarding is gone once a character exists, and remembered', async ()=>{
+  const r = await page.evaluate(async ()=> ({hidden: document.getElementById('onboard').hidden,
+    stored: !!(await storage.get('ui:onboarded'))}));
+  if (!r.hidden || !r.stored) throw new Error(JSON.stringify(r));
+});
+await step('B9/QOL6 — R tosses and L keeps the focused card', async ()=>{
+  await page.evaluate(()=> document.querySelectorAll('.traitCard.locked, .lockBtn.locked').length);
+  const slot = await page.evaluate(()=>{
+    const c = [...document.querySelectorAll('#sheet .traitCard[data-slot][tabindex]')]
+      .find(c => { const s = state[c.dataset.slot]; return s && !s.locked && c.querySelector('.rerollBtn'); });
+    c.focus(); return c.dataset.slot;
+  });
+  const before = await page.evaluate(s=> state[s].trait.id, slot);
+  await page.keyboard.press('r'); await page.waitForTimeout(250);
+  const after = await page.evaluate(s=> state[s].trait.id, slot);
+  if (before === after) throw new Error('R did not toss the focused card');
+  await page.evaluate(s=> document.querySelector('.traitCard[data-slot="'+s+'"]').focus(), slot);
+  await page.keyboard.press('l'); await page.waitForTimeout(250);
+  const locked = await page.evaluate(s=> !!state[s].locked, slot);
+  if (!locked) throw new Error('L did not keep the focused card');
+  await page.evaluate(s=> toggleLock(s), slot);
+});
+await step('B8 — redo does not fire from inside a text field', async ()=>{
+  const r = await page.evaluate(()=>{
+    const before = JSON.stringify(Object.keys(state).map(k=>state[k]&&state[k].trait&&state[k].trait.id));
+    undoLast();   // puts something on the redo stack
+    const mid = JSON.stringify(Object.keys(state).map(k=>state[k]&&state[k].trait&&state[k].trait.id));
+    const inp = document.getElementById('charName'); inp.focus();
+    inp.dispatchEvent(new KeyboardEvent('keydown', {key:'y', ctrlKey:true, bubbles:true}));
+    const after = JSON.stringify(Object.keys(state).map(k=>state[k]&&state[k].trait&&state[k].trait.id));
+    inp.blur(); redoLast();
+    return {changedByUndo: before !== mid, redoFired: mid !== after};
+  });
+  if (r.redoFired) throw new Error('Ctrl+Y in a text field changed the sheet');
+});
+await step('share link replays the same character', async ()=>{
+  const r = await page.evaluate(()=>{
+    const ids = () => Object.values(state).filter(s=>s&&s.trait).map(s=>s.trait.id).sort().join(',');
+    // Build from a fixed seed so the replay has something to match.
+    setVal('seedInput', 'share-test-seed'); runGeneration(); setVal('seedInput', '');
+    const want = ids();
+    const link = shareLinkFor();
+    runGeneration();   // move away
+    location.hash = link.split('#')[1];
+    const applied = applyShareFromHash();
+    return {applied, same: ids() === want, hashLeft: location.hash, seedLeft: document.getElementById('seedInput').value};
+  });
+  if (!r.applied) throw new Error('the link was not applied');
+  if (!r.same) throw new Error('the shared link built a different character');
+  if (r.hashLeft) throw new Error('hash left in place: ' + r.hashLeft.slice(0,30));
+  if (r.seedLeft) throw new Error('seed field left set');
+});
+await step('LLM prompt export is a markdown voice spec with sample lines', async ()=>{
+  const md = await page.evaluate(()=> sheetToPrompt(state, charMeta));
+  if (!/^# Voice spec:/.test(md) || !/## How they speak/.test(md)) throw new Error(md.slice(0,120));
+});
+await step('File menu → Open file routes a cast file to the cast importer, with undo', async ()=>{
+  const bundle = await page.evaluate(()=>{
+    duplicateCharacter();
+    return JSON.stringify(castBundle());
+  });
+  const before = await page.evaluate(()=> castStates.length);
+  await page.locator('#fileMenu summary').click();
+  await page.locator('#fileMenuInput').setInputFiles({name:'c.json', mimeType:'application/json', buffer: Buffer.from(bundle)});
+  // A cast exists, so replacing it asks first.
+  await page.waitForSelector('dialog[open]', {timeout:4000});
+  await page.locator('dialog[open] button[value="ok"], dialog[open] .btn-primary').first().click();
+  await page.waitForSelector('.toastUndo', {timeout:4000});
+  const n = await page.evaluate(()=> castStates.length);
+  if (n !== JSON.parse(bundle).members.length) throw new Error('cast has ' + n + ' members');
+  await page.evaluate(()=> document.querySelectorAll('.toast').forEach(t=>t.remove()));
+  await page.locator('[data-act="switchTab"][data-args*="single"]').first().click();
+  if (before < 0) throw new Error('unreachable');
+});
+await step('removing a cast member offers Undo, and Undo puts them back', async ()=>{
+  const n0 = await page.evaluate(()=> castStates.length);
+  await page.evaluate(()=> removeCastMember(0));
+  await page.waitForSelector('.toastUndo .toastUndoBtn', {timeout:4000});
+  const n1 = await page.evaluate(()=> castStates.length);
+  await page.locator('.toastUndo .toastUndoBtn').last().click();
+  const n2 = await page.evaluate(()=> castStates.length);
+  if (!(n1 === n0 - 1 && n2 === n0)) throw new Error(`${n0} → ${n1} → ${n2}`);
+});
+await step('compare with a saved character, and search the library', async ()=>{
+  const r = await page.evaluate(async ()=>{
+    const rec = JSON.stringify({format: SAVE_FORMAT, state: compressSlots(state), charMeta: Object.assign({}, charMeta, {name:'Zed Compare'}), savedAt: new Date().toISOString()});
+    await storage.set('character:Zed Compare', rec);
+    await storage.set('character:Ann Other', rec);
+    await loadSavedList();
+    await compareWithSaved('Zed Compare');
+    const panel = document.getElementById('comparePanel');
+    const rows = panel.querySelectorAll('tr.cmpSame').length;
+    const f = document.getElementById('savedFilter'); f.value = 'zed'; applySavedFilter();
+    const visible = [...document.querySelectorAll('#savedList .savedRow')].filter(x=>!x.hidden).length;
+    f.value = ''; applySavedFilter(); closeCompare();
+    await storage.delete('character:Zed Compare'); await storage.delete('character:Ann Other'); await loadSavedList();
+    return {shown: panel.style.display !== 'none' || rows > 0, rows, visible};
+  });
+  if (!r.rows) throw new Error('an identical save showed no identical slots');
+  if (r.visible !== 1) throw new Error(r.visible + ' rows visible for "zed"');
+});
+await step('deleting a save offers Undo', async ()=>{
+  await page.evaluate(async ()=>{ await storage.set('character:Del Me', JSON.stringify({format: SAVE_FORMAT, state: compressSlots(state), charMeta})); });
+  page.evaluate(()=> deleteSavedCharacter('Del Me'));
+  await page.waitForSelector('dialog[open]', {timeout:4000});
+  await page.locator('dialog[open] button[value="ok"], dialog[open] .btn-primary').first().click();
+  await page.waitForSelector('.toastUndo .toastUndoBtn', {timeout:4000});
+  await page.locator('.toastUndo .toastUndoBtn').last().click();
+  await page.waitForTimeout(200);
+  const back = await page.evaluate(async ()=>{ const r = await storage.get('character:Del Me'); await storage.delete('character:Del Me'); await loadSavedList(); return !!r; });
+  if (!back) throw new Error('the deleted save did not come back');
+});
+await step('"Why does this feel familiar?" lists recurring traits with a ban', async ()=>{
+  const r = await page.evaluate(()=>{
+    setVal('seedInput', 'fam-seed'); for (let i=0;i<3;i++) runGeneration(); setVal('seedInput', '');
+    const p = document.getElementById('familiarPanel'); p.open = true; renderFamiliar();
+    return {items: p.querySelectorAll('.familiarList li').length, bans: p.querySelectorAll('[data-act="familiarBan"]').length};
+  });
+  if (!r.items || r.items !== r.bans) throw new Error(JSON.stringify(r));
+});
+await step('B18 — colour values are validated before reaching CSS', async ()=>{
+  const r = await page.evaluate(()=> [cssColor('var(--cast-1)'), cssColor('red;background:url(x)'), cssColor('#abc')]);
+  if (r[0] !== 'var(--cast-1)' || r[1] === 'red;background:url(x)' || r[2] !== '#abc') throw new Error(JSON.stringify(r));
 });
 await step('dark theme resolves real colours', async ()=>{
   await page.emulateMedia({colorScheme:'dark'});

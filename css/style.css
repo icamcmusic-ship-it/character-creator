@@ -1301,3 +1301,75 @@
   .projectRow { display:flex; align-items:center; gap:6px; margin-bottom:6px; }
   .projectRow.current { outline:2px solid var(--golden-deep); outline-offset:2px; border-radius:10px; }
   .projectRow .savedOpen { flex:1; }
+
+/* ================= FILE MENU, UNDO TOAST, LIBRARY TOOLS, COMPARE, ONBOARDING ================= */
+  label.btn-secondary:focus-within { outline:3px solid var(--dusk-blue-mid); outline-offset:2px; }
+  .fileMenu { position:relative; display:inline-block; }
+  .fileMenu > summary { list-style:none; cursor:pointer; }
+  .fileMenu > summary::-webkit-details-marker { display:none; }
+  .fileMenuList {
+    position:absolute; z-index:40; top:calc(100% + 6px); left:0; min-width:230px;
+    display:flex; flex-direction:column; padding:6px; gap:2px;
+    background:var(--panel); border:1.5px solid var(--border-strong); border-radius:var(--radius-sm);
+    box-shadow:var(--shadow-lg);
+  }
+  .fileMenuList button {
+    text-align:left; background:none; border:none; color:var(--text); padding:8px 10px;
+    border-radius:6px; font:inherit; font-size:.85rem; cursor:pointer;
+  }
+  .fileMenuList button:hover, .fileMenuList button:focus-visible { background:var(--panel2); color:var(--dusk-blue); }
+  .fileMenuList hr { border:none; border-top:1px solid var(--border); margin:4px 2px; width:auto; }
+  @media (max-width:560px){ .fileMenuList { position:fixed; left:12px; right:12px; top:auto; bottom:84px; min-width:0; } }
+
+  .toastUndo { display:flex; align-items:center; gap:10px; }
+  .toastUndo > span { flex:1; }
+  .toastUndoBtn {
+    background:none; border:1.5px solid var(--dusk-blue); color:var(--dusk-blue); border-radius:6px;
+    padding:3px 10px; font:inherit; font-size:.8rem; font-weight:700; cursor:pointer;
+  }
+  .toastUndoBtn:hover { background:var(--dusk-blue); color:var(--panel); }
+
+  .savedTools { display:flex; gap:8px; margin-top:12px; flex-wrap:wrap; }
+  .savedTools input { flex:1 1 180px; min-width:0; }
+  .savedTools select { flex:0 0 auto; width:auto; }
+  .savedRow[hidden] { display:none; }
+
+  .comparePanel { margin-top:12px; }
+  .compareHead { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+  .compareHead h3 { margin:0; font-size:1rem; }
+  .compareScroll { overflow-x:auto; margin-top:8px; }
+  .compareTable { width:100%; border-collapse:collapse; font-size:.8rem; }
+  .compareTable th, .compareTable td { padding:5px 8px; border-bottom:1px solid var(--border); text-align:left; vertical-align:top; }
+  .compareTable thead th { color:var(--muted); font-weight:700; }
+  .compareTable tbody th { color:var(--muted); font-weight:600; width:28%; }
+  .compareTable tr.cmpSame td { background:color-mix(in srgb, var(--emerald-deep) 12%, transparent); }
+  .cmpShared { text-decoration:underline; text-decoration-color:var(--emerald-deep); text-underline-offset:3px; }
+
+  .familiarList { list-style:none; margin:8px 0; padding:0; display:flex; flex-direction:column; gap:6px; }
+  .familiarList li { display:flex; align-items:center; justify-content:space-between; gap:10px;
+    padding:8px 10px; border:1px solid var(--border); border-radius:var(--radius-sm); background:var(--panel2); }
+
+  .onboard { border:1.5px solid var(--border-strong); border-radius:var(--radius-sm); background:var(--panel);
+    padding:14px 16px; margin:0 auto 16px; max-width:560px; text-align:center; }
+  .onboard[hidden] { display:none; }
+  .onboardTitle { font-family:var(--font-display); font-size:1.05rem; }
+  .onboardBtns { display:flex; gap:10px; justify-content:center; flex-wrap:wrap; }
+
+  .traitCard[tabindex]:focus-visible { outline:3px solid var(--dusk-blue-mid); outline-offset:2px; }
+  .stickyHelp {
+    width:32px; height:32px; border-radius:50%; border:1.5px solid var(--border-strong); background:var(--panel);
+    color:var(--text); font-weight:800; cursor:pointer; flex:0 0 auto;
+  }
+  .stickyHelp:hover { border-color:var(--dusk-blue); color:var(--dusk-blue); }
+  /* Five controls per saved row no longer fit a phone in one line: the name takes its
+     own line and the actions wrap beneath it. */
+  @media (max-width:560px){
+    .savedRow { flex-wrap:wrap; }
+    .savedRow .savedOpen { flex:1 1 100%; }
+  }
+  .fileMenu > summary.btn-secondary {
+    display:inline-flex; align-items:center; gap:4px; padding:11px 20px; border-radius:999px;
+    font-family:var(--font-body); font-size:.86rem; font-weight:700; letter-spacing:.01em;
+    color:var(--dusk-blue); margin:0; user-select:none;
+  }
+  .fileMenu[open] > summary.btn-secondary { border-color:var(--dusk-blue); }
