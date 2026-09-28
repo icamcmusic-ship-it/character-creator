@@ -289,6 +289,30 @@ politeness layer and brings the stress response in, and a cast view that puts on
 situation to every member and marks the devices more than one of them reaches for.
 These are demonstrations of shape, not publishable prose.
 
+**Another take** composes every line again from the same sheet. The line seed covers the
+sheet's traits, the prompt's position and a take counter, so a take can be reproduced
+and two prompts never share a seed. Under **Add your own situation** you can write your
+own prompt ("Turning down the captain") and pick the built-in situation it should be
+composed like. Author prompts are saved with the current project; without a project
+they last for the session.
+
+**Voice collisions.** The Relationships tab shows a heatmap of every cast pair. Each cell
+counts the devices and rules the two members share across all prompts, including your
+own. **De-collide** rerolls the member with the highest total, keeping their name and
+axis posture. It keeps the new version only if the cast's total goes down, and an Undo
+toast brings the old one back.
+
+**Retire for this project** (⏸ on a trait card) is softer than a ban. It cuts the trait's
+weight in new characters to 15% but never removes it. The retired list is stored with
+the current project and follows it when you switch projects. Replaying a seed ignores
+it, so a seed always rebuilds the character it named.
+
+**Arc timeline export** (Arc panel → Export timeline) downloads markdown with one
+section per event: the belief tested, the choice, the cost and the changes you
+accepted. Each section also shows how the pressure sheet moved after that event. Every
+step uses the same pressure sub-stream, so a slot shows as changed only when the sheet
+under it changed.
+
 ## Casts, relationships and projects
 
 **Relationship workspace.** Cast members can be joined by directed edges carrying trust,
@@ -324,7 +348,29 @@ node tools/studio.js nearest "a phrase"     # what already exists near an idea
 node tools/studio.js review --pack=life     # what is unreviewed, and where
 node tools/studio.js preview --pack=life    # generate with core plus one pack only
 node tools/studio.js packs                  # the manifests and their id ranges
+node tools/studio.js suggest-pol --section=Humor --n=20   # polarity proposals for untagged traits
+node tools/studio.js families --min=0.4     # cluster similar traits into proposed conceptFamily names
+node tools/studio.js worldtag               # worldTags / conditions / exceptions coverage by section
+node tools/studio.js scaffold "Taps the table twice" --section=Mannerisms --category="Micro-Physical Tics" --pack=cells
 ```
+
+`suggest-pol` bases each proposal on the trait's nearest tagged neighbours in its
+section. It proposes an axis only when those neighbours agree on its sign. `families`
+proposes joining an existing family when a cluster already touches one, and flags a
+cluster that spans two families. `scaffold` prints a trait literal with the next free
+id in the pack, the section and category checked against the bank, a polarity
+proposal and the nearest existing traits. None of these commands writes to the bank.
+
+**Engine seams.** The engine can run with no DOM. `setEngineSettings({divergence,
+wildcardToggle, wildcardCount, pressureLevel, rangeFocus, ...})` or
+`withEngineSettings(obj, fn)` supplies values by control id, and any id the object
+leaves out is still read from the page. A build's steering state (avoid set, context
+bias, motivation links, archetype profile, affinity vector, replay mode) is one draw
+context. `captureDrawContext()` reads it, `withDrawContext(ctx, fn)` applies it and
+restores it afterwards, and `buildCharacterState({..., drawContext})` builds inside it.
+Speculative builds restore the whole context. Context rules apply in a fixed order: a
+tag you switched off, then a negated match, then text rules, then age rules. The
+combined per-category multiplier is clamped to 0.2–4×, and a personality nudge to ±36.
 
 ## Rarity
 
@@ -388,3 +434,9 @@ The bank used to live on a single 1.4MB line inside `js/app.js`, which made the 
 unopenable in several editors and every content change an unreviewable diff. It is
 now one trait per line across the data files above; the scripts are plain classic
 scripts loaded in order, sharing one global scope, so there is still nothing to build.
+
+## Never-allowed features
+
+Permanently out of scope. Do not implement or propose these (see `CLAUDE.md`):
+
+- **Name generator.** Names stay user-entered free text.

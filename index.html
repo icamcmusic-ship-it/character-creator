@@ -690,10 +690,21 @@
         <div class="actionRow" style="margin:0 0 10px;">
           <button class="btn-secondary active" id="vlMode_baseline" aria-pressed="true" data-on="click" data-act="setVoiceLabMode" data-args="[&quot;baseline&quot;]">Baseline</button>
           <button class="btn-secondary" id="vlMode_pressure" aria-pressed="false" data-on="click" data-act="setVoiceLabMode" data-args="[&quot;pressure&quot;]">Under pressure</button>
+          <button class="btn-secondary" id="vlReroll" data-on="click" data-act="rerollVoiceLab" data-args="[]" title="Compose every line again from the same sheet">Another take</button>
           <button class="btn-secondary" data-on="click" data-act="copyVoiceLab" data-args="[&quot;$el&quot;]">Copy</button>
           <label class="inlineToggle"><input type="checkbox" id="voiceLabInExport"> Include in exports</label>
         </div>
         <div id="voiceLabBody"></div>
+        <details class="vlAddPrompt" id="vlAddPrompt">
+          <summary>Add your own situation</summary>
+          <div class="sub" style="margin:6px 0;">Saved with the current project. It is composed like the built-in situation you pick, from this sheet's own rules.</div>
+          <div class="vlForm">
+            <input type="text" id="vlNewLabel" maxlength="80" placeholder="Turning down the captain" aria-label="Situation name">
+            <input type="text" id="vlNewSetup" maxlength="240" placeholder="The set-up, in one line (optional)" aria-label="Situation set-up">
+            <select id="vlNewLike" aria-label="Composed like"></select>
+            <button class="btn-secondary" id="vlAddBtn" data-on="click" data-act="addVoicePrompt" data-args="[]">Add</button>
+          </div>
+        </details>
       </div>
 
       <div class="arcPanel" id="arcPanel" style="display:none;">
@@ -702,6 +713,7 @@
         <div class="actionRow" style="margin:0 0 10px;">
           <select id="arcShape" aria-label="Arc shape for the next event"></select>
           <button class="btn-secondary" data-on="click" data-act="addArcEvent" data-args="[]">Add an event</button>
+          <button class="btn-secondary" id="arcTimelineBtn" data-on="click" data-act="exportArcTimeline" data-args="[]" title="Markdown timeline: each event, the changes you accepted, and how the pressure sheet moved">Export timeline</button>
           <span class="sub" id="arcStamp">No events yet. The sheet is where they start.</span>
         </div>
         <div id="arcBody"></div>
@@ -784,6 +796,7 @@
         <button class="btn-secondary" data-on="click" data-act="setVoiceLabMode" data-args="[&quot;baseline&quot;]">Baseline</button>
         <button class="btn-secondary" data-on="click" data-act="setVoiceLabMode" data-args="[&quot;pressure&quot;]">Under pressure</button>
       </div>
+      <div id="voiceHeatmap" style="margin-top:10px;"></div>
       <div id="voiceCompareBody" style="margin-top:10px;"></div>
     </div>
     <div class="controls">

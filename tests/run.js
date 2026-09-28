@@ -1639,8 +1639,11 @@ check('no polarity axis becomes more one-sided', ()=>{
      after the 2026 §4.4 polarity pack: formality 72 -> 68%, analytical 69 -> 67%,
      self-confidence 38.5 -> 39.5%; physical energy (64 -> 60%) and wordiness
      (38.5 -> 40%) are now inside the general band and no longer listed. */
+  /* 2026 audit §4 trait pass: formality (68 -> 59%) and analytical thinking (67 -> 60%)
+     are now inside the general 40-60% band, so they are held to it like every other
+     axis rather than to a recorded lopsided band. */
   const FLOORS = {
-    ego: [0.37, 0.45], intel: [0.62, 0.70], form: [0.62, 0.70],
+    ego: [0.37, 0.45],
   };
   const poles = {};
   T.forEach(t=> Object.entries(t.pol || {}).forEach(([ax, v])=>{
@@ -2912,6 +2915,369 @@ check('B19 — facets of one drawAll section are not reported as conflicts with 
   })()`);
   assert(n === 0 || n === -1, n + ' conflicts reported inside one section');
   return n === -1 ? 'no opposing pair in bank' : '0 reported';
+});
+
+
+/* ================= §3: SIDE FEATURES AND ROBUSTNESS =================
+   Draw context, headless settings, the context-rule cap, voice-lab seeds and author
+   prompts, the collision heatmap, retire-for-project, the pressure sheet's budgets,
+   and the coverage ratchet. Run in the audit engine (G) so nothing leaks upward. */
+group('§3: draw context, headless settings, side features');
+
+check('withDrawContext applies a context and puts every global back', ()=>{
+  const out = G.evalIn(`(function(){
+    const before = JSON.stringify(Object.entries(captureDrawContext()).map(([k,v])=>[k, v instanceof Map ? [...v] : v]));
+    let inside = null;
+    withDrawContext({avoidSet:{ids:new Set([1]),families:new Set(),cats:new Set()}, contextBias:new Map([['X',3]]), replayMode:true}, ()=>{
+      inside = {avoid: !!AVOID_SET, bias: contextMultiplier('X'), replay: !historyAwareGeneration()};
+    });
+    const after = JSON.stringify(Object.entries(captureDrawContext()).map(([k,v])=>[k, v instanceof Map ? [...v] : v]));
+    return {same: before === after, inside};
+  })()`);
+  assert(out.inside.avoid && out.inside.bias === 3 && out.inside.replay, 'context not applied: ' + JSON.stringify(out.inside));
+  assert(out.same, 'a global was left changed after withDrawContext');
+  return 'applied inside, restored after';
+});
+
+check('a build with a clean draw context is byte-identical to the same seed without one', ()=>{
+  const out = G.evalIn(`(function(){
+    clearContextBias(); setAvoidSet(null);
+    const opts = {verbLevel:0.4, regLevel:-0.3, compLevel:0, mannerCount:3, vocabCount:2, rarityPref:'balanced', vocabPref:null, personalityOverrides:{}};
+    const run = extra => withReplayMode(true, ()=> withRng(mulberry32(4242), ()=>{ rollCharacterVariants(); return JSON.stringify(compressSlots(buildCharacterState(Object.assign({}, opts, extra)))); }));
+    const a = run({}), b = run({drawContext: makeDrawContext()}), c = run({});
+    const leaked = captureDrawContext().avoidSet !== null;
+    return {ab: a === b, ac: a === c, leaked};
+  })()`);
+  assert(out.ac, 'the seeded build itself is not reproducible');
+  assert(out.ab, 'a clean draw context changed a seeded build');
+  assert(!out.leaked, 'the draw context leaked out of the build');
+  return 'identical';
+});
+
+check('a speculative build restores the whole draw context', ()=>{
+  const ok = G.evalIn(`(function(){
+    const snap = captureDrawContext();
+    withSpeculativeGeneration(()=>{ setAvoidSet({ids:new Set([9]),families:new Set(),cats:new Set()}); setMotivationLinks({a:1}); setArchetypeProfile({role:'x'}); });
+    const now = captureDrawContext();
+    return DRAW_CONTEXT_KEYS.every(k => now[k] === snap[k]);
+  })()`);
+  assert(ok, 'withSpeculativeGeneration left draw-context globals changed');
+  return 'restored';
+});
+
+check('headless settings drive the engine dials without a DOM', ()=>{
+  const domDiv = G.evalIn('divergenceLevel()');
+  const out = G.evalIn(`(function(){
+    return withEngineSettings({divergence:0.7, wildcardToggle:true, wildcardCount:2, pressureLevel:40, rangeFocus:0}, ()=>
+      ({div: divergenceLevel(), wc: wildcardCount(), p: pressureLevel(), band: bandHalf(), f: floatVal('divergence', 0), s: strVal('rarityPref','balanced')}));
+  })()`);
+  assert(out.div === 0.7 && out.wc === 2 && out.p === 0.4, JSON.stringify(out));
+  assert(Math.abs(out.band - 1.35) < 1e-9, 'rangeFocus from settings not honoured: ' + out.band);
+  assert(out.s === 'balanced', 'an id absent from the settings object should fall back to the DOM/default');
+  const after = G.evalIn('divergenceLevel()');
+  assert(after === domDiv, 'settings leaked past withEngineSettings: ' + after);
+  // And a fully DOM-less engine can build from settings alone.
+  const bare = loadEngine(['buildCharacterState','setEngineSettings','withRng','mulberry32','divergenceLevel']);
+  bare.api.setEngineSettings({divergence:0.25, avoidRecentToggle:false});
+  const st = bare.api.withRng(bare.api.mulberry32(5), ()=> bare.api.buildCharacterState({verbLevel:0, regLevel:0, compLevel:0, mannerCount:2, vocabCount:1, rarityPref:'balanced', vocabPref:null, personalityOverrides:{}}));
+  assert(bare.api.divergenceLevel() === 0.25 && Object.values(st).some(x=>x && x.trait), 'headless build failed');
+  return 'settings win, DOM is the default';
+});
+
+check('stacked context rules are clamped, and precedence holds', ()=>{
+  const out = G.evalIn(`(function(){
+    const r = buildContextBias('soldier, ex-military veteran of the war, army officer, a sergeant, noble lady, criminal thief smuggler', '70');
+    const vals = [...r.bias.values()];
+    const nudges = Object.values(r.nudge);
+    clearContextSuppression();
+    const neg = buildContextBias('not a soldier', '');
+    clearContextBias();
+    return {min: Math.min(...vals), max: Math.max(...vals), nmax: Math.max(0, ...nudges.map(Math.abs)), n: vals.length, negNotes: neg.notes.length, negRejected: neg.rejected.length,
+            cap: [CONTEXT_MULT_MIN, CONTEXT_MULT_MAX, CONTEXT_NUDGE_CAP]};
+  })()`);
+  assert(out.n > 0, 'no rule matched the test text');
+  assert(out.min >= out.cap[0] && out.max <= out.cap[1], `multiplier escaped [${out.cap[0]}, ${out.cap[1]}]: ${out.min}..${out.max}`);
+  assert(out.nmax <= out.cap[2], 'nudge escaped its cap: ' + out.nmax);
+  assert(out.negNotes === 0 && out.negRejected > 0, 'a negated match applied');
+  return `${out.n} categories, ${out.min.toFixed(2)}–${out.max.toFixed(2)}`;
+});
+
+check('voice-lab seed includes the prompt index and a reroll counter', ()=>{
+  const out = G.evalIn(`(function(){
+    let st = null;
+    for (let i = 0; i < 40 && !st; i++){ const s = withRng(mulberry32(800+i), ()=> buildCharacterState({verbLevel:1.5, regLevel:1.5, compLevel:0, mannerCount:2, vocabCount:2, rarityPref:'balanced', vocabPref:null, personalityOverrides:{warm:80, man:80}})); if (voiceLab(s,'baseline').some(l=>l.rules.length)) st = s; }
+    const txt = r => voiceLab(st, 'baseline', r).map(l=>l.text).join('|');
+    const a0 = txt(0), a0b = txt(0);
+    let moved = false; for (let r = 1; r < 12 && !moved; r++) if (txt(r) !== a0) moved = true;
+    return {stable: a0 === a0b, moved};
+  })()`);
+  assert(out.stable, 'the same reroll counter produced different lines');
+  assert(out.moved, 'no reroll counter changed any line');
+  return 'stable per take; another take differs';
+});
+
+check('author voice prompts compose, normalise, and join the comparison', ()=>{
+  const out = G.evalIn(`(function(){
+    setUserVoicePrompts([{label:'Turning down the captain', setup:'x', like:'refuse'}, {label:''}, {label:'Bad like', like:'nope'}]);
+    const ps = getUserVoicePrompts();
+    const st = withRng(mulberry32(31), ()=> buildCharacterState({verbLevel:0, regLevel:0, compLevel:0, mannerCount:2, vocabCount:2, rarityPref:'balanced', vocabPref:null, personalityOverrides:{}}));
+    const lines = voiceLab(st, 'baseline');
+    const cmp = voiceComparison([{state:st, meta:{name:'A'}},{state:st, meta:{name:'B'}}], ps[0].id, 'baseline');
+    setUserVoicePrompts([]);
+    return {n: ps.length, like: ps[1].like, total: lines.length, user: lines.filter(l=>l.user).length, rows: cmp.rows.length, builtIns: VOICE_PROMPTS.length};
+  })()`);
+  assert(out.n === 2, 'an empty label should be dropped: ' + out.n);
+  assert(out.like === 'request', 'an unknown "like" should fall back to request');
+  assert(out.total === out.builtIns + 2 && out.user === 2, JSON.stringify(out));
+  assert(out.rows === 2, 'an author prompt did not compose in the cast comparison');
+  return `${out.total} lines`;
+});
+
+check('the collision heatmap is symmetric and names the worst offender', ()=>{
+  const out = G.evalIn(`(function(){
+    const mk = s => withRng(mulberry32(s), ()=> buildCharacterState({verbLevel:1.5, regLevel:1.5, compLevel:0, mannerCount:2, vocabCount:2, rarityPref:'balanced', vocabPref:null, personalityOverrides:{warm:80}}));
+    const a = mk(1), b = mk(2);
+    const m = voiceCollisionMatrix([{state:a,meta:{name:'A'}},{state:a,meta:{name:'A2'}},{state:b,meta:{name:'B'}}], 'baseline');
+    let sym = true; for (let i=0;i<3;i++) for (let j=0;j<3;j++) if (m.matrix[i][j] !== m.matrix[j][i]) sym = false;
+    const argmax = m.totals.indexOf(Math.max(...m.totals));
+    return {sym, diag: m.matrix.every((r,i)=>r[i]===0), twins: m.matrix[0][1], worst: m.worst, argmax, totals: m.totals};
+  })()`);
+  assert(out.sym && out.diag, 'matrix not symmetric with a zero diagonal');
+  assert(out.twins > 0, 'two identical sheets shared nothing');
+  assert(out.worst === out.argmax, 'worst offender is not the largest row total: ' + JSON.stringify(out));
+  return `twins share ${out.twins}`;
+});
+
+check('de-collide rerolls the worst offender only when it lowers the total', ()=>{
+  const out = G.evalIn(`(function(){
+    const mk = s => withRng(mulberry32(s), ()=> buildCharacterState({verbLevel:1.5, regLevel:1.5, compLevel:0, mannerCount:2, vocabCount:2, rarityPref:'balanced', vocabPref:null, personalityOverrides:{warm:80}}));
+    const a = mk(11);
+    castStates = [castEntry(a, {}, {name:'A'}), castEntry(JSON.parse(JSON.stringify(a)), {}, {name:'B'}), castEntry(mk(12), {}, {name:'C'})];
+    castStates[1].state = a;
+    const sum = () => voiceCollisionMatrix(castStates, 'baseline').totals.reduce((x,y)=>x+y,0);
+    const before = sum();
+    const ids = castStates.map(c=>c.id);
+    toastUndo = function(){}; renderCast = function(){}; refreshRelSelectors = function(){};
+    deCollideCast();
+    const after = sum();
+    const same = castStates.map(c=>c.id).join() === ids.join();
+    castStates = [];
+    return {before, after, same};
+  })()`);
+  assert(out.same, 'de-collide changed cast membership');
+  assert(out.after <= out.before, `de-collide made it worse: ${out.before} → ${out.after}`);
+  return `${out.before} → ${out.after}`;
+});
+
+check('retire-for-project is a soft penalty in exploration and ignored on replay', ()=>{
+  const out = G.evalIn(`(function(){
+    const t = TRAITS[5];
+    setRetiredTraits([t.id]);
+    const explore = retirePenalty(t);
+    const replay = withReplayMode(true, ()=> retirePenalty(t));
+    const other = retirePenalty(TRAITS[6]);
+    setRetiredTraits([]);
+    return {explore, replay, other};
+  })()`);
+  assert(out.explore > 0 && out.explore < 1, 'a retired trait should be down-weighted, not banned: ' + out.explore);
+  assert(out.replay === 1 && out.other === 1, JSON.stringify(out));
+  // A seeded (explicit) build is byte-identical with the sheet's own traits retired.
+  G.gen('retire-replay');
+  const a = G.evalIn('JSON.stringify(compressSlots(state))');
+  const ids = G.evalIn('JSON.stringify(Object.values(state).filter(s=>s&&s.trait).map(s=>s.trait.id))');
+  G.evalIn(`setRetiredTraits(${ids})`);
+  G.gen('retire-replay');
+  const b = G.evalIn('JSON.stringify(compressSlots(state))');
+  // ...and exploration does move off them.
+  G.document.getElementById('seedInput').value = '';
+  let kept = 0, total = 0;
+  for (let i = 0; i < 6; i++){ G.evalIn('_runGeneration()'); const r = G.evalIn(`(function(){const s=new Set(${ids});const v=Object.values(state).filter(x=>x&&x.trait);return [v.filter(x=>s.has(x.trait.id)).length, v.length]})()`); kept += r[0]; total += r[1]; }
+  G.evalIn('setRetiredTraits([])');
+  assert(a === b, 'retiring traits changed a seeded replay');
+  assert(kept / total < 0.2, `retired traits still ${(100*kept/total).toFixed(0)}% of exploration sheets`);
+  return `replay identical; ${kept}/${total} retired seats in exploration`;
+});
+
+check('the pressure sheet respects rarity caps and never-together pairs', ()=>{
+  const out = G.evalIn(`(function(){
+    clearBudgets(); rarityCaps.signature = 0; rarityCaps.distinctive = 0;
+    let breaches = 0, pairBreaches = 0, sheets = 0;
+    const savedPairs = exclusivePairs;
+    try {
+      for (let i = 0; i < 12; i++){
+        const base = withRng(mulberry32(300+i), ()=> finalizeSheet(buildCharacterState({verbLevel:1, regLevel:0, compLevel:0, mannerCount:3, vocabCount:2, rarityPref:'balanced', vocabPref:null, personalityOverrides:{}}), {rarityPref:'balanced'}));
+        const ps = withRng(mulberry32(900+i), ()=> buildStressVariant(1, 0, 3, 'balanced', base));
+        const seated = Object.values(ps).filter(s=>s && s.trait);
+        sheets++;
+        breaches += seated.filter(s=>['signature','distinctive'].includes(rarityTier(s.trait))).length;
+        // Pair the first two seated pressure traits and rebuild on the same stream.
+        if (seated.length >= 2){
+          exclusivePairs = [[seated[0].trait.id, seated[1].trait.id]];
+          const ps2 = withRng(mulberry32(900+i), ()=> buildStressVariant(1, 0, 3, 'balanced', base));
+          const ids = new Set(Object.values(ps2).filter(s=>s&&s.trait).map(s=>s.trait.id));
+          if (ids.has(exclusivePairs[0][0]) && ids.has(exclusivePairs[0][1])) pairBreaches++;
+          exclusivePairs = savedPairs;
+        }
+      }
+    } finally { exclusivePairs = savedPairs; clearBudgets(); }
+    return {breaches, pairBreaches, sheets};
+  })()`);
+  assert(out.pairBreaches === 0, out.pairBreaches + ' pressure sheets seated both halves of a never-together pair');
+  assert(out.breaches === 0, out.breaches + ' capped-tier traits on pressure sheets with the cap at zero');
+  return `${out.sheets} pressure sheets clean`;
+});
+
+check('arc timeline diffs the pressure sheet per event', ()=>{
+  G.gen('arc-tl');
+  const out = G.evalIn(`(function(){
+    arcBase = JSON.parse(JSON.stringify(state)); arcEvents = [];
+    const ev = makeArcEvent(1, {title:'The fire', shape:'growth', at:'x'});
+    ev.changes = proposeArcChanges(state, ev, []).map(c => Object.assign(c, {accepted:true}));
+    arcEvents.push(ev);
+    const rows = arcTimeline(), md = arcTimelineMarkdown(), again = arcTimelineMarkdown();
+    const same = pressureSheetDiff(pressureState || {}, pressureState || {}).length;
+    arcEvents = []; arcBase = null;
+    return {n: rows.length, md, stable: md === again, same, hasDiff: Array.isArray(rows[0].pressureDiff)};
+  })()`);
+  assert(out.n === 1 && out.hasDiff, 'timeline rows missing');
+  assert(/## 1\. The fire/.test(out.md) && /Under pressure, after this event/.test(out.md), out.md.slice(0, 200));
+  assert(out.stable, 'the timeline export is not deterministic');
+  assert(out.same === 0, 'a sheet diffed against itself reported changes');
+  return 'deterministic markdown';
+});
+
+check('batch candidates each get a distinct seed', ()=>{
+  G.document.getElementById('seedInput').value = '';
+  G.evalIn('generateBatch(5)');
+  const seeds = G.evalIn("batchCandidates.map(c=>c.seed || (c.meta && c.meta.seed) || '')");
+  G.evalIn('dismissBatch()');
+  assert(seeds.every(Boolean), 'a candidate carries no seed: ' + JSON.stringify(seeds));
+  assert(new Set(seeds).size === seeds.length, 'duplicate batch seeds: ' + seeds.join(', '));
+  return seeds.length + ' distinct';
+});
+
+check('worldTags / conditions / exceptions coverage never falls (ratchet)', ()=>{
+  /* These fields validate but almost nothing sets them. The floor is what the bank held
+     when the ratchet was added; raise it when you tag more, never lower it. */
+  const FLOOR = {worldTags: 5, conditions: 68, exceptions: 0};
+  const T = A.TRAITS;
+  const have = k => T.filter(t => Array.isArray(t[k]) && t[k].length).length;
+  const now = {worldTags: have('worldTags'), conditions: have('conditions'), exceptions: have('exceptions')};
+  Object.keys(FLOOR).forEach(k => assert(now[k] >= FLOOR[k], `${k} coverage fell to ${now[k]} (floor ${FLOOR[k]})`));
+  return Object.keys(now).map(k => `${k} ${now[k]}`).join(', ');
+});
+
+
+group('§4 balancing: archetype identity, preset spread, trait-bank shape');
+
+check('§4: no two presets are near-duplicates (cosine over 13 axes + 3 voice postures)', ()=>{
+  /* The audit measured four pairs above 0.80 — Plain-Spoken/Blunt Foreman 0.86, Burnt-Out
+     Idealist/Former True Believer 0.83, Compulsive Fixer/Workaholic 0.81, Wounded Soldier/
+     Survivor 0.80. They were differentiated rather than merged so saved characters that
+     name them still load. Voice postures are scaled x50 onto the axis range. */
+  const AX = A.PERSONALITY_AXES.map(a=>a.id), K = Object.keys(A.ARCHETYPES);
+  const vec = k => { const a = A.ARCHETYPES[k]; return AX.map(x=>a.pers[x]||0).concat([a.verbosity*50, a.register*50, a.composure*50]); };
+  const cos = (u,v) => { let d=0,p=0,q=0; u.forEach((x,i)=>{ d+=x*v[i]; p+=x*x; q+=v[i]*v[i]; }); return d/Math.sqrt(p*q); };
+  let worst = [0,'',''];
+  for (let i=0;i<K.length;i++) for (let j=i+1;j<K.length;j++){ const c = cos(vec(K[i]),vec(K[j])); if (c > worst[0]) worst = [c,K[i],K[j]]; }
+  assert(worst[0] <= 0.80, `${worst[1]} / ${worst[2]} at ${worst[0].toFixed(2)}`);
+  [['plainSpoken','bluntForeman'],['burntIdealist','formerTrueBeliever'],['compulsiveFixer','workaholicAvoiding'],['soldier','undiscussedSurvivor']]
+    .forEach(([a,b])=>{ const c = cos(vec(a),vec(b)); assert(c < 0.70, `${a}/${b} still ${c.toFixed(2)}`); });
+  return `${K.length} presets, closest pair ${worst[1]}/${worst[2]} ${worst[0].toFixed(2)}`;
+});
+
+check('§4: presets are filled out, discipline is not skewed, and the missing types exist', ()=>{
+  const thin = Object.entries(A.ARCHETYPES).filter(([,a])=>Object.keys(a.pers).length < 6).map(([k])=>k);
+  assert(!thin.length, 'presets setting fewer than six axes: ' + thin.join(', '));
+  let p = 0, n = 0; Object.values(A.ARCHETYPES).forEach(a=>{ const v = a.pers.discipline; if (v > 0) p++; else if (v < 0) n++; });
+  assert(p / n <= 1.4, `discipline ${p}:${n}`);
+  ['newParent','midlifeReinventor','restlessRetiree','codeSwitcher','preciseLiteralist','incurableFlirt',
+   'secularIdeologue','nosyNeighbour','pompousBlowhard','maliciousTrickster'].forEach(k=> assert(A.ARCHETYPES[k], 'missing preset ' + k));
+  const unhinted = Object.entries(A.ARCHETYPES).filter(([,a])=>Object.keys(a.profile||{}).length < 4).map(([k])=>k);
+  assert(!unhinted.length, 'presets with fewer than four profile hints: ' + unhinted.join(', '));
+  const closed = Object.entries(A.ARCHETYPE_INTENT).filter(([,it])=>!it.open.length).map(([k])=>k);
+  assert(!closed.length, 'presets that leave no core section open: ' + closed.join(', '));
+  return `discipline ${p}:${n}`;
+});
+
+check('§4: a preset\'s profile hints usually land (identity survives the dice)', ()=>{
+  /* Measured before the hint-strength change: 50% of hinted single-slot sections landed
+     on their hint across 40 builds per preset; after it, ~65%. Held at 55% on a seeded
+     six-preset sample so the preset-to-sheet link cannot quietly weaken again. */
+  let hit = 0, tot = 0;
+  ['conartist','soldier','noble','cheerfulMess','pompousBlowhard','codeSwitcher'].forEach((key, ki)=>{
+    const arch = A.effectiveArchetype(key, 'base');
+    for (let i=0;i<20;i++){
+      let st;
+      A.withArchetypeProfile(arch.profile, ()=> A.withRng(A.mulberry32(0x5A4 + ki*101 + i), ()=>{
+        A.rollCharacterVariants();
+        const ov = {}; A.PERSONALITY_AXES.forEach(a=>{ ov[a.id] = arch.pers[a.id] !== undefined ? Math.round(arch.pers[a.id]*0.65) : 0; });
+        st = A.buildCharacterState({verbLevel:0, regLevel:0, compLevel:0, mannerCount:2, vocabCount:2, rarityPref:'balanced', vocabPref:null, personalityOverrides:ov});
+      }));
+      Object.entries(arch.profile).forEach(([sec, cat])=>{
+        const c = A.slotCat(st['prof_'+sec+'_0']); if (!c) return;
+        tot++; if (c === cat) hit++;
+      });
+    }
+  });
+  A.forgetRecentTraits(); A.forgetSlotDraws();
+  assert(tot > 100, 'too few hinted slots measured: ' + tot);
+  assert(hit / tot >= 0.55, `hints landed ${(100*hit/tot).toFixed(0)}% of ${tot}`);
+  return `${(100*hit/tot).toFixed(0)}% of ${tot} hinted slots`;
+});
+
+check('§4: single-slot profile sections reach most of their pool', ()=>{
+  /* Values, Stress and Attachment drew every primary at one shared target with the
+     narrowest window, so about half of each pool was never seen (45% / 45% / 49% of
+     traits drawn in 1,500 builds). The primary now jitters its target and draws with
+     minCount + flatten + slot memory, like Motivation. Floors at 600 seeded builds. */
+  const seen = {stress:new Set(), values:new Set(), attachment:new Set()};
+  // Earlier checks leave section toggles and type pickers dirty; this one is about the
+  // unforced draw, so make sure these three are on and unpinned.
+  Object.keys(seen).forEach(id=>{
+    ctx.document._set('sec_'+id, {checked:true});
+    ctx.document._set('type_'+id, {value:'', tagName:'SELECT', options:[{value:''}]});
+  });
+  A.withRng(A.mulberry32(0xC0FE), ()=>{
+    for (let i=0;i<600;i++){
+      const o = {}; A.PERSONALITY_AXES.forEach(a=> o[a.id] = Math.round(A.rand() * 200 - 100));
+      A.rollCharacterVariants();
+      const st = A.buildCharacterState({verbLevel:0, regLevel:0, compLevel:0, mannerCount:2, vocabCount:2, rarityPref:'balanced', vocabPref:null, personalityOverrides:o});
+      Object.keys(seen).forEach(k=>{ const s = st['prof_'+k+'_0']; if (s && s.trait) seen[k].add(s.trait.id); });
+    }
+  });
+  A.forgetRecentTraits(); A.forgetSlotDraws();
+  const out = [];
+  Object.entries(seen).forEach(([k, set])=>{
+    const ps = A.PROFILE_SECTIONS.find(p=>p.id===k);
+    const pool = A.TRAITS.filter(t=>t.section === ps.section).length;
+    const share = set.size / pool;
+    out.push(`${k} ${(100*share).toFixed(0)}%`);
+    assert(share >= 0.6, `${k} drew only ${set.size} of ${pool}`);
+  });
+  return out.join(', ');
+});
+
+check('§4: the life sections stay grown and rarity is not a proxy for loudness (ratchet)', ()=>{
+  const size = s => A.TRAITS.filter(t=>t.section === s).length;
+  const FLOOR = {"Goals & Stakes":330, "Competence & Method":240, "Recovery & Repair":80, "Role by Context":66,
+                 "Contradiction Functions":66, "Ordinary Texture":88, "Positive Origins":96};
+  Object.entries(FLOOR).forEach(([s, n])=> assert(size(s) >= n, `${s} fell to ${size(s)} (floor ${n})`));
+  // Cramér's V between rarity tier and intensity — 0.60 at the audit, 0.55 after this pass.
+  const R = ['common','uncommon','distinctive','signature'], m = R.map(()=>[0,0,0,0,0]);
+  A.TRAITS.forEach(t=>{ const r = R.indexOf(t.rarity); if (r >= 0) m[r][t.intensity-1]++; });
+  const N = A.TRAITS.length, rs = m.map(r=>r.reduce((a,b)=>a+b,0)), cs = [0,1,2,3,4].map(j=>m.reduce((a,r)=>a+r[j],0));
+  let chi = 0; m.forEach((r,i)=>r.forEach((o,j)=>{ const e = rs[i]*cs[j]/N; if (e) chi += (o-e)*(o-e)/e; }));
+  const V = Math.sqrt(chi / (N * 3));
+  assert(V <= 0.555, `Cramér's V rose to ${V.toFixed(3)}`);
+  // the suffix duplicates the audit listed were reworded, not deleted (saved ids stay valid)
+  const byId = A.TRAITS_BY_ID;
+  [3871,3878,3944,4195,5160,5169,5179,5192,102029,3723].forEach(id=>{
+    const t = byId.get ? byId.get(id) : byId[id];
+    assert(t, 'reworded trait ' + id + ' is missing');
+    assert(!/ (vocab|discipliner|conformist|fighter)$|with how much it matters$|^Direct-question asker$/.test(t.trait), `#${id} still reads as a suffix duplicate: ${t.trait}`);
+  });
+  return `V ${V.toFixed(3)}; goals ${size("Goals & Stakes")}, competence ${size("Competence & Method")}`;
 });
 
 console.log('\n' + (failed ? '\x1b[31m' : '\x1b[32m') + passed + ' passed, ' + failed + ' failed\x1b[0m');

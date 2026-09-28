@@ -681,6 +681,7 @@ function renderCast(){
     card.innerHTML = inner;
     grid.appendChild(card);
   });
+  if (typeof renderVoiceHeatmap === 'function') renderVoiceHeatmap();
 }
 async function renameCastMember(i){
   const c = castStates[i];
@@ -1033,6 +1034,7 @@ function renderArc(){
    The cast view gets the same prompt across every member so a shared device is
    visible as a shared device rather than as a coincidence. */
 let voiceLabMode = 'baseline';
+let voiceLabReroll = 0;   // "another take" — joins the line seed, see composeVoiceLine
 function setVoiceLabMode(mode){
   voiceLabMode = VOICE_MODES.includes(mode) ? mode : 'baseline';
   renderVoiceLab();
@@ -1041,6 +1043,7 @@ function setVoiceLabMode(mode){
 function renderVoiceLab(){
   const host = document.getElementById('voiceLabBody');
   if (!host) return;
+  renderVoicePromptForm();
   const panel = document.getElementById('voiceLabPanel');
   const has = Object.keys(state).length > 0;
   if (panel) panel.style.display = has ? "block" : "none";
@@ -1049,9 +1052,10 @@ function renderVoiceLab(){
     const btn = document.getElementById('vlMode_' + m);
     if (btn){ btn.classList.toggle('active', voiceLabMode === m); btn.setAttribute('aria-pressed', voiceLabMode === m); }
   });
-  host.innerHTML = voiceLab(state, voiceLabMode).map(l => `
-    <div class="voiceCard">
-      <div class="voiceHead"><b>${escHTML(l.prompt)}</b> <span class="sub">${escHTML(l.setup)}</span></div>
+  host.innerHTML = voiceLab(state, voiceLabMode, voiceLabReroll).map(l => `
+    <div class="voiceCard${l.user ? ' userPrompt' : ''}">
+      <div class="voiceHead"><b>${escHTML(l.prompt)}</b> <span class="sub">${escHTML(l.setup)}</span>${l.user
+        ? ` <button class="savedAct savedDel" ${actAttr('click', 'removeVoicePrompt', l.promptId)} aria-label="Remove the prompt ${escAttr(l.prompt)}">remove</button>` : ``}</div>
       <blockquote class="voiceLine">${escHTML(l.text)}</blockquote>
       <div class="sub">Shaped by: ${escHTML(l.rules.join("; ") || "nothing on this sheet")}${l.device ? ` · habitual device: <b>${escHTML(l.device.label)}</b>` : ``}</div>
     </div>`).join("");
@@ -1060,11 +1064,15 @@ function renderVoiceCompare(){
   const host = document.getElementById('voiceCompareBody');
   if (!host) return;
   const sel = document.getElementById('voiceComparePrompt');
-  if (sel && !sel.options.length){
-    sel.innerHTML = VOICE_PROMPTS.map(p => `<option value="${escHTML(p.id)}">${escHTML(p.label)}</option>`).join("");
+  const prompts = allVoicePrompts();
+  if (sel && sel.options.length !== prompts.length){
+    const keep = sel.value;
+    sel.innerHTML = prompts.map(p => `<option value="${escHTML(p.id)}">${escHTML(p.label)}</option>`).join("");
+    if (prompts.some(p => p.id === keep)) sel.value = keep;
   }
+  renderVoiceHeatmap();
   if (!castStates.length){ host.innerHTML = `<div class="sub">Generate a cast to compare voices.</div>`; return; }
-  const cmp = voiceComparison(castStates, strVal('voiceComparePrompt', 'refuse'), voiceLabMode);
+  const cmp = voiceComparison(castStates, strVal('voiceComparePrompt', 'refuse'), voiceLabMode, voiceLabReroll);
   host.innerHTML = `<div class="sub" style="margin-bottom:8px;">${escHTML(cmp.note)}</div>` + cmp.rows.map(r => `
     <div class="voiceCard">
       <div class="voiceHead"><b>${escHTML(r.name)}</b></div>
@@ -1077,6 +1085,177 @@ function renderVoiceCompare(){
 function copyVoiceLab(btnEl){
   if (!Object.keys(state).length){ toast("Generate a character first.", "warn"); return; }
   copyText(`# Voice lab — ${charMeta.name || "Unnamed Character"} (${voiceLabMode})\n\n` + voiceLabToMarkdown(state, voiceLabMode), btnEl);
+}
+function rerollVoiceLab(){
+  voiceLabReroll++;
+  renderVoiceLab();
+  renderVoiceCompare();
+  if (typeof srAnnounce === 'function') srAnnounce(`Voice lab, take ${voiceLabReroll + 1}.`);
+}
+
+/* ---- Author prompts, saved with the project ---- */
+function _projectFieldSave(field, value){
+  const p = currentProject();
+  if (!p) return false;
+  p[field] = value;
+  saveProject(p).catch(e => console.error('[project] save failed', e));
+  return true;
+}
+function addVoicePrompt(){
+  const label = strVal('vlNewLabel', '').trim();
+  if (!label){ toast("Name the situation first — e.g. \"Turning down the captain\".", "warn"); return; }
+  const next = setUserVoicePrompts(getUserVoicePrompts().concat([{label, setup: strVal('vlNewSetup', ''), like: strVal('vlNewLike', 'request')}]));
+  setVal('vlNewLabel', ''); setVal('vlNewSetup', '');
+  const kept = _projectFieldSave('voicePrompts', next.map(p => ({id:p.id, label:p.label, setup:p.setup, like:p.like})));
+  renderVoiceLab(); renderVoiceCompare();
+  toast(kept ? `Added "${label}" to this project's voice lab.` : `Added "${label}" for this session — create a project to keep it.`, "ok", 5000);
+}
+function removeVoicePrompt(id){
+  const next = setUserVoicePrompts(getUserVoicePrompts().filter(p => p.id !== id));
+  _projectFieldSave('voicePrompts', next.map(p => ({id:p.id, label:p.label, setup:p.setup, like:p.like})));
+  renderVoiceLab(); renderVoiceCompare();
+}
+function renderVoicePromptForm(){
+  const sel = document.getElementById('vlNewLike');
+  if (sel && !sel.options.length) sel.innerHTML = VOICE_PROMPTS.map(p => `<option value="${escHTML(p.id)}">like ${escHTML(p.label.toLowerCase())}</option>`).join("");
+}
+
+/* ---- Retire for this project ---- */
+function retireTrait(id){
+  const t = TRAITS_BY_ID.get(id);
+  if (!t) return;
+  const now = new Set(getRetiredTraits());
+  const on = !now.has(id);
+  if (on) now.add(id); else now.delete(id);
+  setRetiredTraits([...now]);
+  const kept = _projectFieldSave('retired', [...now]);
+  toast(on ? `"${t.trait}" is retired${kept ? ' for this project' : ' for this session (no project open)'} — rarer in new characters, never banned.`
+           : `"${t.trait}" is back at full weight.`, "ok", 5000);
+  if (typeof withPreservedFocus === 'function') withPreservedFocus(()=>{ renderSheet(); }); else renderSheet();
+}
+/* Project-scoped preferences follow the current project: switching projects swaps the
+   retired set and the author prompts, and no project means none of either. */
+function applyProjectPreferences(){
+  const p = currentProject();
+  setRetiredTraits(p && Array.isArray(p.retired) ? p.retired : []);
+  setUserVoicePrompts(p && Array.isArray(p.voicePrompts) ? p.voicePrompts : []);
+  if (typeof renderVoiceLab === 'function') renderVoiceLab();
+}
+
+/* ---- Cast voice-collision heatmap and de-collide ---- */
+function renderVoiceHeatmap(){
+  const host = document.getElementById('voiceHeatmap');
+  if (!host) return;
+  if (castStates.length < 2){ host.innerHTML = ""; return; }
+  const m = voiceCollisionMatrix(castStates, voiceLabMode, voiceLabReroll);
+  const cell = (i, j) => {
+    if (i === j) return `<td class="hmSelf" aria-label="same character">—</td>`;
+    const v = m.matrix[i][j], heat = m.max ? v / m.max : 0;
+    const tip = m.shared[i][j].slice(0, 6).join("; ") || "nothing shared";
+    return `<td class="hmCell" style="--heat:${heat.toFixed(2)}" title="${escAttr(tip)}">${v}</td>`;
+  };
+  host.innerHTML = `<div class="tensionTitle" style="margin:0 0 6px;">Voice collisions across every prompt</div>
+    <div class="hmWrap"><table class="heatmap"><thead><tr><th></th>${m.names.map(n => `<th scope="col">${escHTML(n)}</th>`).join("")}</tr></thead>
+    <tbody>${m.names.map((n, i) => `<tr><th scope="row">${escHTML(n)}</th>${m.names.map((_, j) => cell(i, j)).join("")}</tr>`).join("")}</tbody></table></div>
+    <div class="actionRow" style="margin-top:8px;">
+      <button class="btn-secondary" id="deCollideBtn" ${actAttr('click', 'deCollideCast')} ${m.worst < 0 ? 'disabled' : ''}>De-collide${m.worst >= 0 ? ` (reroll ${escHTML(m.names[m.worst])})` : ''}</button>
+      <span class="sub">${m.worst >= 0 ? `${escHTML(m.names[m.worst])} shares the most devices (${m.totals[m.worst]}).` : 'No two members share a device.'}</span>
+    </div>`;
+}
+/* Reroll the member with the largest collision total, keeping their name and axis
+   posture, and keep the reroll only if it lowers the cast's total — a few seeded
+   attempts, never a worse ensemble than before. */
+function deCollideCast(){
+  if (castStates.length < 2){ toast("Generate a cast of two or more first.", "warn"); return; }
+  const before = voiceCollisionMatrix(castStates, voiceLabMode, voiceLabReroll);
+  const i = before.worst;
+  if (i < 0){ toast("Nobody in this cast shares a device — nothing to de-collide."); return; }
+  const sum = mm => mm.totals.reduce((a, b) => a + b, 0);
+  const target = castStates[i];
+  const prof = axisProfile(target.state);
+  const rarityPref = rarityPrefVal();
+  let best = null, bestSum = sum(before);
+  withoutContextBias(()=> withSpeculativeGeneration(()=>{
+    for (let attempt = 0; attempt < 6; attempt++){
+      withRng(mulberry32(hashSeedString(target.id + '|decollide|' + attempt + '|' + voiceLabReroll)), ()=>{
+        const personalityOverrides = {};
+        PERSONALITY_AXES.forEach(a => { personalityOverrides[a.id] = Math.round(clamp((prof[a.id] || 0) * 50, -100, 100)); });
+        rollCharacterVariants();
+        const cand = finalizeSheet(buildCharacterState({verbLevel: randomAxisLevel(), regLevel: randomAxisLevel(), compLevel: randomAxisLevel(),
+          mannerCount: intVal('mannerCount', 3), vocabCount: intVal('vocabCount', 2), rarityPref, vocabPref: null, personalityOverrides}),
+          {rarityPref, applyPins: false});
+        const trial = castStates.map((c, j) => j === i ? Object.assign({}, c, {state: cand}) : c);
+        const s2 = sum(voiceCollisionMatrix(trial, voiceLabMode, voiceLabReroll));
+        if (s2 < bestSum){ bestSum = s2; best = {state: cand, variants: Object.assign({}, charVariants)}; }
+      });
+    }
+  }));
+  if (!best){ toast(`Could not find a version of ${target.meta.name} that collides less — try another take.`, "warn", 5000); return; }
+  const restore = _castSnapshot();
+  castStates[i] = Object.assign({}, target, {state: best.state, variants: best.variants});
+  relationshipEdges = pruneEdges(relationshipEdges, castStates);
+  renderCast(); renderVoiceCompare(); refreshRelSelectors();
+  toastUndo(`Rerolled ${target.meta.name}: shared devices ${sum(before)} → ${bestSum}.`, ()=>{ restore(); renderCast(); renderVoiceCompare(); });
+}
+
+/* ---- Arc timeline export with a pressure-sheet diff per event ---- */
+function _pressureSig(ps){
+  const out = {};
+  Object.keys(ps || {}).forEach(k => { const x = ps[k]; if (x && x.trait) out[k] = {id: x.trait.id, name: x.trait.trait, label: x.label || k}; });
+  return out;
+}
+function pressureSheetDiff(a, b){
+  const A = _pressureSig(a), B = _pressureSig(b), rows = [];
+  new Set(Object.keys(A).concat(Object.keys(B))).forEach(k => {
+    const x = A[k], y = B[k];
+    if (x && y && x.id === y.id) return;
+    rows.push({slotId: k, from: x ? x.name : null, to: y ? y.name : null, label: (y || x).label});
+  });
+  return rows;
+}
+function arcTimeline(){
+  if (!arcBase || !arcEvents.length) return [];
+  const verb = rawToLevel(intVal('verbositySlider', 0)), reg = rawToLevel(intVal('registerSlider', 0));
+  const manners = intVal('mannerCount', 3), rp = rarityPrefVal();
+  const events = arcEvents.slice().sort((a, b) => a.seq - b.seq);
+  const pressureFor = (st, key) => {
+    let ps = null;
+    withSpeculativeGeneration(()=> withRng(mulberry32(hashSeedString('arc-pressure|' + key)), ()=>{
+      ps = buildStressVariant(verb, reg, manners, rp, st);
+    }));
+    return ps;
+  };
+  // Every step uses the SAME sub-stream key, so a slot moves in the diff because the
+  // sheet under it moved, not because the dice were rolled again.
+  let prev = pressureFor(arcBase, 'base');
+  return events.map(e => {
+    const st = replayArc(arcBase, events.filter(x => x.seq <= e.seq));
+    const ps = pressureFor(st, 'base');
+    const row = {seq: e.seq, title: e.title || 'Untitled event', shape: e.shape, belief: e.beliefChallenged || '', choice: e.choice || '', cost: e.cost || '',
+      changes: (e.changes || []).filter(c => c.accepted).map(c => ({from: (TRAITS_BY_ID.get(c.fromId) || {}).trait || String(c.fromId), to: (TRAITS_BY_ID.get(c.toId) || {}).trait || String(c.toId)})),
+      pressureDiff: pressureSheetDiff(prev, ps)};
+    prev = ps;
+    return row;
+  });
+}
+function arcTimelineMarkdown(){
+  const rows = arcTimeline();
+  const L = [`# Arc timeline — ${charMeta.name || "Unnamed Character"}`, "", `_${arcSummary(arcEvents).line}_`, ""];
+  rows.forEach(r => {
+    L.push(`## ${r.seq}. ${r.title} (${r.shape})`, "");
+    if (r.belief) L.push(`- Belief tested: ${r.belief}`);
+    if (r.choice) L.push(`- Choice: ${r.choice}`);
+    if (r.cost) L.push(`- Cost: ${r.cost}`);
+    L.push(r.changes.length ? "- Sheet changes: " + r.changes.map(c => `${c.from} → ${c.to}`).join("; ") : "- Sheet changes: none accepted");
+    L.push("", "Under pressure, after this event:");
+    L.push(r.pressureDiff.length ? r.pressureDiff.map(d => `- ${d.label}: ${d.from || '(none)'} → ${d.to || '(none)'}`).join("\n") : "- no change to how they break", "");
+  });
+  return L.join("\n");
+}
+function exportArcTimeline(){
+  if (!arcEvents.length){ toast("Add an arc event first.", "warn"); return; }
+  const safe = String(charMeta.name || "character").replace(/[^a-z0-9_-]+/gi, "_").slice(0, 40);
+  downloadText(arcTimelineMarkdown(), `${safe}_arc_timeline.md`);
 }
 
 // ================= CONTENT PACKS =================
@@ -1127,6 +1306,7 @@ async function loadProjects(){
     projects = rows.filter(p => p && !validateProject(p).length);
     if (!projects.some(p => p.id === currentProjectId)) currentProjectId = projects.length ? projects[0].id : null;
   } catch(e){ projects = []; }
+  applyProjectPreferences();
   renderProjects();
 }
 async function saveProject(p){
@@ -1137,13 +1317,18 @@ async function newProject(){
   const name = await askForName("Name this project:", "");
   if (!name) return;
   const p = makeProject(name);
+  // A new project starts clean of the old one's retired traits, but keeps any author
+  // prompts written before a project existed — that is usually why it was just created.
+  p.voicePrompts = getUserVoicePrompts().map(x => ({id:x.id, label:x.label, setup:x.setup, like:x.like}));
   projects.push(p); currentProjectId = p.id;
+  applyProjectPreferences();
   await saveProject(p);
   renderProjects();
   toast(`Project "${name}" created. Saves, casts and arcs now file under it.`, "ok", 5000);
 }
 async function switchProject(id){
   currentProjectId = id || null;
+  applyProjectPreferences();
   renderProjects();
   const p = currentProject();
   if (p) toast(`Working in "${p.name}" — ${projectSummary(p)}.`, "ok", 5000);
@@ -1162,6 +1347,7 @@ async function deleteProject(id){
   await storage.delete(PROJECT_KEY(id));
   projects = projects.filter(x => x.id !== id);
   if (currentProjectId === id) currentProjectId = projects.length ? projects[0].id : null;
+  applyProjectPreferences();
   renderProjects();
   toast(`Deleted "${p.name}".`);
 }

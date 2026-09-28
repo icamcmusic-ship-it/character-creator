@@ -501,6 +501,9 @@ function traitCardHTML(id, s, includeControls, showDiff, accent, tagLabel){
         <button class="markBtn ${bannedTraitIds.has(t.id) ? 'on' : ''}" ${actAttr('click', 'banTrait', t.id)}
                 aria-pressed="${bannedTraitIds.has(t.id) ? 'true' : 'false'}"
                 title="${bannedTraitIds.has(t.id) ? 'Allow this trait again' : 'Never draw this trait again'}"><span aria-hidden="true">🚫</span><span class="srOnly">never draw this again</span></button>
+        ${typeof isRetired === 'function' ? `<button class="markBtn retireBtn ${isRetired(t.id) ? 'on' : ''}" ${actAttr('click', 'retireTrait', t.id)}
+                aria-pressed="${isRetired(t.id) ? 'true' : 'false'}"
+                title="${isRetired(t.id) ? 'Bring this trait back at full weight' : 'Retire for this project: drawn far less often in new characters, never banned; seeds still replay'}"><span aria-hidden="true">⏸</span><span class="srOnly">${isRetired(t.id) ? 'un-retire this trait' : 'retire this trait for this project'}</span></button>` : ``}
         <button class="whyBtn" ${actAttr('click', 'editTraitNote', id)} title="${traitNotes[id] ? 'Edit your note on this card' : 'Attach a note to this card'}">${traitNotes[id] ? 'note ✎' : '+ note'}</button>
       </div>` : ``}
     </div>`;

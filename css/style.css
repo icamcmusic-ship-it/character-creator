@@ -1293,6 +1293,20 @@
   .voiceHead { display:flex; flex-wrap:wrap; gap:8px; align-items:baseline; margin-bottom:6px; font-size:.88rem; }
   .voiceLine { margin:4px 0 6px; padding:6px 0 6px 12px; border-left:3px solid var(--golden-deep); font-style:italic; line-height:1.6; }
   .sharedDevice { background:var(--bubblegum); color:#fff; border-radius:8px; padding:0 6px; }
+  .voiceCard.userPrompt { border-style:dashed; }
+  .vlAddPrompt { margin-top:8px; font-size:.85rem; }
+  .vlAddPrompt summary { cursor:pointer; color:var(--text-muted, var(--text)); }
+  .vlForm { display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
+  .vlForm input[type=text] { flex:1 1 180px; min-width:0; }
+  .vlForm select { flex:0 1 auto; max-width:100%; }
+  /* Cast voice-collision heatmap: one tinted cell per pair, tint = share of the worst pair. */
+  .hmWrap { max-width:100%; overflow-x:auto; }
+  .heatmap { border-collapse:collapse; font-size:.8rem; }
+  .heatmap th { font-weight:600; padding:4px 6px; text-align:left; white-space:nowrap; max-width:9em; overflow:hidden; text-overflow:ellipsis; }
+  .heatmap td { min-width:2.4em; text-align:center; padding:4px 6px; border:1px solid var(--border); }
+  .heatmap .hmCell { background:color-mix(in srgb, var(--bubblegum) calc(var(--heat, 0) * 70%), transparent); }
+  .heatmap .hmSelf { color:var(--border-strong); }
+  .retireBtn.on { opacity:1; outline:1px dashed var(--border-strong); }
 
   /* Content packs */
   .packRow { display:flex; align-items:baseline; gap:7px; padding:5px 9px; border:1px solid var(--border-strong); border-radius:10px; margin:0 6px 6px 0; font-size:.83rem; }

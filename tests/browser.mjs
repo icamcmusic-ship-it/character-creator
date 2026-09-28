@@ -581,6 +581,61 @@ await step('B18 — colour values are validated before reaching CSS', async ()=>
   const r = await page.evaluate(()=> [cssColor('var(--cast-1)'), cssColor('red;background:url(x)'), cssColor('#abc')]);
   if (r[0] !== 'var(--cast-1)' || r[1] === 'red;background:url(x)' || r[2] !== '#abc') throw new Error(JSON.stringify(r));
 });
+await step('voice lab: an author prompt is added through the form, and Another take recomposes', async ()=>{
+  await page.evaluate(()=>{ switchTab && switchTab('single'); setVal('seedInput','vl-author'); runGeneration(); setVal('seedInput',''); document.getElementById('vlAddPrompt').open = true; });
+  await page.fill('#vlNewLabel', 'Turning down the captain');
+  await page.selectOption('#vlNewLike', 'refuse');
+  await page.click('#vlAddBtn');
+  const r = await page.evaluate(()=>({cards: document.querySelectorAll('#voiceLabBody .voiceCard').length,
+    user: document.querySelectorAll('#voiceLabBody .voiceCard.userPrompt').length,
+    text: [...document.querySelectorAll('#voiceLabBody .voiceLine')].map(e=>e.textContent).join('|')}));
+  if (r.cards !== VOICE_PROMPT_COUNT + 1 || r.user !== 1) throw new Error(JSON.stringify(r));
+  let moved = false;
+  for (let i = 0; i < 8 && !moved; i++){
+    await page.click('#vlReroll');
+    moved = await page.evaluate(t => [...document.querySelectorAll('#voiceLabBody .voiceLine')].map(e=>e.textContent).join('|') !== t, r.text);
+  }
+  if (!moved) throw new Error('Another take never changed a line');
+  await page.locator('#voiceLabBody .userPrompt [data-act="removeVoicePrompt"]').click();
+  const left = await page.evaluate(()=> document.querySelectorAll('#voiceLabBody .voiceCard.userPrompt').length);
+  if (left) throw new Error('the author prompt was not removed');
+});
+await step('retire for this project toggles from a trait card', async ()=>{
+  const btn = page.locator('#sheetBody .retireBtn').first();
+  await btn.click();
+  const r = await page.evaluate(()=>({n: getRetiredTraits().length, on: !!document.querySelector('#sheetBody .retireBtn.on')}));
+  if (r.n !== 1 || !r.on) throw new Error(JSON.stringify(r));
+  await page.locator('#sheetBody .retireBtn.on').first().click();
+  const n2 = await page.evaluate(()=> getRetiredTraits().length);
+  if (n2 !== 0) throw new Error('un-retire left ' + n2);
+});
+await step('arc timeline export downloads markdown with a pressure diff', async ()=>{
+  await page.evaluate(()=>{ arcBase = JSON.parse(JSON.stringify(state)); arcEvents = []; const ev = makeArcEvent(1, {title:'The fire', shape:'growth', at:'x'}); ev.changes = proposeArcChanges(state, ev, []); arcEvents.push(ev); renderArc(); });
+  const [dl] = await Promise.all([page.waitForEvent('download', {timeout:5000}), page.click('#arcTimelineBtn')]);
+  const path = await dl.path();
+  const fs = await import('fs');
+  const md = fs.readFileSync(path, 'utf8');
+  await page.evaluate(()=>{ arcEvents = []; arcBase = null; renderArc(); });
+  if (!/## 1\. The fire/.test(md) || !/Under pressure, after this event/.test(md)) throw new Error(md.slice(0, 160));
+});
+await step('cast voice-collision heatmap renders and De-collide keeps the cast', async ()=>{
+  await page.evaluate(()=>{ switchTab('cast'); setVal('castCount','4'); generateCast(); switchTab('rel'); renderVoiceCompare(); });
+  const r = await page.evaluate(()=>({cells: document.querySelectorAll('#voiceHeatmap td.hmCell').length, n: castStates.length}));
+  if (r.cells !== r.n * (r.n - 1)) throw new Error(JSON.stringify(r));
+  const btn = page.locator('#deCollideBtn');
+  if (await btn.isEnabled()){
+    const before = await page.evaluate(()=> voiceCollisionMatrix(castStates, voiceLabMode, voiceLabReroll).totals.reduce((a,b)=>a+b,0));
+    await btn.click();
+    const after = await page.evaluate(()=> ({t: voiceCollisionMatrix(castStates, voiceLabMode, voiceLabReroll).totals.reduce((a,b)=>a+b,0), n: castStates.length}));
+    if (after.n !== r.n || after.t > before) throw new Error(`${before} → ${after.t}, ${after.n} members`);
+  }
+});
+await step('heatmap fits a phone width without page scroll', async ()=>{
+  await page.setViewportSize({width: 375, height: 800});
+  const over = await page.evaluate(()=> document.documentElement.scrollWidth - window.innerWidth);
+  await page.setViewportSize({width: 1280, height: 900});
+  if (over > 1) throw new Error('page scrolls horizontally by ' + over + 'px');
+});
 await step('dark theme resolves real colours', async ()=>{
   await page.emulateMedia({colorScheme:'dark'});
   const c = await page.evaluate(()=>{

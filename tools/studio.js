@@ -8,6 +8,10 @@
      node tools/studio.js review [--pack=id]       # what is unreviewed, and where
      node tools/studio.js preview [--pack=id] [--n=5]   # generate with only these packs
      node tools/studio.js packs                    # the manifests and their id ranges
+     node tools/studio.js suggest-pol [--section=X] [--n=20]  # polarity tags for untagged traits
+     node tools/studio.js families [--section=X] [--min=0.4]  # cluster untagged traits into conceptFamily
+     node tools/studio.js worldtag                 # worldTags / conditions / exceptions coverage
+     node tools/studio.js scaffold "Trait name" --section=X --category=Y [--pack=id]
 
    Everything reads the live bank through the same loader the test suite uses, so a
    figure printed here is a figure the app would produce. Nothing here writes: the
@@ -25,7 +29,8 @@ const rest = argv.slice(1).filter(a => !a.startsWith('--')).join(' ');
 const ctx = loadEngine(['TRAITS','CATS_BY_SECTION','TRAIT_PACKS','RTIER_ORDER','rarityTier','assertTraitShape',
   'assertAxisTables','assertCrossLinks','catsOf','byFilter','buildCharacterState','finalizeSheet','withRng',
   'mulberry32','setDisabledPacks','getDisabledPacks','PROFILE_SECTIONS','traitDimensions','slotCat',
-  'forgetRecentTraits','forgetSlotDraws','forgetCategoryUse','packOfId']);
+  'forgetRecentTraits','forgetSlotDraws','forgetCategoryUse','packOfId','TRAIT_WORLD_TAGS','TRAIT_CONTEXTS',
+  'AXIS_LABELS','setEngineSettings']);
 const A = ctx.api, T = A.TRAITS;
 const sections = [...new Set(T.map(t => t.section))];
 const say = (...x) => console.log(...x);
@@ -154,7 +159,142 @@ function cmdPacks(){
   say(`\n${T.length} traits in ${A.TRAIT_PACKS.length} packs. Disable one in the app under Content packs, or here with --pack=.`);
 }
 
-const COMMANDS = {validate: cmdValidate, coverage: cmdCoverage, nearest: cmdNearest, review: cmdReview, preview: cmdPreview, packs: cmdPacks};
+/* suggest-pol: a polarity proposal for a trait with no pol, read off its nearest TAGGED
+   neighbours in the same section (token overlap, weighted by similarity). An axis is
+   proposed only where the neighbours agree on its sign; the value is their weighted
+   mean, rounded to the half-steps the bank uses. A proposal, printed for review — it
+   is never written. */
+function suggestPolFor(t, tagged){
+  const near = tagged.filter(o => o.section === t.section && o.id !== t.id)
+    .map(o => ({o, s: similarity(t.trait + " " + t.desc, o.trait + " " + o.desc)}))
+    .filter(x => x.s > 0.08).sort((a, b) => b.s - a.s).slice(0, 6);
+  if (!near.length) return null;
+  const sum = {}, wt = {}, signs = {};
+  near.forEach(({o, s}) => Object.entries(o.pol).forEach(([ax, v]) => {
+    sum[ax] = (sum[ax] || 0) + v * s; wt[ax] = (wt[ax] || 0) + s;
+    (signs[ax] = signs[ax] || new Set()).add(Math.sign(v));
+  }));
+  const pol = {};
+  Object.keys(sum).forEach(ax => {
+    if (signs[ax].size !== 1 || wt[ax] < 0.15) return;
+    const v = Math.round((sum[ax] / wt[ax]) * 2) / 2;
+    if (v) pol[ax] = v;
+  });
+  return Object.keys(pol).length ? {pol, basis: near.slice(0, 3).map(x => "#" + x.o.id)} : null;
+}
+function cmdSuggestPol(){
+  const only = flag('section', null), n = parseInt(flag('n', '20'), 10);
+  const tagged = T.filter(t => t.pol && Object.keys(t.pol).length);
+  const untagged = T.filter(t => (!t.pol || !Object.keys(t.pol).length) && (!only || t.section.toLowerCase().includes(only.toLowerCase())));
+  say(`${untagged.length} untagged trait(s)${only ? ` in sections matching "${only}"` : ""}; proposals for the first ${n} that have tagged neighbours:\n`);
+  let shown = 0;
+  for (const t of untagged){
+    if (shown >= n) break;
+    const sug = suggestPolFor(t, tagged);
+    if (!sug) continue;
+    shown++;
+    say(`#${t.id} ${t.trait}  (${t.section} → ${t.category})`);
+    say(`      pol: ${JSON.stringify(sug.pol)}   from ${sug.basis.join(", ")}`);
+  }
+  if (!shown) say("No proposals: nothing untagged here has a tagged neighbour close enough to argue from.");
+}
+
+/* families: single-link clusters of traits with no conceptFamily, within one section,
+   joined when their token similarity clears --min. Each cluster is proposed a family
+   name from its commonest shared tokens; a cluster that touches a trait already in a
+   family is proposed as joining that family instead. */
+function clusterFamilies(pool, min){
+  const parent = pool.map((_, i) => i);
+  const find = i => parent[i] === i ? i : (parent[i] = find(parent[i]));
+  // Token sets once, and pairs only within a section: the naive all-pairs version
+  // re-tokenised both sides of 35 million pairs and took half a minute.
+  const sets = pool.map(t => new Set(tokens(t.trait + " " + t.desc)));
+  const bySec = {};
+  pool.forEach((t, i) => { (bySec[t.section] = bySec[t.section] || []).push(i); });
+  Object.values(bySec).forEach(ix => {
+    for (let a = 0; a < ix.length; a++) for (let b = a + 1; b < ix.length; b++){
+      const A2 = sets[ix[a]], B2 = sets[ix[b]];
+      if (!A2.size || !B2.size) continue;
+      let shared = 0; A2.forEach(w => { if (B2.has(w)) shared++; });
+      if (shared && shared / (A2.size + B2.size - shared) >= min) parent[find(ix[a])] = find(ix[b]);
+    }
+  });
+  const groups = {};
+  pool.forEach((t, i) => { (groups[find(i)] = groups[find(i)] || []).push(t); });
+  return Object.values(groups).filter(g => g.length > 1).sort((a, b) => b.length - a.length);
+}
+function familyName(group){
+  const count = {};
+  group.forEach(t => new Set(tokens(t.trait + " " + t.desc)).forEach(w => { count[w] = (count[w] || 0) + 1; }));
+  return Object.entries(count).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, 2).map(x => x[0]).join("-") || "family";
+}
+function cmdFamilies(){
+  const only = flag('section', null), min = parseFloat(flag('min', '0.4'));
+  const pool = T.filter(t => !only || t.section.toLowerCase().includes(only.toLowerCase()));
+  const groups = clusterFamilies(pool, min);
+  say(`${groups.length} cluster(s) at similarity ≥ ${min}${only ? ` in "${only}"` : ""}:\n`);
+  groups.slice(0, parseInt(flag('n', '25'), 10)).forEach(g => {
+    const fams = [...new Set(g.map(t => t.conceptFamily).filter(Boolean))];
+    const untagged = g.filter(t => !t.conceptFamily);
+    if (!untagged.length) return;
+    const name = fams.length === 1 ? fams[0] : familyName(g);
+    say(`${fams.length === 1 ? "join" : fams.length ? "split?" : "new "}  conceptFamily: "${name}"  (${g[0].section}, ${g.length} traits${fams.length > 1 ? `, already spans ${fams.join(" / ")}` : ""})`);
+    g.slice(0, 8).forEach(t => say(`      #${t.id} ${t.trait}${t.conceptFamily ? `  [${t.conceptFamily}]` : ""}`));
+  });
+}
+
+/* worldtag: the optional applicability fields validate but are mostly empty; this is
+   how empty, by section, so the ratchet test in tests/run.js has a number to hold. */
+function cmdWorldtag(){
+  const bySec = {};
+  T.forEach(t => {
+    const r = bySec[t.section] = bySec[t.section] || {n: 0, world: 0, cond: 0, exc: 0};
+    r.n++;
+    if ((t.worldTags || []).length) r.world++;
+    if ((t.conditions || []).length) r.cond++;
+    if ((t.exceptions || []).length) r.exc++;
+  });
+  const pct = (a, b) => (b ? (100 * a / b).toFixed(1) : "0.0").padStart(5) + "%";
+  say("section".padEnd(34) + "traits  worldTags  conditions  exceptions");
+  Object.entries(bySec).sort((a, b) => a[0].localeCompare(b[0])).forEach(([sec, r]) =>
+    say(`${sec.slice(0, 33).padEnd(34)}${String(r.n).padStart(6)}  ${pct(r.world, r.n)}     ${pct(r.cond, r.n)}      ${pct(r.exc, r.n)}`));
+  const tagUse = {};
+  T.forEach(t => (t.worldTags || []).forEach(w => { tagUse[w] = (tagUse[w] || 0) + 1; }));
+  say("\nworldTags in use: " + (A.TRAIT_WORLD_TAGS || []).map(w => `${w} ${tagUse[w] || 0}`).join(" · "));
+  const tot = Object.values(bySec).reduce((a, r) => ({world: a.world + r.world, cond: a.cond + r.cond, exc: a.exc + r.exc}), {world: 0, cond: 0, exc: 0});
+  say(`total: worldTags ${tot.world}, conditions ${tot.cond}, exceptions ${tot.exc} of ${T.length}`);
+}
+
+/* scaffold: a trait literal to paste, with the next free id in the pack's range, the
+   section and category checked against the bank, a polarity proposal, and the nearest
+   existing traits so a duplicate is caught before it is written. Prints; never writes. */
+function cmdScaffold(){
+  const name = rest.trim();
+  const sec = flag('section', null), cat = flag('category', null), packId = flag('pack', 'core');
+  if (!name || !sec || !cat){ say('Usage: node tools/studio.js scaffold "Trait name" --section="Mannerisms" --category="..." [--pack=core]'); process.exitCode = 2; return; }
+  if (!sections.includes(sec)){ say(`No section "${sec}". Known: ${sections.join(", ")}`); process.exitCode = 2; return; }
+  if (!A.catsOf(sec).includes(cat)){ say(`No category "${cat}" in ${sec}. Known: ${A.catsOf(sec).join(" | ")}`); process.exitCode = 2; return; }
+  const pack = A.TRAIT_PACKS.find(p => p.id === packId);
+  if (!pack){ say(`No pack "${packId}".`); process.exitCode = 2; return; }
+  const used = new Set(T.map(t => t.id));
+  let id = pack.ids[0];
+  const inPack = T.filter(t => t.id >= pack.ids[0] && t.id <= pack.ids[1]).map(t => t.id);
+  if (inPack.length) id = Math.max(...inPack) + 1;
+  while (used.has(id) && id <= pack.ids[1]) id++;
+  if (id > pack.ids[1]){ say(`Pack "${packId}" has no free id left in ${pack.ids[0]}–${pack.ids[1]}.`); process.exitCode = 1; return; }
+  const tagged = T.filter(t => t.pol && Object.keys(t.pol).length);
+  const sug = suggestPolFor({id: -1, section: sec, trait: name, desc: ""}, tagged);
+  const lit = {id, section: sec, category: cat, trait: name, desc: "TODO: what it looks like from outside, one sentence.",
+    example: "TODO: a line or a beat that shows it.", intensity: 3, rarity: "uncommon", pol: sug ? sug.pol : {}, reviewStatus: "unreviewed"};
+  say("// Paste into the " + packId + " pack's data file:");
+  say(JSON.stringify(lit, null, 2).replace(/"([a-zA-Z]+)":/g, "$1:") + ",");
+  const near = T.map(t => ({t, s: similarity(name, t.trait)})).sort((a, b) => b.s - a.s).slice(0, 5).filter(x => x.s > 0);
+  if (near.length){ say("\n// Nearest existing:"); near.forEach(({t, s}) => say(`//   ${(s * 100).toFixed(0)}%  #${t.id} ${t.trait} (${t.section})`)); }
+  if (near[0] && near[0].s > 0.5) say("// The top match is close enough that this may be a duplicate.");
+}
+
+const COMMANDS = {validate: cmdValidate, coverage: cmdCoverage, nearest: cmdNearest, review: cmdReview, preview: cmdPreview, packs: cmdPacks,
+  'suggest-pol': cmdSuggestPol, families: cmdFamilies, worldtag: cmdWorldtag, scaffold: cmdScaffold};
 if (!COMMANDS[cmd]){
   say(`Unknown command "${cmd}". One of: ${Object.keys(COMMANDS).join(", ")}`);
   process.exitCode = 2;
