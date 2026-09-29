@@ -442,4 +442,128 @@ module.exports = function({check, group, assert}){
       assert(n.includes('dialect') && n.includes('family'), `seed sh${i} lost a hinted extra section: ${n}`);
     }
   });
+
+  group('Audit 2026-09 §6a the voice lab reads motivation, humour and mannerisms');
+
+  // A fixed sheet, then the parts of it the checks change one at a time.
+  const swapTrait = (G, slotPrefix, catRe, trait) => G.evalIn(`(()=>{
+    const k = Object.keys(state).find(k => k.startsWith('${slotPrefix}') && state[k] && state[k].trait && ${catRe}.test(state[k].trait.category));
+    if (!k) return false; state[k] = Object.assign({}, state[k], {trait: TRAITS_BY_ID.get(${trait})}); return true; })()`);
+  const takes = (G, id, mode, n) => G.evalIn(`voiceLines(state, '${id}', '${mode || 'baseline'}', ${n || 10}, 0)`);
+
+  check('VOICE the inner life is read from the sheet', ()=>{
+    const G = fresh(); G.gen('vi1');
+    const i = G.evalIn("(()=>{const x=voiceRules(state).inner; return Object.keys(x).filter(k=>x[k]).sort().join()})()");
+    ['defence','ghost','humor','lie','need','want'].forEach(k => assert(i.includes(k), 'voiceRules.inner is missing ' + k + ' (has ' + i + ')'));
+  });
+
+  check('VOICE concealing circles the Ghost, lying protects the Want, persuading is about the Want', ()=>{
+    const G = fresh(); let hitC = 0, hitL = 0, hitP = 0, n = 0;
+    for (let i = 0; i < 40; i++){
+      G.gen('vc' + i);
+      const w = G.evalIn("(()=>{const r=voiceRules(state);return {g:_spoken(r.inner.ghost||r.inner.wound,{the:!!r.inner.ghost,noun:!r.inner.ghost}),w:_spoken(r.inner.want)}})()");
+      if (!w.g || !w.w) continue;
+      const terse = G.evalIn("(()=>{const r=voiceRules(state);return !!r.terse||!!(r.verbosity&&r.verbosity.category==='Minimal & Ultra-Brief')})()");
+      if (terse) continue;   // a character who says almost nothing only ever gets the clipped concealing line
+      n++;
+      if (takes(G, 'conceal').some(l => l.text.includes(w.g))) hitC++;
+      if (takes(G, 'lie').some(l => l.text.includes(w.w) || l.text.includes(w.w[0].toUpperCase() + w.w.slice(1)))) hitL++;
+      if (takes(G, 'persuade').some(l => l.text.includes(w.w) || l.text.includes(w.w[0].toUpperCase() + w.w.slice(1)))) hitP++;
+    }
+    assert(n >= 8, 'too few sheets with a ghost and a want: ' + n);
+    assert(hitC / n >= 0.85 && hitL / n >= 0.85 && hitP / n >= 0.85, `conceal ${hitC}/${n}, lie ${hitL}/${n}, persuade ${hitP}/${n}`);
+    return `conceal ${hitC}/${n}, lie ${hitL}/${n}, persuade ${hitP}/${n}`;
+  });
+
+  check('VOICE the same speech with a different Ghost and Want says different things', ()=>{
+    const G = fresh(); G.gen('vd1');
+    const a = takes(G, 'conceal').map(l => l.text).join('|');
+    const ghosts = G.evalIn("TRAITS.filter(t=>/The Ghost/.test(t.category)).map(t=>t.id)");
+    const cur = G.evalIn("voiceRules(state).inner.ghost.id");
+    const other = ghosts.find(id => id !== cur);
+    assert(swapTrait(G, 'prof_motivation_', '/The Ghost/', other), 'no Ghost slot to swap');
+    const b = takes(G, 'conceal').map(l => l.text).join('|');
+    assert(a !== b, 'a different Ghost produced the same lines');
+  });
+
+  check('VOICE the Defence bends asking for help, and the line says which card did it', ()=>{
+    const G = fresh(); let bent = 0, n = 0;
+    for (let i = 0; i < 60; i++){
+      G.gen('vh' + i);
+      const ok = G.evalIn("(()=>{const r=voiceRules(state);const terse=!!r.terse||!!(r.verbosity&&r.verbosity.category==='Minimal & Ultra-Brief');return !terse&&!!_innerLine('askhelp',r,()=>0.1,false,false)})()");
+      if (!ok) continue; n++;
+      if (takes(G, 'askhelp').some(l => l.rules.some(r => /^motivation: .* — (the ask|they )/.test(r)))) bent++;
+    }
+    assert(n >= 15, 'too few sheets whose Defence maps to a mode: ' + n);
+    assert(bent / n >= 0.9, `only ${bent}/${n} such sheets ever showed a defence-bent ask`);
+    const share = G.evalIn("(()=>{const D=TRAITS.filter(t=>/The Defence/.test(t.category));return D.filter(t=>_DEFENCE_MODES.some(m=>m.re.test(t.trait+' '+(t.desc||'')))).length/D.length})()");
+    assert(share >= 0.6, 'only ' + Math.round(share * 100) + '% of Defence cards map to a mode');
+    return `${bent}/${n} sheets; ${Math.round(share * 100)}% of Defence cards mapped`;
+  });
+
+  check('VOICE humour adds a remark in the sheet\'s own register, and Humorless adds none', ()=>{
+    const G = fresh();
+    for (let i = 0; i < 30; i++){
+      G.gen('vm' + i);
+      if (!G.evalIn("(()=>{const r=voiceRules(state);return !!r.terse||!!(r.verbosity&&r.verbosity.category==='Minimal & Ultra-Brief')})()")) break;
+    }
+    const setHumor = cat => assert(G.evalIn(`(()=>{const t=TRAITS.find(t=>t.section==='Humor Style'&&t.category==='${cat}'); const k=Object.keys(state).find(k=>k.startsWith('prof_humor_')); if(!k||!t) return false; state[k]=Object.assign({},state[k],{trait:t}); return true})()`), 'no humour slot');
+    setHumor('Cruel & Barbed');
+    const cruel = G.evalIn("_VOICE_HUMOR['Cruel & Barbed']");
+    let seen = 0; for (const id of ['refuse','apologise','persuade','lie','request']) takes(G, id, 'baseline', 10).forEach(l => { if (cruel.some(x => l.text.includes(x)) && l.rules.some(r => /^humour:/.test(r))) seen++; });
+    assert(seen >= 5, 'a Cruel & Barbed sheet added its barb only ' + seen + ' times in 50 lines');
+    setHumor('Humorless & Absent');
+    let any = 0; for (const id of ['refuse','apologise','persuade']) takes(G, id).forEach(l => { if (l.rules.some(r => /^humour:/.test(r))) any++; });
+    assert(any === 0, 'a Humorless sheet still added humour');
+  });
+
+  check('VOICE mannerisms add their own authored stage direction, in brackets', ()=>{
+    const G = fresh(); let withDir = 0, n = 0;
+    for (let i = 0; i < 20; i++){
+      G.gen('vs' + i);
+      const dirs = G.evalIn("_stageDirections(voiceRules(state).manner).map(d => d.text)");
+      if (!dirs.length) continue; n++;
+      const ls = takes(G, 'refuse', 'baseline', 10).concat(takes(G, 'apologise', 'baseline', 10));
+      if (ls.some(l => dirs.some(d => l.text.includes('[' + d + ']')) && l.rules.some(r => /^mannerism:/.test(r)))) withDir++;
+    }
+    assert(n >= 10 && withDir / n >= 0.9, `stage directions on ${withDir}/${n} sheets`);
+    return `${withDir}/${n} sheets`;
+  });
+
+  check('VOICE no placeholder or third-person leaks into a spoken line', ()=>{
+    const G = fresh(); const bad = [];
+    for (let i = 0; i < 30; i++){
+      G.gen('vp' + i);
+      for (const id of ['conceal','lie','askhelp','persuade','refuse','apologise','request']){
+        for (const mode of ['baseline','pressure']) takes(G, id, mode, 6).forEach(l => {
+          if (/\{\w+\}/.test(l.text)) bad.push('placeholder: ' + l.text);
+          if (/\b(the time they|being someone who)\b/.test(l.text)) bad.push('narration: ' + l.text);
+          if (!l.text.trim()) bad.push('empty line');
+        });
+      }
+    }
+    assert(!bad.length, bad[0] + ` (+${bad.length - 1} more)`);
+  });
+
+  check('VOICE goals, family and money cards lend their phrases to the topic pools', ()=>{
+    const G = fresh(); G.gen('vt1');
+    const r = G.evalIn(`(()=>{
+      const t = TRAITS.find(t => t.section === 'Family Talk' && /(^|[^a-z])(my|your) (sister|brother|mother|father)/i.test(t.example || ''));
+      if (!t) return null;
+      const pools = _topicPools(mulberry32(1), _examplePhrases([t], 'profile'));
+      return {t: t.trait, has: pools.person.some(p => /^(my|your) (sister|brother|mother|father)/.test(p))};
+    })()`);
+    assert(r && r.has, 'a Family Talk phrase did not reach the person pool: ' + JSON.stringify(r));
+  });
+
+  check('VOICE a terse character gets a clipped concealing line and stage directions, but no explained want', ()=>{
+    const G = fresh(); G.gen('vt9');
+    assert(G.evalIn(`(()=>{const t=TRAITS.find(t=>t.category==='Minimal & Ultra-Brief'); const k=Object.keys(state).find(k=>state[k]&&state[k].trait&&state[k].trait.section==='Verbosity Traits'&&/^verbosity/.test(k)); if(!k||!t) return false; state[k]=Object.assign({},state[k],{trait:t}); return true})()`), 'no verbosity slot to make terse');
+    assert(G.evalIn("voiceRules(state).verbosity.category") === 'Minimal & Ultra-Brief', 'the sheet did not become terse');
+    ['lie', 'persuade'].forEach(id => takes(G, id).forEach(l => assert(!l.rules.some(r => /^motivation:/.test(r)), id + ' explained the want on a terse sheet: ' + l.text)));
+    const c = takes(G, 'conceal', 'baseline', 20);
+    assert(c.some(l => l.rules.some(r => /^motivation:/.test(r))), 'a terse concealing line never circled the wound');
+    c.filter(l => l.rules.some(r => /^motivation:/.test(r))).forEach(l => assert(l.text.length < 140, 'the terse line is not clipped: ' + l.text));
+    assert(c.some(l => /\[[^\]]+\]/.test(l.text)), 'a terse character lost their stage directions');
+  });
 };

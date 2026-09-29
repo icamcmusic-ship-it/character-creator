@@ -5996,7 +5996,7 @@ const STRATEGY_BY_VALUES = {
    "Get through Friday". Pasted raw into a sentence they read as "…when keeps a
    spreadsheet for everything made them useful" and "there was was…". Every splice in
    the chain, the beats and the mechanics prose goes through these instead. */
-const _PROSE_PAST = /^(was|were|blamed|chosen|abandoned|forgotten|bullied|ignored|adopted|called|given|watched|failed|survived|lost|betrayed|grew|taught|made|told|passed|won|finished|got|learned|learnt|lent|trusted|read|allowed|sent|praised|held|left|saw|found|raised|buried|moved|spent|had|kept|became|broke|fled|missed|nursed|carried|heard|walked|stayed|came|went|took|gave|chose|married|divorced|inherited|outlived|mediated)$/i;
+const _PROSE_PAST = /^(was|were|shamed|mocked|dismissed|overlooked|replaced|cheated|humiliated|excluded|punished|rejected|blamed|chosen|abandoned|forgotten|bullied|ignored|adopted|called|given|watched|failed|survived|lost|betrayed|grew|taught|made|told|passed|won|finished|got|learned|learnt|lent|trusted|read|allowed|sent|praised|held|left|saw|found|raised|buried|moved|spent|had|kept|became|broke|fled|missed|nursed|carried|heard|walked|stayed|came|went|took|gave|chose|married|divorced|inherited|outlived|mediated)$/i;
 const _PROSE_MODAL = /^(can|cannot|can't|could|will|won't|would|never|always|only|rarely|still|mildly|quietly|secretly|slightly)$/i;
 const _PROSE_BARE = /^(live|stay|talk|finally|put|send|bring|teach|lose|give|take|run|hold|look|walk|sleep|quit|get|make|be|keep|find|win|see|have|build|learn|retire|fix|finish|sell|say|leave|clear|go|prove|become|earn|pay|buy|save|stop|start|help|protect|return|move|write|tell|hear|reach|open|close|repair|raise|marry|own|visit|meet|beat|escape|survive|forgive|matter|belong|land|pass|finally)$/i;
 const _PROSE_NOT_VERB = /^(parents|adults|mastery|recognition|belonging|nothing|always|others|debts|less|loss|access|process|success|progress|business|kindness|bus|status|chaos|focus|bonus|plus|this|its|his|hers|yes|us|thus|as|is)$/i;
@@ -6029,7 +6029,7 @@ function asNounPhrase(t){
       if (/^(was|were)$/i.test(first)) return "being " + s.replace(/^\S+\s+/, "");
       // Passive ("Told they were enough", "Blamed for…", "Chosen last") reads as being
       // done TO them; active ("Taught themselves…") as a thing they did.
-      if (/^(chosen|given|forgotten|abandoned|bullied|ignored|adopted)$/i.test(first)
+      if (/^(chosen|given|forgotten|abandoned|bullied|ignored|adopted|betrayed|blamed|rejected|shamed|mocked|dismissed|overlooked|replaced|cheated|humiliated|excluded|punished)$/i.test(first)
           || /^(for|by|they|as|that|last|first|out|into|in|at|and|repeatedly|early|young|often|twice|again)$/i.test((s.split(/\s+/)[1] || "").replace(/[,.]$/, "")))
         return "being " + s;
       if (/^had$/i.test(first)) return "having " + s.replace(/^\S+\s+/, "");
@@ -6698,6 +6698,16 @@ function voiceRules(st){
     open: lean("emo") > 0.2, guarded: lean("emo") < -0.2,
     mannered: lean("man") > 0.2, blunt: lean("man") < -0.2,
     stress: slot("prof_stress_0"), values: slot("prof_values_0"),
+    /* The lines used to be built from verbosity, register, grammar, vocabulary and the
+       axes alone, so two characters with the same speech and different wounds said the
+       same thing. The inner life is read here too — see _innerLine, _VOICE_HUMOR and
+       _stageDirections. */
+    inner: {
+      want: _profTrait(st, "motivation", /Core Want/i), need: _profTrait(st, "motivation", /The Need/i),
+      ghost: _profTrait(st, "motivation", /The Ghost/i), wound: _profTrait(st, "motivation", /Core Wound/i),
+      lie: _profTrait(st, "motivation", /The Lie/i), defence: _profTrait(st, "motivation", /The Defence/i),
+      fear: _profTrait(st, "motivation", /Core Fear/i), humor: _profTrait(st, "humor"),
+    },
   };
 }
 
@@ -6827,8 +6837,11 @@ function composeVoiceLineFragments(st, promptId, mode, opts){
   };
 }
 function voiceLab(st, mode, reroll){
+  // One `recent` across the seven situations, so the same tail, joke or stage direction
+  // does not turn up in all of them.
+  const recent = [];
   return allVoicePrompts().map((p, index) => {
-    const l = composeVoiceLine(st, p.id, mode, {index, reroll: reroll || 0});
+    const l = composeVoiceLine(st, p.id, mode, {index, reroll: reroll || 0, recent});
     if (l && p.user) l.user = true;
     return l;
   }).filter(Boolean);
@@ -7368,12 +7381,12 @@ const VOICE_CLAUSES = {
 const VOICE_ELABORATIONS = ["{person} was there {time}, if you want to check.","It's to do with {thing}, mostly.","And before you say it — yes, I know about {place}.","I've been thinking about it since {time}.","Which is more than {person} ever did."];
 // Pull noun phrases out of the sheet's own vocabulary examples, so the words a
 // character reaches for turn up in what they talk about.
-function _examplePhrases(traits){
+function _examplePhrases(traits, kind){
   const out = [];
   (traits || []).forEach(t => {
     const ex = t && t.example ? String(t.example) : "";
     const re = /\b(the|my|your|his|her|their|our) ([a-z][a-z'-]{2,}(?: [a-z][a-z'-]{2,})?)\b/gi;
-    let m; while ((m = re.exec(ex))) out.push({text: (m[1] + " " + m[2]).toLowerCase().replace(/^the the /, "the "), from: t.trait});
+    let m; while ((m = re.exec(ex))) out.push({text: (m[1] + " " + m[2]).toLowerCase().replace(/^the the /, "the "), from: t.trait, kind: kind || "vocabulary"});
   });
   return out;
 }
@@ -7393,7 +7406,13 @@ function _topicPools(rng, vocabPhrases){
   const pools = {};
   Object.keys(VOICE_TOPIC_POOL).forEach(k => { pools[k] = VOICE_TOPIC_POOL[k].slice(); });
   activeLenses().forEach(l => Object.entries(l.topics || {}).forEach(([k, arr]) => { if (pools[k]) pools[k] = arr.concat(arr, pools[k]); }));
-  vocabPhrases.forEach(p => { pools.thing.unshift(p.text); pools.thing.unshift(p.text); });
+  // Phrases lifted from the sheet: vocabulary examples, and the goals, jargon, family and
+  // money cards — a character who talks about "my sister" and "the pension" says so.
+  const KIN = /^(my|your|his|her|their|our) (mother|mum|mom|father|dad|sister|brother|wife|husband|son|daughter|aunt|uncle|parents?|kids?|child|ex|boss|partner|friend|neighbour|grandmother|grandfather|gran|nan|family)\b/;
+  vocabPhrases.forEach(p => {
+    const dest = p.kind === "profile" && KIN.test(p.text) ? pools.person : pools.thing;
+    dest.unshift(p.text); dest.unshift(p.text);
+  });
   Object.keys(pools).forEach(k => { pools[k] = pools[k].filter(x => !taboo.some(tb => x.toLowerCase().includes(tb))); });
   return pools;
 }
@@ -7403,9 +7422,126 @@ function _fill(template, pools, rng, used, vocabPhrases){
     if (!arr || !arr.length) return k;
     const v = arr[Math.floor(rng() * arr.length)];
     const vp = vocabPhrases.find(p => p.text === v);
-    if (vp && !used.includes("vocabulary: " + vp.from)) used.push("vocabulary: " + vp.from);
+    const tag = (vp && vp.kind === "profile" ? "profile: " : "vocabulary: ") + (vp && vp.from);
+    if (vp && !used.includes(tag)) used.push(tag);
     return v;
   });
+}
+/* ---------- INNER LIFE IN THE LINES ----------
+   What a character says is shaped by what they are hiding, wanting and defending, how
+   they joke, and what their hands do — none of which the composer read. Four additions,
+   each naming the card it came from in the rules list:
+     concealing circles the Ghost (or the Wound);   lying protects the Want;
+     asking for help is bent by the Defence;        humour adds a remark in its own register;
+     mannerisms add the stage direction the card itself authors.                           */
+// A trait, said by the character about themselves: "a door they left open" -> "a door I left open".
+function _firstPerson(s){
+  return String(s || "")
+    .replace(/\bthey're\b/gi, "I'm").replace(/\bthey've\b/gi, "I've").replace(/\bthey'd\b/gi, "I'd").replace(/\bthey'll\b/gi, "I'll")
+    .replace(/\bthey are\b/gi, "I am").replace(/\bthey were\b/gi, "I was").replace(/\bthey is\b/gi, "I am")
+    .replace(/\bthemselves\b/gi, "myself").replace(/\bthem\b/gi, "me").replace(/\btheirs\b/gi, "mine").replace(/\btheir\b/gi, "my")
+    .replace(/\bthey\b/gi, "I");
+}
+function _spoken(t, opts){
+  if (!t) return null;
+  let s = (opts && opts.noun ? asNounPhrase(t) : traitPhrase(t));
+  if (!/\s/.test(s)) s = s.replace(/-/g, " ");
+  s = _firstPerson(s).replace(/[.!?,;:]+$/, "").trim();
+  if (opts && opts.the) s = s.replace(/^(a|an) /i, "the ");
+  if (!s || s.length > 56) return null;
+  return /^I\b/.test(s) ? s : s[0].toLowerCase() + s.slice(1);
+}
+const _VOICE_INNER = {
+  conceal: [
+    "Ask me anything else. Not {G}.", "Whatever you've heard about {G}, leave it where it is.", "That has nothing to do with {G}. Nothing.",
+    "I'll talk about anything. I won't talk about {G}.", "Don't. Not {G}. Not here."],
+  lie: [
+    "All I want is {W}. Why would I risk that?", "Everything I did, I did for one reason: {W}.",
+    "You know what I want. {Wc}. Why would I throw that away?"],
+  concealShort: ["Not {G}.", "Leave {G} out of it.", "{G}? No."],   // for a character who says almost nothing
+  persuade: ["It comes down to this for me: {W}.", "I'm asking because of one thing: {W}.", "You know what this is for. {Wc}."],
+};
+// How the Defence bends a request for help, read from what the card says it is.
+const _DEFENCE_MODES = [
+  {id:"joke", re:/joke|funn|laugh|humou?r|clown|comic/i, tell:"the ask arrives as a joke",
+   pre:["Funny story — ", "Small joke of a favour — ", "Don't laugh, but "], post:["I'm laughing. I'm also serious."]},
+  {id:"charm", re:/charm|flatter|compliment|likeab|winning/i, tell:"the ask arrives wrapped in charm",
+   post:["You'll say yes. You're always lovely about these things.", "I ask because you're the one who could make this look easy."]},
+  {id:"selfcrit", re:/self-?critic|self-?blame|criticism|self-?punish|apolog/i, tell:"they run themselves down before the ask lands",
+   pre:["I know how this sounds — ", "Sorry. Ridiculous. But — "], post:["I hate that I can't do this myself."]},
+  {id:"question", re:/asks? the questions|interrogat|only ever asks|answers a question|deflect(s|ing)? with question/i, tell:"they answer the need with a question",
+   pre:["Can I ask you something first? "], post:["What would you do, if it were you?", "Is that a terrible thing to ask?"]},
+  {id:"contempt", re:/contempt|scorn|disdain|sneer|dismiss/i, tell:"they sneer at the thing they need",
+   post:["Not that it matters. Not that any of it does.", "Don't make a thing of it."]},
+  {id:"perform", re:/perform|persona|mask|version|act\b/i, tell:"the ask comes in a practised voice that slips",
+   post:["That's — sorry. That's not the voice I usually use for this.", "I had a better way of asking. It's gone."]},
+  {id:"chatter", re:/disclos|overshar|chatter|cheerful|talkat/i, tell:"they bury the ask in cheerful talk",
+   pre:["Long story, but — ", "Anyway, the weather, and also — "], post:["Anyway. That's the whole thing."]},
+  {id:"armour", re:/compet|expert|efficien|control|organis|plan|rules|explain|manag|fix|prepar|precis|armou?r|armor/i, tell:"they frame it as competence, not need",
+   post:["I'd normally handle this myself.", "It's not that I can't. It's that it goes quicker with two.", "This isn't about competence."]},
+  {id:"minimise", re:/silen|withdraw|avoid|distan|busy|motion|leav|hid|quiet|shut|wall|invisib/i, tell:"they shrink the ask until it barely counts",
+   post:["It's nothing, honestly.", "Forget it — it's small.", "Only if you happen to be passing."]},
+  {id:"blunt", re:/honest|blunt|truth|direct|candid|frank/i, tell:"they say it plainly because dressing it up is worse",
+   post:["I'm asking plainly because I don't do this well.", "No dressing it up: I need help."]},
+  {id:"offer", re:/pleas|useful|helper|kind|generous|giv|fawn|agreeab|serv|host/i, tell:"they offer something back before they ask",
+   pre:["I'll do yours first — ", "I'll owe you, and I always pay — "], post:["Only if I can do something for you in return."]},
+];
+function _innerLine(kind, r, rng, underPressure, terse){
+  const inn = r.inner || {};
+  const pick = arr => arr[Math.floor(rng() * arr.length)];
+  if (kind === "conceal"){
+    const src = inn.ghost || inn.wound;
+    const G = src && _spoken(src, {the: !!inn.ghost, noun: !inn.ghost});
+    if (!G) return null;
+    return {text: _cap(pick(terse ? _VOICE_INNER.concealShort : _VOICE_INNER.conceal).replace("{G}", G)), rule: `motivation: ${src.trait} — the line circles what they are not saying`};
+  }
+  if (kind === "lie" || kind === "persuade"){
+    const W = _spoken(inn.want);
+    if (!W) return null;
+    return {text: _cap(pick(_VOICE_INNER[kind]).replace("{W}", W).replace("{Wc}", _cap(W))),
+      rule: `motivation: ${inn.want.trait} — ${kind === "lie" ? "the lie protects the want" : "the ask is about the want"}`};
+  }
+  if (kind === "askhelp" && inn.defence){
+    const mode = _DEFENCE_MODES.find(m => m.re.test(`${inn.defence.trait} ${inn.defence.desc || ""}`));
+    if (!mode) return null;
+    return {mode, rule: `motivation: ${inn.defence.trait} — ${mode.tell}`};
+  }
+  return null;
+}
+/* Humour, by category: what the sense of humour adds to a line. Under pressure most of
+   it goes (see _HUMOR_AT in mechanics.js: the jokes change first), and what is left is
+   the version that shows the strain. */
+const _VOICE_HUMOR = {
+  "Dry & Deadpan": ["Minor detail.", "Not ideal.", "Could be worse. Not by much.", "Noted."],
+  "Self-Deprecating": ["Which, given my record, is optimistic of me.", "Don't take my word for it — I'm the problem here.", "Naturally I'd be the one to say it.", "I'm aware of how that sounds coming from me."],
+  "Cruel & Barbed": ["Try to keep up.", "I'll go slower for you.", "You'd know all about that.", "Do write that down."],
+  "Warm & Playful": ["— you big softie.", "See? Easy. You're welcome.", "Don't look at me like that, you love it.", "I'm only teasing. Mostly."],
+  "Absurd & Chaotic": ["Also, there's a goose in the car park. Unrelated.", "Anyway, the moon's a bit close tonight.", "Has anyone checked on the ferret?", "I've decided it's a Tuesday."],
+  "Intellectual & Wordplay": ["A matter of {thing}, as it were.", "And that, as they say, is the rub.", "Call it a question of syntax.", "There's a pun in there somewhere; I'll spare you."],
+  "Observational": ["Funny how nobody ever says it out loud.", "It's always {thing}, isn't it.", "People do that, don't they."],
+  "Pun-Groaner": ["Sorry. That one wrote itself.", "I'd say more, but I'd be pushing my luck. Or my pun.", "That's the good one and I know it."],
+  "Callback & Running Bit": ["Like {thing}. Again.", "Which is the {thing} business all over again."],
+  "Gallows": ["Well, nobody's died. Yet.", "On the bright side, it can't get worse. Famous last words.", "Put it on my headstone."],
+  "Physical & Slapstick": ["— and then I walked into the door, naturally.", "[nearly trips over nothing and carries on]"],
+  "Teasing as Affection": ["Don't get sentimental on me.", "You're lucky I like you.", "Look at you, being competent."],
+  "Laughs at Own Jokes": ["[laughs at their own line] Sorry — sorry, that got me."],
+};
+const _VOICE_HUMOR_PRESSURE = {
+  "Dry & Deadpan": ["Wonderful.", "That's the day, then."],
+  "Cruel & Barbed": ["Good. Keep going.", "Don't stop now."],
+  "Self-Deprecating": ["Sorry. Obviously it's me.", "Of course it is."],
+  "Warm & Playful": ["[a laugh, a beat too fast]", "Ha. Yes. Very good."],
+  "Gallows": ["Well, it's not like I was using the rest of the day."],
+};
+// The trait's own stage direction — the authored "(taps the table)" that opens its example.
+function _stageDirections(manner){
+  const out = [];
+  (manner || []).forEach(t => {
+    const m = /^\(([^)]{3,64})\)/.exec(String(t.example || "").trim());
+    // A direction is a gesture, not a paragraph: skip the long ones and the multi-sentence ones.
+    if (m && m[1].length <= 52 && !/[.!?] /.test(m[1])) out.push({text: m[1].trim().replace(/[.,;:]+$/, ""), trait: t.trait});
+  });
+  return out;
 }
 function composeVoiceLine(st, promptId, mode, opts){
   const prompt = allVoicePrompts().find(p => p.id === promptId);
@@ -7425,7 +7561,10 @@ function composeVoiceLine(st, promptId, mode, opts){
   const kind = prompt.like || promptId;
   const table = VOICE_CLAUSES[kind];
   const used = [];
-  const vocabPhrases = _examplePhrases(r.vocab);
+  // Goals, jargon, family, money and texture cards lend their own phrases to the topic pools.
+  const profMany = id => Object.keys(st || {}).filter(k => k.startsWith("prof_" + id + "_") && st[k] && st[k].trait).map(k => st[k].trait);
+  const vocabPhrases = _examplePhrases(r.vocab).concat(
+    _examplePhrases(["goals", "jargon", "family", "money", "texture"].reduce((a, id) => a.concat(profMany(id)), []), "profile"));
   const pools = _topicPools(rng, vocabPhrases);
   const fill = t => _fill(t, pools, rng, used, vocabPhrases);
   const gcat = r.grammar ? r.grammar.category : null, vcat = r.verbosity ? r.verbosity.category : null;
@@ -7482,6 +7621,22 @@ function composeVoiceLine(st, promptId, mode, opts){
     core = ["I think ","Maybe ","I mean, ","Sort of — "][Math.floor(rng() * 4)] + _lowerFirst(core); rule("hedged (low assertiveness)");
   }
   const extra = [];
+  /* Inner life. Concealing circles the Ghost (or Wound), lying protects the Want, asking for
+     help is bent by the Defence, persuading is about what they want. Not every line: a
+     character who explained their wound every time would be a case file, not a person. */
+  // A character who says almost nothing still has a wound: concealing gets a clipped version.
+  if ((!minimal || kind === "conceal") && rng() < (underPressure ? 0.4 : 0.65)){
+    const inn = _innerLine(kind, r, rng, underPressure, minimal);
+    if (inn){
+      rule(inn.rule);
+      if (inn.text) extra.unshift(inn.text);
+      else if (inn.mode){
+        const m = inn.mode, pk = arr => arr[Math.floor(rng() * arr.length)];
+        if (m.pre && rng() < 0.5) core = pk(m.pre) + _lowerFirst(core);
+        else if (m.post) extra.unshift(pk(m.post));
+      }
+    }
+  }
   if (!minimal && !underPressure && (r.long || vcat === "High-Volume & Wordy")){
     extra.push(_cap(fill(VOICE_ELABORATIONS[Math.floor(rng() * VOICE_ELABORATIONS.length)])));
     if (r.long) extra.push(fresh(VOICE_FRAGMENTS.tail.long).text);
@@ -7551,16 +7706,34 @@ function composeVoiceLine(st, promptId, mode, opts){
     if (recent) recent.push(dev.text);
     extra.push(dev.text); rule("vocabulary: " + dev.trait);
   }
+  // Humour: a remark in the character's own register, at the end of the line.
+  const hum = r.inner && r.inner.humor;
+  if (hum && !minimal){
+    const pool = (underPressure ? _VOICE_HUMOR_PRESSURE : _VOICE_HUMOR)[hum.category];
+    if (pool && rng() < (underPressure ? 0.3 : 0.4)){
+      const h = fresh(pool.map(t => _VF(t, "humour: " + hum.trait + " — a remark in its register")));
+      extra.push(_cap(fill(h.text))); rule(h.rule);
+    }
+  }
   let text = [opener, core].concat(extra).filter(Boolean).join(" ").replace(/\s+/g, " ").trim()
     .replace(/([^.][.!?] )([a-z])/g, (m, a, b) => a + b.toUpperCase());
   // Register: formal speech drops its contractions, casual speech takes them. Not under
   // pressure — the politeness layer is the first thing to go.
   if (!underPressure && r.formal && !r.casual){
     let n = 0; CONTRACT.forEach(([full, short]) => { const re = new RegExp("\\b" + short.replace("'", "'") + "\\b", "g"); text = text.replace(re, () => { n++; return full; }); });
+    text = text.replace(/\b(do|does|did|is|are|was|were|can|could|will|would|should|have|has) not (you|they|we|he|she|it|I)\b/g, (m, v, pr) => `${v} ${pr} not`);
     if (n) rule("formal register — no contractions");
   } else if (!underPressure && r.casual){
     let n = 0; CONTRACT.forEach(([full, short]) => { const re = new RegExp("\\b" + full + "\\b", "g"); text = text.replace(re, () => { n++; return short; }); });
     if (n) rule("casual register — contracts everything");
+  }
+  // Mannerisms: the card's own stage direction, in brackets, before or after the line.
+  // Even a terse character has hands.
+  const dirs = _stageDirections(r.manner);
+  if (dirs.length && text && rng() < 0.5){
+    const d = fresh(dirs.map(x => Object.assign({}, x, {rule: "mannerism: " + x.trait + " — its own stage direction"})));
+    rule(d.rule);
+    text = rng() < 0.5 ? `[${d.text}] ${text}` : `${text} [${d.text}]`;
   }
   return {
     prompt: prompt.label, promptId, setup: prompt.setup, mode: underPressure ? "pressure" : "baseline",
