@@ -362,4 +362,84 @@ module.exports = function({check, group, assert}){
     assert(fear.size >= 3, 'the fear link has ' + fear.size + ' distinct openers');
     assert(fail.size >= 3, 'the failure beat has ' + fail.size + ' distinct openers');
   });
+
+  group('Audit 2026-09 §4b archetype hints for the off-by-default sections');
+
+  // fresh() ticks every section; these checks are about the ones that ship OFF.
+  const freshOff = () => {
+    const G = fresh();
+    G.evalIn("PROFILE_SECTIONS.filter(p => p.defaultOn === false).map(p => p.id)").forEach(id => G.document._set('sec_' + id, {checked: false}));
+    return G;
+  };
+
+  check('HINTS every section that ships off is named by several presets, and most presets name one', ()=>{
+    const G = fresh();
+    const r = G.evalIn(`(()=>{
+      const off = PROFILE_SECTIONS.filter(p => p.defaultOn === false).map(p => p.id);
+      const per = {}; off.forEach(id => per[id] = 0);
+      let presetsWithOff = 0;
+      for (const [k, prof] of Object.entries(ARCHETYPE_PROFILE_HINTS)){
+        const mine = Object.keys(prof).filter(s => off.includes(s));
+        if (mine.length) presetsWithOff++;
+        mine.forEach(s => per[s]++);
+      }
+      return {off, per, presetsWithOff, total: Object.keys(ARCHETYPES).length};
+    })()`);
+    const thin = Object.entries(r.per).filter(([, n]) => n < 2).map(([k]) => k);
+    assert(!thin.length, 'sections hinted by fewer than two presets: ' + thin.join(', '));
+    assert(r.presetsWithOff >= r.total - 3, `only ${r.presetsWithOff}/${r.total} presets name an off-by-default section`);
+    return `${r.presetsWithOff}/${r.total} presets; per section ${JSON.stringify(r.per)}`;
+  });
+
+  check('HINTS a preset\'s hint switches its off-by-default section on for that build, and only that build', ()=>{
+    const G = freshOff();
+    const count = (prof) => G.evalIn(`(()=>{
+      let n = 0;
+      withArchetypeProfile(${JSON.stringify(prof)}, () => withRng(mulberry32(77), () => {
+        const o = {}; PERSONALITY_AXES.forEach(a => { o[a.id] = 0; });
+        const st = buildCharacterState({verbLevel:0, regLevel:0, compLevel:0, mannerCount:2, vocabCount:2, rarityPref:'balanced', vocabPref:null, personalityOverrides:o});
+        n = Object.keys(st).filter(k => k.startsWith('prof_dialect_')).length;
+      }));
+      return n;
+    })()`);
+    assert(count({dialect:'Code-Switching'}) > 0, 'a Dialect hint did not bring Dialect in');
+    assert(count(null) === 0, 'Dialect appeared with no archetype (cast, foil and gap-filler builds run this way)');
+    assert(count({stress:'Flight (remove yourself)'}) === 0, 'an unrelated hint brought Dialect in');
+    // the switch
+    G.document._set('archetypeSectionsToggle', {checked: false});
+    assert(count({dialect:'Code-Switching'}) === 0, 'the switch does not turn it off');
+    G.document._set('archetypeSectionsToggle', {checked: true});
+    // a section the user turned on is theirs, hint or not
+    G.document._set('sec_dialect', {checked: true});
+    assert(count(null) > 0, 'a section the user switched on is not drawn');
+  });
+
+  check('HINTS the in-force strip and Why-not name the sections the selected preset adds', ()=>{
+    const G = freshOff();
+    G.document._set('archetypeSelect', {value: 'codeSwitcher'}); G.document._set('archetypeVariation', {value: 'base'});
+    const names = G.evalIn('archetypeAddedSections().map(p => p.id)');
+    assert(names.includes('dialect') && names.includes('family'), 'added sections: ' + names);
+    const chip = G.evalIn("activeRuleChips().find(c => c.k === 'archetype adds')");
+    assert(chip && /Dialect/.test(chip.v), 'no "archetype adds" chip: ' + JSON.stringify(chip));
+    G.document._set('archetypeSectionsToggle', {checked: false});
+    assert(G.evalIn('archetypeAddedSections().length') === 0, 'the strip still claims added sections with the switch off');
+  });
+
+  check('HINTS the switch is part of the saved workspace and Reset restores it', ()=>{
+    const G = fresh();
+    assert(G.evalIn("SETTING_TOGGLES.includes('archetypeSectionsToggle')"), 'the switch is not captured with the settings');
+    const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+    assert(/id="archetypeSectionsToggle" checked/.test(html), 'the switch does not ship on');
+  });
+
+  check('HINTS the sheet shape never drops a section the preset itself switched on', ()=>{
+    const G = freshOff();
+    G.document._set('archetypeSelect', {value: 'codeSwitcher'}); G.document._set('archetypeVariation', {value: 'base'});
+    G.document._set('sheetShapeToggle', {checked: true});
+    for (let i = 0; i < 40; i++){
+      G.gen('sh' + i);
+      const n = G.evalIn("Object.keys(state).filter(k => k.startsWith('prof_dialect_') || k.startsWith('prof_family_')).map(k => k.split('_')[1])");
+      assert(n.includes('dialect') && n.includes('family'), `seed sh${i} lost a hinted extra section: ${n}`);
+    }
+  });
 };

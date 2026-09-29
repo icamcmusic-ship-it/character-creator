@@ -812,7 +812,7 @@ function emptyGroupReason(title){
   }
   const ps = PROFILE_SECTIONS.find(p=>p.label === title);
   if (ps){
-    if (!profileSectionEnabled(ps)) return "Switched off in the Character Profile panel.";
+    if (!profileSectionEnabled(ps) && !archetypeAddedSections().includes(ps)) return "Switched off in the Character Profile panel.";
     if (charMeta && charMeta.shape && charMeta.shape.dropped === ps.label) return "Dropped by this sheet's shape — the signature budget spent the space on the sections that define them. Switch \"Vary the sheet's shape\" off to always draw it.";
     if (bannedSections.has(ps.section)) return `The whole "${ps.section}" section is banned in your constraints, so nothing here can ever be drawn.`;
     const cats = catsOf(ps.section);
@@ -1581,7 +1581,7 @@ const SETTING_FIELDS = ['mannerCount','vocabCount','personalityCount','profileDe
 const SETTING_TOGGLES = ['personalityToggle','depthFirstToggle','examplesToggle','stressToggle',
   'genPersonality','genSpeech','genVocab','genManner',
   'avoidRecentToggle','wildcardToggle','foilOpposeComposure','compactToggle','castAnchor',
-  'sheetShapeToggle','seatContradictions','exploreCandidates'];
+  'sheetShapeToggle','seatContradictions','exploreCandidates','archetypeSectionsToggle'];
 
 function captureSettings(){
   const fields = {}, toggles = {}, sections = {};

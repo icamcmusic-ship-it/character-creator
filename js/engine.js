@@ -1040,62 +1040,67 @@ let ARCHETYPES = {
    hints at one STRONG link were measured too weak to carry identity: 50% hint fidelity
    and 28-39 distinct emergent names in 40 builds of the same preset (2026 audit §4).
 
+   Most presets also name one or two of the twelve sections that ship OFF (Dialect,
+   Conversation Mechanics, Family Talk, Body in Speech, ...). Those hints do double duty:
+   they steer the category AND switch the section on for that preset's builds — see
+   archetypeOptsIn — which is the only way a preset could ever reach those 690 traits.
+
    Deliberately spread: eleven of these name Secure attachment and nine name Restraint
    or Discipline, against the "damaged person with a secret" pull the preset list was
    already corrected for once on the personality axes but never on the profile. */
 const ARCHETYPE_PROFILE_HINTS = {
-  soldier:              {attachment:"Avoidant", stress:"Freeze (shut down)", values:"Loyalty-Bound", humor:"Dry & Deadpan", vices:"Substance & Consumption", competence:"Hands & Materials"},
-  conartist:            {values:"Self-Interested", humor:"Cruel & Barbed", role:"Instigator", vices:"Risk & Escape", stress:"Flight (remove yourself)", competence:"People & Rooms"},
-  intern:               {attachment:"Anxious", stress:"Fawn (appease the threat)", humor:"Self-Deprecating", role:"Peacemaker", vices:"Compulsion & Ritual", origins:"Earned Success"},
-  scholar:              {role:"Skeptic", humor:"Intellectual & Wordplay", vices:"Avoidance & Procrastination", values:"Rigid & Principled", attachment:"Avoidant", competence:"Craft & Knowledge"},
-  noble:                {attachment:"Avoidant", values:"Rigid & Principled", role:"Leader", humor:"Dry & Deadpan", stress:"Freeze (shut down)", origins:"Stable Care"},
-  child:                {attachment:"Secure", humor:"Absurd & Chaotic", role:"Connector", values:"Idealistic & Visionary", stress:"Flight (remove yourself)", origins:"Stable Care"},
-  burntIdealist:        {values:"Idealistic & Visionary", vices:"Avoidance & Procrastination", stress:"Freeze (shut down)", humor:"Self-Deprecating", attachment:"Anxious"},
-  charmingManipulator:  {attachment:"Avoidant", values:"Self-Interested", role:"Connector", humor:"Warm & Playful", stress:"Fawn (appease the threat)", competence:"People & Rooms"},
-  grievingParent:       {attachment:"Anxious", stress:"Freeze (shut down)", humor:"Humorless & Absent", vices:"Substance & Consumption", role:"Caretaker"},
-  reluctantSecond:      {role:"Caretaker", values:"Loyalty-Bound", attachment:"Secure", stress:"Fawn (appease the threat)", humor:"Dry & Deadpan", competence:"Systems & Logistics"},
-  cheerfulSociopath:    {attachment:"Avoidant", values:"Self-Interested", humor:"Cruel & Barbed", stress:"Fight (attack the threat)", role:"Instigator"},
-  furiousCaretaker:     {role:"Caretaker", stress:"Fawn (appease the threat)", vices:"Restraint & Discipline", humor:"Dry & Deadpan", values:"Loyalty-Bound"},
-  washedUpProdigy:      {vices:"Substance & Consumption", humor:"Self-Deprecating", values:"Pragmatic & Flexible", role:"Outsider", stress:"Flight (remove yourself)"},
-  companyLoyalist:      {values:"Loyalty-Bound", role:"Peacemaker", vices:"Restraint & Discipline", humor:"Warm & Playful", attachment:"Secure", competence:"Systems & Logistics"},
-  blackSheep:           {role:"Outsider", attachment:"Disorganized", values:"Self-Interested", humor:"Dry & Deadpan", stress:"Flight (remove yourself)"},
-  compulsiveFixer:      {vices:"Compulsion & Ritual", role:"Caretaker", stress:"Fight (attack the threat)", attachment:"Anxious", humor:"Warm & Playful", competence:"Hands & Materials"},
-  undiscussedSurvivor:  {attachment:"Avoidant", stress:"Flight (remove yourself)", humor:"Absurd & Chaotic", values:"Pragmatic & Flexible", role:"Peacemaker"},
-  workaholicAvoiding:   {vices:"Avoidance & Procrastination", attachment:"Avoidant", stress:"Fight (attack the threat)", role:"Leader", humor:"Humorless & Absent", competence:"Systems & Logistics"},
-  formerTrueBeliever:   {role:"Skeptic", values:"Pragmatic & Flexible", attachment:"Disorganized", humor:"Intellectual & Wordplay", stress:"Fight (attack the threat)"},
-  goldenChild:          {attachment:"Anxious", role:"Leader", values:"Idealistic & Visionary", humor:"Warm & Playful", stress:"Fawn (appease the threat)", origins:"Earned Success"},
-  competentProfessional: {attachment:"Secure", vices:"Restraint & Discipline", role:"Skeptic", humor:"Dry & Deadpan", values:"Pragmatic & Flexible", competence:"Craft & Knowledge"},
-  contentedElder:       {attachment:"Secure", humor:"Warm & Playful", values:"Pragmatic & Flexible", role:"Peacemaker", vices:"Compulsion & Ritual", origins:"Stable Care"},
-  genuinelyFunny:       {humor:"Intellectual & Wordplay", role:"Connector", attachment:"Anxious", vices:"Risk & Escape", stress:"Flight (remove yourself)"},
-  careerBureaucrat:     {values:"Rigid & Principled", vices:"Restraint & Discipline", humor:"Humorless & Absent", stress:"Freeze (shut down)", attachment:"Avoidant", competence:"Systems & Logistics"},
-  trueZealot:           {values:"Idealistic & Visionary", role:"Instigator", stress:"Fight (attack the threat)", attachment:"Disorganized", humor:"Humorless & Absent"},
-  alienLogic:           {role:"Outsider", humor:"Intellectual & Wordplay", attachment:"Avoidant", values:"Rigid & Principled", stress:"Freeze (shut down)"},
-  unbotheredYoung:      {attachment:"Secure", humor:"Dry & Deadpan", values:"Pragmatic & Flexible", vices:"Avoidance & Procrastination", role:"Instigator"},
-  steadyOrganiser:      {role:"Leader", vices:"Restraint & Discipline", humor:"Warm & Playful", values:"Loyalty-Bound", attachment:"Secure", competence:"People & Rooms", origins:"Learned Trust"},
-  cheerfulMess:         {attachment:"Disorganized", humor:"Absurd & Chaotic", vices:"Risk & Escape", role:"Connector", stress:"Fawn (appease the threat)"},
-  plainSpoken:          {attachment:"Secure", values:"Pragmatic & Flexible", role:"Caretaker", humor:"Warm & Playful", stress:"Freeze (shut down)", competence:"Hands & Materials", origins:"Stable Care"},
-  softSpokenSecond:     {role:"Peacemaker", stress:"Fawn (appease the threat)", attachment:"Anxious", values:"Loyalty-Bound", humor:"Self-Deprecating"},
-  bluntForeman:         {role:"Leader", stress:"Fight (attack the threat)", values:"Rigid & Principled", humor:"Cruel & Barbed", competence:"Hands & Materials", vices:"Substance & Consumption"},
-  dreamyDrifter:        {role:"Outsider", vices:"Avoidance & Procrastination", attachment:"Secure", humor:"Absurd & Chaotic", values:"Idealistic & Visionary"},
-  stubbornCraftsman:    {values:"Rigid & Principled", vices:"Compulsion & Ritual", attachment:"Avoidant", role:"Skeptic", humor:"Humorless & Absent", competence:"Craft & Knowledge"},
-  openHeartedShambles:  {attachment:"Anxious", vices:"Substance & Consumption", humor:"Warm & Playful", role:"Connector", stress:"Fawn (appease the threat)"},
-  weepingBrawler:       {stress:"Fight (attack the threat)", vices:"Risk & Escape", attachment:"Disorganized", values:"Loyalty-Bound", role:"Instigator"},
-  lovableLiar:          {values:"Self-Interested", humor:"Absurd & Chaotic", role:"Connector", attachment:"Anxious", stress:"Flight (remove yourself)"},
-  incuriousContent:     {humor:"Humorless & Absent", values:"Pragmatic & Flexible", role:"Peacemaker", attachment:"Secure", vices:"Restraint & Discipline"},
-  gloomyRomantic:       {attachment:"Anxious", humor:"Self-Deprecating", vices:"Substance & Consumption", values:"Idealistic & Visionary", stress:"Freeze (shut down)"},
-  scatteredGenius:      {humor:"Intellectual & Wordplay", vices:"Compulsion & Ritual", role:"Outsider", attachment:"Disorganized", stress:"Flight (remove yourself)"},
-  jadedFixer:           {values:"Pragmatic & Flexible", humor:"Cruel & Barbed", stress:"Flight (remove yourself)", role:"Skeptic", attachment:"Avoidant", competence:"People & Rooms"},
-  bigHeartedBoss:       {role:"Leader", humor:"Warm & Playful", vices:"Risk & Escape", attachment:"Secure", stress:"Fight (attack the threat)", origins:"Learned Trust"},
-  newParent:            {attachment:"Anxious", role:"Caretaker", stress:"Freeze (shut down)", humor:"Self-Deprecating", values:"Loyalty-Bound", origins:"Stable Care"},
-  midlifeReinventor:    {vices:"Risk & Escape", role:"Instigator", values:"Idealistic & Visionary", attachment:"Disorganized", humor:"Self-Deprecating"},
-  restlessRetiree:      {vices:"Compulsion & Ritual", humor:"Dry & Deadpan", role:"Skeptic", values:"Rigid & Principled", competence:"Craft & Knowledge", stress:"Fight (attack the threat)"},
-  codeSwitcher:         {role:"Connector", values:"Loyalty-Bound", stress:"Fawn (appease the threat)", humor:"Intellectual & Wordplay", attachment:"Secure", origins:"Learned Trust"},
-  preciseLiteralist:    {role:"Outsider", humor:"Dry & Deadpan", values:"Rigid & Principled", vices:"Compulsion & Ritual", stress:"Flight (remove yourself)", competence:"Craft & Knowledge"},
-  incurableFlirt:       {attachment:"Disorganized", humor:"Warm & Playful", role:"Connector", vices:"Risk & Escape", values:"Idealistic & Visionary"},
-  secularIdeologue:     {values:"Rigid & Principled", role:"Instigator", stress:"Fight (attack the threat)", humor:"Humorless & Absent", attachment:"Avoidant"},
-  nosyNeighbour:        {role:"Connector", vices:"Compulsion & Ritual", values:"Rigid & Principled", humor:"Cruel & Barbed", attachment:"Anxious"},
-  pompousBlowhard:      {role:"Leader", humor:"Intellectual & Wordplay", values:"Self-Interested", stress:"Fight (attack the threat)", attachment:"Avoidant"},
-  maliciousTrickster:   {humor:"Cruel & Barbed", role:"Instigator", values:"Self-Interested", vices:"Risk & Escape", attachment:"Disorganized"},
+  soldier:              {attachment:"Avoidant", stress:"Freeze (shut down)", values:"Loyalty-Bound", humor:"Dry & Deadpan", vices:"Substance & Consumption", competence:"Hands & Materials", body:"Pain & Fatigue", jargon:"Military"},
+  conartist:            {values:"Self-Interested", humor:"Cruel & Barbed", role:"Instigator", vices:"Risk & Escape", stress:"Flight (remove yourself)", competence:"People & Rooms", money:"Status Signalling", conversation:"Scripted Speech"},
+  intern:               {attachment:"Anxious", stress:"Fawn (appease the threat)", humor:"Self-Deprecating", role:"Peacemaker", vices:"Compulsion & Ritual", origins:"Earned Success", fears:"Social Dreads", texture:"Practised Badly"},
+  scholar:              {role:"Skeptic", humor:"Intellectual & Wordplay", vices:"Avoidance & Procrastination", values:"Rigid & Principled", attachment:"Avoidant", competence:"Craft & Knowledge", jargon:"Academic", conversation:"Info-Dumping"},
+  noble:                {attachment:"Avoidant", values:"Rigid & Principled", role:"Leader", humor:"Dry & Deadpan", stress:"Freeze (shut down)", origins:"Stable Care", money:"Money Taboo", family:"Parent-Voice Echo"},
+  child:                {attachment:"Secure", humor:"Absurd & Chaotic", role:"Connector", values:"Idealistic & Visionary", stress:"Flight (remove yourself)", origins:"Stable Care", dialect:"Youth Register", fears:"Phobias"},
+  burntIdealist:        {values:"Idealistic & Visionary", vices:"Avoidance & Procrastination", stress:"Freeze (shut down)", humor:"Self-Deprecating", attachment:"Anxious", beliefs:"Secular Rituals", texture:"Preferences & Small Pleasures"},
+  charmingManipulator:  {attachment:"Avoidant", values:"Self-Interested", role:"Connector", humor:"Warm & Playful", stress:"Fawn (appease the threat)", competence:"People & Rooms", romance:"Courtship Speech", conversation:"Masking"},
+  grievingParent:       {attachment:"Anxious", stress:"Freeze (shut down)", humor:"Humorless & Absent", vices:"Substance & Consumption", role:"Caretaker", repair:"Changed Boundaries & Failed Repair", family:"Talks About Family Constantly"},
+  reluctantSecond:      {role:"Caretaker", values:"Loyalty-Bound", attachment:"Secure", stress:"Fawn (appease the threat)", humor:"Dry & Deadpan", competence:"Systems & Logistics", contextrole:"Under Authority", texture:"Routines"},
+  cheerfulSociopath:    {attachment:"Avoidant", values:"Self-Interested", humor:"Cruel & Barbed", stress:"Fight (attack the threat)", role:"Instigator", repair:"Apology", conversation:"Turn-Timing"},
+  furiousCaretaker:     {role:"Caretaker", stress:"Fawn (appease the threat)", vices:"Restraint & Discipline", humor:"Dry & Deadpan", values:"Loyalty-Bound", contextrole:"With Dependents", body:"Pain & Fatigue"},
+  washedUpProdigy:      {vices:"Substance & Consumption", humor:"Self-Deprecating", values:"Pragmatic & Flexible", role:"Outsider", stress:"Flight (remove yourself)", money:"Class-Mobility Tells", texture:"Practised Badly"},
+  companyLoyalist:      {values:"Loyalty-Bound", role:"Peacemaker", vices:"Restraint & Discipline", humor:"Warm & Playful", attachment:"Secure", competence:"Systems & Logistics", texture:"Affiliations", contextrole:"Among Peers"},
+  blackSheep:           {role:"Outsider", attachment:"Disorganized", values:"Self-Interested", humor:"Dry & Deadpan", stress:"Flight (remove yourself)", family:"Sibling Rivalry", dialect:"Regional Features"},
+  compulsiveFixer:      {vices:"Compulsion & Ritual", role:"Caretaker", stress:"Fight (attack the threat)", attachment:"Anxious", humor:"Warm & Playful", competence:"Hands & Materials", repair:"Restitution & Practical Care", jargon:"Kitchen & Trade"},
+  undiscussedSurvivor:  {attachment:"Avoidant", stress:"Flight (remove yourself)", humor:"Absurd & Chaotic", values:"Pragmatic & Flexible", role:"Peacemaker", family:"Never Mentions Family", repair:"Avoidance & Humour"},
+  workaholicAvoiding:   {vices:"Avoidance & Procrastination", attachment:"Avoidant", stress:"Fight (attack the threat)", role:"Leader", humor:"Humorless & Absent", competence:"Systems & Logistics", body:"Medication & Management", jargon:"Medical"},
+  formerTrueBeliever:   {role:"Skeptic", values:"Pragmatic & Flexible", attachment:"Disorganized", humor:"Intellectual & Wordplay", stress:"Fight (attack the threat)", beliefs:"Lapsed Faith", family:"Parent-Voice Echo"},
+  goldenChild:          {attachment:"Anxious", role:"Leader", values:"Idealistic & Visionary", humor:"Warm & Playful", stress:"Fawn (appease the threat)", origins:"Earned Success", family:"Sibling Rivalry", money:"Status Signalling"},
+  competentProfessional: {attachment:"Secure", vices:"Restraint & Discipline", role:"Skeptic", humor:"Dry & Deadpan", values:"Pragmatic & Flexible", competence:"Craft & Knowledge", contextrole:"Among Peers", jargon:"Tech"},
+  contentedElder:       {attachment:"Secure", humor:"Warm & Playful", values:"Pragmatic & Flexible", role:"Peacemaker", vices:"Compulsion & Ritual", origins:"Stable Care", dialect:"Era References", texture:"Preferences & Small Pleasures"},
+  genuinelyFunny:       {humor:"Intellectual & Wordplay", role:"Connector", attachment:"Anxious", vices:"Risk & Escape", stress:"Flight (remove yourself)", conversation:"Turn-Timing", fears:"Social Dreads"},
+  careerBureaucrat:     {values:"Rigid & Principled", vices:"Restraint & Discipline", humor:"Humorless & Absent", stress:"Freeze (shut down)", attachment:"Avoidant", competence:"Systems & Logistics", jargon:"Legal", money:"Thrift Talk"},
+  trueZealot:           {values:"Idealistic & Visionary", role:"Instigator", stress:"Fight (attack the threat)", attachment:"Disorganized", humor:"Humorless & Absent", beliefs:"Faith Practice", conversation:"Scripted Speech"},
+  alienLogic:           {role:"Outsider", humor:"Intellectual & Wordplay", attachment:"Avoidant", values:"Rigid & Principled", stress:"Freeze (shut down)", conversation:"Sensory Load", dialect:"Second-Language Speaker"},
+  unbotheredYoung:      {attachment:"Secure", humor:"Dry & Deadpan", values:"Pragmatic & Flexible", vices:"Avoidance & Procrastination", role:"Instigator", dialect:"Youth Register", texture:"Preferences & Small Pleasures"},
+  steadyOrganiser:      {role:"Leader", vices:"Restraint & Discipline", humor:"Warm & Playful", values:"Loyalty-Bound", attachment:"Secure", competence:"People & Rooms", origins:"Learned Trust", texture:"Routines", family:"Talks About Family Constantly"},
+  cheerfulMess:         {attachment:"Disorganized", humor:"Absurd & Chaotic", vices:"Risk & Escape", role:"Connector", stress:"Fawn (appease the threat)", texture:"Practised Badly", romance:"Jealousy Tells"},
+  plainSpoken:          {attachment:"Secure", values:"Pragmatic & Flexible", role:"Caretaker", humor:"Warm & Playful", stress:"Freeze (shut down)", competence:"Hands & Materials", origins:"Stable Care", jargon:"Kitchen & Trade", money:"Thrift Talk"},
+  softSpokenSecond:     {role:"Peacemaker", stress:"Fawn (appease the threat)", attachment:"Anxious", values:"Loyalty-Bound", humor:"Self-Deprecating", fears:"Social Dreads", contextrole:"Under Authority"},
+  bluntForeman:         {role:"Leader", stress:"Fight (attack the threat)", values:"Rigid & Principled", humor:"Cruel & Barbed", competence:"Hands & Materials", vices:"Substance & Consumption", body:"Hearing & Sight", contextrole:"With Dependents"},
+  dreamyDrifter:        {role:"Outsider", vices:"Avoidance & Procrastination", attachment:"Secure", humor:"Absurd & Chaotic", values:"Idealistic & Visionary", beliefs:"Superstition", texture:"Preferences & Small Pleasures"},
+  stubbornCraftsman:    {values:"Rigid & Principled", vices:"Compulsion & Ritual", attachment:"Avoidant", role:"Skeptic", humor:"Humorless & Absent", competence:"Craft & Knowledge", jargon:"Kitchen & Trade", texture:"Routines"},
+  openHeartedShambles:  {attachment:"Anxious", vices:"Substance & Consumption", humor:"Warm & Playful", role:"Connector", stress:"Fawn (appease the threat)", romance:"Pining Tells", money:"Money Taboo"},
+  weepingBrawler:       {stress:"Fight (attack the threat)", vices:"Risk & Escape", attachment:"Disorganized", values:"Loyalty-Bound", role:"Instigator", body:"Stammer & Speech Blocks", family:"Sibling Rivalry"},
+  lovableLiar:          {values:"Self-Interested", humor:"Absurd & Chaotic", role:"Connector", attachment:"Anxious", stress:"Flight (remove yourself)", beliefs:"Superstition", fears:"Social Dreads"},
+  incuriousContent:     {humor:"Humorless & Absent", values:"Pragmatic & Flexible", role:"Peacemaker", attachment:"Secure", vices:"Restraint & Discipline", texture:"Routines", money:"Thrift Talk"},
+  gloomyRomantic:       {attachment:"Anxious", humor:"Self-Deprecating", vices:"Substance & Consumption", values:"Idealistic & Visionary", stress:"Freeze (shut down)", romance:"Pining Tells", beliefs:"Lapsed Faith"},
+  scatteredGenius:      {humor:"Intellectual & Wordplay", vices:"Compulsion & Ritual", role:"Outsider", attachment:"Disorganized", stress:"Flight (remove yourself)", conversation:"Info-Dumping", jargon:"Tech"},
+  jadedFixer:           {values:"Pragmatic & Flexible", humor:"Cruel & Barbed", stress:"Flight (remove yourself)", role:"Skeptic", attachment:"Avoidant", competence:"People & Rooms", conversation:"Masking", dialect:"Code-Switching"},
+  bigHeartedBoss:       {role:"Leader", humor:"Warm & Playful", vices:"Risk & Escape", attachment:"Secure", stress:"Fight (attack the threat)", origins:"Learned Trust", contextrole:"With Dependents", jargon:"Service"},
+  newParent:            {attachment:"Anxious", role:"Caretaker", stress:"Freeze (shut down)", humor:"Self-Deprecating", values:"Loyalty-Bound", origins:"Stable Care", family:"Talks About Family Constantly", body:"Breath & Stamina"},
+  midlifeReinventor:    {vices:"Risk & Escape", role:"Instigator", values:"Idealistic & Visionary", attachment:"Disorganized", humor:"Self-Deprecating", money:"Class-Mobility Tells", texture:"Affiliations"},
+  restlessRetiree:      {vices:"Compulsion & Ritual", humor:"Dry & Deadpan", role:"Skeptic", values:"Rigid & Principled", competence:"Craft & Knowledge", stress:"Fight (attack the threat)", dialect:"Dated Slang", body:"Hearing & Sight"},
+  codeSwitcher:         {role:"Connector", values:"Loyalty-Bound", stress:"Fawn (appease the threat)", humor:"Intellectual & Wordplay", attachment:"Secure", origins:"Learned Trust", dialect:"Code-Switching", family:"Parent-Voice Echo"},
+  preciseLiteralist:    {role:"Outsider", humor:"Dry & Deadpan", values:"Rigid & Principled", vices:"Compulsion & Ritual", stress:"Flight (remove yourself)", competence:"Craft & Knowledge", conversation:"Literal Uptake", texture:"Routines"},
+  incurableFlirt:       {attachment:"Disorganized", humor:"Warm & Playful", role:"Connector", vices:"Risk & Escape", values:"Idealistic & Visionary", romance:"Flirting Style", conversation:"Turn-Timing"},
+  secularIdeologue:     {values:"Rigid & Principled", role:"Instigator", stress:"Fight (attack the threat)", humor:"Humorless & Absent", attachment:"Avoidant", beliefs:"Political Temperament", conversation:"Info-Dumping"},
+  nosyNeighbour:        {role:"Connector", vices:"Compulsion & Ritual", values:"Rigid & Principled", humor:"Cruel & Barbed", attachment:"Anxious", texture:"Affiliations", beliefs:"Conspiracy-Adjacent"},
+  pompousBlowhard:      {role:"Leader", humor:"Intellectual & Wordplay", values:"Self-Interested", stress:"Fight (attack the threat)", attachment:"Avoidant", money:"Status Signalling", dialect:"Class Register Shift"},
+  maliciousTrickster:   {humor:"Cruel & Barbed", role:"Instigator", values:"Self-Interested", vices:"Risk & Escape", attachment:"Disorganized", beliefs:"Conspiracy-Adjacent", conversation:"Masking"},
 };
 Object.entries(ARCHETYPE_PROFILE_HINTS).forEach(([k, profile])=>{
   if (ARCHETYPES[k]) ARCHETYPES[k].profile = profile;
@@ -4045,10 +4050,36 @@ const PROFILE_SECTIONS = [
 /* Is this section drawn? A missing toggle (a trimmed page, the test harness) used to
    read as ON, which was fine when every section shipped on. The §6 sections ship off
    by default, so an absent control has to mean "the shipped default", not "yes". */
-function profileSectionEnabled(ps){
+// The section's own switch, as the Profile panel shows it.
+function profileSectionChecked(ps){
   const tog = settingEl('sec_'+ps.id);
   if (tog) return !!tog.checked;
   return ps.defaultOn !== false;
+}
+/* Twelve sections ship off, so no preset could ever reach them: 690 traits, 0% reach.
+   A preset that hints one of them (ARCHETYPE_PROFILE_HINTS) brings it in for that build
+   — "Diaspora Code-Switcher" draws Dialect, "Scattered Genius" draws Conversation — and
+   only while its profile is the live one (a build, or a preview), so cast members, foils
+   and the gap-filler stay exactly as they were. One switch turns this off. */
+function archetypeSectionsEnabled(){
+  const el = settingEl('archetypeSectionsToggle');
+  return el ? !!el.checked : true;
+}
+function archetypeOptsIn(ps){
+  return ps.defaultOn === false && !!CURRENT_ARCHETYPE_PROFILE && !!CURRENT_ARCHETYPE_PROFILE[ps.id] && archetypeSectionsEnabled();
+}
+function profileSectionEnabled(ps){
+  return profileSectionChecked(ps) || archetypeOptsIn(ps);
+}
+// The sections the SELECTED preset switches on that the panel shows as off — for the
+// in-force strip and the "why not" tool, which run outside a build.
+function archetypeAddedSections(){
+  if (!archetypeSectionsEnabled() || typeof effectiveArchetype !== 'function') return [];
+  const key = (document.getElementById('archetypeSelect')||{}).value || '';
+  if (!key) return [];
+  const arch = effectiveArchetype(key, (document.getElementById('archetypeVariation')||{}).value);
+  const prof = arch && arch.profile;
+  return prof ? PROFILE_SECTIONS.filter(ps => ps.defaultOn === false && prof[ps.id] && !profileSectionChecked(ps)) : [];
 }
 
 // Resolves which TYPE each profile section lands on, one section at a time, in the order
@@ -7041,8 +7072,11 @@ function rollSheetShape(){
   let drop = null;
   if (ids.length > 2 && rand() < 0.7){
     const size = id => { const ps = PROFILE_SECTIONS.find(p => p.id === id); return catsOf(ps.section).reduce((n, c) => n + byFilter(ps.section, c).length, 0); };
-    const sorted = ids.slice().sort((a, b) => size(a) - size(b));
-    drop = sorted[Math.floor(rand() * Math.min(2, sorted.length))];
+    // A section the preset itself switched on is what that preset is FOR; the thin-section
+    // drop used to take it a third of the time (the extra sections are all thin).
+    const sorted = ids.filter(id => !archetypeOptsIn(PROFILE_SECTIONS.find(p => p.id === id))).sort((a, b) => size(a) - size(b));
+    const pickAt = Math.floor(rand() * Math.min(2, Math.max(sorted.length, 1)));
+    drop = sorted.length ? sorted[pickAt] : null;
   }
   let r = rand(), wild = 0;
   for (let i = 0; i < SHAPE_WILD_ODDS.length; i++){ r -= SHAPE_WILD_ODDS[i]; if (r <= 0){ wild = i; break; } }
@@ -7853,9 +7887,11 @@ function activeRuleChips(){
   }).length;
   if (manual) n('fixed profile types', manual);
   const off = (typeof PROFILE_SECTIONS !== 'undefined' ? PROFILE_SECTIONS : []).filter(ps=>{
-    return !profileSectionEnabled(ps);
+    return !profileSectionChecked(ps);
   }).length;
-  if (off) n('sections off', off);
+  const added = archetypeAddedSections();
+  if (off - added.length) n('sections off', off - added.length);
+  if (added.length) n('archetype adds', added.map(ps => ps.label).join(', '));
   const seedEl = document.getElementById('seedInput');
   if (seedEl && seedEl.value.trim()) n('replaying seed', seedEl.value.trim());
   else if (divergenceLevel() > 0) n('divergence', 'on');
@@ -7874,7 +7910,7 @@ function panelBadgeCounts(){
     const sel = document.getElementById('type_'+ps.id);
     return sel && sel.value && !(typeof isAutoProfileType === 'function' && isAutoProfileType(ps.id));
   }).length;
-  const toggled = secs.filter(ps => profileSectionEnabled(ps) !== (ps.defaultOn !== false)).length;
+  const toggled = secs.filter(ps => profileSectionChecked(ps) !== (ps.defaultOn !== false)).length;
   return {
     constraints: bannedSections.size + bannedCategories.size + bannedTraitIds.size + requiredTraitIds.length
       + requiredCategories.length + exclusivePairs.length + categoryTiers.size,

@@ -102,6 +102,18 @@ the same seed under the same lenses and toggles gives the same sheet.
   they took from it, turning point, most recent failure, where it stands now — each tied
   to a seated card and dated from the age field when there is one.
 
+## Presets and the sections that ship off
+
+Twelve profile sections (Dialect, Conversation Mechanics, Family Talk, Body in Speech,
+Money & Class, Fears, Romance, Beliefs, Occupational Jargon, Ordinary Texture, Recovery &
+Repair, Role by Context) are off by default. Every archetype now names one or two of them
+in its profile hints, and a preset that names one **switches it on for that preset's
+builds**: Diaspora Code-Switcher draws Dialect (Code-Switching) and Family Talk, Scattered
+Genius draws Conversation Mechanics (Info-Dumping). The in-force strip shows
+"archetype adds …", the sheet shape never drops a section the preset switched on, and
+cast members, foils and the gap-filler are unaffected. One checkbox in the Character
+Profile panel turns the behaviour off. A section you switched on yourself is drawn either way.
+
 ## Generation order
 
 Single characters, batch candidates, casts, foils and the gap-filler all run the same

@@ -1486,3 +1486,7 @@
   background:var(--panel); color:var(--text); font:inherit; cursor:pointer;
 }
 .ruleReview:hover { border-color:var(--dusk-blue-mid); }
+
+/* A chip can now carry a section list ("archetype adds Dialect & Linguistic Background,
+   Family Talk"); nowrap pushed the page 44px wide on a phone. */
+.ruleChip { white-space:normal; max-width:100%; overflow-wrap:anywhere; }
