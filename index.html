@@ -144,7 +144,7 @@
         </div>
         <div class="field advOnly">
           <label>&nbsp;</label>
-          <div class="sub" style="margin:0;">Same seed + same settings = the exact same character, pressure sheet included, shareable as text. Every generation shows the seed it used — paste that seed back in to replay it, including the one the app generates for you when this box is blank. Pasting a seed puts the build in <b>replay mode</b>: it runs against an empty session history, so <b>Avoid recent traits</b> and the history-aware side of <b>Surprise me</b> have nothing to remember and the result is the same in any session. A blank box is <b>exploration</b> — it does take your recent characters into account, which is what stops a session converging on one person. One deliberate exception either way: rerolls are un-seeded, because a reroll is you overriding the dice.</div>
+          <div class="sub" style="margin:0;">Same seed + same settings = the exact same character, pressure sheet included, shareable as text. Every generation shows the seed it used — paste that seed back in to replay it, including the one the app generates for you when this box is blank. Every build draws against an empty session history, so the seed alone decides the character and it comes out the same in any session. A blank box is <b>exploration</b>: it draws three candidates and keeps the one least like your recent characters and your project archive, so <b>Avoid recent traits</b> steers <i>which</i> candidate is kept rather than the draw itself. The seed printed is the winner's, so pasting it back gives you that character. One deliberate exception either way: rerolls are un-seeded, because a reroll is you overriding the dice.</div>
         </div>
       </div>
 
@@ -182,7 +182,7 @@
             <label for="constraintTraitSearch">Trait by name</label>
             <input type="text" id="constraintTraitSearch" placeholder="type at least two letters — searches names and descriptions…"
                    autocomplete="off" data-on="input" data-act="searchTraits" data-args="[&quot;constraintTraitSearch&quot;,&quot;constraintSearchResults&quot;]"
-                   data-on="keydown" data-act="searchKeydown" data-args="[&quot;$event&quot;,&quot;constraintTraitSearch&quot;,&quot;constraintSearchResults&quot;]" role="combobox" aria-expanded="false" aria-autocomplete="list">
+                   data-act-keydown="searchKeydown" data-args-keydown="[&quot;$event&quot;,&quot;constraintTraitSearch&quot;,&quot;constraintSearchResults&quot;]" role="combobox" aria-expanded="false" aria-autocomplete="list">
             <div class="searchResults" id="constraintSearchResults" style="display:none;"></div>
             <div class="actionRow" style="margin-top:6px;">
               <button class="btn-secondary" data-on="click" data-act="addTraitConstraint" data-args="[&quot;req&quot;]">Always include</button>
@@ -193,11 +193,11 @@
             <label>Mutually exclusive pair</label>
             <input type="text" id="exclusiveA" placeholder="first trait…" autocomplete="off"
                    data-on="input" data-act="searchTraits" data-args="[&quot;exclusiveA&quot;,&quot;exclusiveAResults&quot;]"
-                   data-on="keydown" data-act="searchKeydown" data-args="[&quot;$event&quot;,&quot;exclusiveA&quot;,&quot;exclusiveAResults&quot;]" role="combobox" aria-expanded="false" aria-autocomplete="list" aria-label="First trait of the exclusive pair">
+                   data-act-keydown="searchKeydown" data-args-keydown="[&quot;$event&quot;,&quot;exclusiveA&quot;,&quot;exclusiveAResults&quot;]" role="combobox" aria-expanded="false" aria-autocomplete="list" aria-label="First trait of the exclusive pair">
             <div class="searchResults" id="exclusiveAResults" style="display:none;"></div>
             <input type="text" id="exclusiveB" placeholder="second trait…" autocomplete="off" style="margin-top:6px;"
                    data-on="input" data-act="searchTraits" data-args="[&quot;exclusiveB&quot;,&quot;exclusiveBResults&quot;]"
-                   data-on="keydown" data-act="searchKeydown" data-args="[&quot;$event&quot;,&quot;exclusiveB&quot;,&quot;exclusiveBResults&quot;]" role="combobox" aria-expanded="false" aria-autocomplete="list" aria-label="Second trait of the exclusive pair">
+                   data-act-keydown="searchKeydown" data-args-keydown="[&quot;$event&quot;,&quot;exclusiveB&quot;,&quot;exclusiveBResults&quot;]" role="combobox" aria-expanded="false" aria-autocomplete="list" aria-label="Second trait of the exclusive pair">
             <div class="searchResults" id="exclusiveBResults" style="display:none;"></div>
             <button class="btn-secondary" style="margin-top:6px;" data-on="click" data-act="addExclusivePair" data-args="[]">Never both</button>
           </div>
@@ -257,7 +257,7 @@
             <label for="whyNotSearch">Trait name</label>
             <input type="text" id="whyNotSearch" placeholder="type at least two letters…" autocomplete="off"
                    data-on="input" data-act="searchTraits" data-args="[&quot;whyNotSearch&quot;,&quot;whyNotResults&quot;]"
-                   data-on="keydown" data-act="searchKeydown" data-args="[&quot;$event&quot;,&quot;whyNotSearch&quot;,&quot;whyNotResults&quot;]" role="combobox" aria-expanded="false" aria-autocomplete="list">
+                   data-act-keydown="searchKeydown" data-args-keydown="[&quot;$event&quot;,&quot;whyNotSearch&quot;,&quot;whyNotResults&quot;]" role="combobox" aria-expanded="false" aria-autocomplete="list">
             <div class="searchResults" id="whyNotResults" style="display:none;"></div>
           </div>
           <div class="field">
@@ -344,7 +344,7 @@
 
       <div class="stressToggleRow checkboxRow advOnly" style="margin-top:8px;">
         <input type="checkbox" id="avoidRecentToggle" checked data-on="change" data-act="onSliderChange" data-args="[]">
-        <label style="margin:0; text-transform:none; font-size:.85rem; color:var(--text);" for="avoidRecentToggle">Avoid recent traits — softly penalise anything drawn in your last few characters</label>
+        <label style="margin:0; text-transform:none; font-size:.85rem; color:var(--text);" for="avoidRecentToggle">Avoid recent traits — when a blank-seed roll picks the best of three, prefer the candidate that repeats the fewest traits from your last few characters</label>
       </div>
       <div class="stressToggleRow checkboxRow advOnly" style="margin-top:8px;">
         <!-- On by default. This is the strongest anti-staleness tool in the app and it
@@ -386,9 +386,9 @@
         <div class="sub" style="margin:10px 0;">Fix one trait you already know about this character; everything else is built outward from it through the correlation matrix.</div>
         <div class="row">
           <div class="field" style="flex:2;">
-            <label>Seed trait</label>
-            <input type="text" id="seedTraitFilter" placeholder="Filter (e.g. 'betrayed', 'leader', 'dry')..." data-on="input" data-act="filterSeedPicker" data-args="[]" style="margin-bottom:6px;">
-            <select id="seedTraitSelect"></select>
+            <label for="seedTraitFilter">Seed trait</label>
+            <input type="text" id="seedTraitFilter" aria-label="Filter the seed trait list" placeholder="Filter (e.g. 'betrayed', 'leader', 'dry')..." data-on="input" data-act="filterSeedPicker" data-args="[]" style="margin-bottom:6px;">
+            <select id="seedTraitSelect" aria-label="Seed trait"></select>
           </div>
           <div class="field">
             <label>&nbsp;</label>
@@ -403,7 +403,7 @@
         <summary><h3>Character Profile — Motivation, Values, Role &amp; more</h3></summary>
         <div class="row" style="margin-top:10px;">
           <div class="field" style="max-width:220px;">
-            <label>Traits per section</label>
+            <label for="profileDepth">Traits per section</label>
             <select id="profileDepth" >
               <option value="1" selected>1 (concise)</option>
               <option value="2">2 (detailed)</option>
@@ -442,7 +442,7 @@
         <summary><h3>Advanced: affinity weights</h3></summary>
         <div class="row" style="margin-top:10px;">
           <div class="field" style="max-width:160px;">
-            <label>Boost strength</label>
+            <label for="affinityBoost">Boost strength</label>
             <!-- Was a bare number input with a 400-word explanation attached, in a UI
                  where every other dial is a slider with a resolved word beside it. -->
             <input type="range" id="affinityBoost" value="2.5" min="0" max="10" step="0.5" data-on="input" data-act="onSliderChange" data-args="[]">
@@ -467,7 +467,7 @@
         <div class="sub" style="margin:10px 0;">Set the sliders above however you like, then save them as a reusable archetype. The constraints, counts and section toggles in force are saved alongside — selecting the archetype still just blends its posture with yours, and "Restore full setup" is the explicit way to get the rest back. The library exports as a file, so a set of house archetypes can be shared or moved between machines.</div>
         <div class="row">
           <div class="field">
-            <label>Archetype name</label>
+            <label for="customArchName">Archetype name</label>
             <input type="text" id="customArchName" placeholder="e.g. Grizzled Mentor">
           </div>
           <div class="field">
@@ -804,11 +804,11 @@
       <div class="sub" style="margin:0 0 10px;">Generate a cast first, then analyse how any two members would rub together based on where their personality axes clash or align.</div>
       <div class="row">
         <div class="field">
-          <label>Character A</label>
+          <label for="relA">Character A</label>
           <select id="relA"></select>
         </div>
         <div class="field">
-          <label>Character B</label>
+          <label for="relB">Character B</label>
           <select id="relB"></select>
         </div>
         <div class="field">

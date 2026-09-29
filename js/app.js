@@ -332,7 +332,10 @@ async function loadSavedCharacter(name){
     if (typeof viewContext !== 'undefined') viewContext = CONTEXT_MODE_IDS.includes(charMeta.viewContext) ? charMeta.viewContext : 'baseline';
     if (typeof resetArc === 'function'){
       arcEvents = (Array.isArray(rec.arcEvents) ? rec.arcEvents : []).filter(e=>!validateArcEvent(e).length);
-      arcBase = rec.arcBase ? expandSlots(rec.arcBase) : JSON.parse(JSON.stringify(state)); if (arcEvents.length) arcReplay(); else renderArc(); }
+      arcBase = rec.arcBase ? expandSlots(rec.arcBase) : JSON.parse(JSON.stringify(state));
+      // What the arc alone produces; anything the saved sheet has beyond it was an edit.
+      arcOverrides = {}; arcLastReplay = JSON.parse(JSON.stringify(replayArc(arcBase, arcEvents)));
+      if (arcEvents.length) arcReplay(); else renderArc(); }
     pressureState = rec.pressureState || null;
     pinnedTargets = rec.pinnedTargets || {};
     charVariants = rec.charVariants || {};
@@ -538,6 +541,9 @@ function generateCast(){
   // label used to be `seedNum.toString(36)`, which could not be pasted back.
   const castSeed = resolveSeed(seedInput ? seedInput.value : "");
   const seedNum = castSeed.num;
+  // The cast and its edges are replaced wholesale — keep a way back (Undo toast below).
+  const hadCast = castStates.length > 0 || relationshipEdges.length > 0;
+  const restoreCast = hadCast ? _castSnapshot() : null;
   lastCastSeed = castSeed.label;
   castStates = [];
   relationshipEdges = [];
@@ -640,6 +646,8 @@ function generateCast(){
   // BUG FIX: the Relationships dropdowns were only rebuilt by switchTab('rel'), so a
   // cast generated while sitting on that tab left stale (or empty) selectors behind.
   refreshRelSelectors();
+  if (restoreCast) toastUndo("New cast generated — the previous cast and its relationships were replaced.",
+    ()=>{ restoreCast(); toast("The previous cast is back."); });
 }
 /* Theme-aware: these are drawn into inline SVG fill/stroke attributes, which resolve
    CSS custom properties just as a stylesheet would, so the cast overlay follows the
@@ -721,6 +729,8 @@ async function renameCastMember(i){
   c.meta.name = next;
   renderCast();
   refreshRelSelectors();
+  // The edge cards print member names too; they kept the old one until the next edit.
+  if (typeof renderEdges === 'function') renderEdges();
 }
 async function removeCastMember(i){
   const c = castStates[i];
@@ -975,15 +985,37 @@ function applyCastBundle(p){
    or removing an event replays from the base rather than trying to invert an edit. */
 let arcBase = null;
 let arcEvents = [];
-function arcReplay(){
+/* Sheet edits made while an arc is open — a reroll, a pin, a lock — are not arc events,
+   and replaying from `arcBase` used to throw them away the moment a change was accepted
+   or declined. The replay now remembers what it produced last (`arcLastReplay`); any
+   slot that differs from it on the next replay is the author's edit and is laid back
+   over the replayed sheet (`arcOverrides`). Deciding an arc change on a slot hands that
+   slot back to the arc. */
+let arcOverrides = {};
+let arcLastReplay = null;
+function _arcCaptureEdits(){
+  const ref = arcLastReplay || arcBase;
+  if (!ref) return;
+  Object.keys(state || {}).forEach(k => {
+    if (JSON.stringify(state[k]) !== JSON.stringify(ref[k])) arcOverrides[k] = JSON.parse(JSON.stringify(state[k]));
+  });
+}
+function arcReplay(releaseSlot){
   if (!arcBase) return;
-  state = replayArc(arcBase, arcEvents);
+  _arcCaptureEdits();
+  if (releaseSlot) delete arcOverrides[releaseSlot];
+  const replayed = replayArc(arcBase, arcEvents);
+  arcLastReplay = JSON.parse(JSON.stringify(replayed));
+  Object.entries(arcOverrides).forEach(([k, v]) => { if (replayed[k]) replayed[k] = JSON.parse(JSON.stringify(v)); });
+  state = replayed;
   charMeta.arc = arcSummary(arcEvents);
   renderSheet();
   renderArc();
 }
 function resetArc(keepBase){
   arcEvents = [];
+  arcOverrides = {};
+  arcLastReplay = null;
   arcBase = keepBase ? arcBase : (Object.keys(state).length ? JSON.parse(JSON.stringify(state)) : null);
   if (charMeta) delete charMeta.arc;
 }
@@ -1037,7 +1069,7 @@ function setArcChange(eventId, slotId, accepted){
   const c = e && (e.changes || []).find(x => x.slotId === slotId);
   if (!c) return;
   c.accepted = !!accepted;
-  arcReplay();
+  arcReplay(slotId);
 }
 async function removeArcEvent(id){
   const e = arcEvents.find(x => x.id === id);
@@ -1450,17 +1482,19 @@ async function fileIntoProject(){
   if (!p){ toast("Create a project first.", "warn"); return; }
   if (!Object.keys(state).length){ toast("Generate or load a character first.", "warn"); return; }
   const name = charMeta.name && charMeta.name !== "Unnamed Character" ? charMeta.name : "Character " + (p.characters.length + 1);
-  const record = {name, state: compressSlots(state), charMeta,
-    arcBase: arcBase ? compressSlots(arcBase) : null, arcEvents,
+  // Copies, not references: later edits to the open sheet must not rewrite what was filed.
+  const _copy = v => JSON.parse(JSON.stringify(v));
+  const record = {name, state: compressSlots(state), charMeta: _copy(charMeta),
+    arcBase: arcBase ? compressSlots(arcBase) : null, arcEvents: _copy(arcEvents),
     savedAt: new Date().toISOString()};
   const at = p.characters.findIndex(c => c.name === name);
   if (at >= 0){
     if (!await askForConfirm(`"${name}" is already in this project. Replace it with what is on screen?`, "Replace")) return;
     p.characters[at] = record;
   } else p.characters.push(record);
-  if (castStates.length) p.casts = [{name: "Cast", members: castStates.map(c => ({id: c.id, name: c.meta.name, state: compressSlots(c.state), meta: c.meta}))}];
-  p.edges = pruneEdges(relationshipEdges, castStates);
-  p.events = arcEvents;
+  if (castStates.length) p.casts = [{name: "Cast", members: castStates.map(c => ({id: c.id, name: c.meta.name, state: compressSlots(c.state), meta: _copy(c.meta)}))}];
+  p.edges = _copy(pruneEdges(relationshipEdges, castStates));
+  p.events = _copy(arcEvents);
   p.settings = captureSettings();
   if (typeof exportArchive === 'function') p.archive = exportArchive();
   await saveProject(p);
@@ -2043,11 +2077,31 @@ async function resetAllToDefaults(){
   // for confirmation, so cancelling the dialog still silently wiped your saved
   // settings. Confirm first, mutate second.
   if (!await askForConfirm("Reset every slider, toggle, and field back to defaults? Your generated character stays until you generate again.", "Reset")) return;
+  /* Hold every intermediate save until the end: clearConstraints() used to persist the
+     half-reset workspace (old budgets still set) partway through, and that is what came
+     back on the next reload. One save, after every step, of the finished defaults. */
+  const wasReady = prefsReady;
+  prefsReady = false;
   try { storage.delete(PREF_KEY); } catch(e){}
   rerollExclusions = {}; rerollHistory = {}; whyOpen = {}; lastDepthUntouched = []; pinnedTargets = {};
   lastAxesUsed = null; lastAxisTrimActive = false;
   Object.entries(DEFAULTS.fields).forEach(([id, v])=>{ const el = document.getElementById(id); if (el) el.value = v; });
   Object.entries(DEFAULTS.toggles).forEach(([id, v])=>{ const el = document.getElementById(id); if (el) el.checked = v; });
+  /* Anything in the workspace the table above does not name goes back to what the page
+     shipped with — its HTML default — so a new setting can never be missed by Reset. */
+  SETTING_FIELDS.concat(['castOptimise']).filter(id => !(id in DEFAULTS.fields)).forEach(id=>{
+    const el = document.getElementById(id); if (!el) return;
+    if (el.type === 'checkbox'){ el.checked = !!el.defaultChecked; return; }
+    if (el.tagName === 'SELECT'){
+      const opt = Array.from(el.options || []).find(o => o.defaultSelected) || (el.options || [])[0];
+      el.value = opt ? opt.value : ""; return;
+    }
+    el.value = el.defaultValue !== undefined ? el.defaultValue : "";
+  });
+  SETTING_TOGGLES.filter(id => !(id in DEFAULTS.toggles)).forEach(id=>{
+    const el = document.getElementById(id); if (el) el.checked = !!el.defaultChecked;
+  });
+  if (typeof renderLensPicker === 'function') renderLensPicker();
   PERSONALITY_AXES.forEach(a=>{ const el = document.getElementById('pers_'+a.id); if (el) el.value = 0; });
   PROFILE_SECTIONS.forEach(ps=>{
     // A section's shipped default, not "on": the §6 sections that ship off stay off.
@@ -2067,6 +2121,8 @@ async function resetAllToDefaults(){
   togglePersonalityPanel();
   toggleCompact();
   onSliderChange();
+  prefsReady = wasReady;
+  savePrefs();
   toast("Everything reset to defaults.");
 }
 
@@ -2106,8 +2162,8 @@ function randomRawSlider(){
    Handlers that were multi-statement inline bodies are named functions now, which is
    where they should have been anyway. */
 const ACTION_EVENTS = ['click', 'change', 'input', 'keydown'];
-function _actionArgs(el, ev){
-  let raw = el.getAttribute('data-args');
+function _actionArgs(el, ev, suffix){
+  let raw = el.getAttribute('data-args' + (suffix || ''));
   if (!raw) return [];
   let parsed;
   try { parsed = JSON.parse(raw); }
@@ -2115,8 +2171,8 @@ function _actionArgs(el, ev){
   if (!Array.isArray(parsed)) parsed = [parsed];
   return parsed.map(a => a === "$el" ? el : a === "$event" ? ev : a);
 }
-function _runAction(el, ev){
-  const name = el.getAttribute('data-act');
+function _runAction(el, ev, suffix){
+  const name = el.getAttribute('data-act' + (suffix || ''));
   const fn = name && globalThis[name];
   if (typeof fn !== 'function'){ console.error('[action] no such action:', name); return; }
   /* Roughly a third of the actions dispatched here are `async`, and a synchronous
@@ -2124,7 +2180,7 @@ function _runAction(el, ev){
      that threw after its first `await` produced an unhandled rejection in the console
      and nothing at all on screen. Catch the returned promise too. */
   try {
-    const out = fn.apply(null, _actionArgs(el, ev));
+    const out = fn.apply(null, _actionArgs(el, ev, suffix));
     if (out && typeof out.catch === 'function'){
       out.catch(err=>{
         console.error('[action] ' + name + ' rejected', err);
@@ -2139,6 +2195,11 @@ function _runAction(el, ev){
 }
 ACTION_EVENTS.forEach(type=>{
   document.addEventListener(type, (ev)=>{
+    /* An element can carry one action per event: `data-act-keydown` / `data-args-keydown`
+       sit beside the plain `data-act`. Writing `data-act` twice on one tag does not do
+       this — the parser keeps the first copy and silently drops the second. */
+    const perType = ev.target && ev.target.closest && ev.target.closest('[data-act-' + type + ']');
+    if (perType){ _runAction(perType, ev, '-' + type); return; }
     const target = ev.target && ev.target.closest && ev.target.closest('[data-act]');
     if (!target) return;
     // An element declares which events it wants; without this, a text input carrying a
@@ -3292,15 +3353,19 @@ function applyAdvancedMode(){
    A 7,073-option datalist is also a lot of DOM for a control nobody can scroll.
    This is a debounced search over trait + description, showing the category, capped
    at a readable number of results and drawing from the WHOLE pool. */
-let _searchTimer = null;
-function searchTraits(inputId, resultsId, onPick){
+// One debounce timer per search box: a shared one let typing in one box cancel
+// another's pending results.
+const _searchTimers = {};
+function searchTraits(inputId, resultsId){
   const inp = document.getElementById(inputId);
   const box = document.getElementById(resultsId);
   if (!inp || !box) return;
-  if (_searchTimer) clearTimeout(_searchTimer);
-  _searchTimer = setTimeout(()=>{
+  if (_searchTimers[inputId]) clearTimeout(_searchTimers[inputId]);
+  _searchTimers[inputId] = setTimeout(()=>{
     const q = (inp.value||"").trim().toLowerCase();
-    if (q.length < 2){ box.innerHTML = ""; box.style.display = 'none'; return; }
+    // closeSearchResults also resets aria-expanded and aria-activedescendant, which
+    // would otherwise keep pointing at options that no longer exist.
+    if (q.length < 2){ closeSearchResults(inputId, resultsId); return; }
     const hits = [];
     for (const t of TRAITS){
       if (t.trait.toLowerCase().includes(q) || t.desc.toLowerCase().includes(q)){
@@ -3487,7 +3552,7 @@ function wireKeyboard(){
                  document.querySelector('.traitCard[data-slot]:hover');
     if (!card) return;
     const slot = card.getAttribute('data-slot');
-    const btn = card.querySelector(k === 'r' ? '.rerollBtn' : '.lockBtn');
+    const btn = card.querySelector(k === 'r' ? '.rerollBtn:not(.backBtn)' : '.lockBtn');
     if (!btn) return;
     e.preventDefault();
     btn.click();
@@ -3583,7 +3648,12 @@ function shareLinkFor(){
   // Name/age/context travel so the replay lands in the same world; the seed field
   // itself is carried separately.
   if (settings.fields) delete settings.fields.seedInput;
+  /* Kept cards are seated before anything is drawn (finalizeSheet, carryLocked), so a
+     sheet built around them is only replayable with them. They travel with the link. */
+  const locked = {};
+  Object.entries(state || {}).forEach(([k, s2]) => { if (s2 && s2.locked && s2.trait) locked[k] = s2; });
   const payload = {v: 1, seed: lastSeedUsed, settings};
+  if (Object.keys(locked).length) payload.locked = compressSlots(locked);
   const url = location.href.split('#')[0];
   return url + '#share=' + _b64urlEncode(JSON.stringify(payload));
 }
@@ -3600,6 +3670,18 @@ function readShareFromHash(hash){
   const p = JSON.parse(_b64urlDecode(m[1]));
   if (!p || typeof p !== 'object' || typeof p.seed !== 'string' || !p.seed.trim()) throw new Error("the link has no seed.");
   if (p.settings != null && (typeof p.settings !== 'object' || Array.isArray(p.settings))) throw new Error("the link's settings are malformed.");
+  // The same structural check an imported file gets, BEFORE anything is applied — a
+  // malformed constraint block used to clear the recipient's own bans and then throw.
+  if (p.settings && typeof validateSheetPayload === 'function') validateSheetPayload({settings: p.settings});
+  if (p.locked != null){
+    if (typeof p.locked !== 'object' || Array.isArray(p.locked)) throw new Error("the link's kept cards are malformed.");
+    const exp = expandSlots(p.locked) || {};
+    Object.values(exp).forEach(s2 => {
+      if (!s2 || !s2.trait || !TRAITS_BY_ID.get(s2.trait.id)) throw new Error("the link keeps a card this bank does not have.");
+      s2.trait = TRAITS_BY_ID.get(s2.trait.id);
+    });
+    p.locked = exp;
+  }
   return p;
 }
 function applyShareFromHash(){
@@ -3608,19 +3690,34 @@ function applyShareFromHash(){
   try { p = readShareFromHash(location.hash); }
   catch(e){ toast("That share link could not be read: " + e.message, "warn", 7000); return false; }
   if (!p) return false;
+  /* The link's settings replace the recipient's own (the replay needs them), so the
+     workspace is snapshotted first: Undo gives the recipient their settings back, and a
+     failure part-way restores them rather than leaving half of each. */
+  const before = captureSettings();
+  const snap = _snapshotNow();
   try {
     if (p.settings) restoreSettings(p.settings);
     applyAdvancedMode();
     setVal('seedInput', p.seed);
     onSliderChange();
+    // Seat the link's kept cards exactly as the sender had them.
+    state = p.locked ? p.locked : {};
     runGeneration();
+    // The build pushed a snapshot of the half-applied workspace; undo should land on
+    // the recipient's own sheet and settings instead.
+    if (history.length) history[history.length - 1] = snap;
+  } catch(e){
+    state = expandSlots(snap.state) || {};
+    try { restoreSettings(before); } catch(e2){}
+    toast("That share link could not be opened: " + (e && e.message || e), "warn", 7000);
+    return false;
   } finally {
     // The seed replayed once; left in the field, every later roll would be the same one.
     setVal('seedInput', '');
     // window.history: the bare name is the undo stack (engine.js).
     try { window.history.replaceState(null, '', location.href.split('#')[0]); } catch(e){}
   }
-  toast(`Opened a shared character (seed ${p.seed}).`);
+  toast(`Opened a shared character (seed ${p.seed}). It came with its own settings — Undo puts yours back.`, "ok", 7000);
   markOnboarded();
   return true;
 }
@@ -3657,7 +3754,6 @@ function compareSheetsHTML(a, aName, b, bName){
   const rows = slots.map(k=>{
     const x = a[k] && a[k].trait, y = b[k] && b[k].trait;
     const eq = x && y && x.id === y.id;
-    const inOther = (!eq && x && B.has(x.id)) || (!eq && y && A.has(y.id));
     if (eq) same++;
     const label = (a[k] && a[k].label) || (b[k] && b[k].label) || k;
     const cell = (t, has) => t ? `<span class="${has ? 'cmpShared' : ''}">${escHTML(t.trait)}</span>` : `<span class="sub">—</span>`;
@@ -3771,7 +3867,9 @@ buildPersonalitySliders();
 loadSavedList();
 // Say whether this browser will actually keep anything BEFORE the first save (B21).
 announceStorageMode();
-loadCustomArchetypes();
+// Prefs restore the archetype selection, which may be a custom_* option — so they wait
+// for the custom presets to exist, or the saved choice is silently dropped on reload.
+const _customArchetypesReady = loadCustomArchetypes();
 populateBanCategorySelect();
 refreshConstraintChips();
 renderLensPicker();
@@ -3790,7 +3888,7 @@ wireKeyboard();
 applyAdvancedMode();
 (function(){ const f = document.getElementById('familiarPanel');
   if (f) f.addEventListener('toggle', ()=> onFamiliarToggle(f)); })();
-loadPrefs().then(()=>{ applyShareFromHash(); initOnboarding(); });
+_customArchetypesReady.catch(()=>{}).then(()=>loadPrefs()).then(()=>{ applyShareFromHash(); initOnboarding(); });
 // Offline/repeat-visit caching. Registration is best-effort: the app is fully
 // functional without it, and file:// or an unsupported browser must not throw here.
 if (typeof navigator !== 'undefined' && navigator.serviceWorker && location.protocol.startsWith('http')){

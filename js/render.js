@@ -482,7 +482,7 @@ function traitCardHTML(id, s, includeControls, showDiff, accent, tagLabel){
           <button class="pinBtn ${pinnedTargets[id]!==undefined ? "pinned" : ""}" ${actAttr('click', 'togglePin', id)} title="Pin this slot's intensity target (not the exact trait) so future generations/rerolls stay near this level even as sliders move elsewhere" aria-pressed="${pinnedTargets[id]!==undefined?'true':'false'}">${pinnedTargets[id]!==undefined ? "pinned "+pinnedTargets[id].toFixed(1) : "pin"}</button>
           ${pinnedTargets[id]!==undefined ? `<button class="pinAdj" ${actAttr('click', 'adjustPin', id, -0.2)} title="Nudge pinned intensity down" aria-label="Nudge pinned intensity down">−</button><button class="pinAdj" ${actAttr('click', 'adjustPin', id, 0.2)} title="Nudge pinned intensity up" aria-label="Nudge pinned intensity up">+</button>` : ``}
         </div>
-        ${history ? `<button class="rerollBtn" ${actAttr('click', 'rerollBack', id)} title="Step back to the trait this slot held before the last toss">↺ back</button>` : ``}
+        ${history ? `<button class="rerollBtn backBtn" ${actAttr('click', 'rerollBack', id)} title="Step back to the trait this slot held before the last toss">↺ back</button>` : ``}
         ${slotDepthHTML(id, t)}
         <button class="whyBtn" ${actAttr('click', 'toggleWhy', id)} title="Why did I get this trait?" aria-expanded="${whyOpen[id]?'true':'false'}">why?</button>
         <!-- Favouriting and banning previously meant leaving the sheet, opening
@@ -1511,7 +1511,16 @@ function sheetToText(st, meta, pState){
 }
 
 function copyText(text, btn){
-  const done = ()=>{ if (btn){ const old = btn.textContent; btn.textContent = "Copied!"; setTimeout(()=>btn.textContent=old, 1200); } };
+  // The label is remembered once, on the element: reading textContent on a second click
+  // inside the 1.2s window captured "Copied!" as the label and left it stuck there.
+  const done = ()=>{
+    if (!btn) return;
+    if (btn.dataset && btn.dataset.copyLabel === undefined) btn.dataset.copyLabel = btn.textContent;
+    const label = btn.dataset ? btn.dataset.copyLabel : btn.textContent;
+    btn.textContent = "Copied!";
+    clearTimeout(btn._copyTimer);
+    btn._copyTimer = setTimeout(()=>{ btn.textContent = label; if (btn.dataset) delete btn.dataset.copyLabel; }, 1200);
+  };
   // BUG FIX: navigator.clipboard is undefined in non-secure contexts (plain http,
   // file://) — this threw instead of copying. Guard it, and fall back to the
   // textarea/execCommand path so the button works everywhere.
@@ -1531,8 +1540,10 @@ function legacyCopy(text, done){
     if (ok) done(); else toast("Copy failed — your browser may block clipboard access here.", "warn");
   } catch(e){ toast("Copy failed — your browser may block clipboard access here.", "warn"); }
 }
-function downloadText(text, filename){
-  const blob = new Blob([text], {type:"text/markdown;charset=utf-8"});
+function downloadText(text, filename, mime){
+  // Every download used to be labelled text/markdown, the JSON exports included.
+  const type = mime || (/\.json$/i.test(filename) ? "application/json" : /\.md$/i.test(filename) ? "text/markdown" : "text/plain");
+  const blob = new Blob([text], {type: type + ";charset=utf-8"});
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url; a.download = filename; a.click();
@@ -1688,7 +1699,7 @@ function buildBudgetUI(){
         <label for="cap_${tier}" class="budgetLabel"><span class="rarityBadge rarity-${tier}"><span class="rarityGlyph" aria-hidden="true">${RTIER_GLYPH[tier]||"·"}</span>${escHTML(RTIER_LABEL[tier])}</span></label>
         <input type="number" id="cap_${tier}" min="0" max="60" step="1" placeholder="no cap"
                aria-label="Maximum ${escHTML(RTIER_LABEL[tier])} cards on one sheet"
-               ${actAttr('input', 'onRarityCapChange', "${tier}")}>
+               ${actAttr('input', 'onRarityCapChange', tier)}>
       </div>`).join("");
   }
   const ig = document.getElementById('intensityCapGrid');
@@ -1698,14 +1709,14 @@ function buildBudgetUI(){
         <label for="icap_${g.id}" class="budgetLabel">${escHTML(g.label)}</label>
         <input type="number" id="icap_${g.id}" min="0" max="400" step="1" placeholder="off"
                aria-label="Maximum total intensity for ${escHTML(g.label)}"
-               ${actAttr('input', 'onIntensityCapChange', "${g.id}")}>
+               ${actAttr('input', 'onIntensityCapChange', g.id)}>
         <span class="budgetMeter" id="imeter_${g.id}"><i></i><b></b></span>
       </div>`).join("");
   }
   const pr = document.getElementById('budgetPresetRow');
   if (pr){
     pr.innerHTML = Object.entries(BUDGET_PRESETS).map(([k,p])=>
-      `<button class="btn-secondary" ${actAttr('click', 'useBudgetPreset', "${k}")}>${escHTML(p.label)}</button>`).join("");
+      `<button class="btn-secondary" ${actAttr('click', 'useBudgetPreset', k)}>${escHTML(p.label)}</button>`).join("");
   }
   refreshBudgetUI();
 }
@@ -1789,11 +1800,11 @@ function refreshBudgetChips(){
   let h = "";
   RTIER_ORDER.forEach(t=>{
     if (rarityCaps[t] == null) return;
-    h += `<span class="chip chip-tier">max ${rarityCaps[t]} ${escHTML(RTIER_LABEL[t])} <b ${actAttr('click', 'clearOneBudget', "rarity", "${t}")} title="Remove">&times;</b></span>`;
+    h += `<span class="chip chip-tier">max ${rarityCaps[t]} ${escHTML(RTIER_LABEL[t])} <b ${actAttr('click', 'clearOneBudget', "rarity", t)} title="Remove">&times;</b></span>`;
   });
   BUDGET_GROUPS.forEach(g=>{
     if (intensityCaps[g.id] == null) return;
-    h += `<span class="chip chip-tier">${escHTML(g.label)} intensity &le; ${intensityCaps[g.id]} <b ${actAttr('click', 'clearOneBudget', "intensity", "${g.id}")} title="Remove">&times;</b></span>`;
+    h += `<span class="chip chip-tier">${escHTML(g.label)} intensity &le; ${intensityCaps[g.id]} <b ${actAttr('click', 'clearOneBudget', "intensity", g.id)} title="Remove">&times;</b></span>`;
   });
   if (h && getBudgetMode() !== 'redraw') h += `<span class="chip chip-ban">over budget: ${getBudgetMode() === 'drop' ? 'drop the loudest' : 'warn only'}</span>`;
   box.innerHTML = h || '<span class="sub" style="margin:0;">No budgets set — every draw stands as dealt.</span>';
@@ -1876,6 +1887,8 @@ function exportCharacterJSON(){
     charMeta, state, pressureState, pinnedTargets, charVariants, traitNotes,
     sliders: captureSliders(),
     settings: captureSettings(),
+    arcBase: (typeof arcBase !== 'undefined' && arcBase) ? compressSlots(arcBase) : null,
+    arcEvents: (typeof arcEvents !== 'undefined') ? arcEvents : [],
   };
   const name = (charMeta.name || "character").replace(/[^a-z0-9_-]+/gi,'_');
   downloadText(JSON.stringify(payload, null, 2), name + ".character.json");
@@ -2063,6 +2076,22 @@ function importCharacterJSON(fileInput){
       setVal('charContext', charMeta.context || "");
       setText('archetypeTag', charMeta.archetypeLabel || "Imported");
       document.getElementById('pressureSheet').style.display = pressureState ? "block" : "none";
+      if (typeof viewContext !== 'undefined') viewContext = CONTEXT_MODE_IDS.includes(charMeta.viewContext) ? charMeta.viewContext : 'baseline';
+      /* The arc belongs to the imported sheet. It used to be left over from the character
+         open before, so the first arc action rebuilt THAT character over this one. */
+      if (typeof resetArc === 'function'){
+        resetArc(false);
+        const evs = Array.isArray(staged.arcEvents) ? staged.arcEvents.filter(e => !validateArcEvent(e).length) : [];
+        if (evs.length && staged.arcBase){
+          const base = relink(expandSlots(staged.arcBase));
+          if (base && Object.keys(base).length){
+            arcBase = base; arcEvents = evs;
+            arcLastReplay = JSON.parse(JSON.stringify(replayArc(arcBase, arcEvents)));
+            charMeta.arc = arcSummary(arcEvents);
+          }
+        }
+        if (typeof renderArc === 'function') renderArc();
+      }
       onSliderChange(); renderSheet(); checkConflicts();
       if (!staged.settings) toast("Imported. This file predates full-settings export, so constraints and counts were left as they are.", "warn", 6000);
       else toast("Imported " + (charMeta.name || "character") + " — settings restored too.");
@@ -2144,7 +2173,9 @@ function importArchetypes(fileInput){
       if (!ok.length) throw new Error(rejected.length
         ? `none of the ${rejected.length} record(s) in that file are usable — ${rejected[0].why}`
         : "that file contains no archetypes.");
-      const replacing = ok.filter(a=> CUSTOM_ARCHETYPES[a.label] !== undefined || ARCHETYPES[a.label] !== undefined);
+      // Custom presets are keyed 'custom_'+label (loadCustomArchetypes); looking them up by
+      // the bare label never found one, so every overwrite was announced as "new".
+      const replacing = ok.filter(a=> CUSTOM_ARCHETYPES['custom_'+a.label] !== undefined);
       const adding = ok.length - replacing.length;
       const lines = [`${adding} new preset${adding===1?'':'s'}.`];
       if (replacing.length) lines.push(`${replacing.length} will REPLACE existing preset${replacing.length===1?'':'s'}: ${replacing.map(a=>a.label).join(', ')}.`);

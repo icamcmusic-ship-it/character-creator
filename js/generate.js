@@ -453,6 +453,9 @@ function chooseBatch(i){
      belongs — on the one character the user kept, not on all five. The batch itself is
      isolated (see withSpeculativeGeneration); this is the deliberate commit. */
   if (pick.variants) charVariants = pick.variants;
+  // The kept candidate starts its own arc; arcBase must be THIS sheet, not whichever
+  // candidate happened to be built last.
+  if (typeof resetArc === 'function') resetArc(false);
   // Put the chosen candidate's sliders on screen too, so controls match the sheet.
   if (pick.sliders){ lastGeneratedSliders = pick.sliders; restoreSliders(pick.sliders); }
   if (pick.budgetReport && typeof setBudgetReport === 'function') setBudgetReport(pick.budgetReport);
@@ -679,9 +682,13 @@ function _runGeneration(){
   let seedNum = seed.num;
   lastSeedUsed = seed.label;
   const wantStress = !!(document.getElementById('stressToggle')||{}).checked;
-  // An explicit seed means "give me this character again", so it suppresses the
-  // session-history branch of divergence (see REPLAY_MODE in engine.js). An
-  // unseeded roll is exploration and keeps it.
+  /* Every build runs in replay mode (REPLAY_MODE, engine.js): no avoid-recent window,
+     no divergence tally, nothing from session history reaches the draw. That is what
+     makes the printed seed a real promise — it used to replay only the first roll of a
+     session, because a blank-seed roll drew against history the pasted seed then lacked.
+     A blank seed still explores (best of three, below): the choice between candidates
+     reads the archive, but each candidate is a pure function of its own seed, and the
+     winner's seed is the one printed. */
   const replay = seed.explicit;
   // Setting / culture / life-stage lenses carry a register norm: a nudge on the dial.
   if (ctxInfo && ctxInfo.lensRegister) regLevel = clamp(regLevel + ctxInfo.lensRegister, -2, 2);
@@ -699,7 +706,7 @@ function _runGeneration(){
       const cands = [];
       for (let k = 0; k < EXPLORE_CANDIDATES; k++){
         const num = candidateSeed(seedNum, k);
-        const st = withSpeculativeGeneration(()=> withReplayMode(false, ()=>
+        const st = withSpeculativeGeneration(()=> withReplayMode(true, ()=>
           withArchetypeProfile(arch && arch.profile, ()=> withRng(mulberry32(num), ()=>{
             rollCharacterVariants(want0);
             return buildCharacterState({verbLevel, regLevel, compLevel, mannerCount, rarityPref,
@@ -718,7 +725,7 @@ function _runGeneration(){
   // The archetype's profile hints are live for the whole build and nothing else — see
   // ARCHETYPE PROFILE HINTS in engine.js. Cast, foil and gap-filler deliberately do not
   // inherit them; they are not this archetype's character.
-  withReplayMode(replay, ()=>
+  withReplayMode(true, ()=>
   withArchetypeProfile(arch && arch.profile, ()=> withRng(mulberry32(seedNum), ()=>{
     /* The character's presentation is committed BEFORE anything is drawn — including
        before the depth-first foundation draw, which goes through byFilter and is
@@ -996,8 +1003,9 @@ function rerollSlot(slotId){
     const cat = old.trait.category;
     const pool = byFilter(old.trait.section, cat);
     const tgt = profileTarget(old.sectionId);
-    replacement = drawFresh(()=>({slotId, locked:false, label: old.label, sectionId: old.sectionId, target:tgt,
-      trait: pickInRange(pool, rarityPref, tgt)}));
+    // A counterpoint card stays one after a reroll (tallyOveruse skips counterpoints).
+    replacement = drawFresh(()=>Object.assign({slotId, locked:false, label: old.label, sectionId: old.sectionId, target:tgt,
+      trait: pickInRange(pool, rarityPref, tgt)}, old.counterpoint ? {counterpoint: true} : {}));
   } else if (slotId.startsWith("pers_")){
     const axisId = slotId.replace("pers_","").replace(/__2$/,"");
     const axis = PERSONALITY_AXES.find(a=>a.id===axisId);
@@ -1061,14 +1069,18 @@ function rerollSlot(slotId){
 function rerollBack(slotId){
   const hist = rerollHistory[slotId];
   if (!hist || !hist.length){ toast("Nothing to step back to in this slot.", "warn"); return; }
-  const prev = hist.pop();
-  if (!prev || !prev.trait) return;
+  // A Kept card is frozen against every sheet mutation, this one included.
+  if (state[slotId] && state[slotId].locked){ toast("This card is Kept — unlock it before stepping back.", "warn"); return; }
+  // Peek, don't pop: a refused step-back must leave the history where it was.
+  const prev = hist[hist.length - 1];
+  if (!prev || !prev.trait){ hist.pop(); return; }
   // The trait you tossed here may have been drawn into a different slot since. Stepping
   // back to it would seat it twice on one sheet, so refuse rather than duplicate.
   if (seatedTraitIds(slotId).has(prev.trait.id)){
     toast(`"${prev.trait.trait}" has since been drawn into another slot — stepping back would put it on the sheet twice.`, "warn");
     return;
   }
+  hist.pop();
   snapshotHistory();
   if (rerollExclusions[slotId]) rerollExclusions[slotId].delete(prev.trait.id);
   const cur = state[slotId];

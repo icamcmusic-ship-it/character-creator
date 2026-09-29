@@ -26,8 +26,11 @@ function mxTokens(text){
   return out;
 }
 function mxOverlap(a, b){ const B = b instanceof Set ? b : mxTokens(b); return [...(a instanceof Set ? a : mxTokens(a))].filter(w => B.has(w)); }
-function _mxQ(s){ return `"${String(s || "").trim().replace(/^['"\u2018\u201c]+|['"\u2019\u201d]+$/g, "")}"`; }
-function _mxLc(s){ s = String(s || "").trim().replace(/[.!]+$/, ""); return s ? s[0].toLowerCase() + s.slice(1) : s; }
+// A trait name that is one hyphen-joined run ("Being-liked-means-being-fake") is a
+// phrase, and reads as one only once the hyphens are spaces.
+function _mxUnrun(s){ return (!/\s/.test(s) && (s.match(/-/g) || []).length >= 2) ? s.replace(/-/g, " ") : s; }
+function _mxQ(s){ return `"${_mxUnrun(String(s || "").trim().replace(/^['"\u2018\u201c]+|['"\u2019\u201d]+$/g, ""))}"`; }
+function _mxLc(s){ s = _mxUnrun(String(s || "").trim().replace(/[.!]+$/, "")); return s ? s[0].toLowerCase() + s.slice(1) : s; }
 function _mxHash(s){ let h = 0; s = String(s); for (let i = 0; i < s.length; i++) h = Math.imul(31, h) + s.charCodeAt(i) | 0; return h >>> 0; }
 function _mxPick(arr, key){ return arr.length ? arr[_mxHash(key) % arr.length] : null; }
 function _mxSlot(st, sectionId, catRe){
@@ -540,7 +543,6 @@ function relationshipWebSVG(web, size){
 function relationshipWebHTML(members, edges){
   const web = relationshipWeb(members, edges);
   if (web.nodes.length < 2) return `<div class="sub">Add two or more cast members to see the web.</div>`;
-  const nm = i => escHTML(web.nodes[i].name);
   const list = (title, items) => items.length ? `<div class="relWebList"><b>${title}</b><ul>${items.map(x => `<li>${escHTML(x)}</li>`).join("")}</ul></div>` : "";
   return `<div class="relWeb">
     <div class="relWebChart">${web.pairs.length ? relationshipWebSVG(web, 320) : `<div class="sub">No edges yet — add some above, or use “Add both directions”. Factions below are guessed from shared Values.</div>`}
@@ -609,10 +611,10 @@ function recoverySheet(st){
   const row = (key, title, text, from) => { if (text) rows.push({key, title, text, from: (from || []).filter(Boolean).map(t => t.trait)}); };
   row("first", "First hours", stress ? _RECOVER_FIRST[stress.category] : null, [stress]);
   row("who", "Who they go to", attach && _RECOVER_WHO[attach.category] ? `They go ${_RECOVER_WHO[attach.category]}.` : null, [attach]);
-  row("helps", "What actually helps", need ? `${need.trait}${need.desc ? ` — ${_mxLc(need.desc)}` : ""}.` : null, [need]);
+  row("helps", "What actually helps", need ? `${_mxUnrun(need.trait)}${need.desc ? ` — ${_mxLc(need.desc)}` : ""}.` : null, [need]);
   row("ground", "What grounds them", texture ? `Back to ${_mxLc(texture.trait)}${texture.desc ? ` — ${_mxLc(texture.desc)}` : ""}.` : origin ? `The memory of ${_mxLc(origin.trait)}.` : null, [texture || origin]);
-  row("hurts", "What does not help", vices ? `${vices.trait} — it feels like recovery and is not.` : values && values.category === "Rigid & Principled" ? "Being told it was not their fault; they will argue." : null, [vices || values]);
-  row("repair", "How they repair it", repair ? `${repair.trait}${repair.desc ? ` — ${_mxLc(repair.desc)}` : ""}.` : null, [repair]);
+  row("hurts", "What does not help", vices ? `${_mxUnrun(vices.trait)} — it feels like recovery and is not.` : values && values.category === "Rigid & Principled" ? "Being told it was not their fault; they will argue." : null, [vices || values]);
+  row("repair", "How they repair it", repair ? `${_mxUnrun(repair.trait)}${repair.desc ? ` — ${_mxLc(repair.desc)}` : ""}.` : null, [repair]);
   row("scar", "The story they tell afterwards", lie ? `That it proves ${_mxQ(lie.trait)} — unless someone gets to them first.` : null, [lie]);
   const summary = typeof pressureRecovery === "function" ? pressureRecovery(st) : null;
   return rows.length ? {summary, rows} : null;
@@ -670,8 +672,27 @@ function _mxShift(t, delta){
   if (!t || typeof byFilter !== "function") return null;
   const pool = byFilter(t.section, t.category).filter(x => x.id !== t.id);
   const want = clamp((t.intensity || 3) + delta, 1, 5);
-  const exact = pool.filter(x => (x.intensity || 3) === want);
-  return exact.length ? exact[Math.floor(rand() * exact.length)] : pickInRange(pool, "balanced", want, 3);
+  /* Any trait one step louder or quieter used to do, so a Want of "a quiet partnership"
+     could shift to "mild preference" and the arc read "they choose an ordinary week over
+     mild preference". Stay with the same idea: the same concept family first, then the
+     closest wording, and only then anything at that intensity. */
+  const near = pool.filter(x => Math.abs((x.intensity || 3) - want) <= (delta ? 0 : 1));
+  const cands = near.length ? near : pool;
+  if (!cands.length) return null;
+  // Category boilerplate ("Wants…", "Fear of…") is shared by the whole pool, so it
+  // says nothing about closeness; the name carries the idea and counts triple.
+  const boiler = new Set(["want","wants","fear","need","core","being","thing"].map(w => _mxStem(w)));
+  const toks = x => new Set([...mxTokens(x)].filter(w => !boiler.has(w)));
+  const nameW = toks(t.trait), descW = toks(`${t.trait} ${t.desc || ""}`);
+  const score = x => (t.conceptFamily && x.conceptFamily === t.conceptFamily ? 10 : 0)
+    + 3 * mxOverlap(nameW, toks(x.trait)).length
+    + mxOverlap(descW, toks(`${x.trait} ${x.desc || ""}`)).length
+    + ((x.intensity || 3) === want ? 0.5 : 0);
+  const scored = cands.map(x => ({x, s: score(x)}));
+  const top = Math.max(...scored.map(o => o.s));
+  if (top <= 0.5) return near.length ? near[Math.floor(rand() * near.length)] : pickInRange(pool, "balanced", want, 3);
+  const best = scored.filter(o => o.s === top).map(o => o.x);
+  return best[Math.floor(rand() * best.length)];
 }
 /* Changes that come from the TEXT of the event, appended after the shape's own. */
 function arcTextChanges(st, event, shape, existing){
@@ -760,7 +781,7 @@ function _fillArcText(s, st){
     .replace(/\{want\}/g, want ? _mxLc(want.trait) : "what they wanted")
     .replace(/\{need\}/g, need ? _mxLc(need.trait) : "what would actually help")
     .replace(/\{values\}/g, values ? `${_mxQ(values.trait)}` : "the line they said they would never cross")
-    .replace(/\{price\}/g, price ? `${price.trait}.` : "More than they admit.");
+    .replace(/\{price\}/g, price ? `${_mxUnrun(price.trait)}.` : "More than they admit.");
 }
 /* A template becomes ordinary events, each with its proposals computed against the
    sheet as the PREVIOUS steps' proposals would leave it — so the steps read as a

@@ -3717,6 +3717,8 @@ check('§6 trait-bank gap sections stay grown, opt-in, and conceptFamily coverag
   return `${gaps.length} gap traits, conceptFamily ${fam}/${T.length}`;
 });
 
+require('./regressions')({check, group, assert});
+
 console.log('\n' + (failed ? '\x1b[31m' : '\x1b[32m') + passed + ' passed, ' + failed + ' failed\x1b[0m');
 if (failed){
   console.log('\nFailures:');

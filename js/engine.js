@@ -329,9 +329,27 @@ function withSpeculativeGeneration(fn){
     lastGenerationSignature: (typeof lastGenerationSignature !== 'undefined') ? lastGenerationSignature : undefined,
     categoryUse: new Map(CATEGORY_USE),
     drawContext: captureDrawContext(),
+    // Per-sheet UI state _runGeneration clears for "the next character" — a
+    // speculative build is not the next character, so the sheet on screen keeps it.
+    ui: (typeof rerollHistory !== 'undefined') ? {rerollHistory, rerollExclusions, whyOpen,
+      diffLog, lastDepthUntouched,
+      changedSlots: (typeof changedSlots !== 'undefined') ? changedSlots : null,
+      openCards: (typeof OPEN_CARD_CONTROLS !== 'undefined') ? new Set(OPEN_CARD_CONTROLS) : null} : null,
+    arc: (typeof arcBase !== 'undefined') ? {arcBase, arcEvents, arcOverrides, arcLastReplay} : null,
   };
   try { return fn(); }
   finally {
+    if (saved.ui){
+      rerollHistory = saved.ui.rerollHistory; rerollExclusions = saved.ui.rerollExclusions;
+      whyOpen = saved.ui.whyOpen; diffLog = saved.ui.diffLog;
+      lastDepthUntouched = saved.ui.lastDepthUntouched;
+      if (saved.ui.changedSlots) changedSlots = saved.ui.changedSlots;
+      if (saved.ui.openCards){ OPEN_CARD_CONTROLS.clear(); saved.ui.openCards.forEach(x => OPEN_CARD_CONTROLS.add(x)); }
+    }
+    if (saved.arc){
+      arcBase = saved.arc.arcBase; arcEvents = saved.arc.arcEvents;
+      arcOverrides = saved.arc.arcOverrides; arcLastReplay = saved.arc.arcLastReplay;
+    }
     _applyDrawContext(saved.drawContext);
     charVariants = saved.charVariants;
     history = saved.history;
@@ -3580,8 +3598,13 @@ function assertAxisTables(){
   return problems;
 }
 
+const CONTRADICTION_SKIP_SECTIONS = new Set(["Positive Origins","Motivation & Wound","Goals & Stakes",
+  "Recovery & Repair","Contradiction Functions","Money & Class","Family Talk","Fears & Aversions"]);
 function contradictionFor(stateObj){
-  const items = Object.values(stateObj || {}).filter(s=> s && s.trait && s.trait.pol);
+  /* Only cards that describe how someone BEHAVES can contradict each other. History and
+     circumstance (an origin, a wound, a goal) share axis tags too, and the panel used to
+     set "Parents who liked each other" against a mannerism as if they were two faces. */
+  const items = Object.values(stateObj || {}).filter(s=> s && s.trait && s.trait.pol && !CONTRADICTION_SKIP_SECTIONS.has(s.trait.section));
   let best = null;
   for (let i = 0; i < items.length; i++){
     for (let j = i + 1; j < items.length; j++){
@@ -5331,6 +5354,15 @@ function _snapshotNow(){
     charVariants: Object.assign({}, (typeof charVariants !== 'undefined' ? charVariants : {})),
     traitNotes: Object.assign({}, traitNotes || {}),
     settings: (typeof captureSettings === 'function') ? captureSettings() : null,
+    // The arc and the context lens belong to the sheet; undo used to leave B's arc
+    // sitting on A's sheet.
+    arc: (typeof arcBase !== 'undefined') ? {
+      base: arcBase ? compressSlots(arcBase) : null,
+      events: JSON.parse(JSON.stringify(arcEvents || [])),
+      overrides: compressSlots(arcOverrides || {}),
+      lastReplay: arcLastReplay ? compressSlots(arcLastReplay) : null,
+    } : null,
+    viewContext: (typeof viewContext !== 'undefined') ? viewContext : null,
   };
 }
 function updateUndoButtons(){
@@ -5355,6 +5387,14 @@ function _restoreSnapshot(prev){
   if (prev.pinnedTargets) pinnedTargets = JSON.parse(JSON.stringify(prev.pinnedTargets));
   if (prev.charVariants && typeof charVariants !== 'undefined') charVariants = Object.assign({}, prev.charVariants);
   if (prev.traitNotes) traitNotes = Object.assign({}, prev.traitNotes);
+  if (prev.arc && typeof arcBase !== 'undefined'){
+    arcBase = prev.arc.base ? expandSlots(prev.arc.base) : null;
+    arcEvents = JSON.parse(JSON.stringify(prev.arc.events || []));
+    arcOverrides = expandSlots(prev.arc.overrides) || {};
+    arcLastReplay = prev.arc.lastReplay ? expandSlots(prev.arc.lastReplay) : null;
+    if (charMeta){ if (arcEvents.length) charMeta.arc = arcSummary(arcEvents); else delete charMeta.arc; }
+  }
+  if (prev.viewContext && typeof viewContext !== 'undefined') viewContext = prev.viewContext;
   restoreSliders(prev.sliders);
   lastGeneratedSliders = prev.sliders; // the restored state now corresponds to these again
   setVal('charName', charMeta.name || "");
@@ -5365,6 +5405,7 @@ function _restoreSnapshot(prev){
   diffLog = {}; rerollExclusions = {}; rerollHistory = {}; whyOpen = {}; OPEN_CARD_CONTROLS.clear();
   onSliderChange();
   renderSheet(); checkConflicts();
+  if (typeof renderArc === 'function') renderArc();
   updateUndoButtons();
 }
 function undoLast(){
@@ -5896,6 +5937,21 @@ const STRATEGY_BY_STRESS = {
   "Freeze (shut down)": "goes still and waits for it to pass",
   "Fawn (appease the threat)": "makes themselves useful to it until it stops being a threat",
 };
+/* The table above is third-person singular ("Trait: goes still…"). Spliced after
+   "they" it read "they goes still" on every sheet with a stress card, so the chain and
+   the beats take these conjugated forms instead. */
+const STRATEGY_BY_STRESS_THEY = {
+  "Fight (attack the threat)": "meet it head-on before it can land",
+  "Flight (remove yourself)": "leave before it can land",
+  "Freeze (shut down)": "go still and wait for it to pass",
+  "Fawn (appease the threat)": "make themselves useful to it until it stops being a threat",
+};
+const STRATEGY_BY_STRESS_PAST = {
+  "Fight (attack the threat)": "met it head-on before it could land",
+  "Flight (remove yourself)": "left before it could land",
+  "Freeze (shut down)": "went still and waited for it to pass",
+  "Fawn (appease the threat)": "made themselves useful to it until it stopped being a threat",
+};
 const STRATEGY_BY_VALUES = {
   "Rigid & Principled": "a rule they will not bend",
   "Pragmatic & Flexible": "whatever works this time",
@@ -5903,6 +5959,76 @@ const STRATEGY_BY_VALUES = {
   "Self-Interested": "their own position first",
   "Idealistic & Visionary": "a picture of how it ought to be",
 };
+/* ---------- TRAIT NAMES INSIDE PROSE ----------
+   Trait names are labels, not grammar: "Keeps a spreadsheet for everything",
+   "Was the family translator", "Fear-of-wasted-potential", "'I-have-to-earn-my-place'",
+   "Get through Friday". Pasted raw into a sentence they read as "…when keeps a
+   spreadsheet for everything made them useful" and "there was was…". Every splice in
+   the chain, the beats and the mechanics prose goes through these instead. */
+const _PROSE_PAST = /^(was|were|blamed|chosen|abandoned|forgotten|bullied|ignored|adopted|called|given|watched|failed|survived|lost|betrayed|grew|taught|made|told|passed|won|finished|got|learned|learnt|lent|trusted|read|allowed|sent|praised|held|left|saw|found|raised|buried|moved|spent|had|kept|became|broke|fled|missed|nursed|carried|heard|walked|stayed|came|went|took|gave|chose|married|divorced|inherited|outlived|mediated)$/i;
+const _PROSE_MODAL = /^(can|cannot|can't|could|will|won't|would|never|always|only|rarely|still|mildly|quietly|secretly|slightly)$/i;
+const _PROSE_BARE = /^(live|stay|talk|finally|put|send|bring|teach|lose|give|take|run|hold|look|walk|sleep|quit|get|make|be|keep|find|win|see|have|build|learn|retire|fix|finish|sell|say|leave|clear|go|prove|become|earn|pay|buy|save|stop|start|help|protect|return|move|write|tell|hear|reach|open|close|repair|raise|marry|own|visit|meet|beat|escape|survive|forgive|matter|belong|land|pass|finally)$/i;
+const _PROSE_NOT_VERB = /^(parents|adults|mastery|recognition|belonging|nothing|always|others|debts|less|loss|access|process|success|progress|business|kindness|bus|status|chaos|focus|bonus|plus|this|its|his|hers|yes|us|thus|as|is)$/i;
+function traitPhrase(t){
+  let s = String((t && t.trait) || t || "").trim().replace(/^['"‘“]+|['"’”]+$/g, "").replace(/[.!]+$/, "");
+  // A name that is one hyphen-joined run of three or more words is a phrase, not a compound.
+  if (!/\s/.test(s) && (s.match(/-/g) || []).length >= 2) s = s.replace(/-/g, " ");
+  if (/^(I|I'm|I've|I'd|I'll)\b/.test(s)) return s;
+  return s ? s[0].toLowerCase() + s.slice(1) : s;
+}
+function _proseVerbKind(first){
+  if (_PROSE_NOT_VERB.test(first)) return null;
+  if (/^to$/i.test(first)) return "inf";
+  if (/^being$/i.test(first)) return "ger";
+  if (_PROSE_MODAL.test(first)) return "modal";
+  if (_PROSE_PAST.test(first)) return "past";
+  if (_PROSE_BARE.test(first)) return "bare";
+  if (/^(has|does|gets|is)$/i.test(first)) return "pres";
+  if (/^[a-z]+(s)$/i.test(first) && !/(ss|us|is|ous)$/i.test(first) && first.length > 3) return "pres";
+  return null;
+}
+/* A trait as something that can stand where a noun goes: "being someone who keeps a
+   spreadsheet for everything", "the time they watched…", "being the family translator". */
+function asNounPhrase(t){
+  const s = traitPhrase(t);
+  const first = s.split(/\s+/)[0] || "";
+  switch (_proseVerbKind(first)){
+    case "pres": case "modal": return "being someone who " + s;
+    case "past":
+      if (/^(was|were)$/i.test(first)) return "being " + s.replace(/^\S+\s+/, "");
+      // Passive ("Told they were enough", "Blamed for…", "Chosen last") reads as being
+      // done TO them; active ("Taught themselves…") as a thing they did.
+      if (/^(chosen|given|forgotten|abandoned|bullied|ignored|adopted)$/i.test(first)
+          || /^(for|by|they|as|that|last|first|out|into|in|at|and|repeatedly|early|young|often|twice|again)$/i.test((s.split(/\s+/)[1] || "").replace(/[,.]$/, "")))
+        return "being " + s;
+      if (/^had$/i.test(first)) return "having " + s.replace(/^\S+\s+/, "");
+      return "the time they " + s;
+    case "bare": return "trying to " + s;
+    default: return s;
+  }
+}
+/* A trait as an aim: "to get through Friday", "to be looked after", "recognition". */
+function asAim(t){
+  const s = traitPhrase(t);
+  const kind = _proseVerbKind(s.split(/\s+/)[0] || "");
+  if (kind === "bare") return "to " + s;
+  if (kind === "pres" || kind === "modal" || kind === "past") return asNounPhrase(t);
+  return s;
+}
+/* A belief in the character's own words, quoted, so a first-person Lie stays grammatical. */
+function asBelief(t){
+  const s = traitPhrase(t);
+  return `"${s ? s[0].toUpperCase() + s.slice(1) : s}"`;
+}
+/* The same belief reported in the third person: "they have to earn their place daily". */
+function asReportedBelief(t){
+  const s = traitPhrase(t)
+    .replace(/\bI'm\b/g, "they're").replace(/\bI've\b/g, "they've").replace(/\bI'd\b/g, "they'd").replace(/\bI'll\b/g, "they'll")
+    .replace(/\bI am\b/g, "they are").replace(/\bI was\b/g, "they were").replace(/\bI\b/g, "they")
+    .replace(/\bmyself\b/gi, "themselves").replace(/\bmy\b/gi, "their").replace(/\bmine\b/gi, "theirs").replace(/\bme\b/gi, "them")
+    .replace(/\bthey has\b/g, "they have").replace(/\bthey does\b/g, "they do").replace(/\bthey is\b/g, "they are");
+  return s ? s[0].toLowerCase() + s.slice(1) : s;
+}
 function motivationChain(st){
   const want = _profTrait(st, "motivation", /Core Want/i);
   const fear = _profTrait(st, "motivation", /Core Fear/i);
@@ -5919,20 +6045,20 @@ function motivationChain(st){
   if (!want && !need && !wound) return null;
   const links = [];
   const add = (key, text, from) => links.push({key, text, from: from.filter(Boolean).map(t => t.trait)});
-  if (want) add("want", `The conscious goal is ${want.trait}${want.desc ? ` — ${want.desc}` : ``}`, [want]);
-  if (lie && want) add("belief", `They chase it because they believe ${lie.trait}: the want is what that belief makes look like the answer.`, [lie, want]);
-  else if (lie) add("belief", `Underneath, they believe ${lie.trait}.`, [lie]);
-  if (wound) add("origin", `The belief was learned from ${wound.trait}${ghost ? `, and it is still attached to ${ghost.trait}` : ``}.`, [wound, ghost]);
-  if (need) add("need", `What would actually help is ${need.trait}${want ? ` — which the want stands in front of rather than delivering` : ``}.`, [need, want]);
-  if (defence) add("strategy", `The strategy built on top is ${defence.trait}: it keeps the wound covered and keeps the need unmet.`, [defence]);
+  if (want) add("want", `The conscious goal is ${asAim(want)}${want.desc ? ` — ${want.desc}` : ``}`, [want]);
+  if (lie && want) add("belief", `They chase it because they believe ${asBelief(lie)}: the want is what that belief makes look like the answer.`, [lie, want]);
+  else if (lie) add("belief", `Underneath, they believe ${asBelief(lie)}.`, [lie]);
+  if (wound) add("origin", `The belief was learned from ${asNounPhrase(wound)}${ghost ? `, and it is still attached to ${asNounPhrase(ghost)}` : ``}.`, [wound, ghost]);
+  if (need) add("need", `What would actually help is ${asAim(need)}${want ? ` — which the want stands in front of rather than delivering` : ``}.`, [need, want]);
+  if (defence) add("strategy", `The strategy built on top — ${traitPhrase(defence)} — keeps the wound covered and keeps the need unmet.`, [defence]);
   if (stress || values){
-    const s = stress ? STRATEGY_BY_STRESS[stress.category] : null;
+    const s = stress ? STRATEGY_BY_STRESS_THEY[stress.category] : null;
     const v = values ? STRATEGY_BY_VALUES[values.category] : null;
     add("method", `When the strategy is tested they ${s || "fall back on habit"}${v ? `, and justify it by ${v}` : ``}.`, [stress, values]);
   }
-  if (fear) add("fear", `The thing they organise their life to avoid is ${fear.trait}${wound ? ` — the wound happening again` : ``}.`, [fear]);
-  if (origin) add("counterweight", `The one place the belief does not hold: ${origin.trait}. ${origin.desc || ""}`.trim(), [origin]);
-  if (aim || price) add("stakes", `${aim ? `Right now it points at ${aim.trait}.` : ``}${price ? ` The cost they are already paying: ${price.trait}.` : ``}`.trim(), [aim, price]);
+  if (fear) add("fear", `The thing they organise their life to avoid is ${asNounPhrase(fear)}${wound ? ` — the wound happening again` : ``}.`, [fear]);
+  if (origin) add("counterweight", `The one place the belief does not hold: ${traitPhrase(origin)}. ${origin.desc || ""}`.trim(), [origin]);
+  if (aim || price) add("stakes", `${aim ? `Right now the aim is ${asAim(aim)}.` : ``}${price ? ` The cost they are already paying: ${traitPhrase(price)}.` : ``}`.trim(), [aim, price]);
   return {want, fear, wound, lie, need, ghost, defence, origin, stress, values, links};
 }
 
@@ -5997,7 +6123,13 @@ function structuredContradiction(st, meta){
   const base = contradictionFor(st);
   if (!base) return null;
   const fn = _profTrait(st, "contradiction");
-  const condsOf = t => (t.conditions || []).map(c => CONTEXT_WORDS[c] || c);
+  // Authored conditions first; without them, the contexts the card's own text implies
+  // (derivedContextTags, mechanics.js) — "when" was empty on most sheets otherwise.
+  const condsOf = t => {
+    const own = t.conditions || [];
+    const tags = own.length ? own : (typeof derivedContextTags === 'function' ? derivedContextTags(t) : []);
+    return [...new Set(tags.map(c => CONTEXT_WORDS[c] || c))];
+  };
   const hiWhen = condsOf(base.hi), loWhen = condsOf(base.lo);
   const roles = ["Among Peers","Under Authority","With Dependents"].map(c => _profTrait(st, "contextrole", new RegExp("^" + c + "$"))).filter(Boolean);
   const attach = _profTrait(st, "attachment");
@@ -7048,7 +7180,8 @@ function selectDistinctCandidate(cands, references){
   if (!cands || !cands.length) return null;
   const scored = cands.map((c, i) => {
     const co = c.coherence !== undefined ? c.coherence : ((typeof coherenceScore === 'function' && coherenceScore(c.state)) || {pct:0}).pct;
-    const d = (references && references.length ? diversityScore(c.state, references).score : 0) - TALLY_WEIGHT * tallyOveruse(c.state);
+    const d = (references && references.length ? diversityScore(c.state, references).score : 0) - TALLY_WEIGHT * tallyOveruse(c.state)
+      - RECENT_PICK_WEIGHT * recentOverlapShare(c.state);
     return Object.assign({}, c, {index:i, coherence:co, diversity:d});
   });
   const best = Math.max(...scored.map(c => c.coherence));
@@ -7056,6 +7189,18 @@ function selectDistinctCandidate(cands, references){
   ok.sort((a, b) => (b.diversity - a.diversity) || (a.index - b.index));
   return Object.assign({}, ok[0], {considered: scored.length, floor: best - COHERENCE_FLOOR_DROP,
     scores: scored.map(c => ({index:c.index, diversity:+c.diversity.toFixed(3), coherence:c.coherence}))});
+}
+/* Avoid recent traits lives HERE, in the choice between candidates, not in the draw.
+   The draw runs in replay mode so a printed seed always rebuilds its character; the
+   recent window instead steers which of the three seeded candidates is kept. */
+const RECENT_PICK_WEIGHT = 0.5;
+function recentOverlapShare(st){
+  if (typeof avoidRecentEnabled === 'function' && !avoidRecentEnabled()) return 0;
+  if (!recentTraitIds || !recentTraitIds.length) return 0;
+  const recent = new Set();
+  recentTraitIds.forEach(set => set.forEach(id => recent.add(id)));
+  const ids = Object.values(st || {}).filter(s => s && s.trait).map(s => s.trait.id);
+  return ids.length ? ids.filter(id => recent.has(id)).length / ids.length : 0;
 }
 function explorationReferences(currentState){
   const refs = PROJECT_ARCHIVE.slice(-60);
@@ -7084,22 +7229,22 @@ function backstoryBeats(st, meta){
   if (wound || origin){
     const src = wound || origin;
     add("formative", "Formative event", at(0.25, 5, 14, "in childhood"),
-      wound ? `${pick(["It starts with","Before anything else there was","The first thing that happened to them was"], "f")} ${wound.trait.toLowerCase()}${ghost ? `, and it is still tied to ${ghost.trait.toLowerCase()}` : ``}.${origin ? ` What kept it from being everything: ${origin.trait.toLowerCase()}.` : ``}`
-            : `${pick(["What went right early:","The thing that held:"], "o")} ${origin.trait.toLowerCase()}.`, [src, ghost, wound && origin]);
+      wound ? `${pick(["It starts with","Before anything else came","The first thing that marked them was"], "f")} ${asNounPhrase(wound)}${ghost ? `, and it is still tied to ${asNounPhrase(ghost)}` : ``}.${origin ? ` What kept it from being everything: ${traitPhrase(origin)}.` : ``}`
+            : `${pick(["What went right early:","The thing that held:"], "o")} ${traitPhrase(origin)}.`, [src, ghost, wound && origin]);
   }
   if (lie) add("lesson", "What they took from it", at(0.4, 8, 20, "in their teens"),
-    `${pick(["They drew the conclusion","They learned, wrongly,","It taught them"], "l")} that ${lie.trait.replace(/^I /, "they ").toLowerCase()}.`, [lie]);
+    `${pick(["They drew the conclusion","They learned, wrongly,","It taught them"], "l")} that ${asReportedBelief(lie)}.`, [lie]);
   if (defence || values || competence){
     const pivot = competence || values || defence;
     add("turning", "Turning point", at(0.6, 14, 40, "in early adulthood"),
-      `${pick(["The turn came when","Everything changed when","The first time it paid off was when"], "t")} ${competence ? `${competence.trait.toLowerCase()} made them useful` : values ? `they chose ${STRATEGY_BY_VALUES[values.category] || values.trait.toLowerCase()} over the easier thing` : `they found the defence would hold`}${defence ? ` — ${defence.trait.toLowerCase()} set, from then on, into how they operate` : ``}.`, [pivot, defence]);
+      `${pick(["The turn came when","Everything changed when","The first time it paid off was when"], "t")} ${competence ? `${asNounPhrase(competence)} made them useful` : values ? `they chose ${STRATEGY_BY_VALUES[values.category] || `their line (${traitPhrase(values)})`} over the easier thing` : `they found the defence would hold`}${defence ? ` — and the defence (${traitPhrase(defence)}) set, from then on, into how they operate` : ``}.`, [pivot, defence]);
   }
   if (stress || vice){
     add("failure", "Most recent failure", age ? "within the last year" : "recently",
-      `${pick(["The latest time it broke:","Most recently it went wrong when"], "r")} under pressure they ${stress ? (STRATEGY_BY_STRESS[stress.category] || stress.trait.toLowerCase()) : "fell back on the old habit"}${vice ? `, and ${vice.trait.toLowerCase()} did the rest` : ``}${price ? ` — the bill was ${price.trait.toLowerCase()}` : need ? ` — which is the opposite of ${need.trait.toLowerCase()}` : ``}.`, [stress, vice, price]);
+      `${pick(["The latest time it broke:","Most recently it went wrong when"], "r")} under pressure they ${stress ? (STRATEGY_BY_STRESS_PAST[stress.category] || `fell back on ${asNounPhrase(stress)}`) : "fell back on the old habit"}${vice ? `, and the old habit (${traitPhrase(vice)}) did the rest` : ``}${price ? ` — the bill was ${traitPhrase(price)}` : need ? ` — the opposite of what they need (${traitPhrase(need)})` : ``}.`, [stress, vice, price]);
   }
   if (want || aim || role) add("now", "Where it stands", "now",
-    `${want ? `They want ${want.trait.toLowerCase()}` : `They are after ${aim.trait.toLowerCase()}`}${aim && want ? `, which right now means ${aim.trait.toLowerCase()}` : ``}${role ? `, and in any room they are the ${role.category.toLowerCase()}` : ``}.`, [want, aim, role]);
+    `${want ? `They want ${asAim(want)}` : `What they are after: ${asAim(aim)}`}${aim && want ? `, which right now means ${/^to /.test(asAim(aim)) ? 'trying ' + asAim(aim) : asAim(aim)}` : ``}${role ? `, and in any room they are the ${role.category.toLowerCase()}` : ``}.`, [want, aim, role]);
   return beats.length >= 3 ? beats.slice(0, 5) : (beats.length ? beats : null);
 }
 
@@ -7123,7 +7268,7 @@ const VOICE_TOPIC_POOL = {
   person: ["my sister","your father","the landlord","the new one","the foreman","my ex","the neighbour","the priest","the kid from downstairs","the captain","the nurse on nights","my brother-in-law","the old man at the gate","the client","her mother","the driver","my supervisor","the woman at the counter","my cousin","the lodger","the man from the council"],
   place: ["the kitchen","the station","the harbour","the back office","the car park","the chapel","the stairwell","the far field","the hospital","the bar on the corner","the roof","the garage","the waiting room","the market","the ferry","my mother's","the depot","the laundrette"],
   time: ["last night","on Tuesday","all evening","after the funeral","before the storm","this morning","around nine","the whole weekend","after the meeting","before you got here","at the weekend","until close","in the spring"],
-  task: ["carry this","sign for it","talk to them","drive","hold the door","look at the numbers","keep an eye on it","cover for me","tell her","wait with me","make the call","fix it","go back there","lend it"],
+  task: ["carry this","sign for it","talk to them","drive","hold the door","look at the numbers","keep an eye on it","cover the late shift","tell her","wait with them","make the call","fix it","go back there","lend it"],
 };
 const _VT = (templates, rule) => ({templates, rule});
 const VOICE_CLAUSES = {
@@ -7274,14 +7419,22 @@ function composeVoiceLine(st, promptId, mode, opts){
     const w = core.split(" ")[0];
     core = `${w.replace(/[.,!?]$/, "")} — ${_lowerFirst(core)}`; rule("grammar: " + gName + " — a false start");
   } else if (gcat === "Structural Shifts"){
-    extra.push(_cap(fill(["If {person} lets me.","Probably.","Which it won't be.","Or {time}.","Mostly."][Math.floor(rng() * 5)])));
+    // Only afterthoughts that qualify ANY claim, and seated straight after the core
+    // line — tacked on after the other extras, "Or all evening." landed after "You and me."
+    const AFTER = ["Probably.","Mostly.","Or near enough.","Give or take.","If {person} lets me.","More or less."];
+    extra.unshift(_cap(fill(AFTER[Math.floor(rng() * AFTER.length)])));
     rule("grammar: " + gName + " — an afterthought tacked on");
   } else if (gcat === "Turn-Taking Grammar"){
     core = ["—no, let me finish — ","Before you start — ","Wait — "][Math.floor(rng() * 3)] + _lowerFirst(core); rule("grammar: " + gName + " — cuts in");
   } else if (gcat === "Repetition & Echo Patterns"){
-    const words = core.replace(/[.!?]+$/, "").split(" ");
-    const last = words[words.length - 1].replace(/[,;]/g, "");
-    core = core.replace(/[.!?]+$/, "") + `, ${last}.`; rule("grammar: " + gName + " — echoes itself");
+    /* Echo the head of the line ("I'm not going to answer that. I'm not going to."),
+       not its last word — which was usually a pronoun: "answer that, that." */
+    const first = _sentences(core)[0] || core;
+    const words = first.replace(/[.!?]+$/, "").split(" ").filter(Boolean);
+    const head = words.length <= 3 ? words : words.slice(0, Math.min(4, words.length - 1));
+    const echo = head.join(" ").replace(/[,;:—-]+$/, "").trim();
+    if (echo) core = core.replace(/\s*$/, "") + ` ${_cap(echo)}.`;
+    rule("grammar: " + gName + " — echoes itself");
   }
   // Hedges, ellipsis, tense habits and tag questions.
   if ((r.guarded && rng() < 0.5) || (underPressure && r.stress && /Freeze/.test(r.stress.category))){
@@ -7579,8 +7732,8 @@ function refreshConstraintChips(){
   bannedCategories.forEach(c=> h += `<span class="chip chip-ban">never: ${escHTML(c)}${cost(catSize(c))} <b ${actAttr('click', 'removeBan', "cat", c)} title="Remove">&times;</b></span>`);
   categoryTiers.forEach((tier,c)=> h += `<span class="chip ${tierMultiplier(c)>1?'chip-req':'chip-tier'}">${escHTML(tierLabel(tier))}: ${escHTML(c)} <b ${actAttr('click', 'removeTier', c)} title="Remove">&times;</b></span>`);
   requiredCategories.forEach(c=> h += `<span class="chip chip-req">at least one: ${escHTML(c)} <b ${actAttr('click', 'removeRequiredCategory', c)} title="Remove">&times;</b></span>`);
-  bannedTraitIds.forEach(id=>{ const t=byId.get(id); if(t) h += `<span class="chip chip-ban">never: ${escHTML(t.trait)} <b ${actAttr('click', 'removeBan', "trait", "${id}")} title="Remove">&times;</b></span>`; });
-  requiredTraitIds.forEach(id=>{ const t=byId.get(id); if(t) h += `<span class="chip chip-req">always: ${escHTML(t.trait)} <b ${actAttr('click', 'removeReq', "${id}")} title="Remove">&times;</b></span>`; });
+  bannedTraitIds.forEach(id=>{ const t=byId.get(id); if(t) h += `<span class="chip chip-ban">never: ${escHTML(t.trait)} <b ${actAttr('click', 'removeBan', "trait", id)} title="Remove">&times;</b></span>`; });
+  requiredTraitIds.forEach(id=>{ const t=byId.get(id); if(t) h += `<span class="chip chip-req">always: ${escHTML(t.trait)} <b ${actAttr('click', 'removeReq', id)} title="Remove">&times;</b></span>`; });
   exclusivePairs.forEach((pair,i)=>{
     const a = byId.get(pair[0]), b = byId.get(pair[1]);
     if (a && b) h += `<span class="chip chip-tier">never together: ${escHTML(a.trait)} / ${escHTML(b.trait)} <b ${actAttr('click', 'removeExclusivePair', i)} title="Remove">&times;</b></span>`;

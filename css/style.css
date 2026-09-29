@@ -821,7 +821,9 @@
   .stickyBar {
     position:fixed; left:0; right:0; bottom:0; z-index:50; display:none;
     align-items:center; gap:10px; padding:10px 18px;
-    background:rgba(255,252,249,.94); backdrop-filter:blur(8px);
+    /* Follows the theme: a hard-coded light rgba left a pale strip under dark mode. */
+    background:rgba(255,252,249,.94);
+    background:color-mix(in srgb, var(--panel) 94%, transparent); backdrop-filter:blur(8px);
     border-top:1.5px solid var(--border-strong); box-shadow:0 -4px 18px rgba(38,84,124,.08);
   }
   body.on-single-tab .stickyBar { display:flex; }

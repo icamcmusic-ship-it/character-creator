@@ -50,15 +50,15 @@ prints is pasted back and expected to reproduce both sheets exactly.
 ## What a seed promises
 
 A seed the app prints replays the character it names — base sheet, pressure sheet and
-all — from any session. Pasting a seed puts the build in **replay mode**, which runs
-against an empty session history, so the history-aware mechanisms (Avoid recent traits,
-and the side of Surprise me that refuses to land where it has already landed) have
-nothing to remember.
+all — from any session. Every build, seeded or not, runs against an **empty session
+history**: nothing from earlier rolls (the Avoid-recent window, the divergence category
+tally) reaches the draw, so a seed is a pure function of itself. Kept cards travel with a
+share link for the same reason: they are seated before anything is drawn.
 
-Leaving the box blank is **exploration**: that build *does* take the session's recent
-characters into account, which is what stops a long session converging on one person.
-The two modes are the same generator over the same seeded stream; only the history
-differs.
+Leaving the box blank is **exploration**. History does its work in the *choice* between
+candidates rather than inside the draw: the build draws three, and keeps the one least
+like your recent characters and the project archive (see best of three, below), which is
+what stops a long session converging on one person. The seed printed is the winner's.
 
 Rerolls stay deliberately un-seeded — a reroll is you overriding the dice.
 

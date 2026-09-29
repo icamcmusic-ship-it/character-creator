@@ -747,6 +747,22 @@ await step('§5 an exploration build with a project archive picks the most disti
   if (!r.ex || r.ex.considered !== 3) throw new Error('no best-of-three on an exploration build: ' + JSON.stringify(r.ex));
   if (!r.same) throw new Error('the printed seed of the chosen candidate did not replay it');
 });
+/* B2 (audit 2026-09): the comboboxes declared data-on/data-act twice, the parser kept
+   the first copy, and the keydown action silently never ran. */
+await step('trait search: ArrowDown moves the active option', async ()=>{
+  const r = await page.evaluate(async ()=>{
+    const inp = document.getElementById('whyNotSearch');
+    inp.closest('details') && (inp.closest('details').open = true);
+    inp.value = 'dr';
+    inp.dispatchEvent(new Event('input', {bubbles:true}));
+    await new Promise(res => setTimeout(res, 300));
+    const before = inp.getAttribute('aria-activedescendant');
+    inp.dispatchEvent(new KeyboardEvent('keydown', {key:'ArrowDown', bubbles:true}));
+    return {before, after: inp.getAttribute('aria-activedescendant')};
+  });
+  if (!r.before) throw new Error('no search results appeared');
+  if (r.after === r.before) throw new Error('ArrowDown did not move the active option (' + r.before + ')');
+});
 await step('§5 lens row fits a phone width', async ()=>{
   await page.setViewportSize({width: 375, height: 800});
   const over = await page.evaluate(()=> document.documentElement.scrollWidth - window.innerWidth);
