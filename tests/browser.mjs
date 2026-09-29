@@ -763,6 +763,20 @@ await step('trait search: ArrowDown moves the active option', async ()=>{
   if (!r.before) throw new Error('no search results appeared');
   if (r.after === r.before) throw new Error('ArrowDown did not move the active option (' + r.before + ')');
 });
+/* Audit §2: a build must bring the sheet into view, and the first-visit card must be
+   on screen without scrolling. */
+await step('a build scrolls the sheet into view', async ()=>{
+  await page.evaluate(()=> window.scrollTo(0, 0));
+  await page.evaluate(()=> generateCharacter());
+  await page.waitForFunction(()=> { const t = document.getElementById('sheetTitle').getBoundingClientRect().top; return t >= 0 && t < innerHeight * 0.5; }, null, {timeout: 6000});
+});
+await step('the More ways to roll menu opens, lists five rolls and closes on choice', async ()=>{
+  await page.evaluate(()=> { document.getElementById('moreRolls').open = true; });
+  const n = await page.locator('.moreRollsMenu button').count();
+  if (n !== 5) throw new Error('expected 5 rolls in the menu, found ' + n);
+  await page.locator('.moreRollsMenu button', {hasText: 'Variation'}).click();
+  if (await page.evaluate(()=> document.getElementById('moreRolls').open)) throw new Error('the menu stayed open after a choice');
+});
 await step('§5 lens row fits a phone width', async ()=>{
   await page.setViewportSize({width: 375, height: 800});
   const over = await page.evaluate(()=> document.documentElement.scrollWidth - window.innerWidth);

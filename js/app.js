@@ -2238,7 +2238,6 @@ function toggleCardControls(el){
   el.setAttribute('aria-label', (open ? 'Hide' : 'Show') + ' the controls for this card');
   el.title = (open ? 'Hide' : 'Show') + ' the controls for this card';
 }
-function randomizeAndGenerate(){ randomizeSliders('all'); generateCharacter(); }
 /* `printSheet` was DEFINED TWICE — render.js has the real one with summary scoping,
    and this file redefined it below it in load order as a bare print() wrapper, so both
    Print and Print Summary dispatched to the same unscoped implementation and the
@@ -3337,6 +3336,24 @@ function wirePrefPersistence(){
    Generate. Quick mode shows the four that matter on a first pass — name, the three
    voice sliders, archetype — and hides the rest behind one switch, which is a
    presentation change only: everything hidden keeps its value and keeps applying. */
+/* "Review" on the in-force strip: show the Advanced controls if Quick mode hides them,
+   open every panel whose heading carries a count, and scroll to the first. */
+function reviewActiveRules(){
+  const adv = document.getElementById('advancedToggle');
+  if (adv && !adv.checked){ adv.checked = true; applyAdvancedMode(); if (typeof savePrefs === 'function') savePrefs(); }
+  let first = null;
+  document.querySelectorAll('[data-badge]:not([hidden])').forEach(b=>{
+    const d = b.closest('details'); if (!d) return;
+    d.open = true; if (!first) first = d;
+  });
+  const target = first || document.getElementById('controlsStart');
+  if (target && target.scrollIntoView) target.scrollIntoView({block:'start', behavior: _prefersReducedMotion() ? 'auto' : 'smooth'});
+}
+document.addEventListener('click', (e)=>{
+  // Choosing something from the "More ways to roll" menu closes it.
+  const item = e.target && e.target.closest && e.target.closest('.moreRollsMenu button');
+  if (item){ const d = item.closest('details'); if (d) d.open = false; }
+});
 function applyAdvancedMode(){
   const on = document.getElementById('advancedToggle');
   const adv = !!(on && on.checked);

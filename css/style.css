@@ -1446,3 +1446,43 @@
   .relWeb, .pressureStages { grid-template-columns:minmax(0, 1fr); }
   .recoverySheet dl { grid-template-columns:minmax(0, 1fr); }
 }
+
+/* ---------- Audit §2: first-move fixes ---------- */
+#sheetTitle { scroll-margin-top:12px; }
+.onboard { margin-top:0; }
+
+/* One primary Build button; the other ways to roll live in a menu beside it. */
+.buildRow { align-items:flex-start; }
+.moreRolls { position:relative; align-self:stretch; }
+.moreRolls > summary {
+  list-style:none; cursor:pointer; padding:11px 16px; border:1.5px solid var(--border-strong);
+  border-radius:var(--radius-sm); background:var(--panel); color:var(--text); font-weight:600;
+  font-size:.9rem; white-space:nowrap; display:flex; align-items:center; gap:8px; height:100%; box-sizing:border-box;
+}
+.moreRolls > summary::-webkit-details-marker { display:none; }
+.moreRolls > summary::after { content:"▾"; font-size:.8em; opacity:.7; }
+.moreRolls[open] > summary::after { content:"▴"; }
+.moreRolls > summary:focus-visible { outline:3px solid var(--dusk-blue-mid); outline-offset:2px; }
+.moreRollsMenu {
+  position:absolute; z-index:20; top:calc(100% + 6px); left:0; min-width:260px; padding:8px;
+  display:flex; flex-direction:column; gap:6px; background:var(--panel);
+  border:1.5px solid var(--border-strong); border-radius:var(--radius-sm); box-shadow:0 12px 28px rgba(38,84,124,.16);
+}
+.moreRollsMenu button { text-align:left; width:100%; }
+@media (max-width:640px){
+  .moreRolls { flex:1 1 100%; }
+  .moreRolls > summary { justify-content:center; }
+  .moreRollsMenu { position:static; margin-top:6px; box-shadow:none; }
+}
+
+/* A count on a collapsed Advanced panel's heading. */
+.panelBadge {
+  display:inline-block; margin-left:10px; padding:1px 9px; border-radius:999px; vertical-align:middle;
+  font-size:.7rem; font-weight:700; letter-spacing:.02em; background:var(--dusk-blue-mid); color:var(--panel);
+}
+.panelBadge[hidden] { display:none; }
+.ruleReview {
+  margin-left:4px; padding:2px 10px; border-radius:999px; border:1px solid var(--border-strong);
+  background:var(--panel); color:var(--text); font:inherit; cursor:pointer;
+}
+.ruleReview:hover { border-color:var(--dusk-blue-mid); }

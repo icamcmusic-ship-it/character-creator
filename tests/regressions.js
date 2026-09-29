@@ -258,4 +258,34 @@ module.exports = function({check, group, assert}){
     }
     assert(total && related / total >= 0.9, `only ${related}/${total} shifts shared any wording with the original`);
   });
+
+  group('Audit 2026-09 §2 first-move UX');
+
+  check('UX onboarding card sits under the tabs, outside the empty state', ()=>{
+    const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+    const empty = html.slice(html.indexOf('id="emptyState"'), html.indexOf('<div class="sheet" id="sheet">'));
+    assert(!empty.includes('id="onboard"'), '#onboard is back inside #emptyState');
+    assert(html.indexOf('id="onboard"') < html.indexOf('id="helpPanel"') && html.indexOf('id="onboard"') > html.indexOf('class="tabs"'),
+      '#onboard is not directly under the tabs');
+  });
+
+  check('UX the build row has exactly one primary button; the other rolls live in the menu', ()=>{
+    const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+    const row = html.slice(html.indexOf('<div class="buildRow">'), html.indexOf('class="modeSwitch tinkerBar"'));
+    assert((row.match(/btn-primary/g) || []).length === 1, 'more than one primary button in the build row');
+    ['generateBatch','generateBatchDistinct','generateSameWorld','generateVariation','surpriseMe'].forEach(a =>
+      assert(row.includes(`data-act="${a}"`) && row.indexOf(a) > row.indexOf('moreRollsMenu'), a + ' is not in the More ways to roll menu'));
+    assert(!/randomizeAndGenerate/.test(html), 'the duplicate Randomize All button is back');
+  });
+
+  check('UX panel badges count only what differs from the shipped defaults', ()=>{
+    const G = fresh();
+    G.evalIn("document.querySelectorAll = () => []");
+    const c = () => G.evalIn('panelBadgeCounts()');
+    const base = c();
+    assert(base.constraints === 0 && base.budgets === 0 && base.packs === 0, 'a fresh page already claims settings: ' + JSON.stringify(base));
+    G.evalIn("bannedCategories.add(TRAITS[5].category); requiredTraitIds.push(TRAITS[9].id); rarityCaps.signature = 2; setPackEnabled('gaps', false)");
+    const n = c();
+    assert(n.constraints === 2 && n.budgets === 1 && n.packs === 1, 'counts wrong: ' + JSON.stringify(n));
+  });
 };

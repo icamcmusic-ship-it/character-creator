@@ -7802,19 +7802,51 @@ function activeRuleChips(){
   if (off) n('sections off', off);
   const seedEl = document.getElementById('seedInput');
   if (seedEl && seedEl.value.trim()) n('replaying seed', seedEl.value.trim());
-  else if (divergenceLevel() > 0) n('history-aware exploration', 'on');
+  else if (divergenceLevel() > 0) n('divergence', 'on');
   if (typeof getSuppressedContextTags === 'function' && getSuppressedContextTags().length)
     n('context readings off', getSuppressedContextTags().length);
   return out;
 }
+/* The count each collapsed Advanced panel shows in its heading, so a closed panel says
+   when it is steering the build. Only what differs from the shipped default counts:
+   twelve profile sections ship off, and "12 changed" on a fresh page would be a lie. */
+function panelBadgeCounts(){
+  const budgets = (typeof budgetsActive === 'function' && budgetsActive())
+    ? RTIER_ORDER.filter(t=>rarityCaps[t] != null).length + BUDGET_GROUPS.filter(g=>intensityCaps[g.id] != null).length : 0;
+  const secs = (typeof PROFILE_SECTIONS !== 'undefined' ? PROFILE_SECTIONS : []);
+  const manual = secs.filter(ps=>{
+    const sel = document.getElementById('type_'+ps.id);
+    return sel && sel.value && !(typeof isAutoProfileType === 'function' && isAutoProfileType(ps.id));
+  }).length;
+  const toggled = secs.filter(ps => profileSectionEnabled(ps) !== (ps.defaultOn !== false)).length;
+  return {
+    constraints: bannedSections.size + bannedCategories.size + bannedTraitIds.size + requiredTraitIds.length
+      + requiredCategories.length + exclusivePairs.length + categoryTiers.size,
+    budgets,
+    profile: manual + toggled,
+    packs: getDisabledPacks().length,
+  };
+}
+function refreshPanelBadges(){
+  if (typeof document === 'undefined' || !document.querySelectorAll) return;
+  const counts = panelBadgeCounts();
+  document.querySelectorAll('[data-badge]').forEach(el=>{
+    const n = counts[el.getAttribute('data-badge')] || 0;
+    el.hidden = !n;
+    el.textContent = n ? n + ' active' : '';
+    el.setAttribute('aria-label', n ? n + ' setting' + (n === 1 ? '' : 's') + ' in force in this panel' : '');
+  });
+}
 function refreshActiveRuleStrip(){
+  refreshPanelBadges();
   const el = document.getElementById('activeRules');
   if (!el) return;
   const chips = activeRuleChips();
   if (!chips.length){ el.style.display = 'none'; el.innerHTML = ''; return; }
   el.style.display = 'flex';
   el.innerHTML = `<span class="ruleStripLabel">In force:</span>`
-    + chips.map(c=>`<span class="ruleChip">${escHTML(c.k)} <b>${escHTML(String(c.v))}</b></span>`).join('');
+    + chips.map(c=>`<span class="ruleChip">${escHTML(c.k)} <b>${escHTML(String(c.v))}</b></span>`).join('')
+    + `<button type="button" class="ruleReview" ${actAttr('click', 'reviewActiveRules')} title="Open the panels that are changing this roll">Review</button>`;
 }
 function addCategoryBan(){
   const sel = document.getElementById('banCategorySelect');

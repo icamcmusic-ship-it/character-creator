@@ -314,6 +314,20 @@ function archetypeFidelity(st, arch){
    sheet the user saw for one frame. One in-flight guard; the extra presses are dropped
    rather than queued, because "generate twice" is never what the second press meant. */
 let _generationInFlight = false;
+function _prefersReducedMotion(){
+  return typeof window !== 'undefined' && !!window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+/* After a build the sheet is thousands of pixels below the controls that produced it,
+   and on a phone the result appeared off-screen. Bring the sheet's heading into view —
+   but leave the page alone if it is already there. */
+function revealSheet(){
+  if (typeof window === 'undefined' || typeof document === 'undefined') return;
+  const el = document.getElementById('sheetTitle');
+  if (!el || !el.getBoundingClientRect || !el.scrollIntoView) return;
+  const top = el.getBoundingClientRect().top, vh = window.innerHeight || 800;
+  if (top >= 0 && top < vh * 0.5) return;
+  el.scrollIntoView({block:'start', behavior: _prefersReducedMotion() ? 'auto' : 'smooth'});
+}
 function generateCharacter(){
   if (_generationInFlight) return;
   const sheetEl = document.getElementById('sheet');
@@ -321,7 +335,7 @@ function generateCharacter(){
   _generationInFlight = true;
   showSkeleton();
   requestAnimationFrame(()=> requestAnimationFrame(()=>{
-    try { runGeneration(); } finally { _generationInFlight = false; }
+    try { runGeneration(); revealSheet(); } finally { _generationInFlight = false; }
   }));
 }
 
@@ -476,6 +490,7 @@ function chooseBatch(i){
   const pEl = document.getElementById('pressureSheet');
   if (pEl) pEl.style.display = pressureState ? "block" : "none";
   renderSheet(); checkConflicts();
+  revealSheet();
   toast(`Kept "${charMeta.name && charMeta.name !== "Unnamed Character" ? charMeta.name : "that one"}". The rest are gone.`);
 }
 function dismissBatch(){ batchCandidates = []; renderBatchTray(); }
@@ -543,6 +558,7 @@ function generateSameWorld(){
     if (ok && keptName && charMeta) charMeta.name = keptName;
   }
   if (!ok) return;
+  revealSheet();
   charMeta.mode = 'same-world';
   toast(`Built someone else in the same world${keptName ? ' as "' + keptName + '"' : ''}: their traits, concept families and profile categories were all avoided.`);
 }
@@ -573,6 +589,7 @@ function generateVariation(){
     renderSheet();
   }
   if (!ok) return;
+  revealSheet();
   charMeta.mode = 'variation';
   toast(`A variation: the ${defining.length} most defining cards were held, everything else re-rolled without divergence.`);
 }
