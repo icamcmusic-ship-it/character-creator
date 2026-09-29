@@ -3668,7 +3668,9 @@ check('§6 pressure: irritated → cornered → broken stages and a recovery she
     return {ids: esc.stages.map(s=>s.id), current: esc.current, grounded: esc.stages.every(s => s.signs.every(x => x.from.length)),
       rows: rec ? rec.rows.length : 0, recGrounded: rec ? rec.rows.every(x => x.from.length) : false, md: pressureEscalationMarkdown(st, null)};
   })()`);
-  assert(r.ids.join() === 'irritated,cornered,broken', 'stages out of order or missing: ' + r.ids);
+  // A freezer may skip the cornered rung (the stress response is the break), so both
+  // ladders are valid; anything else must keep all three, in order.
+  assert(['irritated,cornered,broken', 'irritated,broken'].includes(r.ids.join()), 'stages out of order or missing: ' + r.ids);
   assert(r.current === 'irritated', 'a 40% dial should sit at irritated, got ' + r.current);
   assert(r.grounded && r.recGrounded, 'a stage sign or recovery row names no card');
   assert(r.rows >= 4 && /Recovery sheet/.test(r.md), 'recovery sheet too thin: ' + r.rows);

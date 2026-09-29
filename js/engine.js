@@ -6045,6 +6045,10 @@ function motivationChain(st){
   if (!want && !need && !wound) return null;
   const links = [];
   const add = (key, text, from) => links.push({key, text, from: from.filter(Boolean).map(t => t.trait)});
+  // Phrasing is chosen by a hash of the sheet, never the dice; the fear link opened with
+  // the same sentence on every one of 200 sheets.
+  let _h = 7; Object.keys(st || {}).sort().forEach(k => { if (st[k] && st[k].trait) _h = (_h * 31 + st[k].trait.id) >>> 0; });
+  const pk = (salt, arr) => arr[hashSeedString(_h + "|mc|" + salt) % arr.length];
   if (want) add("want", `The conscious goal is ${asAim(want)}${want.desc ? ` — ${want.desc}` : ``}`, [want]);
   if (lie && want) add("belief", `They chase it because they believe ${asBelief(lie)}: the want is what that belief makes look like the answer.`, [lie, want]);
   else if (lie) add("belief", `Underneath, they believe ${asBelief(lie)}.`, [lie]);
@@ -6054,9 +6058,9 @@ function motivationChain(st){
   if (stress || values){
     const s = stress ? STRATEGY_BY_STRESS_THEY[stress.category] : null;
     const v = values ? STRATEGY_BY_VALUES[values.category] : null;
-    add("method", `When the strategy is tested they ${s || "fall back on habit"}${v ? `, and justify it by ${v}` : ``}.`, [stress, values]);
+    add("method", `${pk("m", ["When the strategy is tested they", "Put under load, they", "Tested, they", "The moment it is pushed they"])} ${s || "fall back on habit"}${v ? `, and justify it by ${v}` : ``}.`, [stress, values]);
   }
-  if (fear) add("fear", `The thing they organise their life to avoid is ${asNounPhrase(fear)}${wound ? ` — the wound happening again` : ``}.`, [fear]);
+  if (fear) add("fear", `${pk("f", ["The thing they organise their life to avoid is", "What they are organised around not meeting:", "Underneath the routines sits a fear:", "The alarm that never fully switches off is"])} ${asNounPhrase(fear)}${wound ? pk("fw", [" — the wound happening again", " — the wound, coming round a second time", " — the old injury, repeated"]) : ``}.`, [fear]);
   if (origin) add("counterweight", `The one place the belief does not hold: ${traitPhrase(origin)}. ${origin.desc || ""}`.trim(), [origin]);
   if (aim || price) add("stakes", `${aim ? `Right now the aim is ${asAim(aim)}.` : ``}${price ? ` The cost they are already paying: ${traitPhrase(price)}.` : ``}`.trim(), [aim, price]);
   return {want, fear, wound, lie, need, ghost, defence, origin, stress, values, links};
@@ -6717,17 +6721,31 @@ const VOICE_FRAGMENTS = {
     mid:     [_VF("Something like that.", "no strong lean")],
   },
   tail: {
-    long:    [_VF("I know that's more words than it needed.", "high verbosity"), _VF("And there's a whole other half to it, but you've had enough of me.", "high verbosity")],
+    long:    [_VF("I know that's more words than it needed.", "high verbosity"), _VF("And there's a whole other half to it, but you've had enough of me.", "high verbosity"),
+              _VF("Sorry — I'll stop there. Actually, no, one more thing.", "high verbosity"), _VF("I could go on. I'm choosing not to, which is new.", "high verbosity"),
+              _VF("That's the short version, believe it or not.", "high verbosity"), _VF("Anyway. That's a lot. Ignore most of it.", "high verbosity")],
     terse:   [_VF("", "low verbosity — nothing follows")],
-    warm:    [_VF("We're all right, though. You and me.", "high warmth")],
+    /* One line here meant every warm character ended every line the same way. Eight now,
+       and a warm tail is a habit, not a rule: composeVoiceLine gives it WARM_TAIL_ODDS. */
+    warm:    [_VF("We're all right, though. You and me.", "high warmth"), _VF("I say it kindly.", "high warmth"),
+              _VF("You know I'm on your side.", "high warmth"), _VF("I only say it because I care how it goes.", "high warmth"),
+              _VF("No hard feelings. Truly.", "high warmth"), _VF("Whatever happens, I'm glad it's you I'm telling.", "high warmth"),
+              _VF("Sit down a minute. I'll put the kettle on.", "high warmth"), _VF("That's not a complaint. Come here.", "high warmth")],
     cold:    [_VF("", "low warmth — no softening")],
   },
 };
+const WARM_TAIL_ODDS = 0.4;   // a warm tail closes about two lines in five, not every one
 const PRESSURE_TAIL = {
-  "Fight (attack the threat)": _VF("And if you want to make something of it, make it.", "stress response: fight"),
-  "Flight (remove yourself)":  _VF("I need some air. We'll do this another time.", "stress response: flight"),
-  "Freeze (shut down)":        _VF("...", "stress response: freeze"),
-  "Fawn (appease the threat)": _VF("Whatever's easiest for you. Honestly. Whatever's easiest.", "stress response: fawn"),
+  "Fight (attack the threat)": ["And if you want to make something of it, make it.", "Say that again. Go on.", "Come on, then.",
+    "I'm done being polite about it.", "You wanted it straight. That was straight.", "Step closer and say it to my face."]
+    .map(t => _VF(t, "stress response: fight")),
+  "Flight (remove yourself)": ["I need some air. We'll do this another time.", "I can't do this right now.", "I'm going. Don't follow me.",
+    "Later. Not now. Later.", "I have somewhere to be.", "Let me get my coat."].map(t => _VF(t, "stress response: flight")),
+  "Freeze (shut down)": ["...", "I—", "...I don't know.", "Sorry. Give me a second.", "…", "I can't. I can't find it."]
+    .map(t => _VF(t, "stress response: freeze")),
+  "Fawn (appease the threat)": ["Whatever's easiest for you. Honestly. Whatever's easiest.", "It's fine. Really, it's fine.",
+    "I'm sorry — that's my fault, I should have said.", "Don't worry about me. What do you need?",
+    "Tell me what you'd like me to say.", "Whatever you think is best. I'll do that."].map(t => _VF(t, "stress response: fawn")),
 };
 
 function _pickFrag(list, rng){ return list && list.length ? list[Math.floor(rng() * list.length)] : null; }
@@ -6765,7 +6783,7 @@ function composeVoiceLineFragments(st, promptId, mode, opts){
   take(pick("direct","yielding","slippery","straight","open","guarded","warm","cold","mannered","blunt","terse"));
   if (!underPressure && r.long) take(_pickFrag(VOICE_FRAGMENTS.tail.long, rng));
   if (!underPressure && r.warm) take(_pickFrag(VOICE_FRAGMENTS.tail.warm, rng));
-  if (underPressure && r.stress) take(PRESSURE_TAIL[r.stress.category]);
+  if (underPressure && r.stress) take(_pickFrag(PRESSURE_TAIL[r.stress.category], rng));
   /* A vocabulary trait's own example is the one genuinely authored thing available, so
      it rides along as the character's habitual device rather than being paraphrased. */
   const device = r.vocab.filter(t => t.example)[0] || r.grammar;
@@ -7241,7 +7259,7 @@ function backstoryBeats(st, meta){
   }
   if (stress || vice){
     add("failure", "Most recent failure", age ? "within the last year" : "recently",
-      `${pick(["The latest time it broke:","Most recently it went wrong when"], "r")} under pressure they ${stress ? (STRATEGY_BY_STRESS_PAST[stress.category] || `fell back on ${asNounPhrase(stress)}`) : "fell back on the old habit"}${vice ? `, and the old habit (${traitPhrase(vice)}) did the rest` : ``}${price ? ` — the bill was ${traitPhrase(price)}` : need ? ` — the opposite of what they need (${traitPhrase(need)})` : ``}.`, [stress, vice, price]);
+      `${pick(["The latest time it broke:","Most recently it went wrong when","The last time it gave way:","It came apart most recently when"], "r")} under pressure they ${stress ? (STRATEGY_BY_STRESS_PAST[stress.category] || `fell back on ${asNounPhrase(stress)}`) : "fell back on the old habit"}${vice ? `, and the old habit (${traitPhrase(vice)}) did the rest` : ``}${price ? ` — the bill was ${traitPhrase(price)}` : need ? ` — the opposite of what they need (${traitPhrase(need)})` : ``}.`, [stress, vice, price]);
   }
   if (want || aim || role) add("now", "Where it stands", "now",
     `${want ? `They want ${asAim(want)}` : `What they are after: ${asAim(aim)}`}${aim && want ? `, which right now means ${/^to /.test(asAim(aim)) ? 'trying ' + asAim(aim) : asAim(aim)}` : ``}${role ? `, and in any room they are the ${role.category.toLowerCase()}` : ``}.`, [want, aim, role]);
@@ -7325,11 +7343,13 @@ function _examplePhrases(traits){
   });
   return out;
 }
-function _exampleSentence(t){
-  if (!t || !t.example) return null;
-  const parts = String(t.example).split(/(?<=[.!?])\s+/).map(s => s.trim()).filter(s => s.split(/\s+/).length >= 3 && s.length <= 60 && !/[()]/.test(s));
-  return parts.length ? parts[0] : null;
+// Every usable sentence of a trait's example, not only the first: the habitual device
+// used to take parts[0], so one vocabulary card always said the same sentence.
+function _exampleSentences(t){
+  if (!t || !t.example) return [];
+  return String(t.example).split(/(?<=[.!?])\s+/).map(s => s.trim()).filter(s => s.split(/\s+/).length >= 3 && s.length <= 60 && !/[()]/.test(s));
 }
+function _exampleSentence(t){ return _exampleSentences(t)[0] || null; }
 const _sentences = s => s.split(/(?<=[.!?])\s+/).filter(Boolean);
 const _cap = s => s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
 const _lowerFirst = s => /^(I\b|I'|[A-Z]{2})/.test(s) ? s : s.charAt(0).toLowerCase() + s.slice(1);
@@ -7363,6 +7383,9 @@ function composeVoiceLine(st, promptId, mode, opts){
   Object.values(st || {}).forEach(s => { if (s && s.trait) seed = (seed * 31 + s.trait.id) >>> 0; });
   const idx = Number.isInteger(opts.index) ? opts.index : -1, reroll = Number.isInteger(opts.reroll) ? opts.reroll : 0;
   const take = Number.isInteger(opts.take) ? opts.take : 0;
+  // Tails and devices already spoken in this list of takes (voiceLines shares one array),
+  // so ten takes do not close with the same line.
+  const recent = Array.isArray(opts.recent) ? opts.recent : null;
   const rng = mulberry32(hashSeedString(String(seed) + "|" + promptId + "|" + (mode || "baseline") + "|c2" +
     (idx >= 0 || reroll ? "|" + idx + "|" + reroll : "") + (take ? "|t" + take : "")));
   const kind = prompt.like || promptId;
@@ -7389,8 +7412,35 @@ function composeVoiceLine(st, promptId, mode, opts){
   for (const k of order){ if (r[k] && table[k]){ entry = table[k]; break; } }
   if (!entry) entry = table.mid || table.straight || Object.values(table)[0];
   used.push(entry.rule);
-  let core = _cap(fill(entry.templates[Math.floor(rng() * entry.templates.length)]));
+  // Within one list of takes, a clause template is not reused until the pool is spent —
+  // a three-template pool used to repeat itself three or four times in ten lines.
+  const tplSrc = (()=>{
+    if (!recent) return entry.templates;
+    let pool = entry.templates.filter(t => !recent.includes(t));
+    if (!pool.length){ entry.templates.forEach(t => { const i = recent.indexOf(t); if (i >= 0) recent.splice(i, 1); }); pool = entry.templates; }
+    return pool;
+  })();
+  const tpl = tplSrc[Math.floor(rng() * tplSrc.length)];
+  if (recent) recent.push(tpl);
+  let core = _cap(fill(tpl));
   const rule = x => { if (!used.includes(x)) used.push(x); };
+  // When every entry has been used the cycle starts over — the list's own entries leave
+  // `recent` — so a pool of six over ten takes repeats each line at most twice, rather
+  // than letting the dice hand one line to half of them.
+  const cycle = (list, textOf) => {
+    if (!recent) return list;
+    let pool = list.filter(f => !recent.includes(textOf(f)));
+    if (!pool.length){
+      list.forEach(f => { const i = recent.indexOf(textOf(f)); if (i >= 0) recent.splice(i, 1); });
+      pool = list;
+    }
+    return pool;
+  };
+  const fresh = list => {
+    const f = _pickFrag(cycle(list, x => x.text), rng);
+    if (f && recent) recent.push(f.text);
+    return f;
+  };
   // Verbosity shapes how much survives.
   if (minimal){ core = _sentences(core)[0]; rule("low verbosity — only one clause survives"); }
   // Hedges go on before the grammar reshapes the clause, so a cut-in stays a cut-in.
@@ -7400,10 +7450,10 @@ function composeVoiceLine(st, promptId, mode, opts){
   const extra = [];
   if (!minimal && !underPressure && (r.long || vcat === "High-Volume & Wordy")){
     extra.push(_cap(fill(VOICE_ELABORATIONS[Math.floor(rng() * VOICE_ELABORATIONS.length)])));
-    if (r.long) extra.push(_pickFrag(VOICE_FRAGMENTS.tail.long, rng).text);
+    if (r.long) extra.push(fresh(VOICE_FRAGMENTS.tail.long).text);
     rule("high verbosity");
   }
-  if (!underPressure && r.warm && !minimal){ const w = _pickFrag(VOICE_FRAGMENTS.tail.warm, rng); extra.push(w.text); rule(w.rule); }
+  if (!underPressure && r.warm && !minimal && rng() < WARM_TAIL_ODDS){ const w = fresh(VOICE_FRAGMENTS.tail.warm); extra.push(w.text); rule(w.rule); }
   // Grammar transforms, keyed on the grammar card's category and fed by its example.
   const gName = r.grammar ? r.grammar.trait : "";
   if (gcat === "Spoken Compression"){
@@ -7456,11 +7506,17 @@ function composeVoiceLine(st, promptId, mode, opts){
     rule("tag question (checks the listener is still with them)");
   }
   // Pressure: the stress response closes the line.
-  if (underPressure && r.stress && PRESSURE_TAIL[r.stress.category]){ extra.push(PRESSURE_TAIL[r.stress.category].text); rule(PRESSURE_TAIL[r.stress.category].rule); }
+  if (underPressure && r.stress && PRESSURE_TAIL[r.stress.category]){ const pt = fresh(PRESSURE_TAIL[r.stress.category]); extra.push(pt.text); rule(pt.rule); }
   // The habitual device: a sentence lifted whole from a vocabulary example, now and then.
   const deviceT = r.vocab.filter(t => t.example)[0] || r.grammar;
-  const devSentence = r.vocab.map(_exampleSentence).filter(Boolean)[0];
-  if (devSentence && !minimal && rng() < 0.35){ extra.push(devSentence); rule("vocabulary: " + r.vocab.find(t => _exampleSentence(t) === devSentence).trait); }
+  const devPool = [];
+  r.vocab.forEach(t => _exampleSentences(t).forEach(x => devPool.push({text: x, trait: t.trait})));
+  if (devPool.length && !minimal && rng() < 0.35){
+    const open = cycle(devPool, d => d.text);
+    const dev = open[Math.floor(rng() * open.length)];
+    if (recent) recent.push(dev.text);
+    extra.push(dev.text); rule("vocabulary: " + dev.trait);
+  }
   let text = [opener, core].concat(extra).filter(Boolean).join(" ").replace(/\s+/g, " ").trim()
     .replace(/([^.][.!?] )([a-z])/g, (m, a, b) => a + b.toUpperCase());
   // Register: formal speech drops its contractions, casual speech takes them. Not under
@@ -7483,9 +7539,9 @@ function composeVoiceLine(st, promptId, mode, opts){
    sub-seed, so the list is stable for a sheet and the same take always reads the same. */
 function voiceLines(st, promptId, mode, n, reroll){
   const index = allVoicePrompts().findIndex(p => p.id === promptId);
-  const out = [];
+  const out = [], recent = [];
   for (let k = 0; k < (n || 10); k++){
-    const l = composeVoiceLine(st, promptId, mode, {index, reroll: reroll || 0, take: k});
+    const l = composeVoiceLine(st, promptId, mode, {index, reroll: reroll || 0, take: k, recent});
     if (l) out.push(l);
   }
   return out;

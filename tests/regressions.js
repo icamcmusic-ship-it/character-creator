@@ -288,4 +288,78 @@ module.exports = function({check, group, assert}){
     const n = c();
     assert(n.constraints === 2 && n.budgets === 1 && n.packs === 1, 'counts wrong: ' + JSON.stringify(n));
   });
+
+  group('Audit 2026-09 §5a varied prose');
+
+  check('PROSE a list of takes does not repeat its closing lines: no warm tail dominates, no tail or device repeats', ()=>{
+    const G = fresh();
+    G.evalIn("globalThis.__t=function(mode){const ids=allVoicePrompts().map(p=>p.id);const out=[];for(const id of ids.slice(0,3)) out.push(voiceLines(state,id,mode,10).map(l=>l.text));return out}");
+    let sets = 0, warmAll = 0;
+    for (const mode of ['baseline','pressure']){
+      for (let i = 0; i < 25; i++){
+        G.gen('t' + i);
+        G.evalIn(`__t('${mode}')`).forEach(set=>{
+          sets++;
+          const tails = set.map(t => t.split(/(?<=[.!?…])\s+/).pop());
+          ['You and me.', "We're all right, though. You and me."].forEach(w => { if (tails.filter(x => x === w).length > 3) warmAll++; });
+          // fixed pressure tails may not repeat inside one list
+          ['And if you want to make something of it, make it.', 'Whatever\'s easiest.', 'We\'ll do this another time.'].forEach(f =>
+            assert(tails.filter(x => x === f).length <= 2, `"${f}" closes ${tails.filter(x => x === f).length} of 10 takes`));
+        });
+      }
+    }
+    assert(!warmAll, 'the warm tail closes most lines again');
+    return `${sets} sets of 10`;
+  });
+
+  check('PROSE the voice tail pools are real pools, and the warm tail is a habit, not a rule', ()=>{
+    const G = fresh();
+    const n = G.evalIn("({warm: VOICE_FRAGMENTS.tail.warm.length, long: VOICE_FRAGMENTS.tail.long.length, odds: WARM_TAIL_ODDS, press: Object.values(PRESSURE_TAIL).map(a => a.length)})");
+    assert(n.warm >= 6 && n.long >= 5 && n.press.every(x => x >= 5), 'a tail pool shrank: ' + JSON.stringify(n));
+    assert(n.odds > 0 && n.odds <= 0.5, 'the warm tail odds are ' + n.odds);
+  });
+
+  check('PROSE pressure ladder: no sign frame opens more than ~40% of sheets, and ladders are grounded', ()=>{
+    const G = fresh();
+    const pre = {}; let n = 0, skip = 0;
+    for (let i = 0; i < 120; i++){
+      G.gen('pp' + i);
+      const r = G.evalIn("(()=>{const e=pressureEscalation(state,{__pressure:{level:1}});return {ids:e.stages.map(s=>s.id).join(),cur:e.current,ok:e.stages.every(s=>s.signs.every(x=>x.from.length)),signs:e.stages.flatMap(s=>s.signs.map(x=>x.text.split(/[:—]/)[0].slice(0,24)))}})()");
+      n++; assert(r.ok, 'an ungrounded sign'); if (r.ids === 'irritated,broken') skip++;
+      assert(r.ids.split(',').includes(r.cur), 'the current stage is not on the ladder: ' + r.ids + ' / ' + r.cur);
+      new Set(r.signs).forEach(k => { pre[k] = (pre[k] || 0) + 1; });
+    }
+    const top = Object.entries(pre).sort((a, b) => b[1] - a[1])[0];
+    assert(top[1] / n <= 0.55, `"${top[0]}" opens ${top[1]}/${n} ladders`);
+    assert(skip > 0, 'no sheet ever skips the cornered stage');
+    return `top opener ${top[1]}/${n}; ${skip} freeze ladders skip cornered`;
+  });
+
+  check('PROSE recovery: the first two rows depend on stress x attachment (16 cells), not each half alone', ()=>{
+    const G = fresh();
+    const cells = G.evalIn("Object.values(_RECOVER_CELL).reduce((a, m) => a + Object.keys(m).length, 0)");
+    assert(cells === 16, 'expected 16 stress x attachment cells, found ' + cells);
+    const texts = G.evalIn("(()=>{const o=new Set();for(const a of Object.values(_RECOVER_CELL)) for(const c of Object.values(a)){o.add(c.first);o.add(c.who)} return o.size})()");
+    assert(texts === 32, 'cells are not all distinct: ' + texts);
+    const seen = new Set();
+    for (let i = 0; i < 120; i++){
+      G.gen('rc' + i);
+      G.evalIn("recoverySheet(state)").rows.filter(r => r.key === 'first').forEach(r => seen.add(r.text));
+    }
+    assert(seen.size >= 10, 'only ' + seen.size + ' distinct First-hours texts over 120 sheets');
+    return seen.size + ' distinct first-hours texts / 120 sheets';
+  });
+
+  check('PROSE the chain and beats no longer open the same way on every sheet', ()=>{
+    const G = fresh();
+    const fear = new Set(), fail = new Set();
+    for (let i = 0; i < 120; i++){
+      G.gen('ch' + i);
+      const r = G.evalIn("(()=>{const c=motivationChain(state);const b=backstoryBeats(state,{age:'40'});return {f:c&&c.links.find(l=>l.key==='fear'),m:c&&c.links.find(l=>l.key==='method'),b:b&&b.find(x=>x.key==='failure')}})()");
+      if (r.f) fear.add(r.f.text.split(' ').slice(0, 4).join(' '));
+      if (r.b) fail.add(r.b.text.split(' ').slice(0, 4).join(' '));
+    }
+    assert(fear.size >= 3, 'the fear link has ' + fear.size + ' distinct openers');
+    assert(fail.size >= 3, 'the failure beat has ' + fail.size + ' distinct openers');
+  });
 };
