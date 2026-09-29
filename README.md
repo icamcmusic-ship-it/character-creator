@@ -82,6 +82,13 @@ the same seed under the same lenses and toggles gives the same sheet.
   lines** under any situation shows ten takes. Measured over 100 characters: 124 → ~640
   distinct lines of 700; the lie prompt 13 → ~94 distinct. Author prompts compose the
   same way through the situation they are "like".
+  The lines also read the sheet's **inner life**, and each addition names its card in the
+  rules list: concealing circles the Ghost (or Wound), lying and persuading are about the
+  Want, asking for help is bent by the Defence (a joke, a minimised ask, a bid of charm…),
+  the humour card adds a remark in its own register, each mannerism adds the stage
+  direction its own example authors (`[rubs temples]`), and the goals, family, money and
+  jargon cards lend their phrases to the topic pools. A character who says almost nothing
+  still gets a clipped concealing line and their stage directions.
 - **Seated contradictions** (Advanced, on by default). One or two axes are chosen before
   the draw; afterwards a trait against the sheet's actual lean on that axis is seated
   with a Contradiction Functions card saying what it is for, and its scene questions
