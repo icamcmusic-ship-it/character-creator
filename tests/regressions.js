@@ -653,4 +653,42 @@ module.exports = function({check, group, assert}){
     }
     assert(!bad.length, bad[0] + ` (+${bad.length - 1} more)`);
   });
+
+  group('Audit 2026-09 §4b look-alike archetype pairs');
+  const AUDITED_PAIRS = [['charmingManipulator','lovableLiar'], ['reluctantSecond','furiousCaretaker'], ['competentProfessional','stubbornCraftsman'],
+                         ['companyLoyalist','careerBureaucrat'], ['workaholicAvoiding','steadyOrganiser']];
+
+  check('PAIRS the five audited look-alike pairs differ in their profile hints and voice posture', ()=>{
+    const G = fresh();
+    AUDITED_PAIRS.forEach(([a, b]) => {
+      const r = G.evalIn(`(()=>{
+        const A = ARCHETYPES.${a}, B = ARCHETYPES.${b};
+        const core = ['attachment','stress','values','humor','role','vices','competence'];
+        const hintDiff = core.filter(k => (A.profile[k] || '') !== (B.profile[k] || '')).length;
+        const voiceDiff = ['verbosity','register','composure'].filter(k => A[k] !== B[k]).length;
+        const vocabShared = A.vocabPref.filter(x => B.vocabPref.includes(x)).length;
+        return {hintDiff, voiceDiff, vocabShared};
+      })()`);
+      assert(r.hintDiff >= 4, `${a} / ${b} share too many core hints (${r.hintDiff} differ)`);
+      assert(r.voiceDiff >= 2, `${a} / ${b} have nearly the same voice posture (${r.voiceDiff} of 3 differ)`);
+      assert(r.vocabShared <= 1, `${a} / ${b} reach for the same vocabulary categories`);
+    });
+  });
+
+  check('PAIRS sheets from the five audited pairs are no longer near-twins (category cosine, 12 sheets each)', ()=>{
+    const G = freshOff(); const d = G.document;
+    d._set('archetypeSelect', {value: ''}); d._set('archetypeVariation', {value: 'base'});
+    const vec = key => {
+      d.getElementById('archetypeSelect').value = key; const v = {};
+      for (let i = 0; i < 12; i++){ G.gen('pp' + key + i); G.evalIn("Object.values(state).filter(s=>s&&s.trait).map(s=>s.trait.category)").forEach(c => { v[c] = (v[c] || 0) + 1; }); }
+      return v;
+    };
+    const cos = (a, b) => { let dot = 0, x = 0, y = 0; for (const k in a){ x += a[k] * a[k]; if (b[k]) dot += a[k] * b[k]; } for (const k in b) y += b[k] * b[k]; return dot / Math.sqrt(x * y); };
+    const out = [];
+    AUDITED_PAIRS.forEach(([a, b]) => {
+      const c = cos(vec(a), vec(b)); out.push(`${a}/${b} ${c.toFixed(2)}`);
+      assert(c <= 0.86, `${a} / ${b} are still near-twins: category cosine ${c.toFixed(2)} (was 0.83-0.93 before the pass)`);
+    });
+    return out.join('; ');
+  });
 };
