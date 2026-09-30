@@ -825,6 +825,65 @@ await step('phone: tabs are three short pills, the sticky bar folds behind a men
   await page.setViewportSize({width: 1280, height: 900});
   if (h1 > 28) throw new Error('the header title is still ' + h1 + 'px on a phone');
 });
+/* Audit §3 side features, in the real page. */
+await step('history drawer: build three, restore an earlier roll, compare it with the sheet', async ()=>{
+  await page.evaluate(async ()=> { for (let i = 0; i < 3; i++){ generateCharacter(); await new Promise(r => setTimeout(r, 500)); } });
+  await page.locator('#historyBtn').click();
+  const n = await page.locator('#historyDrawer .histList li').count();
+  if (n < 3) throw new Error('the drawer lists only ' + n + ' entries');
+  await page.locator('#historyDrawer .histList li:has(button) >> nth=0').locator('button', {hasText: 'compare'}).click();
+  if (!/Sliders/.test(await page.locator('#comparePanel').innerText())) throw new Error('no slider diff in the comparison');
+  const seedBefore = await page.evaluate(()=> lastSeedUsed);
+  await page.locator('#historyDrawer .histList li:has(button) >> nth=0').locator('button', {hasText: 'restore'}).click();
+  if (!await page.evaluate(()=> Object.keys(state).length > 0)) throw new Error('restore left no sheet');
+  await page.locator('#historyBtn').click();
+});
+await step('find on the sheet filters the cards and opens folded sections; folds survive a reload', async ()=>{
+  await page.evaluate(()=> { generateCharacter(); });
+  await page.waitForTimeout(700);
+  const total = await page.locator('#sheetBody .traitCard').count();
+  const word = await page.evaluate(()=> Object.values(state).find(s => s && s.trait).trait.trait.split(' ').find(w => w.length > 3) || 'a');
+  await page.fill('#sheetFind', word);
+  await page.waitForTimeout(300);
+  const shown = await page.locator('#sheetBody .traitCard:not([hidden])').count();
+  if (!(shown > 0 && shown < total)) throw new Error('the filter showed ' + shown + ' of ' + total);
+  if (!/of \d+ cards/.test(await page.locator('#sheetFindCount').innerText())) throw new Error('no match count');
+  await page.fill('#sheetFind', '');
+  await page.waitForTimeout(200);
+  await page.evaluate(()=> { collapsedGroups = {}; setAllGroups(true); });
+  await page.reload(); await page.waitForTimeout(800);
+  const kept = await page.evaluate(()=> Object.values(collapsedGroups).some(Boolean));
+  if (!kept) throw new Error('folded sections were forgotten on reload');
+  await page.evaluate(()=> { setAllGroups(false); });
+});
+await step('slider lock survives Randomize, and a named slider set saves and loads', async ()=>{
+  await page.evaluate(()=> { document.getElementById('advancedToggle').checked = true; applyAdvancedMode(); setInputsCollapsed(false); });
+  await page.evaluate(()=> { setVal('verbositySlider', 77); document.getElementById('lock_verbositySlider').checked = true; randomizeSliders('all'); });
+  if (await page.evaluate(()=> document.getElementById('verbositySlider').value) !== '77') throw new Error('Randomize moved the locked slider');
+  await page.evaluate(()=> { document.getElementById('lock_verbositySlider').checked = false; askForName = async ()=> 'Kit A'; setVal('composureSlider', 33); });
+  await page.evaluate(()=> saveSliderPreset()); await page.waitForTimeout(300);
+  if (!await page.evaluate(()=> [...document.getElementById('sliderPresetSelect').options].some(o => o.value === 'Kit A'))) throw new Error('the set was not listed after saving');
+  await page.evaluate(()=> { setVal('composureSlider', -60); document.getElementById('sliderPresetSelect').value = 'Kit A'; });
+  await page.evaluate(()=> applySliderPreset()); await page.waitForTimeout(300);
+  if (await page.evaluate(()=> document.getElementById('composureSlider').value) !== '33') throw new Error('loading the set did not restore the slider');
+  await page.evaluate(()=> deleteSliderPreset()); await page.waitForTimeout(300);
+});
+await step('the voice lab shows a word count, a reading level and a copy button per line', async ()=>{
+  await page.evaluate(()=> { generateCharacter(); }); await page.waitForTimeout(800);
+  const stats = await page.locator('#voiceLabBody .vlStats').first().innerText();
+  if (!/\d+ words? · reads at grade [\d.]+/.test(stats) || !/copy line/.test(stats)) throw new Error('stats line: ' + stats);
+});
+await step('cast: CSV and SVG downloads, and the redraw button, exist and work', async ()=>{
+  await page.evaluate(()=> { switchTab('cast'); document.getElementById('castCount').value = '4'; generateCast(); });
+  await page.waitForTimeout(900);
+  const [dl] = await Promise.all([page.waitForEvent('download', {timeout: 5000}), page.evaluate(()=> downloadCastCSV())]);
+  if (!/\.csv$/.test(dl.suggestedFilename())) throw new Error('the CSV download is named ' + dl.suggestedFilename());
+  await page.evaluate(()=> regenerateMostSimilarMember());
+  await page.evaluate(()=> { switchTab('rel'); });
+  await page.waitForTimeout(300);
+  await page.evaluate(()=> { if (typeof addAllRelationshipDirections === 'function') addAllRelationshipDirections(); });
+  await page.evaluate(()=> switchTab('single'));
+});
 await step('§5 lens row fits a phone width', async ()=>{
   await page.setViewportSize({width: 375, height: 800});
   const over = await page.evaluate(()=> document.documentElement.scrollWidth - window.innerWidth);

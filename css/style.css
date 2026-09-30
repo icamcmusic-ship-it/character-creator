@@ -1576,3 +1576,29 @@
 kbd { display:inline-block; min-width:1.4em; text-align:center; padding:1px 6px; border:1px solid var(--border-strong); border-bottom-width:2px; border-radius:5px; background:var(--panel2); font-family:var(--font-mono); font-size:.78em; }
 
 .themeBtn { padding:5px 12px; border-radius:999px; border:1.5px solid var(--border-strong); background:var(--panel); color:var(--text); font:inherit; font-size:.8rem; cursor:pointer; }
+
+/* History drawer */
+.historyDrawer { margin:0 0 14px; padding:12px 14px; border:1.5px solid var(--border-strong); border-radius:var(--radius-sm); background:var(--panel2); }
+.historyDrawer[hidden] { display:none; }
+.histHead { display:flex; gap:10px; align-items:baseline; margin-bottom:6px; }
+.histHead .savedAct { margin-left:auto; }
+.histList { list-style:none; margin:0; padding:0; max-height:260px; overflow:auto; }
+.histList li { display:flex; justify-content:space-between; gap:10px; align-items:center; padding:6px 0; border-top:1px solid var(--border); font-size:.85rem; }
+.histList li:first-child { border-top:none; }
+.histNow { opacity:.85; }
+.histBtns { display:flex; gap:6px; flex-shrink:0; }
+.sliderDiff { margin:0 0 6px; padding-left:18px; columns:2; font-size:.82rem; }
+
+.sliderLabelRow { display:flex; align-items:center; justify-content:space-between; gap:6px; }
+.sliderLock { display:inline-flex; align-items:center; gap:3px; font-size:.72rem; opacity:.55; cursor:pointer; text-transform:none; letter-spacing:0; margin:0; }
+.sliderLock:hover, .sliderLock:has(input:checked) { opacity:1; }
+.sliderLock input { margin:0; }
+
+.traitCard[hidden], .axisGroup[hidden] { display:none !important; }
+.sheetFind { margin-left:auto; min-width:160px; max-width:240px; padding:5px 12px; border-radius:999px; border:1.5px solid var(--border-strong); background:var(--panel); color:var(--text); font:inherit; font-size:.8rem; }
+
+.reduce-motion *, .reduce-motion *::before, .reduce-motion *::after { animation:none !important; transition:none !important; scroll-behavior:auto !important; }
+.sliderLabelRow { width:100%; min-width:0; }
+.sliderLabelRow > label:first-child { flex:1 1 auto; min-width:0; overflow-wrap:anywhere; margin:0; }
+.sliderLock { flex:0 0 auto; }
+@media (max-width:520px){ .sliderLock span { display:none; } .sliderLock input { width:16px; height:16px; } }

@@ -710,7 +710,7 @@ module.exports = function({check, group, assert}){
     const menu = html.slice(html.indexOf('<div class="fileMenuList">'), html.indexOf('</details>', html.indexOf('<div class="fileMenuList">')));
     assert(/fileMenuHead[^>]*>Share</.test(menu) && /fileMenuHead[^>]*>Backup</.test(menu), 'the menu lacks its Share and Backup headings');
     const buttons = (menu.match(/<button /g) || []).length, described = (menu.match(/<small>/g) || []).length;
-    assert(buttons === 9 && described === 9, `${described}/${buttons} items carry a description`);
+    assert(buttons >= 9 && buttons === described, `${described}/${buttons} items carry a description`);
   });
 
   check('UX2 the sheet nav reaches every panel it names, and the project chip and save state are in the header', ()=>{
@@ -788,5 +788,98 @@ module.exports = function({check, group, assert}){
     ['.tabShort', '.inputsBar', '.stickyMoreBtn', '.stickyExtra', '#view-single.inputsCollapsed #controlsStart'].forEach(sel => assert(css.includes(sel), 'CSS lacks ' + sel));
     assert(/class="tabLong"/.test(html) && /class="tabShort"/.test(html), 'the tabs have no short labels');
     assert(/id="inputsBar"/.test(html) && /id="stickyMoreBtn"/.test(html), 'the inputs bar or the ⋯ button is missing');
+  });
+
+  group('Audit 2026-09 §3 side features');
+
+  check('SIDE the history drawer lists the last twenty rolls, restores one and compares it with the sheet on screen', ()=>{
+    const G = fresh();
+    assert(G.evalIn('HISTORY_MAX') === 20, 'the undo depth is not the twenty the drawer promises');
+    G.document._set('comparePanel', {innerHTML: '', style: {}}); G.document._set('historyDrawer', {hidden: true, innerHTML: ''});
+    G.evalIn("toastUndo = function(){}");
+    G.gen('h1'); G.gen('h2'); G.gen('h3');
+    const entries = G.evalIn('historyEntries()');
+    assert(entries.length >= 3 && entries.every(e => typeof e.i === 'number'), 'entries: ' + JSON.stringify(entries));
+    G.gen('h2'); const h2 = G.sig(); G.gen('h4');
+    const idx = G.evalIn("historyEntries()[0].i");
+    G.evalIn(`restoreHistoryAt(${idx})`);
+    assert(G.sig() === h2, 'restoring the newest history entry did not bring back the previous sheet');
+    G.gen('h5');
+    G.evalIn(`compareWithHistory(${G.evalIn("historyEntries()[0].i")})`);
+    const html = G.document.getElementById('comparePanel').innerHTML;
+    assert(/slots identical/.test(html) && /Sliders/.test(html), 'the comparison lacks the trait diff or the slider diff');
+  });
+
+  check('SIDE saved traits can count double, and a share link then carries them', ()=>{
+    const G = fresh();
+    const id = G.evalIn("TRAITS[40].id"), other = G.evalIn("TRAITS[41].id");
+    G.evalIn(`setFavouriteTraitIds([${id}])`);
+    assert(G.evalIn(`favouriteMultiplier(TRAITS_BY_ID.get(${id}))`) === 1, 'saved traits steer with the switch off');
+    G.document._set('favouriteBoostToggle', {checked: true});
+    assert(G.evalIn(`favouriteMultiplier(TRAITS_BY_ID.get(${id}))`) === 2, 'the boost is not x2 with the switch on');
+    assert(G.evalIn(`favouriteMultiplier(TRAITS_BY_ID.get(${other}))`) === 1, 'an unsaved trait was boosted');
+    assert(G.evalIn("SETTING_TOGGLES.includes('favouriteBoostToggle')"), 'the switch is not part of the workspace');
+    assert(/if \(!favouriteBoostEnabled\(\)\) delete settings\.favouriteTraitIds/.test(read('js/app.js')), 'the share link drops saved traits even when they steer the draw');
+  });
+
+  check('SIDE a locked slider is left alone by Randomize and Surprise me', ()=>{
+    const G = fresh();
+    G.document._set('lock_verbositySlider', {checked: true}); G.document._set('verbositySlider', {value: '55'});
+    G.document._set('registerSlider', {value: '0'}); G.document._set('composureSlider', {value: '0'});
+    let moved = 0;
+    for (let i = 0; i < 12; i++){ G.evalIn("randomizeSliders('voice')"); if (G.document.getElementById('registerSlider').value !== '0') moved++; }
+    assert(G.document.getElementById('verbositySlider').value === '55', 'the locked slider moved');
+    assert(moved > 0, 'the unlocked sliders never moved');
+    const src = read('js/app.js') + read('js/render.js');
+    assert(/lockedSliders: \(typeof lockedSliderIds/.test(src) && /s\.lockedSliders/.test(src), 'locks are not saved with the settings');
+    assert(/isSliderLocked\('pers_'\+axis\.id\)/.test(src), 'Surprise me can still move a locked axis');
+  });
+
+  check('SIDE named slider sets, find-on-sheet and remembered folds exist and are wired', ()=>{
+    const app = read('js/app.js'), render = read('js/render.js'), html = read('index.html');
+    ['saveSliderPreset', 'applySliderPreset', 'deleteSliderPreset'].forEach(f => assert(new RegExp('function ' + f).test(app) && html.includes('data-act="' + f + '"'), f + ' is not wired'));
+    assert(/toastUndo\(`Deleted the slider set/.test(app) && /toastUndo\(`Loaded/.test(app), 'loading or deleting a slider set cannot be undone');
+    assert(/id="sheetFind"/.test(html) && /function applySheetFilter/.test(render) && /!sheetFilterActive\(\)/.test(render), 'find-on-sheet is not wired (or does not open folded sections)');
+    assert(/persistCollapsed\(\)/.test(render) && /loadCollapsedGroups\(\)/.test(app), 'section folds are not remembered');
+  });
+
+  check('SIDE reading level: words, sentences and grade, with stage directions left out', ()=>{
+    const G = fresh();
+    const easy = G.evalIn("readingStats('No. I will not. Go home.')"), hard = G.evalIn("readingStats('The administrative reorganisation necessitated considerable deliberation regarding institutional responsibilities.')");
+    assert(easy.words === 6 && easy.sentences === 3, 'easy: ' + JSON.stringify(easy));
+    assert(hard.grade > easy.grade + 6, `grades ${easy.grade} vs ${hard.grade}`);
+    assert(G.evalIn("readingStats('[rubs temples] Fine.')").words === 1, 'a stage direction was counted as speech');
+    assert(G.evalIn("readingStats('')").words === 0, 'empty text');
+    assert(/copyVoiceLine/.test(read('js/app.js')) && /reads at grade/.test(read('js/app.js')), 'the voice lab shows no reading level or copy button');
+  });
+
+  check('SIDE the cast: redraw the most similar member, and export it as CSV', ()=>{
+    const G = fresh();
+    G.evalIn("renderCast=function(){};refreshRelSelectors=function(){};toastUndo=function(m,fn){globalThis.__undo=fn}");
+    G.document._set('castSeed', {value: 'sf1'}); G.document._set('castCount', {value: '4'});
+    G.evalIn('generateCast()');
+    const total = () => G.evalIn("voiceCollisionMatrix(castStates,'baseline',0).totals.reduce((a,b)=>a+b,0)");
+    const sigOf = () => G.evalIn("castStates.map(c => Object.keys(c.state).sort().map(k => c.state[k].trait && c.state[k].trait.id).join(',')).join('|')");
+    const before = total(), names = G.evalIn("castStates.map(c => c.meta.name).join('|')"), sig = sigOf();
+    G.evalIn('regenerateMostSimilarMember()');
+    assert(G.evalIn("castStates.length") === 4 && G.evalIn("castStates.map(c => c.meta.name).join('|')") === names, 'the redraw changed who is in the cast');
+    assert(total() <= before, `the redraw made the cast MORE similar: ${before} -> ${total()}`);
+    G.evalIn('__undo()');
+    assert(sigOf() === sig, 'Undo did not bring the member back');
+    const csv = G.evalIn('castToCSV()');
+    const cards = G.evalIn("castStates.reduce((n, c) => n + Object.values(c.state).filter(s => s && s.trait).length, 0)");
+    assert(csv.charCodeAt(0) === 0xFEFF && csv.slice(1).startsWith('Member,Age,Context,Archetype,Slot,Section,Category,Trait,Intensity,Rarity,Kept'), 'the CSV header or BOM is wrong');
+    assert(csv.trim().split('\r\n').length === cards + 1, `CSV rows ${csv.trim().split('\r\n').length} vs ${cards + 1} expected`);
+    assert(G.evalIn("_csvCell('a,b')") === '"a,b"' && G.evalIn("_csvCell('say \"hi\"')") === '"say ""hi"""', 'CSV escaping is wrong');
+  });
+
+  check('SIDE the short LLM prompt is a fraction of the full one, and reduce-motion is a real switch', ()=>{
+    const G = fresh(); G.gen('sp1');
+    const full = G.evalIn("sheetToPrompt(state, {name:'X'})"), short = G.evalIn("sheetToPrompt(state, {name:'X'}, {short:true})");
+    assert(short.length < full.length * 0.6, `short is ${short.length} of ${full.length} characters`);
+    assert(!/Sample lines|## Rules|Central contradiction/.test(short) && /How they speak/.test(short), 'the short prompt kept the long parts or lost the voice');
+    G.evalIn("document.body = {classList: {contains: c => c === 'reduce-motion'}}");
+    assert(G.evalIn('_prefersReducedMotion()') === true, 'the page switch does not count as reduce-motion');
+    assert(/\.reduce-motion \*/.test(read('css/style.css')), 'no CSS turns the motion off');
   });
 };

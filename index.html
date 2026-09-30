@@ -111,19 +111,19 @@
       </div>
       <div class="row dialBox">
         <div class="field">
-          <label for="verbositySlider">Verbosity (Terse &rarr; Voluble)</label>
+          <div class="sliderLabelRow"><label for="verbositySlider">Verbosity (Terse &rarr; Voluble)</label><label class="sliderLock" title="Lock: Randomize and Surprise me leave this slider where it is"><input type="checkbox" id="lock_verbositySlider" data-on="change" data-act="onSliderLockChange" data-args="[]" aria-label="Lock Verbosity"><span aria-hidden="true">🔒</span></label></div>
           <input type="range" id="verbositySlider" min="-100" max="100" value="0" step="1" data-on="input" data-act="onSliderChange" data-args="[]">
           <div class="scaleLabels"><span>Silent</span><span>Balanced</span><span>Torrential</span></div>
           <div class="sliderVal" id="verbosityVal">0</div>
         </div>
         <div class="field">
-          <label for="registerSlider">Register (Plain &rarr; Elaborate)</label>
+          <div class="sliderLabelRow"><label for="registerSlider">Register (Plain &rarr; Elaborate)</label><label class="sliderLock" title="Lock: Randomize and Surprise me leave this slider where it is"><input type="checkbox" id="lock_registerSlider" data-on="change" data-act="onSliderLockChange" data-args="[]" aria-label="Lock Register"><span aria-hidden="true">🔒</span></label></div>
           <input type="range" id="registerSlider" min="-100" max="100" value="0" step="1" data-on="input" data-act="onSliderChange" data-args="[]">
           <div class="scaleLabels"><span>Blunt</span><span>Neutral</span><span>Ornate</span></div>
           <div class="sliderVal" id="registerVal">0</div>
         </div>
         <div class="field">
-          <label for="composureSlider">Composure (Steady &rarr; Volatile)</label>
+          <div class="sliderLabelRow"><label for="composureSlider">Composure (Steady &rarr; Volatile)</label><label class="sliderLock" title="Lock: Randomize and Surprise me leave this slider where it is"><input type="checkbox" id="lock_composureSlider" data-on="change" data-act="onSliderLockChange" data-args="[]" aria-label="Lock Composure"><span aria-hidden="true">🔒</span></label></div>
           <input type="range" id="composureSlider" min="-100" max="100" value="0" step="1" data-on="input" data-act="onSliderChange" data-args="[]">
           <div class="scaleLabels"><span>Calm</span><span>Mixed</span><span>Erratic</span></div>
           <div class="sliderVal" id="composureVal">0</div>
@@ -333,6 +333,14 @@
             <button class="btn-secondary" data-on="click" data-act="randomizeSliders" data-args="[&quot;personality&quot;]">🎲 Randomize Personality</button>
             <button class="btn-secondary" data-on="click" data-act="suggestVoiceFromPersonality" data-args="[]">↳ Suggest voice from personality</button>
           </div>
+          <!-- Slider sets: the sixteen sliders, saved under a name — a lighter thing than a custom
+               archetype, which also carries the constraints, counts and section toggles. -->
+          <div class="actionRow" style="margin-top:8px;">
+            <select id="sliderPresetSelect" aria-label="Saved slider sets"><option value="">Slider sets…</option></select>
+            <button class="btn-secondary" data-on="click" data-act="applySliderPreset" data-args="[]">Load</button>
+            <button class="btn-secondary" data-on="click" data-act="saveSliderPreset" data-args="[]" title="Save the voice and personality sliders as they are now, under a name">Save sliders as…</button>
+            <button class="btn-secondary" data-on="click" data-act="deleteSliderPreset" data-args="[]">Delete</button>
+          </div>
         </div>
       </div>
       <div class="stressToggleRow checkboxRow advOnly">
@@ -381,6 +389,10 @@
         <label style="margin:0; text-transform:none; font-size:.85rem; color:var(--text);" for="exploreCandidates">Best of three — when the seed box is blank, draw three and keep the one least like this project's characters (a pasted seed always replays exactly)</label>
       </div>
 
+      <div class="stressToggleRow checkboxRow advOnly" style="margin-top:8px;">
+        <input type="checkbox" id="favouriteBoostToggle" data-on="change" data-act="onFavouriteBoostChange" data-args="[]">
+        <label style="margin:0; text-transform:none; font-size:.85rem; color:var(--text);" for="favouriteBoostToggle">Saved traits count double — the bookmark on a card becomes a soft "always consider"</label>
+      </div>
       <div class="stressToggleRow checkboxRow advOnly" style="margin-top:8px;">
         <input type="checkbox" id="depthFirstToggle">
         <label style="margin:0; text-transform:none; font-size:.85rem; color:var(--text);" for="depthFirstToggle">Depth-first generation — resolve wound, values &amp; attachment first, then derive personality from them</label>
@@ -547,6 +559,7 @@
           <span class="actionGroupLabel">Edit</span>
           <div class="actionRow">
             <button class="btn-secondary" data-on="click" data-act="undoLast" data-args="[]" id="undoBtn" disabled aria-keyshortcuts="Control+Z Meta+Z" title="Undo (Ctrl/&#8984;+Z)">Undo</button>
+            <button class="btn-secondary" data-on="click" data-act="toggleHistoryDrawer" data-args="[]" id="historyBtn" aria-expanded="false" aria-controls="historyDrawer" title="The last twenty rolls: restore one, or compare it with what is on screen">History</button>
             <button class="btn-secondary" data-on="click" data-act="redoLast" data-args="[]" id="redoBtn" disabled aria-keyshortcuts="Control+Shift+Z Control+Y Meta+Shift+Z" title="Step forward again through anything you have undone (Shift+Ctrl/&#8984;+Z or Ctrl+Y)">Redo</button>
           </div>
         </div>
@@ -573,6 +586,7 @@
                 <div class="fileMenuHead" role="presentation">Share</div>
                 <button type="button" data-on="click" data-act="copyShareLink" data-args="[&quot;$el&quot;]" title="A link that replays this character: its seed and the settings that shaped it, in the URL"><span class="fmLabel">Copy share link</span><small>A link that replays this character: its seed and settings travel in the URL.</small></button>
                 <button type="button" data-on="click" data-act="copyPrompt" data-args="[&quot;$el&quot;]" title="A condensed voice spec in markdown, ready to paste into an LLM's system prompt"><span class="fmLabel">Copy as LLM prompt</span><small>A condensed voice spec, ready to paste into an LLM system prompt.</small></button>
+                <button type="button" data-on="click" data-act="copyPromptShort" data-args="[&quot;$el&quot;]"><span class="fmLabel">Copy short LLM prompt</span><small>Trait names only, no sample lines: for a small context window.</small></button>
                 <button type="button" data-on="click" data-act="downloadPrompt" data-args="[]"><span class="fmLabel">Download LLM prompt .md</span><small>The same voice spec as a markdown file.</small></button>
                 <button type="button" data-on="click" data-act="downloadSheet" data-args="[]"><span class="fmLabel">Download sheet .md</span><small>The sheet as readable markdown.</small></button>
                 <div class="fileMenuHead" role="presentation">Backup</div>
@@ -603,6 +617,7 @@
           </div>
         </div>
       </div>
+      <div class="historyDrawer" id="historyDrawer" hidden aria-label="Recent rolls"></div>
       <div class="storageStatus" id="storageStatus" role="status" style="display:none;"></div>
       <div class="savedTools" id="savedTools" hidden>
         <input type="text" inputmode="search" role="searchbox" id="savedFilter" placeholder="Search saved characters" aria-label="Search saved characters" data-on="input" data-act="applySavedFilter" data-args="[]">
@@ -668,6 +683,8 @@
         <button type="button" data-on="click" data-act="jumpToPanel" data-args="[&quot;arcPanel&quot;]">Arc</button>
         <button type="button" data-on="click" data-act="jumpToPanel" data-args="[&quot;familiarPanel&quot;]">Feels familiar?</button>
         <button type="button" data-on="click" data-act="jumpToPanel" data-args="[&quot;projectPanel&quot;]">Project</button>
+        <input type="search" id="sheetFind" class="sheetFind" placeholder="Find on this sheet…" aria-label="Find a trait on this sheet" data-on="input" data-act="onSheetFind" data-args="[&quot;$el&quot;]">
+        <span class="sub" id="sheetFindCount" role="status" aria-live="polite"></span>
       </nav>
       <div class="coachMark" id="coachMark" role="note" hidden>
         <span><b>Every card is one trait.</b> <b>keep</b> holds it through every rebuild, <b>pin</b> holds how strongly it shows, <b>toss</b> draws a different one. Build again and only the cards you did not keep change.</span>
@@ -725,6 +742,9 @@
         <button class="btn-secondary" data-on="click" data-act="setAllGroups" data-args="[false]">Expand all</button>
         <label class="inlineToggle">
           <input type="checkbox" id="compactToggle" data-on="change" data-act="toggleCompact" data-args="[]">Compact view
+        </label>
+        <label class="inlineToggle" title="Turns off animations and smooth scrolling, whatever your system says">
+          <input type="checkbox" id="reduceMotionToggle" data-on="change" data-act="toggleReduceMotion" data-args="[]">Reduce motion
         </label>
       </div>
       <div id="sheetBody"></div>
@@ -822,6 +842,8 @@
             <button class="btn-primary" data-on="click" data-act="generateCast" data-args="[]">Build cast</button>
             <button class="btn-secondary" data-on="click" data-act="copyCast" data-args="[&quot;$el&quot;]">Copy Cast</button>
             <button class="btn-secondary" data-on="click" data-act="downloadCast" data-args="[]">Download .md</button>
+            <button class="btn-secondary" data-on="click" data-act="downloadCastCSV" data-args="[]" title="One row per card per member, for a spreadsheet">Download .csv</button>
+            <button class="btn-secondary" data-on="click" data-act="regenerateMostSimilarMember" data-args="[]" title="Redraw the member who shares the most voice devices with the rest, and keep the redraw only if the cast gets more distinct">Redraw the most similar member</button>
             <button class="btn-secondary" data-on="click" data-act="exportCastJSON" data-args="[]" title="Round-trips the whole ensemble, re-importable exactly as-is">Export cast .json</button>
             <label class="btn-secondary" style="cursor:pointer;">Import cast .json
               <input type="file" accept="application/json,.json" class="srOnly" data-on="change" data-act="importCastJSON" data-args="[&quot;$el&quot;]">
@@ -897,6 +919,7 @@
       <div id="relEdges" class="edgeList"></div>
       <h3 style="margin:14px 0 4px;">Relationship web</h3>
       <div class="sub" style="margin:0 0 8px;">The whole cast at once: factions, triads (stable or about to break), shared secrets and lopsided edges.</div>
+      <div class="actionRow" style="margin:0 0 8px;"><button class="btn-secondary" data-on="click" data-act="downloadRelationshipSvg" data-args="[]" title="The relationship web as a standalone vector image">Download web .svg</button></div>
       <div id="relWeb"></div>
     </div>
     <div class="sheet" id="relSheet">

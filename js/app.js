@@ -534,6 +534,69 @@ let lastCastSeed = null;
 let lastCastOptimisation = null;   // {before, after, rerolled} from optimiseCastVoices
 function randomAxisLevel(){ return (rand()*4) - 2; }
 
+/* One cast member, drawn from the current settings. generateCast uses it for the whole
+   cast; "regenerate the most similar member" uses it for one. Draws from whatever rng is
+   live, so the caller decides how it is seeded. */
+function makeCastRoller(){
+  const rarityPref = rarityPrefVal();
+  const mannerCount = intVal('mannerCount', 3);
+  const vocabCount = intVal('vocabCount', 2);
+  const anchored = boolVal('castAnchor', false) && Object.keys(state).length > 0;
+  const spread = clamp(floatVal('castSpread', 0.55), 0.15, 1);
+  const baseVerb = rawToLevel(intVal('verbositySlider', 0));
+  const baseReg  = rawToLevel(intVal('registerSlider', 0));
+  const baseComp = rawToLevel(intVal('composureSlider', 0));
+  const around = (base, s) => clamp(base + (rand()*2 - 1) * 2 * s, -2, 2);
+  return () => {
+    const verbLevel = anchored ? around(baseVerb, spread) : randomAxisLevel();
+    const regLevel  = anchored ? around(baseReg,  spread) : randomAxisLevel();
+    const compLevel = anchored ? around(baseComp, spread) : randomAxisLevel();
+    const personalityOverrides = {};
+    PERSONALITY_AXES.forEach(axis=>{
+      personalityOverrides[axis.id] = anchored
+        ? Math.round(clamp(intVal('pers_'+axis.id, 0) + (rand()*2 - 1) * 100 * spread, -100, 100))
+        : Math.round(randomAxisLevel()*50);
+    });
+    rollCharacterVariants();
+    /* Cast members used to call buildCharacterState and stop there — no required
+       traits, no budgets, no exclusivity — so a cast generated with a named
+       required trait and every rarity cap at zero honoured none of them, while the
+       chips on screen said otherwise. Same finalizer as everything else; pins are
+       the single-character sheet's and deliberately do not travel. */
+    const cand = finalizeSheet(buildCharacterState({verbLevel, regLevel, compLevel, mannerCount, vocabCount,
+      rarityPref, vocabPref:null, personalityOverrides}), {rarityPref, applyPins:false});
+    return {state: cand, variants: Object.assign({}, charVariants)};
+  };
+}
+/* "Regenerate the most similar member": the one who collides with the rest on the most
+   voice devices (the same score the joint optimisation minimises) is redrawn until the
+   cast's total drops. Undo brings the old member back. */
+function regenerateMostSimilarMember(){
+  if (castStates.length < 2){ toast("A cast needs at least two members to compare.", "warn"); return; }
+  const m = voiceCollisionMatrix(castStates, "baseline", 0);
+  const i = m.worst;
+  if (!(i >= 0) || !castStates[i]){ toast("No member stands out as the most similar.", "warn"); return; }
+  const before = m.totals.reduce((a, b) => a + b, 0);
+  const restore = _castSnapshot();
+  const old = castStates[i];
+  let best = null;
+  const baseKey = String(lastCastSeed || "cast") + "|regen|" + (old.meta.name || i) + "|" + (_regenCount++);
+  withReplayMode(true, ()=> withoutContextBias(()=> withSpeculativeGeneration(()=> {
+    for (let a = 0; a < 6; a++){
+      withRng(mulberry32(hashSeedString(baseKey + "|" + a)), ()=>{
+        const cand = makeCastRoller()();
+        const trial = castStates.map((c, j) => j === i ? Object.assign({}, c, cand) : c);
+        const t = voiceCollisionMatrix(trial, "baseline", 0).totals.reduce((x, y) => x + y, 0);
+        if (!best || t < best.t) best = {t, cand};
+      });
+    }
+  })));
+  if (!best){ toast("Could not draw a replacement.", "warn"); return; }
+  castStates[i] = Object.assign({}, old, best.cand, {meta: old.meta});
+  renderCast(); refreshRelSelectors();
+  toastUndo(`Redrew "${old.meta.name}", the member most like the others: shared voice devices ${before} → ${best.t}.`, ()=>{ restore(); toast(`"${old.meta.name}" is back.`); }, 10000);
+}
+let _regenCount = 0;
 function generateCast(){
   const count = intVal('castCount', 3);
   // BUG FIX: the cast read your Generate-group checkboxes and per-section profile
@@ -600,26 +663,7 @@ function generateCast(){
      empty session history, so the seed in the readout rebuilds exactly this cast, from
      any session, whether it was typed in or rolled. */
   withReplayMode(true, ()=> withoutContextBias(()=> withSpeculativeGeneration(()=> withRng(mulberry32(seedNum), ()=>{
-    const rollOne = () => {
-      const verbLevel = anchored ? around(baseVerb, spread) : randomAxisLevel();
-      const regLevel  = anchored ? around(baseReg,  spread) : randomAxisLevel();
-      const compLevel = anchored ? around(baseComp, spread) : randomAxisLevel();
-      const personalityOverrides = {};
-      PERSONALITY_AXES.forEach(axis=>{
-        personalityOverrides[axis.id] = anchored
-          ? Math.round(clamp(intVal('pers_'+axis.id, 0) + (rand()*2 - 1) * 100 * spread, -100, 100))
-          : Math.round(randomAxisLevel()*50);
-      });
-      rollCharacterVariants();
-      /* Cast members used to call buildCharacterState and stop there — no required
-         traits, no budgets, no exclusivity — so a cast generated with a named
-         required trait and every rarity cap at zero honoured none of them, while the
-         chips on screen said otherwise. Same finalizer as everything else; pins are
-         the single-character sheet's and deliberately do not travel. */
-      const cand = finalizeSheet(buildCharacterState({verbLevel, regLevel, compLevel, mannerCount, vocabCount,
-        rarityPref, vocabPref:null, personalityOverrides}), {rarityPref, applyPins:false});
-      return {state: cand, variants: Object.assign({}, charVariants)};
-    };
+    const rollOne = makeCastRoller();
     const drafts = [];
     for (let i=0;i<count;i++){
       let d = null;
@@ -773,6 +817,39 @@ function castToMarkdown(){
 }
 function copyCast(btnEl){
   copyText(castToMarkdown(), btnEl);
+}
+/* The cast as a spreadsheet: one row per card per member (long format), so it sorts and
+   pivots. A BOM makes Excel read the em dashes as UTF-8. */
+function _csvCell(v){ const s = String(v == null ? "" : v); return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; }
+function castToCSV(){
+  const head = ["Member", "Age", "Context", "Archetype", "Slot", "Section", "Category", "Trait", "Intensity", "Rarity", "Kept"];
+  const rows = [head];
+  castStates.forEach(c => {
+    Object.keys(c.state || {}).forEach(k => {
+      const s = c.state[k]; if (!s || !s.trait) return;
+      rows.push([c.meta.name, c.meta.age || "", c.meta.context || "", c.meta.archetypeLabel || "", s.label || k, s.trait.section, s.trait.category, s.trait.trait, s.trait.intensity, s.trait.rarity, s.locked ? "yes" : ""]);
+    });
+  });
+  return "\ufeff" + rows.map(r => r.map(_csvCell).join(",")).join("\r\n") + "\r\n";
+}
+// The relationship web, as a standalone .svg: theme variables are resolved to real colours so it
+// looks the same outside the page.
+function downloadRelationshipSvg(){
+  const svg = document.querySelector('#relWeb svg');
+  if (!svg){ toast("Draw the web first: link at least two members on the Relationships tab.", "warn"); return; }
+  const clone = svg.cloneNode(true);
+  clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+  const vb = (clone.getAttribute('viewBox') || "").split(/[ ,]+/).map(Number);
+  if (vb.length === 4 && !clone.getAttribute('width')){ clone.setAttribute('width', vb[2]); clone.setAttribute('height', vb[3]); }
+  const cs = getComputedStyle(document.documentElement);
+  let out = new XMLSerializer().serializeToString(clone).replace(/var\((--[a-z0-9-]+)\)/gi, (m, n) => cs.getPropertyValue(n).trim() || m);
+  const bg = cs.getPropertyValue('--panel').trim() || '#ffffff';
+  out = out.replace(/(<svg[^>]*>)/, `$1<rect width="100%" height="100%" fill="${bg}"/>`);
+  downloadText('<?xml version="1.0" encoding="UTF-8"?>\n' + out, "relationship_web.svg", "image/svg+xml");
+}
+function downloadCastCSV(){
+  if (!castStates.length){ toast("Build a cast first.", "warn"); return; }
+  downloadText(castToCSV(), "character_cast.csv", "text/csv");
 }
 function downloadCast(){
   downloadText(castToMarkdown(), "character_cast.md");
@@ -1158,6 +1235,8 @@ function renderVoiceLab(){
       <div class="voiceHead"><b>${escHTML(l.prompt)}</b> <span class="sub">${escHTML(l.setup)}</span>${l.user
         ? ` <button class="savedAct savedDel" ${actAttr('click', 'removeVoicePrompt', l.promptId)} aria-label="Remove the prompt ${escAttr(l.prompt)}">remove</button>` : ``}</div>
       <blockquote class="voiceLine">${escHTML(l.text)}</blockquote>
+      <div class="sub vlStats">${(rs => `${rs.words} word${rs.words === 1 ? '' : 's'} · reads at grade ${rs.grade}`)(readingStats(l.text))}
+        <button type="button" class="savedAct" ${actAttr('click', 'copyVoiceLine', l.promptId, '$el')}>copy line</button></div>
       <div class="sub">Shaped by: ${escHTML(l.rules.join("; ") || "nothing on this sheet")}${l.device ? ` · habitual device: <b>${escHTML(l.device.label)}</b>` : ``}</div>
       <button class="btn-secondary vlTen" ${actAttr('click', 'toggleVoiceTen', l.promptId)} aria-expanded="${voiceTenOpen === l.promptId ? 'true' : 'false'}">${voiceTenOpen === l.promptId ? 'Hide the 10 lines' : '10 lines'}</button>
       ${voiceTenOpen === l.promptId ? `<ol class="vlTenList">${voiceLines(state, l.promptId, voiceLabMode, 10, voiceLabReroll, charMeta).map(x => `<li>${escHTML(x.text)}</li>`).join("")}</ol>` : ``}
@@ -1222,6 +1301,12 @@ function renderVoiceCompare(){
         ? `<span class="sharedDevice" title="More than one character in this cast reaches for this">${escHTML(rule)}</span>`
         : escHTML(rule)).join("; ") || "nothing"}</div>
     </div>`).join("");
+}
+// One line, without the stage direction's brackets stripped: what the character would say, as composed.
+function copyVoiceLine(promptId, btnEl){
+  const l = voiceLab(state, voiceLabMode, voiceLabReroll, charMeta).find(x => x.promptId === promptId);
+  if (!l){ toast("That line is no longer on the page.", "warn"); return; }
+  copyText(l.text, btnEl);
 }
 function copyVoiceLab(btnEl){
   if (!Object.keys(state).length){ toast("Generate a character first.", "warn"); return; }
@@ -1962,7 +2047,7 @@ function buildPersonalitySliders(){
       const lo = axis.neg.split('—')[1] ? axis.neg.split('—')[1].trim() : 'Low';
       const hi = axis.pos.split('—')[1] ? axis.pos.split('—')[1].trim() : 'High';
       div.innerHTML = `
-        <label for="pers_${axis.id}">${escHTML(axis.label)}</label>
+        <div class="sliderLabelRow"><label for="pers_${axis.id}">${escHTML(axis.label)}</label>${sliderLockHTML('pers_' + axis.id, axis.label)}</div>
         <div class="sliderWrap"><span class="neutralBand" aria-hidden="true"></span><span class="blendBand" aria-hidden="true"></span>
         <input type="range" id="pers_${axis.id}" min="-100" max="100" value="0" step="1"
                ${actAttr('input', 'onSliderChange')} aria-label="${escHTML(axis.label)}: ${escHTML(lo)} to ${escHTML(hi)}"
@@ -2285,7 +2370,7 @@ function surpriseMe(){
     // Nudge every axis off the preset so two rolls of the same archetype differ.
     PERSONALITY_AXES.forEach(axis=>{
       const el = document.getElementById('pers_'+axis.id);
-      if (!el) return;
+      if (!el || isSliderLocked('pers_'+axis.id)) return;
       el.value = String(clamp(intVal(el, 0) + Math.round((rand()*2-1) * 45), -100, 100));
     });
   }
@@ -2305,19 +2390,24 @@ function surpriseMe(){
 }
 
 function randomizeSliders(scope){
+  // A slider with its lock ticked stays where it is: pin the axes you know, roll the rest.
   if (scope === 'voice' || scope === 'all'){
-    setVal('verbositySlider', randomRawSlider());
-    setVal('registerSlider', randomRawSlider());
-    setVal('composureSlider', randomRawSlider());
+    ['verbositySlider', 'registerSlider', 'composureSlider'].forEach(id => { if (!isSliderLocked(id)) setVal(id, randomRawSlider()); });
   }
   if (scope === 'personality' || scope === 'all'){
     PERSONALITY_AXES.forEach(axis=>{
       const el = document.getElementById('pers_'+axis.id);
-      if (el) el.value = randomRawSlider();
+      if (el && !isSliderLocked('pers_'+axis.id)) el.value = randomRawSlider();
     });
   }
   onSliderChange();
 }
+function isSliderLocked(id){ const el = document.getElementById('lock_' + id); return !!(el && el.checked); }
+function lockedSliderIds(){ return [...document.querySelectorAll('input[id^="lock_"]')].filter(e => e.checked).map(e => e.id.slice(5)); }
+function sliderLockHTML(id, name){
+  return `<label class="sliderLock" title="Lock: Randomize and Surprise me leave this slider where it is"><input type="checkbox" id="lock_${id}" ${actAttr('change', 'onSliderLockChange')} aria-label="Lock ${escAttr(name)}"><span aria-hidden="true">🔒</span></label>`;
+}
+function onSliderLockChange(){ if (typeof savePrefs === 'function') savePrefs(); }
 
 
 // ================= CUSTOM ARCHETYPES =================
@@ -3752,7 +3842,8 @@ function shareLinkFor(){
   if (!lastSeedUsed) return null;
   const settings = captureSettings();
   delete settings.rerollExclusions;
-  delete settings.favouriteTraitIds;
+  // Saved traits only shape a draw when the boost is on; then the link must carry them to replay.
+  if (!favouriteBoostEnabled()) delete settings.favouriteTraitIds;
   // Name/age/context travel so the replay lands in the same world; the seed field
   // itself is carried separately.
   if (settings.fields) delete settings.fields.seedInput;
@@ -3987,6 +4078,67 @@ document.addEventListener('click', (e)=>{
   if (isBtn) return;
   if (!inside || e.target.closest('#stickyExtra button')) toggleStickyMore();
 });
+/* ================= NAMED SLIDER SETS =================
+   Sixteen sliders, saved under a name. Lighter than the custom archetype builder, which
+   also stores constraints, counts and section toggles. */
+const SLIDERSET_PREFIX = 'sliderset:';
+async function loadSliderPresets(){
+  const sel = document.getElementById('sliderPresetSelect');
+  if (!sel) return;
+  const keep = sel.value;
+  let names = [];
+  try { const r = await storage.list(SLIDERSET_PREFIX); names = ((r && r.keys) || []).map(k => k.slice(SLIDERSET_PREFIX.length)).sort((a, b) => a.localeCompare(b)); } catch(e){}
+  sel.innerHTML = `<option value="">Slider sets…</option>` + names.map(n => `<option value="${escAttr(n)}">${escHTML(n)}</option>`).join("");
+  if (names.includes(keep)) sel.value = keep;
+}
+async function saveSliderPreset(){
+  const name = await askForName("Name this slider set:", "");
+  if (!name || !name.trim()) return;
+  const n = name.trim().slice(0, 60);
+  try {
+    await storage.set(SLIDERSET_PREFIX + n, JSON.stringify({format: "character-voice-sliders", sliders: captureSliders(), savedAt: new Date().toISOString()}));
+    await loadSliderPresets();
+    const sel = document.getElementById('sliderPresetSelect'); if (sel) sel.value = n;
+    toast(`Saved the sliders as "${n}".`);
+  } catch(e){ toast("Could not save the slider set.", "warn"); }
+}
+async function applySliderPreset(){
+  const sel = document.getElementById('sliderPresetSelect');
+  if (!sel || !sel.value){ toast("Pick a slider set first.", "warn"); return; }
+  let rec = null;
+  try { const r = await storage.get(SLIDERSET_PREFIX + sel.value); rec = r && JSON.parse(r.value); } catch(e){}
+  if (!rec || !rec.sliders){ toast("That slider set could not be read.", "warn"); return; }
+  const before = captureSliders(), name = sel.value;
+  // Locked sliders keep their value: the lock means "leave this one alone".
+  const next = {}; Object.entries(rec.sliders).forEach(([id, v]) => { if (!isSliderLocked(id)) next[id] = v; });
+  restoreSliders(next); invalidateSliderCache(); onSliderChange();
+  toastUndo(`Loaded "${name}".`, ()=>{ restoreSliders(before); invalidateSliderCache(); onSliderChange(); });
+}
+async function deleteSliderPreset(){
+  const sel = document.getElementById('sliderPresetSelect');
+  if (!sel || !sel.value){ toast("Pick a slider set first.", "warn"); return; }
+  const name = sel.value; let raw = null;
+  try { const r = await storage.get(SLIDERSET_PREFIX + name); raw = r && r.value; } catch(e){}
+  try { await storage.delete(SLIDERSET_PREFIX + name); } catch(e){ toast("Could not delete it.", "warn"); return; }
+  await loadSliderPresets();
+  toastUndo(`Deleted the slider set "${name}".`, async ()=>{ if (raw) await storage.set(SLIDERSET_PREFIX + name, raw); await loadSliderPresets(); }, 10000);
+}
+/* Reduce motion: the system setting was honoured; a switch in the page lets you choose it
+   here too. Remembered between visits (ui:reduceMotion). */
+function applyReduceMotion(on){
+  document.body.classList.toggle('reduce-motion', !!on);
+  const el = document.getElementById('reduceMotionToggle'); if (el) el.checked = !!on;
+}
+function toggleReduceMotion(){
+  const el = document.getElementById('reduceMotionToggle');
+  applyReduceMotion(!!(el && el.checked));
+  try { storage.set('ui:reduceMotion', el && el.checked ? '1' : ''); } catch(e){}
+}
+async function loadReduceMotion(){
+  try { const r = await storage.get('ui:reduceMotion'); if (r && r.value) applyReduceMotion(true); } catch(e){}
+}
+// The boost is part of the workspace: changing it re-saves, and the pool of saved traits is unchanged.
+function onFavouriteBoostChange(){ if (typeof onSliderChange === 'function') onSliderChange(); if (typeof savePrefs === 'function') savePrefs(); }
 // Plain-language hints that work on tap: a title= tooltip never shows on a phone.
 function toggleTip(btn){
   const t = btn && btn.nextElementSibling;
@@ -3995,6 +4147,70 @@ function toggleTip(btn){
   t.hidden = !open;
   btn.setAttribute('aria-expanded', String(open));
 }
+/* ================= HISTORY DRAWER AND ROLL COMPARISON =================
+   The undo stack already holds the last rolls, but the only way into it was Undo, one step
+   at a time, blind. The drawer lists them, restores any one (through the same Undo and Redo
+   the buttons use, so a restore is itself undoable) and compares one with what is on screen. */
+function _ago(ts){
+  if (!ts) return "";
+  const s = Math.max(0, Math.round((Date.now() - ts) / 1000));
+  return s < 45 ? "just now" : s < 3600 ? Math.round(s / 60) + " min ago" : Math.round(s / 3600) + " h ago";
+}
+function historyEntries(){
+  return history.map((snap, i) => ({
+    i, at: snap.at, name: (snap.charMeta && snap.charMeta.name) || "Unnamed Character",
+    arch: (snap.charMeta && snap.charMeta.archetypeLabel) || "", seed: (snap.charMeta && snap.charMeta.seed) || "",
+    cards: Object.keys(snap.state || {}).length,
+  })).reverse();
+}
+function renderHistoryDrawer(){
+  const host = document.getElementById('historyDrawer');
+  if (!host || host.hidden) return;
+  const cur = Object.keys(state).length
+    ? `<li class="histNow"><b>${escHTML(charMeta.name || "Unnamed Character")}</b> <span class="sub">on screen now${charMeta.seed ? " · seed " + escHTML(charMeta.seed) : ""} · ${Object.keys(state).length} cards</span></li>` : "";
+  const rows = historyEntries().map(e => `<li><span><b>${escHTML(e.name)}</b> <span class="sub">${escHTML(e.arch)}${e.seed ? " · seed " + escHTML(e.seed) : ""} · ${e.cards} cards · ${escHTML(_ago(e.at))}</span></span>
+      <span class="histBtns"><button type="button" class="savedAct" ${actAttr('click', 'restoreHistoryAt', e.i)}>restore</button>
+      <button type="button" class="savedAct" ${actAttr('click', 'compareWithHistory', e.i)}>compare</button></span></li>`).join("");
+  host.innerHTML = `<div class="histHead"><b>Recent rolls</b> <span class="sub">newest first · the last ${HISTORY_MAX} are kept</span>
+    <button type="button" class="savedAct" ${actAttr('click', 'toggleHistoryDrawer')}>close</button></div>
+    <ul class="histList">${cur}${rows || `<li class="sub">Nothing earlier yet — build a few and they collect here.</li>`}</ul>`;
+}
+function toggleHistoryDrawer(){
+  const host = document.getElementById('historyDrawer'), btn = document.getElementById('historyBtn');
+  if (!host) return;
+  host.hidden = !host.hidden;
+  if (btn) btn.setAttribute('aria-expanded', String(!host.hidden));
+  renderHistoryDrawer();
+}
+function restoreHistoryAt(i){
+  if (!(i >= 0 && i < history.length)) return;
+  const steps = history.length - i;
+  for (let k = 0; k < steps; k++) undoLast();
+  renderHistoryDrawer();
+  toastUndo("Restored an earlier roll.", ()=>{ for (let k = 0; k < steps; k++) redoLast(); renderHistoryDrawer(); });
+}
+const _SLIDER_NAMES = {verbositySlider: "Verbosity", registerSlider: "Register", composureSlider: "Composure"};
+function sliderDiffHTML(before, after){
+  const name = id => _SLIDER_NAMES[id] || ((PERSONALITY_AXES.find(a => 'pers_' + a.id === id) || {}).label) || id;
+  const ids = [...new Set(Object.keys(before || {}).concat(Object.keys(after || {})))];
+  const rows = ids.filter(id => String((before || {})[id]) !== String((after || {})[id]))
+    .map(id => `<li><b>${escHTML(name(id))}</b> ${escHTML(String((before || {})[id] ?? "—"))} → ${escHTML(String((after || {})[id] ?? "—"))}</li>`);
+  return `<div class="sub" style="margin:10px 0 4px;"><b>Sliders</b> ${rows.length ? `— ${rows.length} moved` : "— unchanged"}</div>` + (rows.length ? `<ul class="sliderDiff">${rows.join("")}</ul>` : "");
+}
+// Two rolls side by side: the earlier one from the drawer against the sheet on screen.
+function compareWithHistory(i){
+  const snap = history[i];
+  if (!snap || !Object.keys(state).length) return;
+  const host = document.getElementById('comparePanel');
+  if (!host) return;
+  const past = expandSlots(snap.state) || {};
+  const pastName = (snap.charMeta && snap.charMeta.name || "Earlier roll") + (snap.charMeta && snap.charMeta.seed ? " (" + snap.charMeta.seed + ")" : "");
+  const nowName = (charMeta.name || "On screen") + (charMeta.seed ? " (" + charMeta.seed + ")" : "");
+  host.innerHTML = compareSheetsHTML(past, pastName, state, nowName) + sliderDiffHTML(snap.sliders, lastGeneratedSliders || captureSliders());
+  host.style.display = 'block';
+  const h = host.querySelector('h3'); if (h){ h.scrollIntoView({block: 'nearest'}); h.focus({preventScroll: true}); }
+}
+
 /* ================= SHEET NAV AND FIRST-CARD HINT =================
    Everything under the sheet — Pressure, Voice lab, Arc, "Why does this feel familiar?",
    the Project library — was reachable only by scrolling past ~37 cards. The nav goes to
@@ -4118,7 +4334,7 @@ wireKeyboard();
 applyAdvancedMode();
 (function(){ const f = document.getElementById('familiarPanel');
   if (f) f.addEventListener('toggle', ()=> onFamiliarToggle(f)); })();
-loadTheme();
+loadTheme(); loadSliderPresets(); loadCollapsedGroups(); loadReduceMotion();
 _customArchetypesReady.catch(()=>{}).then(()=>loadPrefs()).then(()=>{ applyShareFromHash(); initOnboarding(); });
 // Offline/repeat-visit caching. Registration is best-effort: the app is fully
 // functional without it, and file:// or an unsupported browser must not throw here.

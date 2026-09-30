@@ -1763,6 +1763,13 @@ let _avoidRecentActive = false;   // resolved once per build, not per draw
 const RECENT_DECAY = 0.82;            // per character of age
 const RECENT_FAMILY_PENALTY = 0.7;    // same concept family as a recent trait
 let recentFamilies = [];              // array of Sets of conceptFamily, newest last
+/* Saved traits (the bookmark on each card) are a personal "always consider" list. By
+   default they steer nothing; with the switch on they count double in every draw. */
+const FAVOURITE_BOOST = 2;
+function favouriteBoostEnabled(){ const el = settingEl('favouriteBoostToggle'); return el ? !!el.checked : false; }
+function favouriteMultiplier(t){
+  return (favouriteBoostEnabled() && typeof favouriteTraitIds !== 'undefined' && favouriteTraitIds.has(t.id)) ? FAVOURITE_BOOST : 1;
+}
 function recentPenalty(t){
   let m = avoidPenalty(t) * retirePenalty(t);
   if (!_avoidRecentActive || !recentTraitIds.length) return m;
@@ -2149,7 +2156,7 @@ function _pickInRangeInner(pool, rarityPref, target, minCount, flatten){
       // The same coin now flips the trait-level fit too.
       if (fit) w *= clamp(1 + aff*fit*(_divergeThisDraw ? -1 : 1), 0.15, 3);
     }
-    w *= recentPenalty(t) * slotRepeatPenalty(t) * worldTagMultiplier(t);
+    w *= recentPenalty(t) * slotRepeatPenalty(t) * worldTagMultiplier(t) * favouriteMultiplier(t);
     return w;
   });
   const total = weights.reduce((a,b)=>a+b,0);
@@ -5375,8 +5382,10 @@ let redoStack = [];
    field can never be added to the workspace and forgotten by Undo again.
    `captureSettings`/`restoreSettings` live in render.js and read the DOM; under the
    test harness they may be absent, hence the typeof guards. */
+const HISTORY_MAX = 20;   // the history drawer lists these, so the depth is a promise
 function _snapshotNow(){
   return {
+    at: Date.now(),
     state: compressSlots(state),
     charMeta: {...charMeta},
     pressureState: compressSlots(pressureState),
@@ -5397,6 +5406,7 @@ function _snapshotNow(){
   };
 }
 function updateUndoButtons(){
+  if (typeof renderHistoryDrawer === 'function') renderHistoryDrawer();
   const u = document.getElementById('undoBtn'); if (u) u.disabled = history.length === 0;
   const r = document.getElementById('redoBtn'); if (r) r.disabled = redoStack.length === 0;
 }
@@ -5404,7 +5414,7 @@ function snapshotHistory(){
   // A fresh action invalidates anything that was ahead of us on the timeline.
   redoStack = [];
   history.push(_snapshotNow());
-  if (history.length > 15) history.shift();
+  if (history.length > HISTORY_MAX) history.shift();
   updateUndoButtons();
 }
 // Shared by undo and redo: the restore half is identical, only which stack the current
@@ -5442,13 +5452,13 @@ function _restoreSnapshot(prev){
 function undoLast(){
   if (!history.length) return;
   redoStack.push(_snapshotNow());
-  if (redoStack.length > 15) redoStack.shift();
+  if (redoStack.length > HISTORY_MAX) redoStack.shift();
   _restoreSnapshot(history.pop());
 }
 function redoLast(){
   if (!redoStack.length) return;
   history.push(_snapshotNow());
-  if (history.length > 15) history.shift();
+  if (history.length > HISTORY_MAX) history.shift();
   _restoreSnapshot(redoStack.pop());
 }
 
@@ -6650,6 +6660,19 @@ const VOICE_PROMPTS = [
   {id:"askhelp",  label:"Asking for help",   setup:"They cannot do it alone, and the person who can help is right there."},
   {id:"lie",      label:"Lying",             setup:"The truth costs too much, and they have about a second to decide."},
 ];
+/* Length and reading level of a composed line: words, sentences and a Flesch-Kincaid grade.
+   A rough measure (the syllable count is a vowel-group heuristic) but a useful one for
+   "does this character sound like a child, a clerk or a professor". Stage directions in
+   [brackets] are not speech and are left out. */
+function readingStats(text){
+  const speech = String(text || "").replace(/\[[^\]]*\]/g, " ").replace(/\s+/g, " ").trim();
+  const words = speech.match(/[A-Za-z][A-Za-z'’-]*/g) || [];
+  const sentences = Math.max(1, (speech.match(/[.!?…]+(\s|$)/g) || []).length);
+  const syl = w => { const m = w.toLowerCase().replace(/e$/, "").match(/[aeiouy]+/g); return Math.max(1, m ? m.length : 1); };
+  const syllables = words.reduce((n, w) => n + syl(w), 0);
+  const grade = words.length ? Math.max(0, 0.39 * (words.length / sentences) + 11.8 * (syllables / words.length) - 15.59) : 0;
+  return {words: words.length, sentences, grade: Math.round(grade * 10) / 10};
+}
 const VOICE_PROMPT_IDS = VOICE_PROMPTS.map(p => p.id);
 const VOICE_MODES = ["baseline", "pressure"];
 /* AUTHOR PROMPTS. The seven situations are fixed; a project can add its own ("turning

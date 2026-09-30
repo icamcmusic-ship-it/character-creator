@@ -346,6 +346,7 @@ function renderSlotChange(slotId){
   if (!allPainted){ withPreservedFocus(()=>{ renderSheet(); }); return; }
   noteRenderedTraits();
   refreshDerivedViews(ids.size > 1 ? [...ids] : null);
+  if (sheetFilterActive()) applySheetFilter();
 }
 
 /* Everything downstream of the cards: the summary/diagnostics panel, the novelty
@@ -535,7 +536,41 @@ function titleForSlotId(id){
    With profileDepth 4 and every section enabled a sheet runs past forty cards, and
    there was no way to fold any of it away. */
 let collapsedGroups = {};
-function toggleGroup(title){ collapsedGroups[title] = !collapsedGroups[title]; renderSheet(); }
+/* Which sections are folded is remembered between visits (and between characters): a
+   writer who collapses the twelve sections they never touch should not redo it on every
+   build. Stored under ui:collapsed. */
+const COLLAPSED_KEY = 'ui:collapsed';
+function persistCollapsed(){
+  try { storage.set(COLLAPSED_KEY, JSON.stringify(Object.keys(collapsedGroups).filter(t => collapsedGroups[t]))); } catch(e){}
+}
+async function loadCollapsedGroups(){
+  try {
+    const r = await storage.get(COLLAPSED_KEY);
+    const list = r && r.value ? JSON.parse(r.value) : [];
+    if (Array.isArray(list)){ list.forEach(t => { if (typeof t === 'string') collapsedGroups[t] = true; }); if (Object.keys(state || {}).length) renderSheet(); }
+  } catch(e){}
+}
+function toggleGroup(title){ collapsedGroups[title] = !collapsedGroups[title]; persistCollapsed(); renderSheet(); }
+/* FIND ON THE SHEET. Forty-odd cards is a long read for "where did the one about the
+   dog end up?". Two or more characters filter the cards (name, description, category,
+   example); sections that would hide the match are opened while a filter is active. */
+let sheetFindQuery = "";
+function sheetFilterActive(){ return sheetFindQuery.length >= 2; }
+function onSheetFind(el){ sheetFindQuery = String((el && el.value) || "").trim().toLowerCase(); renderSheet(); }
+function applySheetFilter(){
+  const count = document.getElementById('sheetFindCount');
+  const cards = document.querySelectorAll('#sheetBody .traitCard');
+  if (!sheetFilterActive()){
+    cards.forEach(c => { c.hidden = false; });
+    document.querySelectorAll('#sheetBody .axisGroup').forEach(g => { g.hidden = false; });
+    if (count) count.textContent = "";
+    return;
+  }
+  let shown = 0;
+  cards.forEach(c => { const hit = c.textContent.toLowerCase().includes(sheetFindQuery); c.hidden = !hit; if (hit) shown++; });
+  document.querySelectorAll('#sheetBody .axisGroup').forEach(g => { g.hidden = ![...g.querySelectorAll('.traitCard')].some(c => !c.hidden); });
+  if (count) count.textContent = shown ? `${shown} of ${cards.length} cards` : "No card matches.";
+}
 
 /* ================= SHEET DENSITY =================
    A default build produces ~38 populated slots and at profileDepth 4 with everything on
@@ -599,6 +634,7 @@ let SHEET_GROUPS = [];
 function setAllGroups(collapsed){
   document.querySelectorAll('#sheetBody .axisGroup').forEach(()=>{});
   SHEET_GROUP_TITLES.forEach(t=>{ collapsedGroups[t] = collapsed; });
+  persistCollapsed();
   renderSheet();
 }
 let SHEET_GROUP_TITLES = [];
@@ -945,7 +981,7 @@ function renderSheet(){
       return;
     }
     const div = document.createElement('div');
-    const collapsed = !!collapsedGroups[g.title];
+    const collapsed = !!collapsedGroups[g.title] && !sheetFilterActive();   // a filter opens every section
     div.className = "axisGroup" + (collapsed ? " collapsed" : "");
     div.id = sectionAnchorId(g.title);
     div.style.setProperty('--section-accent', cssColor(sectionColor(g.title)));
@@ -1172,6 +1208,7 @@ function renderSheet(){
   if (typeof renderVoiceLab === 'function') renderVoiceLab();
   if (typeof refreshCoachMark === 'function') refreshCoachMark();
   if (typeof refreshSheetNav === 'function') refreshSheetNav();
+  applySheetFilter();
   renderChangeList();
   refreshBudgetMeters();
   refreshJumpToSection();
@@ -1606,7 +1643,7 @@ const SETTING_FIELDS = ['mannerCount','vocabCount','personalityCount','profileDe
 const SETTING_TOGGLES = ['personalityToggle','depthFirstToggle','examplesToggle','stressToggle',
   'genPersonality','genSpeech','genVocab','genManner',
   'avoidRecentToggle','wildcardToggle','foilOpposeComposure','compactToggle','castAnchor',
-  'sheetShapeToggle','seatContradictions','exploreCandidates','archetypeSectionsToggle'];
+  'sheetShapeToggle','seatContradictions','exploreCandidates','archetypeSectionsToggle','favouriteBoostToggle'];
 
 function captureSettings(){
   const fields = {}, toggles = {}, sections = {};
@@ -1647,6 +1684,7 @@ function captureSettings(){
     // Content packs switched off for this workspace. Part of the settings because a
     // character generated with a pack off should replay with it off.
     disabledPacks: (typeof getDisabledPacks === 'function') ? getDisabledPacks() : [],
+    lockedSliders: (typeof lockedSliderIds === 'function') ? lockedSliderIds() : [],
     rerollExclusions: excl,
   };
 }
@@ -1700,6 +1738,9 @@ function restoreSettings(s){
   if (mbm) mbm.value = c.mutationBudgetMode || 'enforce';
   if (typeof setFavouriteTraitIds === 'function') setFavouriteTraitIds(s.favouriteTraitIds || []);
   if (typeof setDisabledPacks === 'function') setDisabledPacks(s.disabledPacks || []);
+  if (Array.isArray(s.lockedSliders)){
+    document.querySelectorAll('input[id^="lock_"]').forEach(e => { e.checked = s.lockedSliders.includes(e.id.slice(5)); });
+  }
   if (typeof refreshPackUI === 'function') refreshPackUI();
   if (typeof refreshBudgetUI === 'function') refreshBudgetUI();
   rerollExclusions = {};
@@ -2347,7 +2388,10 @@ function toastUndo(message, onUndo, ms, label){
    A condensed voice spec for pasting into a model's system prompt: who they are, how
    they talk, what they would never do, and a handful of sample lines — without the
    intensity/rarity bookkeeping sheetToText carries for a human reader. */
-function sheetToPrompt(st, meta){
+/* `opts.short` is the small-context version: trait names only, no descriptions, no sample
+   lines, no separate contradiction section — the same character in a fraction of the tokens. */
+function sheetToPrompt(st, meta, opts){
+  const short = !!(opts && opts.short);
   meta = meta || {};
   const name = meta.name && meta.name !== "Unnamed Character" ? meta.name : "this character";
   const L = [`# Voice spec: ${meta.name || "Unnamed Character"}`, ""];
@@ -2363,14 +2407,14 @@ function sheetToPrompt(st, meta){
   } catch(e){}
   const valid = ids => ids.filter(id => st[id] && st[id].trait);
   const keys = Object.keys(st || {});
-  const line = id => `- **${st[id].trait.trait}** — ${st[id].trait.desc}`;
+  const line = id => short ? `- ${st[id].trait.trait}` : `- **${st[id].trait.trait}** — ${st[id].trait.desc}`;
   const sec = (title, ids) => { const v = valid(ids); if (v.length) L.push("", `## ${title}`, ...v.map(line)); };
   sec("How they speak", ["verbosity","register","grammar"].concat(keys.filter(k=>k.startsWith("vocab")), keys.filter(k=>k.startsWith("manner"))));
   sec("Who they are", keys.filter(k=>k.startsWith("pers_") || k.startsWith("req_") || k.startsWith("reqcat_")));
   sec("What drives them", keys.filter(k=>k.startsWith("prof_")));
   sec("The one thing that doesn't fit", keys.filter(k=>k.startsWith("wild_")));
   try {
-    const contra = (typeof structuredContradiction === 'function') ? structuredContradiction(st, meta) : null;
+    const contra = (!short && typeof structuredContradiction === 'function') ? structuredContradiction(st, meta) : null;
     if (contra) L.push("", `## Central contradiction`, `${contra.hi.trait} — and also ${contra.lo.trait}. ${contra.question}`);
   } catch(e){}
   try {
@@ -2379,12 +2423,17 @@ function sheetToPrompt(st, meta){
       `Day to day: ${ic.a.role.toLowerCase()} "${ic.a.trait.trait}" wins. Under load: ${ic.flips ? `${ic.winner.role.toLowerCase()} "${ic.winner.trait.trait}" takes over, ${ic.when}` : `it holds, ${ic.when}, at a cost`}.`,
       `Meanwhile ${ic.loser.role.toLowerCase()} "${ic.loser.trait.trait}" leaks into what they say — let it show under stress, never as a speech about it.`);
   } catch(e){}
-  const samples = valid(keys).map(id => st[id].trait.example).filter(Boolean).slice(0, 8);
+  const samples = short ? [] : valid(keys).map(id => st[id].trait.example).filter(Boolean).slice(0, 8);
   if (samples.length) L.push("", "## Sample lines (for rhythm, not to repeat verbatim)", ...samples.map(x => `> ${x}`));
+  if (short){ L.push("", "Keep the voice consistent line to line; show habits sparingly; under stress let it slip rather than become someone else."); return L.join("\n") + "\n"; }
   L.push("", "## Rules", "- Keep the verbosity, register and grammar above consistent line to line.",
     "- Use the mannerisms sparingly; a habit shown every line stops reading as a habit.",
     "- Under stress, let the voice slip rather than become someone else.");
   return L.join("\n") + "\n";
+}
+function copyPromptShort(btnEl){
+  if (!Object.keys(state).length){ toast("Generate a character first.", "warn"); return; }
+  copyText(sheetToPrompt(state, charMeta, {short: true}), btnEl);
 }
 function copyPrompt(btnEl){
   if (!Object.keys(state).length){ toast("Generate a character first.", "warn"); return; }

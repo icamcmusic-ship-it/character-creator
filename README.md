@@ -201,6 +201,17 @@ button instead of (or as well as) a confirm.
   card. **Ctrl/⌘+Enter** builds, **Ctrl/⌘+Z** undoes, **Shift+Ctrl/⌘+Z** / **Ctrl+Y** redoes,
   **Ctrl/⌘+S** saves, **1 2 3** switch tab, **/** searches traits, **Esc** closes the menus
   and **?** opens the full list. None of them fire while you are typing or a dialog is open.
+* **History** lists the last twenty rolls: restore one (it is itself undoable) or compare it
+  with the sheet on screen, trait by trait and slider by slider. **Find on this sheet**
+  filters the cards and opens folded sections while you search; which sections you fold is
+  remembered. A **lock** beside each slider keeps it out of Randomize and Surprise me, and
+  **Slider sets** save the sixteen sliders under a name. **Saved traits count double** (Tinker
+  Mode) turns the card bookmark into a soft "always consider"; a share link then carries
+  the saved traits so it still replays. Each Voice lab line shows its word count and reading
+  grade and can be copied alone. On the Cast tab, **Redraw the most similar member** replaces
+  the one who shares the most voice devices (undoable), and the cast downloads as **.csv**;
+  the relationship web downloads as **.svg**; the File menu adds a **short LLM prompt**
+  (trait names only). **Reduce motion** is a switch in the page as well as a system setting.
 * Destructive actions — Reset to Defaults, Unpin/Keep/Release all, clearing constraints or
   budgets, deleting an archetype or a project — undo through a toast rather than a confirm.
   The header shows the current project, when settings were last saved, and a theme switch

@@ -315,6 +315,7 @@ function archetypeFidelity(st, arch){
    rather than queued, because "generate twice" is never what the second press meant. */
 let _generationInFlight = false;
 function _prefersReducedMotion(){
+  if (typeof document !== 'undefined' && document.body && document.body.classList && document.body.classList.contains('reduce-motion')) return true;
   return typeof window !== 'undefined' && !!window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 }
 /* After a build the sheet is thousands of pixels below the controls that produced it,
@@ -1162,7 +1163,7 @@ function favouriteTrait(id){
     toast(`"${t.trait}" removed from your saved traits.`);
   } else {
     favouriteTraitIds.add(id);
-    toast(`"${t.trait}" saved. This does not change what gets generated — use the pin button for that.`);
+    toast(favouriteBoostEnabled() ? `"${t.trait}" saved — it now counts double whenever it could be drawn.` : `"${t.trait}" saved. This does not change what gets generated unless you switch on "Saved traits count double" (Tinker Mode) — use the pin button for intensity.`);
   }
   refreshConstraintChips(); withPreservedFocus(()=>{ renderSheet(); });
   if (typeof savePrefs === 'function') savePrefs();
