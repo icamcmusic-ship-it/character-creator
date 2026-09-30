@@ -12,8 +12,11 @@ const {loadEngine, ROOT} = require('./harness');
 let passed = 0, failed = 0;
 const failures = [];
 function check(name, fn){
+  const t0 = Date.now();
   try {
     const detail = fn();
+    const ms = Date.now() - t0;
+    if (ms > 5000) console.log('  \x1b[2m(slow: ' + Math.round(ms / 1000) + 's)\x1b[0m');
     if (detail === false) throw new Error('returned false');
     passed++;
     console.log('  \x1b[32mok\x1b[0m   ' + name + (typeof detail === 'string' ? '  \x1b[2m(' + detail + ')\x1b[0m' : ''));

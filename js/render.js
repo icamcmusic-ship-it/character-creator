@@ -1044,6 +1044,25 @@ function renderSheet(){
         <div class="sub" style="margin:6px 0 0;">Not an error to fix. A ${escHTML(contra.tier.toLowerCase())} opposition on one axis is where a character stops being a list of traits — answer the question and the rest of the sheet reorganises around it.</div>
       </div>`;
     }
+    /* The inner conflict: a second tension, between the character's own drives rather
+       than two behaviours on one axis — which wins day to day, which wins under load, and
+       what the losing side leaks. Feeds the pressure ladder and the voice lab. */
+    const ic = (typeof innerConflict === 'function') ? innerConflict(state, charMeta) : null;
+    if (ic){
+      const qt = t => '“' + escHTML(t.trait) + '”';
+      h += `<div class="tensionBlock innerConflict" style="border-left-color:var(--dusk-blue-mid); margin-top:10px;">
+        <div class="tensionTitle">Inner conflict &mdash; ${escHTML(ic.label)}${ic.flipped ? ' <span class="sub">(swapped by you)</span>' : ''}</div>
+        <div style="margin:6px 0;"><b>${escHTML(ic.a.role)}</b> ${qt(ic.a.trait)} against <b>${escHTML(ic.b.role.toLowerCase())}</b> ${qt(ic.b.trait)}.</div>
+        <div class="icRow"><b>Day to day:</b> ${escHTML(ic.a.role.toLowerCase())} ${qt(ic.a.trait)} wins.</div>
+        <div class="icRow"><b>Under load:</b> ${ic.flips
+          ? `${escHTML(ic.winner.role.toLowerCase())} ${qt(ic.winner.trait)} takes over, ${escHTML(ic.when)}.`
+          : `it holds, ${escHTML(ic.when)} &mdash; at a cost.`}</div>
+        <div class="icRow"><b>Leaking meanwhile:</b> ${escHTML(ic.loser.role.toLowerCase())} ${qt(ic.loser.trait)} &mdash; in the voice lab and the pressure ladder.</div>
+        <div style="margin:6px 0; font-style:italic;">${escHTML(ic.question)}</div>
+        <button type="button" class="contraEdit" ${actAttr('click', 'flipInnerConflict')} title="Make the other side win under load">swap who wins under load</button>
+        <div class="sub" style="margin:6px 0 0;">Two characters with the same cards differ on which drive wins. This is the rule the pressure ladder and the voice lab follow.</div>
+      </div>`;
+    }
     (typeof seatedContradictions === 'function' ? seatedContradictions(state) : []).forEach(sc => {
       h += `<div class="tensionBlock seatedContra">
         <div class="tensionTitle">Seated contradiction &mdash; ${escHTML(sc.axisLabel)} <span class="sub">(${escHTML(sc.fn)})</span></div>
@@ -1176,7 +1195,7 @@ function renderSheet(){
         `<li><b>${escHTML(sg.title)}.</b> ${escHTML(sg.text)} <span class="chainFrom">← ${escHTML(sg.from.join(" · ") || "the pressure dial")}</span></li>`).join("") + `</ol>`;
     }
     // Section 6: irritated → cornered → broken, and the day after (mechanics.js).
-    if (typeof pressureEscalationHTML === 'function') head += pressureEscalationHTML(state, pressureState);
+    if (typeof pressureEscalationHTML === 'function') head += pressureEscalationHTML(state, pressureState, charMeta);
     pbody.innerHTML = head;
     const pgroups = [
       {title:"Speech Under Pressure", ids:["verbosity","register","grammar"]},
@@ -1392,6 +1411,10 @@ function sheetToText(st, meta, pState){
       L.push("", `**The contradiction — ${contra.axisLabel}:** ${contra.hi.trait} and also ${contra.lo.trait}. _${contra.question}_`,
         ...contra.fields.map(f => `- ${f.prompt} ${f.answer || f.derived || "(unanswered)"}`));
     }
+    const icx = (typeof innerConflict === 'function') ? innerConflict(st, meta) : null;
+    if (icx){
+      L.push("", `**Inner conflict — ${icx.label}:** ${icx.a.role} “${icx.a.trait.trait}” against ${icx.b.role.toLowerCase()} “${icx.b.trait.trait}”. Day to day ${icx.a.role.toLowerCase()} wins; under load ${icx.flips ? `${icx.winner.role.toLowerCase()} takes over, ${icx.when}` : `it holds, ${icx.when}, at a cost`}. The ${icx.loser.role.toLowerCase()} leaks meanwhile. _${icx.question}_`);
+    }
     (typeof seatedContradictions === 'function' ? seatedContradictions(st) : []).forEach(sc => {
       L.push("", `**Seated contradiction — ${sc.axisLabel}:** ${sc.face ? sc.face.trait + " and also " : ""}${sc.exception.trait}${sc.fnTrait ? ` (for: ${sc.fnTrait.trait})` : ""}. _${sc.question}_`,
         ...sc.answers.map(a => `- ${a.prompt} ${a.answer}`));
@@ -1477,7 +1500,7 @@ function sheetToText(st, meta, pState){
       const chain = pressureChain(st, pState);
       if (chain) L.push(...chain.stages.map(sg => `1. **${sg.title}.** ${sg.text} (from: ${sg.from.join(", ") || "the pressure dial"})`), "");
     } catch(e){}
-    try { if (typeof pressureEscalationMarkdown === 'function'){ const esc = pressureEscalationMarkdown(st, pState); if (esc) L.push(esc, ""); } } catch(e){}
+    try { if (typeof pressureEscalationMarkdown === 'function'){ const esc = pressureEscalationMarkdown(st, pState, meta); if (esc) L.push(esc, ""); } } catch(e){}
     /* The base sheet's `block` helper filters slots whose TRAIT is null; the pressure
        section checked only that the slot existed, so one blanked or banned-out pressure
        slot threw `Cannot read properties of null (reading 'trait')` and aborted the
@@ -2340,6 +2363,12 @@ function sheetToPrompt(st, meta){
   try {
     const contra = (typeof structuredContradiction === 'function') ? structuredContradiction(st, meta) : null;
     if (contra) L.push("", `## Central contradiction`, `${contra.hi.trait} — and also ${contra.lo.trait}. ${contra.question}`);
+  } catch(e){}
+  try {
+    const ic = (typeof innerConflict === 'function') ? innerConflict(st, meta) : null;
+    if (ic) L.push("", `## Inner conflict (${ic.label})`,
+      `Day to day: ${ic.a.role.toLowerCase()} "${ic.a.trait.trait}" wins. Under load: ${ic.flips ? `${ic.winner.role.toLowerCase()} "${ic.winner.trait.trait}" takes over, ${ic.when}` : `it holds, ${ic.when}, at a cost`}.`,
+      `Meanwhile ${ic.loser.role.toLowerCase()} "${ic.loser.trait.trait}" leaks into what they say — let it show under stress, never as a speech about it.`);
   } catch(e){}
   const samples = valid(keys).map(id => st[id].trait.example).filter(Boolean).slice(0, 8);
   if (samples.length) L.push("", "## Sample lines (for rhythm, not to repeat verbatim)", ...samples.map(x => `> ${x}`));

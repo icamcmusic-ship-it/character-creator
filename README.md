@@ -93,6 +93,14 @@ the same seed under the same lenses and toggles gives the same sheet.
   the draw; afterwards a trait against the sheet's actual lean on that axis is seated
   with a Contradiction Functions card saying what it is for, and its scene questions
   (what it is for, when, with whom, what changes, the cost) are answered from the sheet.
+- **Inner conflict.** Beside the axis contradiction, every sheet gets a second tension
+  between its own drives — Want vs Need, the line they hold vs Want, Role vs Fear, or
+  Defence vs Need — with a stated rule: which side wins day to day, which takes the wheel
+  under load (and what tips it), and what the losing side does meanwhile. The Cornered
+  stage of the pressure ladder states the rule, the Broken stage shows what leaks, and
+  the voice lab lets the losing drive slip into the line (about 55% of pressure lines,
+  about 8% of calm ones). Two sheets with the same cards can diverge on which drive wins;
+  a button on the panel swaps it, and the swap saves, exports and undoes with the sheet.
 - **Variable sheet shape** (on by default). A seeded signature budget gives one or two
   defining profile sections a second card, drops one thin section, and sets 0–3
   outliers. 40 seeds give ~6 sheet sizes and ~37 shapes, where every sheet used to be 42

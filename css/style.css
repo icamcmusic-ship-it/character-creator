@@ -1490,3 +1490,6 @@
 /* A chip can now carry a section list ("archetype adds Dialect & Linguistic Background,
    Family Talk"); nowrap pushed the page 44px wide on a phone. */
 .ruleChip { white-space:normal; max-width:100%; overflow-wrap:anywhere; }
+
+/* Inner conflict panel */
+.innerConflict .icRow { margin:4px 0; font-size:.9rem; }

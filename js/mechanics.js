@@ -586,7 +586,7 @@ const _BROKEN_BY_ATTACH_ALT = {"Secure":"whoever is nearest hears about it, plai
   "Anxious":"they need to be told, more than once, that nobody is leaving",
   "Avoidant":"the door closes and the answers get shorter until they stop",
   "Disorganized":"they say two opposite things in a row and mean both"};
-function pressureEscalation(st, pst){
+function pressureEscalation(st, pst, meta){
   const g = (id, re) => _mxT(st, id, re);
   const manners = Object.keys(st || {}).filter(k => k.startsWith("manner") && st[k] && st[k].trait).map(k => st[k].trait);
   const pManners = Object.keys(pst || {}).filter(k => k.startsWith("p_manner") && pst[k] && pst[k].trait).map(k => pst[k].trait);
@@ -622,6 +622,19 @@ function pressureEscalation(st, pst){
     {v: _mxLc(vices.trait)}), [vices]));
   if (humor && _HUMOR_AT.broken[humor.category]) brk.signs.push(sig(V("humB", ["Humour: {h}.", "The humour goes: {h}."], {h: _HUMOR_AT.broken[humor.category]}), [humor]));
   shifted.slice(0, 2).forEach(s => brk.signs.push(sig(`Where they stand moves: ${s.fromCat} → ${s.toCat}.`, [s.trait])));
+  /* The inner conflict: what wins day to day, what takes the wheel when cornered, and
+     what the losing drive does meanwhile. */
+  const ic = typeof innerConflict === "function" ? innerConflict(st, meta) : null;
+  if (ic){
+    const w = ic.winner, l = ic.loser, q = t => _mxQ(t.trait);
+    cor.signs.push(sig(ic.flips
+      ? V("icC", ["The inner conflict tips: {wr} {w} takes over {when}.", "Now {wr} {w} drives, {when}; {lr} {l} has been pushing at it all along.", "{when}, {wr} {w} wins — the reverse of how it goes on a good day."],
+          {wr: w.role.toLowerCase(), w: q(w.trait), lr: l.role.toLowerCase(), l: q(l.trait), when: ic.when})
+      : V("icC", ["The inner conflict holds: {wr} {w} still wins {when}, and it costs them.", "They keep to {wr} {w} {when}, though {lr} {l} is pulling the other way.", "{wr} {w} holds {when}. Something else pays for it."],
+          {wr: w.role.toLowerCase(), w: q(w.trait), lr: l.role.toLowerCase(), l: q(l.trait), when: ic.when}), [ic.winner.trait, ic.loser.trait]));
+    brk.signs.push(sig(V("icB", ["What leaks: {lr} {l}.", "The losing drive speaks for them: {lr} {l}.", "Under everything, {lr} {l} is what comes out."],
+      {lr: l.role.toLowerCase(), l: q(l.trait)}), [ic.loser.trait]));
+  }
   /* Not every ladder has three rungs. A freezer can go from strained straight to shut
      down, with no cornered stage between: the stress response IS the break. */
   if (stress && /Freeze/.test(stress.category) && cor.signs.length && brk.signs.length && _mxSheetHash(st) % 2 === 0){
@@ -708,8 +721,8 @@ function recoverySheet(st){
   const summary = typeof pressureRecovery === "function" ? pressureRecovery(st) : null;
   return rows.length ? {summary, rows} : null;
 }
-function pressureEscalationHTML(st, pst){
-  const esc = pressureEscalation(st, pst), rec = recoverySheet(st);
+function pressureEscalationHTML(st, pst, meta){
+  const esc = pressureEscalation(st, pst, meta), rec = recoverySheet(st);
   let h = "";
   if (esc.stages.length){
     h += `<div class="pressureStages" aria-label="Escalation stages">` + esc.stages.map(sg =>
@@ -722,8 +735,8 @@ function pressureEscalationHTML(st, pst){
   }
   return h;
 }
-function pressureEscalationMarkdown(st, pst){
-  const esc = pressureEscalation(st, pst), rec = recoverySheet(st), L = [];
+function pressureEscalationMarkdown(st, pst, meta){
+  const esc = pressureEscalation(st, pst, meta), rec = recoverySheet(st), L = [];
   esc.stages.forEach(sg => { L.push(`**${sg.label}**${sg.id === esc.current ? " (current)" : ""}`); sg.signs.forEach(s => L.push(`- ${s.text}`)); });
   if (rec){ L.push("", "**Recovery sheet**"); rec.rows.forEach(r => L.push(`- ${r.title}: ${r.text}`)); }
   return L.join("\n");
@@ -890,4 +903,112 @@ function arcTemplateEvents(st, templateId, priorEvents){
     sim = applyArcEvent(sim, {id: ev.id, changes: ev.changes.map(c => Object.assign({}, c, {accepted: true}))});
   });
   return out;
+}
+
+// ================= 10. The inner-conflict engine =================
+/* The contradiction panel finds ONE tension, between two behaviours on one axis. That is
+   not where two characters with the same categories actually differ. They differ on which
+   of their own drives wins, and when. This finds a second tension between the drives —
+   what they want and what they need, the line they hold and what they want, the role they
+   play and what they fear, the defence and what it covers — and states a rule: which side
+   wins day to day, which wins under load, what tips it, and what the losing side does
+   meanwhile (it leaks). The pressure ladder and the voice lab both use the rule, so the
+   losing drive shows up in the line at the Cornered stage instead of nowhere.
+
+   Pure function of the sheet (a hash of it, never the dice); `meta.conflictFlip` lets the
+   author swap which side wins under pressure. */
+const INNER_CONFLICT_TYPES = {
+  "want-need":    {label: "Want vs Need",     roles: ["Want", "Need"],
+    question: "They chase the want; the need is what would actually help. Which one do they act on, and what does the other one look like from outside?"},
+  "values-want":  {label: "Values vs Want",   roles: ["The line they hold", "Want"],
+    question: "The line and the want cannot both be honoured. When they choose, which goes, and who sees the cost?"},
+  "fear-role":    {label: "Role vs Fear",     roles: ["The role they play", "Fear"],
+    question: "They play the role in every room. What happens to the role when the fear is in the room too?"},
+  "defence-need": {label: "Defence vs Need",  roles: ["The defence", "Need"],
+    question: "The defence exists to keep the need from being seen. What is the first moment it fails, and who is there?"},
+};
+const _IC_TRIGGER = {
+  "Fight (attack the threat)": "when someone pushes back",
+  "Flight (remove yourself)": "when there is a door and it is open",
+  "Freeze (shut down)": "when there is too much at once",
+  "Fawn (appease the threat)": "when someone is displeased with them",
+};
+function _icOpposition(x, y){
+  if (!x || !y || !x.pol || !y.pol) return 0;
+  let n = 0;
+  Object.keys(x.pol).forEach(a => { const p = x.pol[a], q = y.pol[a]; if (p && q && p !== q) n++; });
+  return Math.min(n, 2);
+}
+function innerConflict(st, meta){
+  const g = (id, re) => _mxT(st, id, re);
+  const want = g("motivation", /Core Want/i), need = g("motivation", /The Need/i), fear = g("motivation", /Core Fear/i);
+  const defence = g("motivation", /The Defence/i), values = g("values"), role = g("role");
+  const stress = g("stress"), attach = g("attachment");
+  const cands = [];
+  if (want && need) cands.push({type: "want-need", w: 3, a: want, b: need});
+  if (values && want) cands.push({type: "values-want", w: 2 + _icOpposition(values, want), a: values, b: want});
+  if (role && fear) cands.push({type: "fear-role", w: 2 + _icOpposition(role, fear), a: role, b: fear});
+  if (defence && need) cands.push({type: "defence-need", w: 2, a: defence, b: need});
+  if (!cands.length) return null;
+  const h = _mxHash(_mxSheetHash(st) + "|ic");
+  let r = h % cands.reduce((n, c) => n + c.w, 0), pick = cands[0];
+  for (const c of cands){ if (r < c.w){ pick = c; break; } r -= c.w; }
+  const T = INNER_CONFLICT_TYPES[pick.type];
+  // Which side takes the wheel under load. A side "wins" by driving what they do; the
+  // other one loses and leaks into what they say.
+  const sc = stress ? stress.category : "", parity = (h >> 3) % 2 === 0 ? "a" : "b";
+  let pressure;
+  if (pick.type === "want-need" || pick.type === "defence-need")
+    pressure = /Freeze|Fawn/.test(sc) ? "b" : /Fight|Flight/.test(sc) ? "a" : parity;
+  else if (pick.type === "values-want")
+    pressure = /Rigid|Loyalty|Idealistic/.test(pick.a.category) ? "a" : "b";
+  else
+    pressure = attach ? (attach.category === "Secure" ? "a" : "b") : parity;
+  const flipped = !!(meta && meta.conflictFlip);
+  if (flipped) pressure = pressure === "a" ? "b" : "a";
+  const TH = typeof THRESHOLD_BY_VALUES !== "undefined" ? THRESHOLD_BY_VALUES : {};
+  const when = pick.type === "values-want" && TH[pick.a.category] ? TH[pick.a.category]
+    : (_IC_TRIGGER[sc] || "when it costs enough");
+  const side = k => ({trait: pick[k], role: T.roles[k === "a" ? 0 : 1], key: k});
+  const A = side("a"), B = side("b");
+  const calmW = A, pressW = pressure === "a" ? A : B, loser = pressure === "a" ? B : A;
+  const flips = pressure !== "a";
+  const q = t => _mxQ(t.trait);
+  const summary = `${A.role} ${q(A.trait)} against ${B.role.toLowerCase()} ${q(B.trait)}. Day to day, ${A.role.toLowerCase()} ${q(A.trait)} wins. `
+    + (flips
+      ? `Under load ${pressW.role.toLowerCase()} ${q(pressW.trait)} takes over, ${when}; the other one has been leaking all along.`
+      : `Under load it holds, ${when} — and ${loser.role.toLowerCase()} ${q(loser.trait)} leaks out around it instead.`);
+  return {type: pick.type, label: T.label, question: T.question, a: A, b: B, calm: "a", pressure, flips, flipped,
+    winner: pressW, loser, when, summary, from: [pick.a, pick.b]};
+}
+const _ic = t => (typeof _spoken === "function" ? _spoken(t) : null) || _mxQ(t.trait);
+// The same phrase where a noun goes: "to be unnecessary" -> "being unnecessary",
+// "to matter to someone" -> "trying to matter to someone" ("done with to be unnecessary" reads as a typo).
+const _icNoun = t => { const s = _ic(t); return /^to be /.test(s) ? "being " + s.slice(6) : /^to /.test(s) ? "trying " + s : s; };
+const _IC_LEAK = {
+  "want-need": {
+    b: ["What I actually need is {b}.", "I keep saying {an}. It isn't that. It's {b}.", "Never mind {an}. I need {b}."],
+    a: ["And I still want {a}. God, I still want it.", "I said I was done with {an}. I'm not."]},
+  "values-want": {
+    b: ["I want {b}. That's the whole trouble. I want it and I won't.", "You think I don't want {b}? I do."],
+    a: ["I know, I know — {aq}. Not tonight.", "I know what I said about {aq}. Forget I said it."]},
+  "fear-role": {
+    b: ["I'm not afraid. It's just {b}, that's all.", "Don't make it about {b}. It isn't."],
+    a: ["I can't be the {role} right now.", "Someone else be the {role}. Please."]},
+  "defence-need": {
+    b: ["What I need is — no, forget it. I need {b}.", "I keep saying it's fine. It isn't. I need {b}."],
+    a: ["{aq} — that's what I do. I can't do it right now.", "I'm dropping the act. {aq}. It was always the act."]},
+};
+/* The line the losing side speaks. The shortest frame goes to a character who says
+   almost nothing. Returns null when the sheet has no conflict. */
+function innerConflictLeak(st, rng, opts){
+  opts = opts || {};
+  const ic = innerConflict(st, opts.meta);
+  if (!ic) return null;
+  const frames = _IC_LEAK[ic.type][ic.loser.key];
+  const f = opts.short ? frames.slice().sort((x, y) => x.length - y.length)[0] : frames[Math.floor(rng() * frames.length)];
+  const roleWord = ic.type === "fear-role" ? String(ic.a.trait.category || "one").toLowerCase().replace(/[^a-z ]/g, "").trim() || "one" : "";
+  const text = f.replace("{an}", _icNoun(ic.a.trait)).replace("{a}", _ic(ic.a.trait)).replace("{b}", _ic(ic.b.trait)).replace("{aq}", _mxQ(ic.a.trait.trait)).replace("{role}", roleWord);
+  return {text: text.charAt(0).toUpperCase() + text.slice(1),
+    rule: `inner conflict: ${ic.label} — ${ic.loser.role.toLowerCase()} “${ic.loser.trait.trait}” leaks out under load`};
 }

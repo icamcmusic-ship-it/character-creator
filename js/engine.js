@@ -6836,12 +6836,12 @@ function composeVoiceLineFragments(st, promptId, mode, opts){
     device: device ? {label: device.trait, example: device.example || ""} : null,
   };
 }
-function voiceLab(st, mode, reroll){
+function voiceLab(st, mode, reroll, meta){
   // One `recent` across the seven situations, so the same tail, joke or stage direction
   // does not turn up in all of them.
   const recent = [];
   return allVoicePrompts().map((p, index) => {
-    const l = composeVoiceLine(st, p.id, mode, {index, reroll: reroll || 0, recent});
+    const l = composeVoiceLine(st, p.id, mode, {index, reroll: reroll || 0, recent, meta});
     if (l && p.user) l.user = true;
     return l;
   }).filter(Boolean);
@@ -7637,6 +7637,13 @@ function composeVoiceLine(st, promptId, mode, opts){
       }
     }
   }
+  /* The inner-conflict engine (mechanics.js): under load the LOSING drive leaks into the
+     line — the need under the want, the want under the line they hold, the fear under
+     the role. A slip now and then in a calm line; more often when cornered. */
+  if (typeof innerConflictLeak === 'function' && rng() < (underPressure ? (minimal ? 0.45 : 0.6) : (minimal ? 0 : 0.12))){
+    const lk = innerConflictLeak(st, rng, {short: minimal, meta: opts.meta});
+    if (lk){ extra.push(lk.text); rule(lk.rule); }
+  }
   if (!minimal && !underPressure && (r.long || vcat === "High-Volume & Wordy")){
     extra.push(_cap(fill(VOICE_ELABORATIONS[Math.floor(rng() * VOICE_ELABORATIONS.length)])));
     if (r.long) extra.push(fresh(VOICE_FRAGMENTS.tail.long).text);
@@ -7744,11 +7751,11 @@ function composeVoiceLine(st, promptId, mode, opts){
 }
 /* The "10 lines" view: ten takes of one prompt from one sheet. Each take is its own
    sub-seed, so the list is stable for a sheet and the same take always reads the same. */
-function voiceLines(st, promptId, mode, n, reroll){
+function voiceLines(st, promptId, mode, n, reroll, meta){
   const index = allVoicePrompts().findIndex(p => p.id === promptId);
   const out = [], recent = [];
   for (let k = 0; k < (n || 10); k++){
-    const l = composeVoiceLine(st, promptId, mode, {index, reroll: reroll || 0, take: k, recent});
+    const l = composeVoiceLine(st, promptId, mode, {index, reroll: reroll || 0, take: k, recent, meta});
     if (l) out.push(l);
   }
   return out;

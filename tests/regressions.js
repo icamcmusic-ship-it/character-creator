@@ -566,4 +566,91 @@ module.exports = function({check, group, assert}){
     c.filter(l => l.rules.some(r => /^motivation:/.test(r))).forEach(l => assert(l.text.length < 140, 'the terse line is not clipped: ' + l.text));
     assert(c.some(l => /\[[^\]]+\]/.test(l.text)), 'a terse character lost their stage directions');
   });
+
+  group('Audit 2026-09 §6a the inner-conflict engine');
+
+  check('CONFLICT every sheet gets a second tension between its own drives, and the result is stable', ()=>{
+    const G = fresh(); const types = {}, combo = {}; let n = 0, none = 0;
+    G.evalIn("globalThis.__ic = () => { const a = innerConflict(state, null), b = innerConflict(state, null); return a && {t:a.type, f:a.flips, same: JSON.stringify([a.type,a.pressure,a.summary]) === JSON.stringify([b.type,b.pressure,b.summary]), sum:a.summary} }");
+    for (let i = 0; i < 200; i++){
+      G.gen('ic' + i); n++;
+      const c = G.evalIn('__ic()');
+      if (!c){ none++; continue; }
+      assert(c.same, 'the conflict changed between two calls on one sheet');
+      assert(!/undefined|\{\w+\}|\[object/.test(c.sum), 'bad text: ' + c.sum);
+      types[c.t] = (types[c.t] || 0) + 1; const k = c.t + (c.f ? '/flips' : '/holds'); combo[k] = (combo[k] || 0) + 1;
+    }
+    assert(none / n <= 0.02, none + ' sheets had no conflict');
+    assert(Object.keys(types).length === 4, 'not every conflict type occurs: ' + JSON.stringify(types));
+    Object.entries(types).forEach(([t, c]) => assert(c / n >= 0.1, `${t} is only ${c}/${n}`));
+    assert(Object.keys(combo).length >= 7, 'few type x outcome combinations: ' + JSON.stringify(combo));
+    return JSON.stringify(combo);
+  });
+
+  check('CONFLICT the author can swap who wins under load, and everything downstream follows', ()=>{
+    const G = fresh(); G.gen('icf1');
+    const r = G.evalIn(`(()=>{
+      const a = innerConflict(state, null), b = innerConflict(state, {conflictFlip: true});
+      const la = innerConflictLeak(state, mulberry32(1), {}), lb = innerConflictLeak(state, mulberry32(1), {meta: {conflictFlip: true}});
+      const pa = pressureEscalation(state, {__pressure:{level:1}}, null).stages.flatMap(s => s.signs.map(x => x.text)).join('|');
+      const pb = pressureEscalation(state, {__pressure:{level:1}}, {conflictFlip:true}).stages.flatMap(s => s.signs.map(x => x.text)).join('|');
+      return {pa: a.pressure, pb: b.pressure, fa: a.flips, fb: b.flips, loserA: a.loser.key, loserB: b.loser.key, la: la.text, lb: lb.text, ladderDiffers: pa !== pb, sameType: a.type === b.type};
+    })()`);
+    assert(r.sameType, 'the swap changed which tension it is');
+    assert(r.pa !== r.pb && r.fa !== r.fb && r.loserA !== r.loserB, 'the swap did not change who wins under load');
+    assert(r.la !== r.lb, 'the leaked line did not change with the swap');
+    assert(r.ladderDiffers, 'the pressure ladder ignored the swap');
+  });
+
+  check('CONFLICT the pressure ladder states the conflict at Cornered and what leaks at Broken', ()=>{
+    const G = fresh(); let n = 0, ok = 0;
+    for (let i = 0; i < 40; i++){
+      G.gen('icl' + i);
+      const st = G.evalIn("pressureEscalation(state,{__pressure:{level:1}},null).stages.map(s=>({id:s.id,t:s.signs.map(x=>x.text),ok:s.signs.every(x=>x.from.length)}))");
+      n++;
+      const allOk = st.every(s => s.ok);
+      const cor = st.find(s => s.id === 'cornered' || s.id === 'broken');
+      const brk = st.find(s => s.id === 'broken');
+      if (allOk && brk && brk.t.some(t => /leaks|losing drive|comes out/.test(t)) && cor.t.some(t => /inner conflict|drives|wins|holds|keep to/i.test(t))) ok++;
+    }
+    assert(ok / n >= 0.9, `only ${ok}/${n} ladders carry the conflict`);
+  });
+
+  check('CONFLICT under pressure the losing drive leaks into the voice lab lines, and only rarely when calm', ()=>{
+    const G = fresh(); let pl = 0, pn = 0, bl = 0, bn = 0, named = 0, namedN = 0;
+    for (let i = 0; i < 12; i++){
+      G.gen('icv' + i);
+      const loser = G.evalIn("(()=>{const c=innerConflict(state,null);return {p:_spoken(c.loser.trait)||c.loser.trait.trait, q:c.loser.trait.trait.toLowerCase()}})()");
+      ['refuse','apologise','persuade','lie','request','askhelp','conceal'].forEach(id => {
+        takes(G, id, 'pressure', 6).forEach(l => { pn++; if (l.rules.some(r => /^inner conflict:/.test(r))){ pl++; namedN++; if (l.text.toLowerCase().includes(String(loser.p).toLowerCase()) || l.text.toLowerCase().includes(loser.q) || /I can.t be the|Someone else be the|dropping the act|that.s what I do/.test(l.text)) named++; } });
+        takes(G, id, 'baseline', 6).forEach(l => { bn++; if (l.rules.some(r => /^inner conflict:/.test(r))) bl++; });
+      });
+    }
+    assert(pl / pn >= 0.35, `pressure lines leak only ${pl}/${pn}`);
+    assert(bl / bn <= 0.2, `calm lines leak ${bl}/${bn}`);
+    assert(named / namedN >= 0.9, `a leak line did not name the losing side: ${named}/${namedN}`);
+    return `pressure ${pl}/${pn}, calm ${bl}/${bn}`;
+  });
+
+  check('CONFLICT the panel, the markdown export and the LLM prompt all carry it', ()=>{
+    const G = fresh(); G.gen('ice1');
+    const r = G.evalIn(`(()=>({md: sheetToText(state, charMeta || {name:'x'}, null), pr: sheetToPrompt(state, charMeta || {name:'x'})}))()`);
+    assert(/Inner conflict/.test(r.md), 'the text export omits the inner conflict');
+    assert(/## Inner conflict/.test(r.pr) && /leaks into what they say/.test(r.pr), 'the LLM prompt omits the inner conflict');
+    const src = fs.readFileSync(path.join(ROOT, 'js/render.js'), 'utf8');
+    assert(/class="tensionBlock innerConflict"/.test(src) && /flipInnerConflict/.test(src), 'the panel or its swap button is gone');
+    assert(G.evalIn("typeof flipInnerConflict") === 'function', 'flipInnerConflict is not defined');
+  });
+
+  check('CONFLICT leak lines read as speech: no placeholders, no "done with to", no doubled gerunds', ()=>{
+    const G = fresh(); const bad = [];
+    for (let i = 0; i < 60; i++){
+      G.gen('icg' + i);
+      for (let k = 0; k < 4; k++){
+        const t = G.evalIn(`innerConflictLeak(state, mulberry32(${k * 7 + 1}), {short: ${k % 2 === 1}}).text`);
+        if (/\{|\}|undefined|done with to |trying trying|being being|\bthey\b/i.test(t)) bad.push(t);
+      }
+    }
+    assert(!bad.length, bad[0] + ` (+${bad.length - 1} more)`);
+  });
 };

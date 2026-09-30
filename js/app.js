@@ -142,6 +142,15 @@ async function editCharacterLabel(){
   renderSheet();
 }
 function clearCharacterLabel(){ delete charMeta.label; renderSheet(); }
+// Swap which side of the inner conflict wins under load. The choice lives in charMeta, so
+// it saves, exports and undoes with the sheet, and the pressure ladder and voice lab follow it.
+function flipInnerConflict(){
+  if (!Object.keys(state).length) return;
+  snapshotHistory();
+  charMeta.conflictFlip = !charMeta.conflictFlip;
+  renderSheet();
+  toast(charMeta.conflictFlip ? "The other side now wins under load — see the pressure ladder and the voice lab." : "Back to the default: the inner conflict resolves the way the sheet implies.");
+}
 async function answerContradiction(key, clear){
   const contra = (typeof structuredContradiction === 'function') ? structuredContradiction(state, charMeta) : null;
   const field = contra && contra.fields.find(f => f.key === key);
@@ -1144,14 +1153,14 @@ function renderVoiceLab(){
     const btn = document.getElementById('vlMode_' + m);
     if (btn){ btn.classList.toggle('active', voiceLabMode === m); btn.setAttribute('aria-pressed', voiceLabMode === m); }
   });
-  host.innerHTML = voiceLab(state, voiceLabMode, voiceLabReroll).map(l => `
+  host.innerHTML = voiceLab(state, voiceLabMode, voiceLabReroll, charMeta).map(l => `
     <div class="voiceCard${l.user ? ' userPrompt' : ''}">
       <div class="voiceHead"><b>${escHTML(l.prompt)}</b> <span class="sub">${escHTML(l.setup)}</span>${l.user
         ? ` <button class="savedAct savedDel" ${actAttr('click', 'removeVoicePrompt', l.promptId)} aria-label="Remove the prompt ${escAttr(l.prompt)}">remove</button>` : ``}</div>
       <blockquote class="voiceLine">${escHTML(l.text)}</blockquote>
       <div class="sub">Shaped by: ${escHTML(l.rules.join("; ") || "nothing on this sheet")}${l.device ? ` · habitual device: <b>${escHTML(l.device.label)}</b>` : ``}</div>
       <button class="btn-secondary vlTen" ${actAttr('click', 'toggleVoiceTen', l.promptId)} aria-expanded="${voiceTenOpen === l.promptId ? 'true' : 'false'}">${voiceTenOpen === l.promptId ? 'Hide the 10 lines' : '10 lines'}</button>
-      ${voiceTenOpen === l.promptId ? `<ol class="vlTenList">${voiceLines(state, l.promptId, voiceLabMode, 10, voiceLabReroll).map(x => `<li>${escHTML(x.text)}</li>`).join("")}</ol>` : ``}
+      ${voiceTenOpen === l.promptId ? `<ol class="vlTenList">${voiceLines(state, l.promptId, voiceLabMode, 10, voiceLabReroll, charMeta).map(x => `<li>${escHTML(x.text)}</li>`).join("")}</ol>` : ``}
     </div>`).join("");
 }
 /* The "10 lines" view (audit §5): ten composed takes of one situation, so the range of
