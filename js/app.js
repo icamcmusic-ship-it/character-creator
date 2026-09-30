@@ -1182,7 +1182,15 @@ function renderLensPicker(){
       title="${escAttr((l.up || []).slice(0, 3).join(', ') + (l.taboo && l.taboo.length ? ' · taboo: ' + l.taboo.join(', ') : ''))}">${escHTML(l.label)}</button>`;
   host.innerHTML = `<span class="lensGroup"><span class="lensKind">Setting</span>${LENSES.filter(l => l.kind === 'setting').map(chip).join('')}</span>`
     + `<span class="lensGroup"><span class="lensKind">Life stage</span>${LENSES.filter(l => l.kind === 'life').map(chip).join('')}</span>`
+    + (on.size ? `<button type="button" class="lensClear" ${actAttr('click', 'clearLenses')} title="Turn every lens off">Clear</button>` : ``)
     + (on.size ? `<span class="sub lensTaboo">Off-limits in their lines: ${escHTML(lensTaboos().join(', ') || 'nothing')}</span>` : ``);
+}
+function clearLenses(){
+  const el = document.getElementById('lensSelect');
+  if (!el) return;
+  el.value = '';
+  renderLensPicker();
+  if (typeof onSliderChange === 'function') onSliderChange();
 }
 function toggleLens(id){
   const el = document.getElementById('lensSelect');
@@ -1476,13 +1484,21 @@ async function renameProject(id){
 async function deleteProject(id){
   const p = projects.find(x => x.id === id);
   if (!p) return;
-  if (!await askForConfirm(`Delete the project "${p.name}"? Its ${projectSummary(p)} go with it. The characters saved separately are untouched.`, "Delete")) return;
+  const wasCurrent = currentProjectId === id;
   await storage.delete(PROJECT_KEY(id));
   projects = projects.filter(x => x.id !== id);
-  if (currentProjectId === id) currentProjectId = projects.length ? projects[0].id : null;
+  if (wasCurrent) currentProjectId = projects.length ? projects[0].id : null;
   applyProjectPreferences();
   renderProjects();
-  toast(`Deleted "${p.name}".`);
+  // Undo, not a confirm: the whole record is kept until the toast goes, so nothing is lost.
+  toastUndo(`Deleted the project "${p.name}" (${projectSummary(p)}).`, async ()=>{
+    await saveProject(p);
+    if (!projects.some(x => x.id === id)) projects.push(p);
+    if (wasCurrent) currentProjectId = id;
+    applyProjectPreferences();
+    renderProjects();
+    toast(`"${p.name}" is back.`);
+  }, 12000);
 }
 /* File the work in front of you into the current project: the sheet, the cast, the
    edges, the arc, the settings that produced them and the diversity archive. */
@@ -1511,6 +1527,7 @@ async function fileIntoProject(){
   toast(`Filed "${name}" into "${p.name}" — ${projectSummary(p)}.`, "ok", 6000);
 }
 function renderProjects(){
+  refreshProjectChip();
   const host = document.getElementById('projectList');
   if (!host) return;
   host.innerHTML = projects.length ? projects.map(p => `
@@ -2085,7 +2102,8 @@ async function resetAllToDefaults(){
   // BUG FIX: this cleared persisted preferences and per-slot UI state BEFORE asking
   // for confirmation, so cancelling the dialog still silently wiped your saved
   // settings. Confirm first, mutate second.
-  if (!await askForConfirm("Reset every slider, toggle, and field back to defaults? Your generated character stays until you generate again.", "Reset")) return;
+  // No confirm dialog: the whole workspace is snapshotted first and the toast at the end undoes it.
+  snapshotHistory();
   /* Hold every intermediate save until the end: clearConstraints() used to persist the
      half-reset workspace (old budgets still set) partway through, and that is what came
      back on the next reload. One save, after every step, of the finished defaults. */
@@ -2132,7 +2150,7 @@ async function resetAllToDefaults(){
   onSliderChange();
   prefsReady = wasReady;
   savePrefs();
-  toast("Everything reset to defaults.");
+  toastUndo("Everything reset to defaults. Your character stays until you build again.", ()=>{ undoLast(); savePrefs(); }, 10000);
 }
 
 function randomRawSlider(){
@@ -2222,6 +2240,7 @@ ACTION_EVENTS.forEach(type=>{
 
 // ---- The handlers that used to be multi-statement inline bodies ----
 function openHelpPanel(){
+  if (typeof closeShortcuts === 'function') closeShortcuts();
   const p = document.getElementById('helpPanel');
   if (!p) return;
   p.open = true;
@@ -2354,11 +2373,20 @@ async function deleteCustomArchetype(){
   const key = sel.value;
   if (!key.startsWith('custom_')){ toast("Select one of your custom archetypes in the dropdown first.", "warn"); return; }
   const name = key.replace('custom_','');
-  if (!await askForConfirm(`Delete the archetype "${name}"? This can't be undone.`, "Delete")) return;
+  // An Undo toast, not a confirm: the saved record is held until the toast goes.
+  let raw = null;
+  try { const r = await storage.get('archetype:'+name); raw = r && r.value; } catch(e){}
   try {
     await storage.delete('archetype:'+name);
     delete CUSTOM_ARCHETYPES[key];
     await loadCustomArchetypes();
+    toastUndo(`Deleted the archetype "${name}".`, async ()=>{
+      if (raw) await storage.set('archetype:'+name, raw);
+      await loadCustomArchetypes();
+      const s2 = document.getElementById('archetypeSelect'); if (s2 && CUSTOM_ARCHETYPES[key]) s2.value = key;
+      onArchetypeChange(true);
+      toast(`"${name}" is back.`);
+    }, 12000);
   } catch(e){ console.error(e); toast("Could not delete — try again.", "warn"); }
 }
 
@@ -2511,7 +2539,19 @@ async function importWorkspaceJSON(fileInput){
 }
 
 // ================= RELATIONSHIP GENERATOR =================
+/* The Relationships tab was a page of empty dropdowns until a cast existed. Say what it
+   needs and offer the way there. */
+function refreshRelEmpty(){
+  const box = document.getElementById('relEmpty');
+  if (!box) return;
+  // The sheet on screen counts: the pair pickers offer it beside the cast members.
+  const n = castStates.length + (Object.keys(state).length ? 1 : 0);
+  box.hidden = n >= 2;
+  const c = document.getElementById('relEmptyCount');
+  if (c) c.textContent = n === 0 ? "There is no character or cast yet." : "There is one character so far — build a cast, or add this sheet to it.";
+}
 function refreshRelSelectors(){
+  refreshRelEmpty();
   if (typeof renderEdges === 'function') renderEdges();
   if (typeof renderVoiceCompare === 'function') renderVoiceCompare();
   const a = document.getElementById('relA'), b = document.getElementById('relB');
@@ -3291,7 +3331,24 @@ async function savePrefs(){
     const adv = document.getElementById('advancedToggle');
     if (adv) data.toggles.advancedToggle = !!adv.checked;
     await storage.set(PREF_KEY, JSON.stringify(data));
-  } catch(e){ /* storage unavailable — preferences just won't persist */ }
+    markSaved();
+  } catch(e){ /* storage unavailable — preferences just won't persist */ markSaved(false); }
+}
+/* The header's save state: what the app has kept for you, and when. Settings autosave; a
+   character is kept only when you save it or file it, and the line says which. */
+function markSaved(ok){
+  const el = document.getElementById('saveState');
+  if (!el) return;
+  if (ok === false || !storageIsDurable()){ el.textContent = "Not saved: storage is off"; el.classList.add('warn'); return; }
+  el.classList.remove('warn');
+  const t = new Date();
+  el.textContent = "Settings saved " + t.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+}
+function refreshProjectChip(){
+  const n = document.getElementById('projectChipName');
+  if (!n) return;
+  const p = currentProject();
+  n.textContent = p ? p.name : 'none';
 }
 
 async function loadPrefs(){
@@ -3350,6 +3407,7 @@ function wirePrefPersistence(){
 function reviewActiveRules(){
   const adv = document.getElementById('advancedToggle');
   if (adv && !adv.checked){ adv.checked = true; applyAdvancedMode(); if (typeof savePrefs === 'function') savePrefs(); }
+  if (typeof setInputsCollapsed === 'function') setInputsCollapsed(false);   // a phone may have folded the inputs
   let first = null;
   document.querySelectorAll('[data-badge]:not([hidden])').forEach(b=>{
     const d = b.closest('details'); if (!d) return;
@@ -3554,6 +3612,19 @@ function wireKeyboard(){
       if (inDialog || tag === 'textarea') return;
       e.preventDefault(); generateCharacter(); return;
     }
+    // Ctrl/Cmd+S keeps the character instead of asking the browser to save the page.
+    if (mod && (e.key === 's' || e.key === 'S') && !e.shiftKey){
+      if (inDialog) return;
+      e.preventDefault(); if (Object.keys(state).length) saveCharacter(null); else toast("Nothing to save yet — build a character first.", "warn"); return;
+    }
+    // Esc closes the menus that open over the page.
+    if (e.key === 'Escape'){
+      let closed = false;
+      const fm = document.getElementById('fileMenu'); if (fm && fm.open){ fm.open = false; closed = true; }
+      const mr = document.getElementById('moreRolls'); if (mr && mr.open){ mr.open = false; closed = true; }
+      const sx = document.getElementById('stickyExtra'); if (sx && sx.classList.contains('open')){ toggleStickyMore(); closed = true; }
+      if (closed) return;
+    }
     // Shift+Ctrl/Cmd+Z and Ctrl/Cmd+Y are the two conventions; support both.
     if (mod && ((e.key === 'z' || e.key === 'Z') && e.shiftKey || e.key === 'y' || e.key === 'Y')){
       if (typing || inDialog) return;     // B8: text fields keep their own redo
@@ -3564,21 +3635,32 @@ function wireKeyboard(){
       e.preventDefault(); undoLast(); return;
     }
     if (typing || inDialog || mod || e.altKey) return;
-    if (e.key === '?'){ const h = document.getElementById('helpPanel'); if (h){ h.open = !h.open; h.scrollIntoView({block:'nearest'}); } return; }
+    if (e.key === '?'){ openShortcuts(); return; }
+    // 1 / 2 / 3 switch tab; / goes to the trait search. Neither does anything on a focused control.
+    if (e.key === '1' || e.key === '2' || e.key === '3'){ switchTab(['single', 'cast', 'rel'][+e.key - 1]); return; }
+    if (e.key === '/'){
+      e.preventDefault();
+      const adv = document.getElementById('advancedToggle');
+      if (adv && !adv.checked){ adv.checked = true; applyAdvancedMode(); }
+      if (typeof setInputsCollapsed === 'function') setInputsCollapsed(false);
+      const inp = document.getElementById('constraintTraitSearch');
+      if (inp){ const d = inp.closest('details'); if (d) d.open = true; inp.focus(); inp.scrollIntoView({block:'center'}); }
+      return;
+    }
     if (tag === 'summary' || tag === 'button' || tag === 'a') {
       // A focused control inside a card still counts as "this card"; anywhere else a
       // letter key belongs to the control (and Space/Enter are its activation keys).
       if (!(t.closest && t.closest('.traitCard[data-slot]'))) return;
     }
     const k = e.key.toLowerCase();
-    if (k !== 'r' && k !== 'l') return;
+    if (k !== 'r' && k !== 'l' && k !== 'p') return;
     // B9: the focused card first (keyboard and touch), the hovered one as a fallback.
     const card = (t.closest && t.closest('.traitCard[data-slot]')) ||
                  document.querySelector('#sheet .traitCard[data-slot]:focus-within') ||
                  document.querySelector('.traitCard[data-slot]:hover');
     if (!card) return;
     const slot = card.getAttribute('data-slot');
-    const btn = card.querySelector(k === 'r' ? '.rerollBtn:not(.backBtn)' : '.lockBtn');
+    const btn = card.querySelector(k === 'r' ? '.rerollBtn:not(.backBtn)' : k === 'l' ? '.lockBtn' : '.pinBtn');
     if (!btn) return;
     e.preventDefault();
     btn.click();
@@ -3589,7 +3671,7 @@ function wireKeyboard(){
       const next = document.querySelector(sel);
       if (next && document.activeElement !== next && !next.contains(document.activeElement)) next.focus({preventScroll:true});
       const sl = state[slot];
-      if (sl && sl.trait) srAnnounce(k === 'r' ? `Tossed. Now: ${sl.trait.trait}.` : `${sl.trait.trait} ${sl.locked ? 'kept' : 'released'}.`);
+      if (sl && sl.trait) srAnnounce(k === 'r' ? `Tossed. Now: ${sl.trait.trait}.` : k === 'p' ? `${sl.trait.trait} intensity ${pinnedTargets[slot] !== undefined ? 'pinned' : 'unpinned'}.` : `${sl.trait.trait} ${sl.locked ? 'kept' : 'released'}.`);
     });
   });
 }
@@ -3827,6 +3909,128 @@ function renderFamiliar(){
 function familiarBan(id){ banTrait(id); renderFamiliar(); }
 function onFamiliarToggle(el){ if (el && el.open) renderFamiliar(); }
 
+/* Inputs fold on a phone. A 34,000px page is mostly the controls; after a build the person
+   wants the sheet, so the inputs collapse to a one-line recap with a way back. */
+function _narrowScreen(){ return typeof matchMedia === 'function' && matchMedia('(max-width: 720px)').matches; }
+function inputsRecapText(){
+  const arch = document.getElementById('archetypeSelect');
+  const label = arch && arch.value && arch.selectedOptions[0] ? arch.selectedOptions[0].textContent : 'No archetype';
+  const rules = typeof activeRuleChips === 'function' ? activeRuleChips().length : 0;
+  const lenses = typeof activeLensIds === 'function' ? activeLensIds().length : 0;
+  return [label, lenses ? lenses + ' lens' + (lenses === 1 ? '' : 'es') : null, rules ? rules + ' rule' + (rules === 1 ? '' : 's') + ' in force' : null].filter(Boolean).join(' · ');
+}
+function setInputsCollapsed(on){
+  const view = document.getElementById('view-single'), bar = document.getElementById('inputsBar'), btn = document.getElementById('inputsToggle');
+  if (!view || !bar) return;
+  view.classList.toggle('inputsCollapsed', !!on);
+  bar.hidden = !Object.keys(state).length;
+  const rc = document.getElementById('inputsRecap'); if (rc) rc.textContent = inputsRecapText();
+  if (btn){ btn.setAttribute('aria-expanded', String(!on)); btn.textContent = on ? 'Edit inputs ▾' : 'Hide inputs ▴'; }
+}
+function collapseInputsAfterBuild(){ if (_narrowScreen()) setInputsCollapsed(true); }
+function toggleInputs(){
+  const view = document.getElementById('view-single');
+  const collapsed = !!(view && view.classList.contains('inputsCollapsed'));
+  setInputsCollapsed(!collapsed);
+  if (collapsed){ const c = document.getElementById('controlsStart'); if (c && c.scrollIntoView) c.scrollIntoView({block:'start'}); }
+}
+/* The shortcuts were a folded paragraph in the help panel. A real dialog, opened by ?. */
+function openShortcuts(){
+  const d = document.getElementById('shortcutDialog');
+  if (!d) return;
+  if (d.open){ d.close(); return; }
+  if (typeof d.showModal === 'function') d.showModal(); else d.setAttribute('open', '');
+}
+function closeShortcuts(){ const d = document.getElementById('shortcutDialog'); if (d && d.open) d.close(); }
+/* Theme: the CSS already answers `data-theme` and the system setting; nothing let you choose.
+   Auto follows the system, Light and Dark override it, and the choice is remembered. */
+const THEME_KEY = 'ui:theme', THEME_MODES = ['auto', 'light', 'dark'];
+let themeMode = 'auto';
+function applyTheme(mode){
+  themeMode = THEME_MODES.includes(mode) ? mode : 'auto';
+  const root = document.documentElement;
+  if (themeMode === 'auto') root.removeAttribute('data-theme'); else root.setAttribute('data-theme', themeMode);
+  const label = document.getElementById('themeLabel'), btn = document.getElementById('themeBtn');
+  const name = {auto:'Auto', light:'Light', dark:'Dark'}[themeMode];
+  if (label) label.textContent = name;
+  if (btn){
+    btn.setAttribute('aria-label', 'Colour theme: ' + name.toLowerCase());
+    btn.title = 'Colour theme: ' + name.toLowerCase() + (themeMode === 'auto' ? ' (follows your system)' : '') + '. Click to change.';
+  }
+}
+function cycleTheme(){
+  applyTheme(THEME_MODES[(THEME_MODES.indexOf(themeMode) + 1) % THEME_MODES.length]);
+  try { storage.set(THEME_KEY, themeMode); } catch(e){}
+}
+async function loadTheme(){
+  try { const r = await storage.get(THEME_KEY); if (r && r.value) applyTheme(r.value); else applyTheme('auto'); } catch(e){ applyTheme('auto'); }
+}
+// The seed chip in the sticky bar copies the seed; the seed promises the character (README).
+function copySeed(){
+  if (!lastSeedUsed){ toast("No character yet — build one and its seed appears here.", "warn"); return; }
+  copyText(lastSeedUsed, null);
+  toast("Seed " + lastSeedUsed + " copied. Paste it into the seed box to get this character back.");
+}
+// The ⋯ button folds the secondary sticky-bar actions away on a phone.
+function toggleStickyMore(){
+  const btn = document.getElementById('stickyMoreBtn'), box = document.getElementById('stickyExtra');
+  if (!btn || !box) return;
+  const open = !box.classList.contains('open');
+  box.classList.toggle('open', open);
+  btn.setAttribute('aria-expanded', String(open));
+}
+document.addEventListener('click', (e)=>{
+  const box = document.getElementById('stickyExtra');
+  if (!box || !box.classList.contains('open')) return;
+  const inside = e.target.closest && e.target.closest('#stickyExtra');
+  const isBtn = e.target.closest && e.target.closest('#stickyMoreBtn');
+  if (isBtn) return;
+  if (!inside || e.target.closest('#stickyExtra button')) toggleStickyMore();
+});
+// Plain-language hints that work on tap: a title= tooltip never shows on a phone.
+function toggleTip(btn){
+  const t = btn && btn.nextElementSibling;
+  if (!t || !t.classList.contains('tipText')) return;
+  const open = t.hidden;
+  t.hidden = !open;
+  btn.setAttribute('aria-expanded', String(open));
+}
+/* ================= SHEET NAV AND FIRST-CARD HINT =================
+   Everything under the sheet — Pressure, Voice lab, Arc, "Why does this feel familiar?",
+   the Project library — was reachable only by scrolling past ~37 cards. The nav goes to
+   each, opening a folded panel on the way. The hint explains keep / pin / toss once. */
+function jumpToPanel(id){
+  const el = document.getElementById(id);
+  if (!el || el.style.display === 'none'){ toast("That part is not on the page yet — build a character first, or switch on the pressure sheet.", "warn"); return; }
+  if (el.tagName === 'DETAILS') el.open = true;
+  const reduce = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  el.scrollIntoView({behavior: reduce ? 'auto' : 'smooth', block: 'start'});
+  if (el.tabIndex < 0 || el.hasAttribute('tabindex')) { try { el.focus({preventScroll:true}); } catch(e){} }
+}
+// Nav buttons that need something absent (the pressure sheet, before it is switched on) are dimmed.
+function refreshSheetNav(){
+  document.querySelectorAll('#sheetNav [data-needs]').forEach(b=>{
+    const t = document.getElementById(b.getAttribute('data-needs'));
+    const on = !!t && t.style.display !== 'none';
+    b.classList.toggle('dim', !on); b.setAttribute('aria-disabled', String(!on));
+  });
+}
+const COACH_KEY = 'ui:coach';
+let _coachSeen = null;
+async function refreshCoachMark(){
+  const box = document.getElementById('coachMark');
+  if (!box) return;
+  if (_coachSeen === null){
+    try { const r = await storage.get(COACH_KEY); _coachSeen = !!(r && r.value); } catch(e){ _coachSeen = false; }
+  }
+  box.hidden = _coachSeen || !Object.keys(state).length;
+}
+function dismissCoachMark(){
+  _coachSeen = true;
+  const box = document.getElementById('coachMark'); if (box) box.hidden = true;
+  try { storage.set(COACH_KEY, '1'); } catch(e){}
+}
+
 /* ================= ONBOARDING =================
    A first visit showed every dial and three preset buttons. One clear first move, and
    the choice of how much interface to see, remembered so it is asked once. */
@@ -3914,6 +4118,7 @@ wireKeyboard();
 applyAdvancedMode();
 (function(){ const f = document.getElementById('familiarPanel');
   if (f) f.addEventListener('toggle', ()=> onFamiliarToggle(f)); })();
+loadTheme();
 _customArchetypesReady.catch(()=>{}).then(()=>loadPrefs()).then(()=>{ applyShareFromHash(); initOnboarding(); });
 // Offline/repeat-visit caching. Registration is best-effort: the app is fully
 // functional without it, and file:// or an unsupported browser must not throw here.

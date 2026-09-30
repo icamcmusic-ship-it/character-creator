@@ -171,7 +171,7 @@ module.exports = function({check, group, assert}){
     const src = fs.readFileSync(path.join(ROOT, 'js/app.js'), 'utf8');
     const body = src.slice(src.indexOf('async function resetAllToDefaults'), src.indexOf('function randomRawSlider'));
     assert(/SETTING_FIELDS\.concat/.test(body) && /SETTING_TOGGLES\.filter/.test(body), 'Reset does not cover SETTING_FIELDS/SETTING_TOGGLES');
-    assert(/prefsReady = false/.test(body) && /savePrefs\(\);\s*\n\s*toast\("Everything reset/.test(body), 'Reset saves before it has finished');
+    assert(/prefsReady = false/.test(body) && /savePrefs\(\);\s*\n\s*toastUndo\("Everything reset/.test(body), 'Reset saves before it has finished');
   });
 
   check('B17 filing into a project copies the live sheet state', ()=>{
@@ -690,5 +690,103 @@ module.exports = function({check, group, assert}){
       assert(c <= 0.86, `${a} / ${b} are still near-twins: category cosine ${c.toFixed(2)} (was 0.83-0.93 before the pass)`);
     });
     return out.join('; ');
+  });
+
+  group('Audit 2026-09 §2 discoverability, mobile and keyboard');
+  const read = f => fs.readFileSync(path.join(ROOT, f), 'utf8');
+
+  check('UX2 the action rows are Edit / Keep / Share, and Reset lives apart from Save', ()=>{
+    const html = read('index.html');
+    const labels = [...html.matchAll(/<span class="actionGroupLabel">([^<]*)<\/span>/g)].map(m => m[1]);
+    ['Edit', 'Keep', 'Share'].forEach(l => assert(labels.includes(l), 'no ' + l + ' group: ' + labels));
+    const groups = html.split('<div class="actionGroup');
+    const keep = groups.find(g => /actionGroupLabel">Keep</.test(g));
+    assert(/saveCharacter/.test(keep) && !/resetAllToDefaults/.test(keep), 'Reset sits in the Keep group beside Save');
+    assert(groups.find(g => /resetAllToDefaults/.test(g) && /advOnly/.test(g)), 'Reset is not in an advanced-only group');
+  });
+
+  check('UX2 the File menu is two headed groups with a description under every item', ()=>{
+    const html = read('index.html');
+    const menu = html.slice(html.indexOf('<div class="fileMenuList">'), html.indexOf('</details>', html.indexOf('<div class="fileMenuList">')));
+    assert(/fileMenuHead[^>]*>Share</.test(menu) && /fileMenuHead[^>]*>Backup</.test(menu), 'the menu lacks its Share and Backup headings');
+    const buttons = (menu.match(/<button /g) || []).length, described = (menu.match(/<small>/g) || []).length;
+    assert(buttons === 9 && described === 9, `${described}/${buttons} items carry a description`);
+  });
+
+  check('UX2 the sheet nav reaches every panel it names, and the project chip and save state are in the header', ()=>{
+    const html = read('index.html');
+    const targets = [...html.matchAll(/data-act="jumpToPanel" data-args="\[&quot;(\w+)&quot;\]"/g)].map(m => m[1]);
+    assert(targets.length >= 6, 'the nav has only ' + targets.length + ' targets');
+    targets.forEach(id => assert(html.includes(`id="${id}"`), 'the nav points at a missing #' + id));
+    assert(/id="projectChip"/.test(html) && /id="saveState"/.test(html) && /id="themeBtn"/.test(html), 'the header lost the project chip, save state or theme toggle');
+  });
+
+  check('UX2 every jargon hint is a tap-friendly toggle with its text, and there are enough of them', ()=>{
+    const html = read('index.html');
+    const tips = (html.match(/class="infoTip"/g) || []).length, texts = (html.match(/class="tipText" hidden/g) || []).length;
+    assert(tips >= 7 && tips === texts, `${tips} tips, ${texts} texts`);
+    ['lens', 'steps away', 'affinity', 'foil', 'edge', 'Prefer', 'stress'].forEach(w => assert(new RegExp('tipText" hidden>[^<]*' + w, 'i').test(html), 'no hint explains ' + w));
+  });
+
+  check('UX2 lens chips have a Clear button and the Relationships tab says what it needs', ()=>{
+    const G = fresh();
+    G.document._set('lensPicker', {innerHTML: ''}); G.document._set('lensSelect', {value: 'court'});
+    G.evalIn("renderLensPicker()");
+    assert(/clearLenses/.test(G.document.getElementById('lensPicker').innerHTML), 'no Clear button while a lens is on');
+    G.evalIn("clearLenses()");
+    assert(G.document.getElementById('lensSelect').value === '', 'Clear did not clear');
+    G.document._set('relEmpty', {hidden: true}); G.document._set('relEmptyCount', {textContent: ''});
+    G.gen('rel1');   // one sheet, no cast: still fewer than two characters? the sheet counts as one
+    G.evalIn("castStates = []; refreshRelEmpty()");
+    assert(G.document.getElementById('relEmpty').hidden === false, 'the empty notice is hidden with one character');
+    G.evalIn("castStates = [{meta:{name:'a'},state:{}}]; refreshRelEmpty()");
+    assert(G.document.getElementById('relEmpty').hidden === true, 'the empty notice stays with two characters');
+  });
+
+  check('UX2 the keyboard: a shortcuts dialog, and the keys it lists are wired', ()=>{
+    const html = read('index.html'), app = read('js/app.js');
+    assert(/<dialog id="shortcutDialog"/.test(html), 'no shortcuts dialog');
+    ['Ctrl', 'Enter', 'Z', 'S', '1', '/', 'Esc', '?', 'R', 'L', 'P'].forEach(k => assert(new RegExp('<kbd>' + k.replace('/', '\\/').replace('?', '\\?') + '</kbd>').test(html), 'the dialog does not list ' + k));
+    const body = app.slice(app.indexOf('function wireKeyboard'), app.indexOf('/* ================= FILE MENU'));
+    ["e.key === 's'", "e.key === 'Escape'", "e.key === '/'", "e.key === '1'", "k !== 'p'", 'openShortcuts()'].forEach(x => assert(body.includes(x), 'wireKeyboard lost ' + x));
+  });
+
+  check('UX2 destructive actions undo through a toast, not a confirm', ()=>{
+    const src = read('js/app.js') + read('js/generate.js') + read('js/render.js');
+    const body = (name, next) => { const i = src.indexOf(name); return src.slice(i, src.indexOf(next, i)); };
+    [['async function resetAllToDefaults', 'function randomRawSlider'], ['async function deleteProject', '/* File the work'], ['async function deleteCustomArchetype', '/* Built-in presets used to be']].forEach(([a, b]) => {
+      const t = body(a, b);
+      assert(/toastUndo\(/.test(t) && !/askForConfirm\(/.test(t), a + ' still asks for confirmation or has no Undo');
+    });
+    ['function lockAll', 'function unlockAll', 'function unpinAll', 'function clearBudgetsUI', 'function clearConstraintsUI'].forEach(a => {
+      const t = body(a, '\n}\n');
+      assert(/toastUndo\(/.test(t), a + ' has no Undo toast');
+    });
+    const G = fresh(); G.gen('un1');
+    G.evalIn("globalThis.__undo = null; toastUndo = function(m, fn){ globalThis.__undo = fn; }");
+    G.evalIn("lockAll()");
+    assert(G.evalIn("Object.values(state).some(x => x && x.locked)"), 'lockAll locked nothing');
+    G.evalIn("__undo()");
+    assert(!G.evalIn("Object.values(state).some(x => x && x.locked)"), 'the Undo toast did not put the locks back');
+    G.evalIn("bannedCategories.add('X'); clearConstraintsUI()");
+    assert(G.evalIn("bannedCategories.size") === 0, 'clearConstraintsUI did not clear');
+    G.evalIn("__undo()");
+    assert(G.evalIn("bannedCategories.has('X')"), 'the Undo toast did not restore the constraint');
+  });
+
+  check('UX2 theme: Auto, Light and Dark cycle and set data-theme', ()=>{
+    const G = fresh();
+    G.evalIn("document.documentElement = {setAttribute(k, v){ this[k] = v; }, removeAttribute(k){ delete this[k]; }}");
+    G.evalIn("applyTheme('auto')");
+    G.evalIn("cycleTheme()"); assert(G.evalIn("themeMode") === 'light' && G.evalIn("document.documentElement['data-theme']") === 'light', 'first click is not Light');
+    G.evalIn("cycleTheme()"); assert(G.evalIn("document.documentElement['data-theme']") === 'dark', 'second click is not Dark');
+    G.evalIn("cycleTheme()"); assert(G.evalIn("'data-theme' in document.documentElement") === false, 'third click does not return to Auto');
+  });
+
+  check('UX2 phone layout rules exist: segmented tabs, folding inputs, a sticky bar that folds behind a menu', ()=>{
+    const css = read('css/style.css'), html = read('index.html');
+    ['.tabShort', '.inputsBar', '.stickyMoreBtn', '.stickyExtra', '#view-single.inputsCollapsed #controlsStart'].forEach(sel => assert(css.includes(sel), 'CSS lacks ' + sel));
+    assert(/class="tabLong"/.test(html) && /class="tabShort"/.test(html), 'the tabs have no short labels');
+    assert(/id="inputsBar"/.test(html) && /id="stickyMoreBtn"/.test(html), 'the inputs bar or the ⋯ button is missing');
   });
 };

@@ -322,6 +322,12 @@ function _prefersReducedMotion(){
    but leave the page alone if it is already there. */
 function revealSheet(){
   if (typeof window === 'undefined' || typeof document === 'undefined') return;
+  if (typeof collapseInputsAfterBuild === 'function') collapseInputsAfterBuild();
+  // The live region says a build finished — the sheet is far from the button that made it.
+  if (typeof srAnnounce === 'function'){
+    const cards = Object.values(state || {}).filter(x => x && x.trait), kept = cards.filter(x => x.locked).length;
+    srAnnounce(`Built: ${cards.length} traits${kept ? `, ${kept} kept` : ''}. Seed ${lastSeedUsed || 'none'}.`);
+  }
   const el = document.getElementById('sheetTitle');
   if (!el || !el.getBoundingClientRect || !el.scrollIntoView) return;
   const top = el.getBoundingClientRect().top, vh = window.innerHeight || 800;
@@ -1207,11 +1213,13 @@ function lockAll(){
   snapshotHistory();
   Object.values(state).forEach(s=>{ if (s && s.trait) s.locked = true; });
   withPreservedFocus(()=>{ renderSheet(); });
+  toastUndo("Every card is kept.", ()=> undoLast());
 }
 function unlockAll(){
   snapshotHistory();
   Object.values(state).forEach(s=>{ if (s) s.locked = false; });
   withPreservedFocus(()=>{ renderSheet(); });
+  toastUndo("Every card is released.", ()=> undoLast());
 }
 
 /* ================= PIN INTENSITY =================
@@ -1274,6 +1282,7 @@ function unpinAll(){
   snapshotHistory();
   pinnedTargets = {};
   withPreservedFocus(()=>{ renderSheet(); });
+  toastUndo("All pins removed.", ()=> undoLast());
 }
 
 // Applied after a fresh buildCharacterState (before lock-merge, so lock still wins):

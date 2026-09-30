@@ -1170,6 +1170,8 @@ function renderSheet(){
 
   if (typeof renderArc === 'function') renderArc();
   if (typeof renderVoiceLab === 'function') renderVoiceLab();
+  if (typeof refreshCoachMark === 'function') refreshCoachMark();
+  if (typeof refreshSheetNav === 'function') refreshSheetNav();
   renderChangeList();
   refreshBudgetMeters();
   refreshJumpToSection();
@@ -1813,9 +1815,16 @@ function useBudgetPreset(key){
   toast(`Budget preset: ${BUDGET_PRESETS[key].label}. Generate to apply it.`);
 }
 function clearBudgetsUI(){
+  const before = captureSettings();
   clearBudgets();
   refreshBudgetUI(); savePrefs();
-  toast("Budgets cleared.");
+  toastUndo("Budgets cleared.", ()=>{ restoreSettings(before); refreshBudgetUI(); savePrefs(); });
+}
+// Clear-all for the constraints panel, with a way back instead of a confirm dialog.
+function clearConstraintsUI(){
+  const before = captureSettings();
+  clearConstraints();
+  toastUndo("Constraints cleared.", ()=>{ restoreSettings(before); refreshConstraintChips(); savePrefs(); });
 }
 function refreshBudgetChips(){
   const box = document.getElementById('budgetChips');

@@ -197,9 +197,15 @@ button instead of (or as well as) a confirm.
   saved list can be searched and sorted.
 * **Why does this feel familiar?** lists traits recurring across your recent characters,
   each with a one-click ban.
-* Trait cards are focusable: **R** tosses and **L** keeps the focused (or hovered) card.
-  **Ctrl/⌘+Enter** generates, **Ctrl/⌘+Z** undoes, **Shift+Ctrl/⌘+Z** / **Ctrl+Y**
-  redoes, **?** opens help. None of them fire while you are typing or a dialog is open.
+* Trait cards are focusable: **R** tosses, **L** keeps and **P** pins the focused (or hovered)
+  card. **Ctrl/⌘+Enter** builds, **Ctrl/⌘+Z** undoes, **Shift+Ctrl/⌘+Z** / **Ctrl+Y** redoes,
+  **Ctrl/⌘+S** saves, **1 2 3** switch tab, **/** searches traits, **Esc** closes the menus
+  and **?** opens the full list. None of them fire while you are typing or a dialog is open.
+* Destructive actions — Reset to Defaults, Unpin/Keep/Release all, clearing constraints or
+  budgets, deleting an archetype or a project — undo through a toast rather than a confirm.
+  The header shows the current project, when settings were last saved, and a theme switch
+  (Auto / Light / Dark). On a phone the tabs are three short pills, the sticky bar folds its
+  secondary actions behind **⋯**, and the inputs fold to a one-line recap after a build.
 * The service worker is network-first (the cache is the offline fallback), so a deploy
   appears on the next load and never mixes files from two builds; a deploy that lands
   during a session offers a **Reload** toast.

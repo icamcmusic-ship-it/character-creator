@@ -777,6 +777,54 @@ await step('the More ways to roll menu opens, lists five rolls and closes on cho
   await page.locator('.moreRollsMenu button', {hasText: 'Variation'}).click();
   if (await page.evaluate(()=> document.getElementById('moreRolls').open)) throw new Error('the menu stayed open after a choice');
 });
+/* Audit §2 second pass: keyboard, theme, seed chip, and the phone layout. */
+await step('the ? key opens the shortcuts dialog, 2 switches tab, Esc closes the File menu', async ()=>{
+  await page.evaluate(()=> { document.activeElement && document.activeElement.blur(); switchTab('single'); });
+  await page.keyboard.press('?');
+  if (!await page.evaluate(()=> document.getElementById('shortcutDialog').open)) throw new Error('? did not open the dialog');
+  await page.keyboard.press('Escape');
+  if (await page.evaluate(()=> document.getElementById('shortcutDialog').open)) throw new Error('Esc did not close the dialog');
+  await page.keyboard.press('2');
+  if (!await page.evaluate(()=> document.getElementById('view-cast').classList.contains('active'))) throw new Error('2 did not switch to the Cast tab');
+  await page.keyboard.press('1');
+  await page.evaluate(()=> { document.getElementById('fileMenu').open = true; });
+  await page.keyboard.press('Escape');
+  if (await page.evaluate(()=> document.getElementById('fileMenu').open)) throw new Error('Esc left the File menu open');
+});
+await step('the theme button cycles Auto, Light, Dark and sets data-theme', async ()=>{
+  const seq = [];
+  for (let i = 0; i < 3; i++){ await page.locator('#themeBtn').click(); seq.push(await page.evaluate(()=> document.documentElement.getAttribute('data-theme'))); }
+  if (seq.join() !== 'light,dark,') throw new Error('theme cycle was ' + seq.join('|'));
+});
+await step('the seed chip copies the seed', async ()=>{
+  await page.evaluate(()=> generateCharacter()); await page.waitForTimeout(600);
+  const before = await page.evaluate(()=> lastSeedUsed);
+  await page.evaluate(()=> { window.__copied = null; copyText = (t)=> { window.__copied = t; }; });
+  await page.locator('#stickySeed').click();
+  const got = await page.evaluate(()=> window.__copied);
+  if (!before || got !== before) throw new Error('copied ' + got + ', seed is ' + before);
+});
+await step('phone: tabs are three short pills, the sticky bar folds behind a menu, and inputs fold after a build', async ()=>{
+  await page.setViewportSize({width: 390, height: 800});
+  await page.evaluate(()=> { switchTab('single'); setInputsCollapsed(false); });
+  const tabs = await page.evaluate(()=> [...document.querySelectorAll('.tabs button')].map(b => ({w: Math.round(b.getBoundingClientRect().width), t: b.innerText.trim()})));
+  if (tabs.some(t => t.w > 140)) throw new Error('tabs are not compact: ' + JSON.stringify(tabs));
+  if (!tabs.every(t => /^(Single|Cast|Relations)$/.test(t.t))) throw new Error('tabs are not short: ' + JSON.stringify(tabs));
+  const bar = await page.evaluate(()=> { const b = document.getElementById('stickyBar'); return {sw: b.scrollWidth, cw: b.clientWidth, more: getComputedStyle(document.getElementById('stickyMoreBtn')).display, extra: getComputedStyle(document.getElementById('stickyExtra')).display}; });
+  if (bar.sw > bar.cw + 1) throw new Error('the sticky bar still scrolls sideways: ' + JSON.stringify(bar));
+  if (bar.more === 'none' || bar.extra !== 'none') throw new Error('the bar did not fold: ' + JSON.stringify(bar));
+  await page.locator('#stickyMoreBtn').click();
+  if (await page.evaluate(()=> getComputedStyle(document.getElementById('stickyExtra')).display) === 'none') throw new Error('the ⋯ button did not open the menu');
+  await page.keyboard.press('Escape');
+  await page.evaluate(()=> generateCharacter()); await page.waitForTimeout(900);
+  const folded = await page.evaluate(()=> ({controls: getComputedStyle(document.getElementById('controlsStart')).display, bar: !document.getElementById('inputsBar').hidden, recap: document.getElementById('inputsRecap').textContent}));
+  if (folded.controls !== 'none' || !folded.bar || !folded.recap) throw new Error('inputs did not fold: ' + JSON.stringify(folded));
+  await page.locator('#inputsToggle').click();
+  if (await page.evaluate(()=> getComputedStyle(document.getElementById('controlsStart')).display) === 'none') throw new Error('Edit inputs did not reopen them');
+  const h1 = await page.evaluate(()=> parseFloat(getComputedStyle(document.querySelector('.pageHead h1')).fontSize));
+  await page.setViewportSize({width: 1280, height: 900});
+  if (h1 > 28) throw new Error('the header title is still ' + h1 + 'px on a phone');
+});
 await step('§5 lens row fits a phone width', async ()=>{
   await page.setViewportSize({width: 375, height: 800});
   const over = await page.evaluate(()=> document.documentElement.scrollWidth - window.innerWidth);
