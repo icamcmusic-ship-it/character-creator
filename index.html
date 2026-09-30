@@ -618,6 +618,11 @@
         </div>
       </div>
       <div class="historyDrawer" id="historyDrawer" hidden aria-label="Recent rolls"></div>
+      <div class="backupReminder" id="backupReminder" role="status" hidden>
+        <span id="backupReminderText"></span>
+        <button type="button" class="btn-secondary" data-on="click" data-act="backupNow" data-args="[]">Back up now</button>
+        <button type="button" class="savedAct" data-on="click" data-act="snoozeBackupReminder" data-args="[]">Remind me next week</button>
+      </div>
       <div class="storageStatus" id="storageStatus" role="status" style="display:none;"></div>
       <div class="savedTools" id="savedTools" hidden>
         <input type="text" inputmode="search" role="searchbox" id="savedFilter" placeholder="Search saved characters" aria-label="Search saved characters" data-on="input" data-act="applySavedFilter" data-args="[]">

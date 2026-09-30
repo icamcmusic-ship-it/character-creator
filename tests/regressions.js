@@ -882,4 +882,85 @@ module.exports = function({check, group, assert}){
     assert(G.evalIn('_prefersReducedMotion()') === true, 'the page switch does not count as reduce-motion');
     assert(/\.reduce-motion \*/.test(read('css/style.css')), 'no CSS turns the motion off');
   });
+
+  group('Audit 2026-09 §3 robustness');
+
+  check('ROBUST constraints that can never hold are named: banned-and-required, a zero cap, a banned required category', ()=>{
+    const G = fresh();
+    const r = G.evalIn(`(()=>{
+      const t = TRAITS.find(t => rarityTier(t) === 'common');
+      requiredTraitIds = [t.id]; bannedTraitIds = new Set([t.id]);
+      const a = detectConstraintConflicts().map(c => c.kind);
+      bannedTraitIds = new Set(); rarityCaps.common = 0;
+      const b = detectConstraintConflicts().map(c => c.kind);
+      rarityCaps.common = null; requiredTraitIds = [];
+      const cat = TRAITS[50].category; requiredCategories = [cat]; bannedCategories = new Set([cat]);
+      const c = detectConstraintConflicts().map(c => c.kind);
+      requiredCategories = []; bannedCategories = new Set();
+      return {a, b, c};
+    })()`);
+    assert(r.a.includes('required-vs-banned-trait'), 'banned + required: ' + r.a);
+    assert(r.b.includes('required-vs-cap'), 'required in a capped-at-zero tier: ' + r.b);
+    assert(r.c.includes('required-category-banned'), 'required category that is banned: ' + r.c);
+  });
+
+  check('ROBUST a build says which rules contradict, and why a required trait is missing', ()=>{
+    const G = fresh(); G.gen('rp1');
+    G.evalIn("globalThis.__t = []; toast = function(m){ __t.push(m) }");
+    G.evalIn("const t = TRAITS.find(t => rarityTier(t) === 'common' && !seatedIdSet(state).has(t.id)); requiredTraitIds = [t.id]; bannedTraitIds = new Set([t.id]); detectConstraintConflicts(); reportRuleProblems()");
+    const msg = G.evalIn("__t.join(' | ')");
+    assert(/contradict each other/.test(msg) && /required but is not on this sheet/.test(msg), 'toast: ' + msg);
+    assert(!/<[a-z]/.test(msg), 'the toast still carries HTML: ' + msg);
+    G.evalIn("requiredTraitIds = []; bannedTraitIds = new Set(); __t.length = 0; detectConstraintConflicts(); reportRuleProblems()");
+    assert(G.evalIn("__t.length") === 0, 'a clean rule set still warns');
+  });
+
+  check('ROBUST a share link or file from another version says so instead of replaying the wrong person', ()=>{
+    const G = fresh();
+    G.evalIn("globalThis.btoa=s=>Buffer.from(s,'binary').toString('base64'); globalThis.atob=s=>Buffer.from(s,'base64').toString('binary');");
+    G.Buffer = Buffer;
+    const link = o => G.evalIn(`readShareFromHash('#share=' + _b64urlEncode(${JSON.stringify(JSON.stringify(o))}))`);
+    assert(link({v: 1, seed: 'v1-abc'}).seed === 'v1-abc', 'a current link was refused');
+    let m = ''; try { link({v: 2, seed: 'v1-abc'}); } catch(e){ m = e.message; }
+    assert(/newer version/.test(m), 'v2 link: ' + m);
+    m = ''; try { link({v: 1, seed: 'v2-abc'}); } catch(e){ m = e.message; }
+    assert(/format v2/.test(m), 'v2 seed: ' + m);
+    m = ''; try { G.evalIn("checkFileVersion({version: 99}, 1, 'cast')"); } catch(e){ m = e.message; }
+    assert(/newer version of this app/.test(m), 'file version: ' + m);
+    assert(G.evalIn("checkFileVersion({}, 1, 'cast')") === 1 && G.evalIn("checkFileVersion({version: 1}, 1, 'cast')") === 1, 'a current or unstamped file was refused');
+  });
+
+  check('ROBUST merging a workspace unions the constraint lists and keeps your own caps', ()=>{
+    const G = fresh();
+    const r = G.evalIn(`mergeWorkspaceSettings(
+      {constraints: {bannedCategories: ['A'], requiredTraitIds: [1], exclusivePairs: [[1,2]], categoryTiers: [['X','prefer']], rarityCaps: {common: 3, signature: null}, intensityCaps: {}}, disabledPacks: ['p1']},
+      {constraints: {bannedCategories: ['A','B'], requiredTraitIds: [2], exclusivePairs: [[1,2],[3,4]], categoryTiers: [['X','rarely'],['Y','rarely']], rarityCaps: {common: 9, signature: 1}, intensityCaps: {sheet: 50}}, disabledPacks: ['p2']})`);
+    const c = r.constraints;
+    assert(c.bannedCategories.join() === 'A,B' && c.requiredTraitIds.join() === '1,2', 'lists were not unioned');
+    assert(c.exclusivePairs.length === 2, 'the duplicate pair was not merged');
+    assert(JSON.stringify(c.categoryTiers) === JSON.stringify([['X','prefer'],['Y','rarely']]), 'your own tier did not win: ' + JSON.stringify(c.categoryTiers));
+    assert(c.rarityCaps.common === 3 && c.rarityCaps.signature === 1 && c.intensityCaps.sheet === 50, 'caps: ' + JSON.stringify(c.rarityCaps) + JSON.stringify(c.intensityCaps));
+    assert(r.disabledPacks.join() === 'p1,p2', 'packs were not unioned');
+  });
+
+  check('ROBUST closing the tab asks only when invested work is unsaved; a failed write raises the storage banner', ()=>{
+    const G = fresh(); G.gen('ug1');
+    G.evalIn("castStates = []; pinnedTargets = {}; traitNotes = {}; arcEvents = []; markWorkSaved()");
+    assert(G.evalIn("hasUnsavedInvestment()") === false, 'a fresh roll nobody invested in should not block closing');
+    G.evalIn("const k = Object.keys(state).find(k => state[k] && state[k].trait); state[k].locked = true");
+    assert(G.evalIn("hasUnsavedInvestment()") === true, 'a kept card was not treated as unsaved work');
+    G.evalIn("markWorkSaved()");
+    assert(G.evalIn("hasUnsavedInvestment()") === false, 'saving did not clear it');
+    G.evalIn("pinnedTargets = {a: 3}");
+    assert(G.evalIn("hasUnsavedInvestment()") === true, 'a pin made after the save was missed');
+    G.document._set('storageStatus', {style: {}, className: '', textContent: ''});
+    G.evalIn("noteStorageFailure(Object.assign(new Error('x'), {name: 'QuotaExceededError'}))");
+    assert(/storage is full/i.test(G.document.getElementById('storageStatus').textContent), 'no banner for a full store: ' + G.document.getElementById('storageStatus').textContent);
+  });
+
+  check('ROBUST the seed picker is built when its panel opens, not on load', ()=>{
+    const eng = read('js/engine.js');
+    assert(/function ensureSeedPickerRendered/.test(eng) && /addEventListener\('toggle'/.test(eng), 'the seed picker is still built eagerly');
+    assert(/_seedPickerRendered = true;\s*\n\s*const q = strVal/.test(eng), 'filtering does not render the options');
+  });
 };

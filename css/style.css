@@ -1602,3 +1602,6 @@ kbd { display:inline-block; min-width:1.4em; text-align:center; padding:1px 6px;
 .sliderLabelRow > label:first-child { flex:1 1 auto; min-width:0; overflow-wrap:anywhere; margin:0; }
 .sliderLock { flex:0 0 auto; }
 @media (max-width:520px){ .sliderLock span { display:none; } .sliderLock input { width:16px; height:16px; } }
+
+.backupReminder { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin:0 0 12px; padding:10px 14px; border:1.5px solid var(--golden-deep, var(--border-strong)); border-radius:var(--radius-sm); background:var(--panel2); font-size:.85rem; }
+.backupReminder[hidden] { display:none; }

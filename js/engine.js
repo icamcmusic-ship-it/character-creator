@@ -5111,6 +5111,17 @@ function buildSeedPicker(){
   if (!sel) return;
   SEEDABLE_TRAITS = TRAITS.filter(t => t.section==="Personality Traits" ||
     PROFILE_SECTIONS.some(ps=>ps.section===t.section));
+  /* The picker held ~6,300 <option>s — three quarters of the page's DOM — inside a panel almost
+     nobody opens. It is now built the first time the panel is opened (or the filter is used). */
+  const panel = sel.closest && sel.closest('details');
+  if (panel && panel.addEventListener && !panel.open){
+    panel.addEventListener('toggle', ()=>{ if (panel.open) ensureSeedPickerRendered(); });
+  } else ensureSeedPickerRendered();
+}
+let _seedPickerRendered = false;
+function ensureSeedPickerRendered(){
+  if (_seedPickerRendered) return;
+  _seedPickerRendered = true;
   renderSeedOptions(SEEDABLE_TRAITS);
 }
 function renderSeedOptions(list){
@@ -5131,6 +5142,7 @@ function renderSeedOptions(list){
   if ([...sel.options].some(o=>o.value===prevValue)) sel.value = prevValue;
 }
 function filterSeedPicker(){
+  _seedPickerRendered = true;
   const q = strVal('seedTraitFilter', '').trim().toLowerCase();
   if (!q){ renderSeedOptions(SEEDABLE_TRAITS); return; }
   const filtered = SEEDABLE_TRAITS.filter(t =>
@@ -8282,6 +8294,22 @@ function detectConstraintConflicts(){
       out.push({kind:'required-vs-ban', ids:[id],
         message: `"${t.trait}" is required, but its ${bannedSections.has(t.section) ? 'section' : 'category'} is banned. Required wins, so the ban does nothing for this trait.`});
     }
+  });
+  // The contradictions a roll could never satisfy: a trait both required and banned, a
+  // required trait in a rarity tier capped at zero, a required category that is banned.
+  requiredTraitIds.forEach(id=>{
+    const t = TRAITS_BY_ID.get(id);
+    if (!t) return;
+    if (bannedTraitIds.has(id)) out.push({kind:'required-vs-banned-trait', ids:[id],
+      message: `"${t.trait}" is both required and banned by name. Remove one of the two.`});
+    if (rarityCaps[rarityTier(t)] === 0) out.push({kind:'required-vs-cap', ids:[id],
+      message: `"${t.trait}" is required, but ${rarityTier(t)} traits are capped at zero in Budgets, and it is one. Raise the cap or drop the requirement.`});
+  });
+  requiredCategories.forEach(cat=>{
+    const section = SECTION_OF_CATEGORY.get(cat);
+    if (bannedCategories.has(cat) || (section && bannedSections.has(section)))
+      out.push({kind:'required-category-banned', cats:[cat],
+        message: `"At least one from ${cat}" is required, but ${bannedCategories.has(cat) ? 'that category' : 'its whole section'} is banned.`});
   });
   requiredCategories.forEach(cat=>{
     const section = SECTION_OF_CATEGORY.get(cat);

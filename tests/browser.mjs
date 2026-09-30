@@ -521,9 +521,9 @@ await step('File menu → Open file routes a cast file to the cast importer, wit
   const before = await page.evaluate(()=> castStates.length);
   await page.locator('#fileMenu summary').click();
   await page.locator('#fileMenuInput').setInputFiles({name:'c.json', mimeType:'application/json', buffer: Buffer.from(bundle)});
-  // A cast exists, so replacing it asks first.
+  // A cast exists, so the import asks: add to it, or replace it.
   await page.waitForSelector('dialog[open]', {timeout:4000});
-  await page.locator('dialog[open] button[value="ok"], dialog[open] .btn-primary').first().click();
+  await page.locator('dialog[open] button[value="replace"]').click();
   await page.waitForSelector('.toastUndo', {timeout:4000});
   const n = await page.evaluate(()=> castStates.length);
   if (n !== JSON.parse(bundle).members.length) throw new Error('cast has ' + n + ' members');
@@ -883,6 +883,61 @@ await step('cast: CSV and SVG downloads, and the redraw button, exist and work',
   await page.waitForTimeout(300);
   await page.evaluate(()=> { if (typeof addAllRelationshipDirections === 'function') addAllRelationshipDirections(); });
   await page.evaluate(()=> switchTab('single'));
+});
+/* Audit §3 robustness, in the real page. */
+await step('importing a cast can add to the current one, renaming clashing members', async ()=>{
+  const r = await page.evaluate(async ()=> {
+    switchTab('cast'); document.getElementById('castCount').value = '3'; generateCast();
+    await new Promise(res => setTimeout(res, 700));
+    const before = castStates.length, names = castStates.map(c => c.meta.name);
+    const json = JSON.stringify(castBundle());
+    askChoice = async ()=> 'merge';
+    const input = {files: [new File([json], 'cast.json', {type: 'application/json'})], value: 'x'};
+    importCastJSON(input);
+    await new Promise(res => setTimeout(res, 900));
+    const after = castStates.map(c => c.meta.name), ids = new Set(castStates.map(c => c.id));
+    return {before, after: after.length, unique: new Set(after).size, ids: ids.size, dupEdge: relationshipEdges.every(e => castStates.some(c => c.id === e.from) && castStates.some(c => c.id === e.to))};
+  });
+  if (r.after !== r.before * 2) throw new Error('merge gave ' + r.after + ' members from 2 x ' + r.before);
+  if (r.unique !== r.after || r.ids !== r.after) throw new Error('names or ids still clash: ' + JSON.stringify(r));
+  if (!r.dupEdge) throw new Error('an edge points at a member who is not in the cast');
+  await page.evaluate(()=> switchTab('single'));
+});
+await step('the backup reminder appears with saves and no backup, and snoozes', async ()=>{
+  const r = await page.evaluate(async ()=> {
+    await storage.delete('ui:lastBackup'); await storage.delete('ui:backupSnooze');
+    await storage.set('character:Reminder test', JSON.stringify({format: SAVE_FORMAT, state: {}, charMeta: {name: 'x'}}));
+    await checkBackupReminder();
+    const shown = !document.getElementById('backupReminder').hidden, text = document.getElementById('backupReminderText').textContent;
+    snoozeBackupReminder();
+    const hidden = document.getElementById('backupReminder').hidden;
+    await checkBackupReminder();
+    const stillHidden = document.getElementById('backupReminder').hidden;
+    await storage.delete('character:Reminder test'); await storage.delete('ui:backupSnooze');
+    return {shown, text, hidden, stillHidden};
+  });
+  if (!r.shown || !/no backup yet/.test(r.text)) throw new Error('reminder: ' + JSON.stringify(r));
+  if (!r.hidden || !r.stillHidden) throw new Error('snooze did not hold: ' + JSON.stringify(r));
+});
+await step('the seed picker holds no options until its panel is opened', async ()=> {
+  await page.reload(); await page.waitForTimeout(700);
+  const n0 = await page.evaluate(()=> document.getElementById('seedTraitSelect').options.length);
+  await page.evaluate(()=> { document.getElementById('seedTraitSelect').closest('details').open = true; });
+  await page.waitForTimeout(400);
+  const n1 = await page.evaluate(()=> document.getElementById('seedTraitSelect').options.length);
+  if (n0 > 1 || n1 < 1000) throw new Error('options before/after opening: ' + n0 + '/' + n1);
+});
+await step('a write the browser refuses raises the storage banner instead of failing in silence', async ()=> {
+  const shown = await page.evaluate(async ()=> {
+    const orig = Storage.prototype.setItem;
+    Storage.prototype.setItem = function(){ const e = new Error('full'); e.name = 'QuotaExceededError'; throw e; };
+    try { await storage.set('ui:test', '1'); } catch(e){}
+    Storage.prototype.setItem = orig;
+    const el = document.getElementById('storageStatus');
+    return {shown: el.style.display !== 'none', text: el.textContent};
+  });
+  if (!shown.shown || !/storage is full/i.test(shown.text)) throw new Error('banner: ' + JSON.stringify(shown));
+  await page.evaluate(()=> announceStorageMode());
 });
 await step('§5 lens row fits a phone width', async ()=>{
   await page.setViewportSize({width: 375, height: 800});

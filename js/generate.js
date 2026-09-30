@@ -321,7 +321,27 @@ function _prefersReducedMotion(){
 /* After a build the sheet is thousands of pixels below the controls that produced it,
    and on a phone the result appeared off-screen. Bring the sheet's heading into view —
    but leave the page alone if it is already there. */
+/* A roll that cannot honour your rules used to say nothing: the sheet came back without the
+   trait you required and the only clue was a chip. After a build, name the rules that
+   contradict each other, and say why a required trait is missing. */
+function reportRuleProblems(){
+  if (typeof getConstraintConflicts !== 'function' || typeof toast !== 'function') return;
+  const conf = getConstraintConflicts() || [];
+  const seated = seatedIdSet(state || {});
+  const missing = requiredTraitIds.filter(id => !seated.has(id));
+  const strip = h => String(h || "").replace(/<[^>]+>/g, "").replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/\s+/g, " ").trim();
+  const bits = [];
+  if (conf.length) bits.push(`${conf.length} of your rules contradict each other: ${conf[0].message}${conf.length > 1 ? ` (and ${conf.length - 1} more — see Constraints)` : ""}`);
+  if (missing.length){
+    const t = TRAITS_BY_ID.get(missing[0]);
+    let why = "";
+    try { const r = explainWhyNot(t); why = strip(String(r).split('</div>')[0]).slice(0, 220); } catch(e){}
+    bits.push(`"${t ? t.trait : missing[0]}" is required but is not on this sheet${why ? ": " + why : "."}${missing.length > 1 ? ` (${missing.length - 1} more required trait${missing.length > 2 ? "s" : ""} missing too.)` : ""}`);
+  }
+  if (bits.length) toast(bits.join(" "), "warn", 9000);
+}
 function revealSheet(){
+  try { reportRuleProblems(); } catch(e){ console.error(e); }
   if (typeof window === 'undefined' || typeof document === 'undefined') return;
   if (typeof collapseInputsAfterBuild === 'function') collapseInputsAfterBuild();
   // The live region says a build finished — the sheet is far from the button that made it.

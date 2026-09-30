@@ -47,7 +47,12 @@ const storage = (function(){
       const v = backend.getItem(PREFIX + key);
       return v === null ? null : { value: v };
     },
-    async set(key, value){ backend.setItem(PREFIX + key, value); },
+    // A failed write (full quota, blocked storage) used to surface only where a caller happened
+    // to catch it — preferences and filings failed in silence. Every failure raises the banner.
+    async set(key, value){
+      try { backend.setItem(PREFIX + key, value); }
+      catch(e){ if (typeof noteStorageFailure === 'function') noteStorageFailure(e); throw e; }
+    },
     async delete(key){ backend.removeItem(PREFIX + key); },
     async list(prefix){
       const keys = [];
@@ -122,6 +127,18 @@ async function savedCharacterExists(name){
 /* Is this browser going to keep what we write? Everything that reports a save, lists
    saves, or offers persistence asks here rather than assuming. */
 function storageIsDurable(){ return storage.durable !== false; }
+let _storageFailures = 0;
+function noteStorageFailure(e){
+  _storageFailures++;
+  const el = document.getElementById('storageStatus');
+  if (el){
+    el.style.display = 'block'; el.className = 'storageStatus warn';
+    el.textContent = (typeof isQuotaError === 'function' && isQuotaError(e))
+      ? "This browser's storage is full, so the last change was NOT kept. Delete a saved character, or export a backup (File ▾ → Export full backup) and clear some space."
+      : "This browser refused to store the last change, so it was NOT kept. Export a backup (File ▾ → Export full backup) to keep your work.";
+  }
+  if (typeof markSaved === 'function') markSaved(false);
+}
 function announceStorageMode(){
   const el = document.getElementById('storageStatus');
   if (!el) return;
@@ -210,6 +227,7 @@ async function saveCharacter(btnEl){
       arcBase: arcBase ? compressSlots(arcBase) : null, arcEvents,
       settings: captureSettings(), savedAt: new Date().toISOString(),
     }));
+    markWorkSaved();
     await loadSavedList();
     // A saved character is an accepted one: the diversity objective measures the next
     // batch against it, and "same world" avoids it.
@@ -363,6 +381,7 @@ async function loadSavedCharacter(name){
     document.getElementById('pressureSheet').style.display = pressureState ? "block" : "none";
     lastSheetTraits = null;
     onSliderChange(); renderSheet(); checkConflicts();
+    markWorkSaved();
     toast('Loaded "'+name+'"');
     reportDecodeLosses(rec);
   } catch(e){ console.error(e); toast("Could not load that character: " + e.message, "warn", 6000); }
@@ -872,20 +891,45 @@ function importCastJSON(fileInput){
     try {
       const p = JSON.parse(reader.result);
       if (!p || p.format !== "character-voice-cast") throw new Error("Not a cast file.");
-      /* B16: this replaced the whole ensemble with no confirm and no way back. */
-      if (castStates.length && !await askForConfirm(`Replace the ${castStates.length} character${castStates.length===1?'':'s'} on the Cast tab with the ${Array.isArray(p.members) ? p.members.length : 0} in this file?`, "Replace")){
-        fileInput.value = ""; return;
+      checkFileVersion(p, CAST_FORMAT_VERSION, "cast");
+      let mergeMode = false;
+      if (castStates.length){
+        const inCount = Array.isArray(p.members) ? p.members.length : 0;
+        const choice = await askChoice(`The Cast tab already has ${castStates.length} character${castStates.length === 1 ? '' : 's'}. What should the ${inCount} in this file do?`,
+          [{value: 'merge', label: 'Add to the cast'}, {value: 'replace', label: 'Replace the cast'}]);
+        if (!choice){ fileInput.value = ""; return; }
+        mergeMode = choice === 'merge';
       }
+      // (B16: replacing the ensemble used to happen with no confirm and no way back; the choice above and the Undo toast below are that fix.)
       const restore = _castSnapshot();
       const hadCast = castStates.length > 0;
       // Same structural validation and id re-linking the single-character import does —
       // a malformed member must not get as far as renderCast and throw there.
-      const {orphans, dropped} = applyCastBundle(p);
+      let orphans, dropped;
+      if (mergeMode){
+        // Import into the live globals, then fold the incoming members and edges into what was there.
+        const curMembers = castStates.slice(), curEdges = relationshipEdges.slice();
+        ({orphans, dropped} = applyCastBundle(p));
+        const incoming = castStates, inEdges = relationshipEdges, ids = new Set(curMembers.map(c => c.id)), names = new Set(curMembers.map(c => c.meta && c.meta.name));
+        const remap = {}; let renamed = 0;
+        incoming.forEach(c => {
+          if (ids.has(c.id)){ const nid = newCharacterId(); remap[c.id] = nid; c.id = nid; }
+          ids.add(c.id);
+          let n = c.meta && c.meta.name, k = 2;
+          while (names.has(n)){ n = `${c.meta.name} (${k++})`; }
+          if (n !== (c.meta && c.meta.name)){ c.meta = Object.assign({}, c.meta, {name: n}); renamed++; }
+          names.add(n);
+        });
+        const rm = id => remap[id] || id;
+        castStates = curMembers.concat(incoming);
+        relationshipEdges = pruneEdges(curEdges.concat(inEdges.map(e => Object.assign({}, e, {from: rm(e.from), to: rm(e.to)}))), castStates);
+        if (renamed) toast(`${renamed} member name${renamed === 1 ? ' was' : 's were'} already in use and got a number.`, "ok", 6000);
+      } else ({orphans, dropped} = applyCastBundle(p));
       renderCast();
       refreshRelSelectors();
       renderEdges();
       switchTab('cast');
-      const msg = `Imported ${castStates.length} cast member${castStates.length===1?'':'s'}${relationshipEdges.length ? ` and ${relationshipEdges.length} edge${relationshipEdges.length===1?'':'s'}` : ``}.`;
+      const msg = `${mergeMode ? 'Added to the cast: it now has' : 'Imported'} ${castStates.length} cast member${castStates.length===1?'':'s'}${relationshipEdges.length ? ` and ${relationshipEdges.length} edge${relationshipEdges.length===1?'':'s'}` : ``}.`;
       if (hadCast) toastUndo(msg, ()=>{ restore(); toast("The previous cast is back."); }, 12000);
       else toast(msg);
       if (orphans) toast(orphans + " trait(s) in this file no longer exist in the pool; their saved text was kept as-is.", "warn", 6000);
@@ -1609,6 +1653,7 @@ async function fileIntoProject(){
   if (typeof exportArchive === 'function') p.archive = exportArchive();
   await saveProject(p);
   renderProjects();
+  markWorkSaved();
   toast(`Filed "${name}" into "${p.name}" — ${projectSummary(p)}.`, "ok", 6000);
 }
 function renderProjects(){
@@ -1637,6 +1682,7 @@ async function exportBackupBundle(){
   const loose = await _looseCharacters();
   const bundle = makeBackupBundle(projects, loose, {archive: (typeof exportArchive === 'function') ? exportArchive() : []});
   downloadText(JSON.stringify(bundle, null, 2), "character_backup.json");
+  markBackedUp(); markWorkSaved();
   toast(`Backed up ${projects.length} project${projects.length===1?'':'s'} and ${loose.length} saved character${loose.length===1?'':'s'}.`, "ok", 6000);
 }
 let _pendingBackup = null;
@@ -2183,6 +2229,33 @@ function askForConfirm(message, confirmLabel){
   });
 }
 
+/* A dialog with more than two answers (Replace / Add / Cancel). Resolves to the chosen value,
+   or null for Cancel and Escape. */
+function askChoice(message, choices){
+  return new Promise(resolve=>{
+    const dlg = document.createElement('dialog');
+    dlg.className = 'nameDialog';
+    dlg.innerHTML = `<form method="dialog"><label>${escHTML(message)}</label><div class="nameDialogBtns">`
+      + `<button value="__cancel" type="submit">Cancel</button>`
+      + choices.map((c, i) => `<button value="${escAttr(c.value)}" type="submit"${i === 0 ? ' class="primary"' : ''}>${escHTML(c.label)}</button>`).join("")
+      + `</div></form>`;
+    const opener = document.activeElement;
+    document.body.appendChild(dlg);
+    let settled = false;
+    const done = v => { if (settled) return; settled = true; dlg.remove(); if (opener && opener.focus && document.contains(opener)) opener.focus(); resolve(v); };
+    dlg.addEventListener('close', ()=> done(dlg.returnValue && dlg.returnValue !== '__cancel' ? dlg.returnValue : null));
+    if (typeof dlg.showModal === 'function'){ dlg.showModal(); const p = dlg.querySelector('.primary'); if (p) p.focus(); }
+    else done(choices[0].value);
+  });
+}
+/* Every exporter stamps a version. A file from a newer build is refused with a sentence, not
+   parsed on the assumption it has this build's shape. */
+function checkFileVersion(p, supported, what){
+  const v = (p && p.version === undefined) ? 1 : (p && p.version);
+  if (typeof v !== 'number' || !Number.isFinite(v)) throw new Error(`that ${what} file's version stamp is not a number.`);
+  if (v > supported) throw new Error(`that ${what} file was written by a newer version of this app (file version ${v}; this one reads up to ${supported}). Update the app, or re-export the file from the version that reads it.`);
+  return v;
+}
 async function resetAllToDefaults(){
   // BUG FIX: this cleared persisted preferences and per-slot UI state BEFORE asking
   // for confirmation, so cancelling the dialog still silently wiped your saved
@@ -2583,6 +2656,27 @@ function exportWorkspaceJSON(){
   const n = Object.keys(CUSTOM_ARCHETYPES).length;
   toast(`Exported your workspace${n ? ` and ${n} custom archetype${n===1?'':'s'}` : ''}.`);
 }
+/* Merging a workspace: the union of the constraint lists, the incoming caps only where you have
+   none, and everything else (sliders, toggles, fields, sections) left as it is. */
+function mergeWorkspaceSettings(cur, inc){
+  const out = JSON.parse(JSON.stringify(cur));
+  const c = out.constraints = out.constraints || {}, i = (inc && inc.constraints) || {};
+  ['bannedCategories', 'bannedSections', 'bannedTraitIds', 'requiredTraitIds', 'requiredCategories'].forEach(k => {
+    c[k] = [...new Set([...(c[k] || []), ...(Array.isArray(i[k]) ? i[k] : [])])];
+  });
+  const key = p => JSON.stringify(p);
+  const pairs = new Map((c.exclusivePairs || []).map(p => [key(p), p]));
+  (Array.isArray(i.exclusivePairs) ? i.exclusivePairs : []).forEach(p => pairs.set(key(p), p));
+  c.exclusivePairs = [...pairs.values()];
+  const tiers = new Map(c.categoryTiers || []);
+  (Array.isArray(i.categoryTiers) ? i.categoryTiers : []).forEach(([k, v]) => { if (!tiers.has(k)) tiers.set(k, v); });
+  c.categoryTiers = [...tiers.entries()];
+  ['rarityCaps', 'intensityCaps'].forEach(k => {
+    c[k] = Object.assign({}, i[k] || {}, Object.fromEntries(Object.entries(c[k] || {}).filter(([, v]) => v !== null && v !== undefined)));
+  });
+  out.disabledPacks = [...new Set([...(out.disabledPacks || []), ...((inc && inc.disabledPacks) || [])])];
+  return out;
+}
 async function importWorkspaceJSON(fileInput){
   const file = fileInput.files && fileInput.files[0];
   if (!file) return;
@@ -2592,6 +2686,7 @@ async function importWorkspaceJSON(fileInput){
   try {
     const p = JSON.parse(text);
     if (p.format !== "character-voice-workspace") throw new Error("Not a workspace file.");
+    checkFileVersion(p, WORKSPACE_FORMAT_VERSION, "workspace");
     if (p.settings != null && (typeof p.settings !== 'object' || Array.isArray(p.settings)))
       throw new Error("The `settings` block is not an object.");
     if (p.archetypes != null && !Array.isArray(p.archetypes))
@@ -2604,13 +2699,21 @@ async function importWorkspaceJSON(fileInput){
     if (p.settings) bits.push("your constraints, budgets, tiers and section settings");
     if (archetypes.length) bits.push(`${archetypes.length} custom archetype${archetypes.length===1?'':'s'}`);
     if (!bits.length) throw new Error("That workspace file is empty.");
-    if (!await askForConfirm(`Replace ${bits.join(" and ")} with the contents of this file?`, "Replace")) return;
+    const choice = await askChoice(`This file holds ${bits.join(" and ")}. Replace yours with it, or merge it into what you have?`,
+      [{value: 'merge', label: 'Merge into mine'}, {value: 'replace', label: 'Replace mine'}]);
+    if (!choice) return;
+    const merge = choice === 'merge';
     /* B16: the undo snapshot carries captureSettings(), so Undo (button, Ctrl+Z, or the
        toast) restores the constraints and settings this import replaced. */
     const prevSettings = captureSettings();
-    if (p.settings){ snapshotHistory(); restoreSettings(p.settings); }
-    let saved = 0;
+    if (p.settings){
+      snapshotHistory();
+      restoreSettings(merge ? mergeWorkspaceSettings(prevSettings, p.settings) : p.settings);
+    }
+    let saved = 0, skippedSame = [];
     for (const arch of archetypes){
+      // Merging keeps an archetype you already have under that name rather than overwriting it.
+      if (merge && CUSTOM_ARCHETYPES['custom_' + arch.label]){ skippedSame.push(arch.label); continue; }
       try { await storage.set('archetype:'+arch.label, JSON.stringify(arch)); saved++; }
       catch(e){ console.error(e); }
     }
@@ -2618,7 +2721,7 @@ async function importWorkspaceJSON(fileInput){
     refreshConstraintChips();
     onSliderChange();
     if (typeof savePrefs === 'function') savePrefs();
-    const msg = `Imported ${bits.join(" and ")}${saved < archetypes.length ? ` (${archetypes.length - saved} archetype(s) would not fit in storage)` : ''}.`;
+    const msg = `${merge ? 'Merged' : 'Imported'} ${bits.join(" and ")}${skippedSame.length ? ` (kept your own version of: ${skippedSame.join(', ')})` : ''}${saved + skippedSame.length < archetypes.length ? ` (${archetypes.length - saved - skippedSame.length} archetype(s) would not fit in storage)` : ''}.`;
     if (p.settings) toastUndo(msg, ()=>{
       restoreSettings(prevSettings); refreshConstraintChips(); onSliderChange();
       if (typeof savePrefs === 'function') savePrefs();
@@ -3863,11 +3966,20 @@ function copyShareLink(btnEl){
   copyText(link, btnEl);
   toast("Share link copied. Opening it replays this character with these settings.");
 }
+const SHARE_LINK_VERSION = 1;
+const SEED_CODEC_VERSION = parseInt(String(SEED_PREFIX).replace(/\D/g, ''), 10) || 1;
 function readShareFromHash(hash){
   const m = /(?:^#|&)share=([A-Za-z0-9_-]+)/.exec(hash || "");
   if (!m) return null;
   const p = JSON.parse(_b64urlDecode(m[1]));
   if (!p || typeof p !== 'object' || typeof p.seed !== 'string' || !p.seed.trim()) throw new Error("the link has no seed.");
+  /* Links carry a version and the seed carries the codec's: a link from another build of the app
+     cannot replay faithfully, and used to produce a different character under the same words. */
+  if (p.v !== undefined && p.v !== SHARE_LINK_VERSION)
+    throw new Error(`it was made by ${p.v > SHARE_LINK_VERSION ? 'a newer' : 'an older'} version of this app (link version ${p.v}; this one reads version ${SHARE_LINK_VERSION}), so it cannot bring back the same character. Ask for a fresh link from the current version.`);
+  const sv = /^v(\d+)-/.exec(p.seed);
+  if (sv && +sv[1] !== SEED_CODEC_VERSION)
+    throw new Error(`its seed is in format v${sv[1]}, but this version of the app reads v${SEED_CODEC_VERSION}, so the seed would build a different person.`);
   if (p.settings != null && (typeof p.settings !== 'object' || Array.isArray(p.settings))) throw new Error("the link's settings are malformed.");
   // The same structural check an imported file gets, BEFORE anything is applied — a
   // malformed constraint block used to clear the recipient's own bans and then throw.
@@ -4147,6 +4259,54 @@ function toggleTip(btn){
   t.hidden = !open;
   btn.setAttribute('aria-expanded', String(open));
 }
+/* ================= BACKUP REMINDER AND UNSAVED-WORK GUARD =================
+   Work lives in this browser's storage, which a cleared cache or a new machine loses. After
+   two weeks without a backup the page says so once, with a button. Closing the tab with
+   kept cards, pins, an arc or a cast that were never saved or exported asks first. */
+const BACKUP_KEY = 'ui:lastBackup', BACKUP_SNOOZE_KEY = 'ui:backupSnooze', BACKUP_DAYS = 14;
+async function markBackedUp(){ try { await storage.set(BACKUP_KEY, String(Date.now())); } catch(e){} hideBackupReminder(); }
+function hideBackupReminder(){ const b = document.getElementById('backupReminder'); if (b) b.hidden = true; }
+async function checkBackupReminder(){
+  const box = document.getElementById('backupReminder');
+  if (!box) return;
+  let saved = 0, last = 0, snooze = 0;
+  try { const r = await storage.list('character:'); saved = ((r && r.keys) || []).length; } catch(e){}
+  saved += (typeof projects !== 'undefined') ? projects.length : 0;
+  try { const r = await storage.get(BACKUP_KEY); last = r ? +r.value || 0 : 0; } catch(e){}
+  try { const r = await storage.get(BACKUP_SNOOZE_KEY); snooze = r ? +r.value || 0 : 0; } catch(e){}
+  const days = last ? Math.floor((Date.now() - last) / 86400000) : null;
+  const due = saved > 0 && (days === null || days >= BACKUP_DAYS) && Date.now() > snooze;
+  box.hidden = !due;
+  const t = document.getElementById('backupReminderText');
+  if (due && t) t.textContent = days === null
+    ? `You have ${saved} saved item${saved === 1 ? '' : 's'} in this browser and no backup yet.`
+    : `Your last backup was ${days} days ago.`;
+}
+function snoozeBackupReminder(){
+  try { storage.set(BACKUP_SNOOZE_KEY, String(Date.now() + 7 * 86400000)); } catch(e){}
+  hideBackupReminder();
+}
+async function backupNow(){ await exportBackupBundle(); }
+// What would be lost: anything the writer invested effort in that has not been filed anywhere.
+function workSignature(){
+  const cards = Object.keys(state || {}).sort().map(k => { const s = state[k]; return s && s.trait ? [k, s.trait.id, !!s.locked] : null; });
+  return JSON.stringify([cards, pinnedTargets, traitNotes, charMeta && [charMeta.name, charMeta.label, charMeta.contradictionAnswers], (typeof arcEvents !== 'undefined') ? arcEvents.length : 0, castStates.map(c => c.id + ':' + (c.meta && c.meta.name))]);
+}
+let _savedWorkSignature = null;
+function markWorkSaved(){ _savedWorkSignature = workSignature(); }
+function hasUnsavedInvestment(){
+  const kept = Object.values(state || {}).some(s => s && s.locked);
+  const invested = kept || Object.keys(pinnedTargets || {}).length || Object.keys(traitNotes || {}).length
+    || (typeof arcEvents !== 'undefined' && arcEvents.length) || castStates.length || (charMeta && (charMeta.label || charMeta.contradictionAnswers));
+  return !!invested && workSignature() !== _savedWorkSignature;
+}
+if (typeof window !== 'undefined' && window.addEventListener){
+  window.addEventListener('beforeunload', (e)=>{
+    if (!hasUnsavedInvestment()) return;
+    e.preventDefault(); e.returnValue = "";   // the browser shows its own wording
+  });
+}
+
 /* ================= HISTORY DRAWER AND ROLL COMPARISON =================
    The undo stack already holds the last rolls, but the only way into it was Undo, one step
    at a time, blind. The drawer lists them, restores any one (through the same Undo and Redo
@@ -4335,7 +4495,7 @@ applyAdvancedMode();
 (function(){ const f = document.getElementById('familiarPanel');
   if (f) f.addEventListener('toggle', ()=> onFamiliarToggle(f)); })();
 loadTheme(); loadSliderPresets(); loadCollapsedGroups(); loadReduceMotion();
-_customArchetypesReady.catch(()=>{}).then(()=>loadPrefs()).then(()=>{ applyShareFromHash(); initOnboarding(); });
+_customArchetypesReady.catch(()=>{}).then(()=>loadPrefs()).then(()=>{ applyShareFromHash(); initOnboarding(); checkBackupReminder(); });
 // Offline/repeat-visit caching. Registration is best-effort: the app is fully
 // functional without it, and file:// or an unsupported browser must not throw here.
 if (typeof navigator !== 'undefined' && navigator.serviceWorker && location.protocol.startsWith('http')){

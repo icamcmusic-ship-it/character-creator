@@ -1965,6 +1965,7 @@ function exportCharacterJSON(){
   };
   const name = (charMeta.name || "character").replace(/[^a-z0-9_-]+/gi,'_');
   downloadText(JSON.stringify(payload, null, 2), name + ".character.json");
+  if (typeof markWorkSaved === 'function') markWorkSaved();
   toast("Exported " + name + ".character.json");
 }
 /* Structural validation for an imported sheet. Deliberately permissive about what it
