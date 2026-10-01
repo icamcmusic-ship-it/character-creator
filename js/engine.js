@@ -1078,20 +1078,20 @@ const ARCHETYPE_PROFILE_HINTS = {
   blackSheep:           {role:"Outsider", attachment:"Disorganized", values:"Self-Interested", humor:"Dry & Deadpan", stress:"Flight (remove yourself)", family:"Sibling Rivalry", dialect:"Regional Features"},
   compulsiveFixer:      {vices:"Compulsion & Ritual", role:"Caretaker", stress:"Fight (attack the threat)", attachment:"Anxious", humor:"Warm & Playful", competence:"Hands & Materials", repair:"Restitution & Practical Care", jargon:"Kitchen & Trade"},
   undiscussedSurvivor:  {attachment:"Avoidant", stress:"Flight (remove yourself)", humor:"Absurd & Chaotic", values:"Pragmatic & Flexible", role:"Peacemaker", family:"Never Mentions Family", repair:"Avoidance & Humour"},
-  workaholicAvoiding:   {vices:"Avoidance & Procrastination", attachment:"Avoidant", stress:"Fight (attack the threat)", role:"Outsider", humor:"Humorless & Absent", competence:"Systems & Logistics", body:"Medication & Management", jargon:"Medical"},
+  workaholicAvoiding:   {vices:"Avoidance & Procrastination", attachment:"Avoidant", stress:"Fight (attack the threat)", role:"Outsider", humor:"Humorless & Absent", competence:"Systems & Logistics", body:"Medication & Management", jargon:"Medical", conflictstyle:"Stonewalling & Withdrawal"},
   formerTrueBeliever:   {role:"Skeptic", values:"Pragmatic & Flexible", attachment:"Disorganized", humor:"Intellectual & Wordplay", stress:"Fight (attack the threat)", beliefs:"Lapsed Faith", family:"Parent-Voice Echo"},
   goldenChild:          {attachment:"Anxious", role:"Leader", values:"Idealistic & Visionary", humor:"Warm & Playful", stress:"Fawn (appease the threat)", origins:"Earned Success", family:"Sibling Rivalry", money:"Status Signalling"},
   competentProfessional: {attachment:"Secure", vices:"Restraint & Discipline", role:"Skeptic", humor:"Dry & Deadpan", values:"Pragmatic & Flexible", competence:"Craft & Knowledge", contextrole:"Among Peers", jargon:"Tech"},
   contentedElder:       {attachment:"Secure", humor:"Warm & Playful", values:"Pragmatic & Flexible", role:"Peacemaker", vices:"Compulsion & Ritual", origins:"Stable Care", dialect:"Era References", texture:"Preferences & Small Pleasures"},
   genuinelyFunny:       {humor:"Intellectual & Wordplay", role:"Connector", attachment:"Anxious", vices:"Risk & Escape", stress:"Flight (remove yourself)", conversation:"Turn-Timing", fears:"Social Dreads"},
-  careerBureaucrat:     {values:"Rigid & Principled", vices:"Restraint & Discipline", humor:"Humorless & Absent", stress:"Freeze (shut down)", attachment:"Avoidant", competence:"Systems & Logistics", jargon:"Legal", money:"Thrift Talk"},
+  careerBureaucrat:     {values:"Rigid & Principled", vices:"Restraint & Discipline", humor:"Humorless & Absent", stress:"Freeze (shut down)", attachment:"Avoidant", competence:"Systems & Logistics", jargon:"Legal", money:"Thrift Talk", conflictstyle:"Litigator"},
   trueZealot:           {values:"Idealistic & Visionary", role:"Instigator", stress:"Fight (attack the threat)", attachment:"Disorganized", humor:"Humorless & Absent", beliefs:"Faith Practice", conversation:"Scripted Speech"},
   alienLogic:           {role:"Outsider", humor:"Intellectual & Wordplay", attachment:"Avoidant", values:"Rigid & Principled", stress:"Freeze (shut down)", conversation:"Sensory Load", dialect:"Second-Language Speaker"},
   unbotheredYoung:      {attachment:"Secure", humor:"Dry & Deadpan", values:"Pragmatic & Flexible", vices:"Avoidance & Procrastination", role:"Instigator", dialect:"Youth Register", texture:"Preferences & Small Pleasures"},
-  steadyOrganiser:      {role:"Leader", vices:"Restraint & Discipline", humor:"Warm & Playful", values:"Loyalty-Bound", attachment:"Secure", competence:"People & Rooms", origins:"Learned Trust", texture:"Routines", family:"Talks About Family Constantly"},
-  cheerfulMess:         {attachment:"Disorganized", humor:"Absurd & Chaotic", vices:"Risk & Escape", role:"Connector", stress:"Fawn (appease the threat)", texture:"Practised Badly", romance:"Jealousy Tells"},
+  steadyOrganiser:      {role:"Leader", vices:"Restraint & Discipline", humor:"Warm & Playful", values:"Loyalty-Bound", attachment:"Secure", competence:"People & Rooms", origins:"Learned Trust", texture:"Routines", family:"Talks About Family Constantly", conflictstyle:"Peacekeeper & Smoother"},
+  cheerfulMess:         {attachment:"Disorganized", humor:"Absurd & Chaotic", vices:"Risk & Escape", role:"Connector", stress:"Fawn (appease the threat)", texture:"Practised Badly", romance:"Jealousy Tells", conflictstyle:"Escalate then Apologise"},
   plainSpoken:          {attachment:"Secure", values:"Pragmatic & Flexible", role:"Caretaker", humor:"Warm & Playful", stress:"Freeze (shut down)", competence:"Hands & Materials", origins:"Stable Care", jargon:"Kitchen & Trade", money:"Thrift Talk"},
-  softSpokenSecond:     {role:"Peacemaker", stress:"Fawn (appease the threat)", attachment:"Anxious", values:"Loyalty-Bound", humor:"Self-Deprecating", fears:"Social Dreads", contextrole:"Under Authority"},
+  softSpokenSecond:     {role:"Peacemaker", stress:"Fawn (appease the threat)", attachment:"Anxious", values:"Loyalty-Bound", humor:"Self-Deprecating", fears:"Social Dreads", contextrole:"Under Authority", conflictstyle:"Passive-Aggressive"},
   bluntForeman:         {role:"Leader", stress:"Fight (attack the threat)", values:"Rigid & Principled", humor:"Cruel & Barbed", competence:"Hands & Materials", vices:"Substance & Consumption", body:"Hearing & Sight", contextrole:"With Dependents"},
   dreamyDrifter:        {role:"Outsider", vices:"Avoidance & Procrastination", attachment:"Secure", humor:"Absurd & Chaotic", values:"Idealistic & Visionary", beliefs:"Superstition", texture:"Preferences & Small Pleasures"},
   stubbornCraftsman:    {values:"Rigid & Principled", vices:"Compulsion & Ritual", attachment:"Avoidant", role:"Skeptic", humor:"Humorless & Absent", competence:"Craft & Knowledge", jargon:"Kitchen & Trade", texture:"Routines"},
@@ -1112,7 +1112,7 @@ const ARCHETYPE_PROFILE_HINTS = {
   secularIdeologue:     {values:"Rigid & Principled", role:"Instigator", stress:"Fight (attack the threat)", humor:"Humorless & Absent", attachment:"Avoidant", beliefs:"Political Temperament", conversation:"Info-Dumping"},
   nosyNeighbour:        {role:"Connector", vices:"Compulsion & Ritual", values:"Rigid & Principled", humor:"Cruel & Barbed", attachment:"Anxious", texture:"Affiliations", beliefs:"Conspiracy-Adjacent"},
   pompousBlowhard:      {role:"Leader", humor:"Intellectual & Wordplay", values:"Self-Interested", stress:"Fight (attack the threat)", attachment:"Avoidant", money:"Status Signalling", dialect:"Class Register Shift"},
-  maliciousTrickster:   {humor:"Cruel & Barbed", role:"Instigator", values:"Self-Interested", vices:"Risk & Escape", attachment:"Disorganized", beliefs:"Conspiracy-Adjacent", conversation:"Masking"},
+  maliciousTrickster:   {humor:"Cruel & Barbed", role:"Instigator", values:"Self-Interested", vices:"Risk & Escape", attachment:"Disorganized", beliefs:"Conspiracy-Adjacent", conversation:"Masking", conflictstyle:"Triangulator"},
   loudKind:             {role:"Caretaker", humor:"Warm & Playful", attachment:"Secure", values:"Loyalty-Bound", stress:"Fight (attack the threat)", family:"Talks About Family Constantly"},
   disciplinedRebel:     {values:"Rigid & Principled", role:"Outsider", humor:"Dry & Deadpan", stress:"Fight (attack the threat)", beliefs:"Political Temperament"},
   anxiousLeader:        {role:"Leader", attachment:"Anxious", stress:"Freeze (shut down)", humor:"Self-Deprecating", vices:"Compulsion & Ritual", values:"Loyalty-Bound", conversation:"Masking"},
@@ -3507,12 +3507,13 @@ function checkConflictsFor(stateObj){
     for (let j=i+1;j<items.length;j++){
       if (groups[i] && groups[i] === groups[j]) continue;
       const a = items[i].trait, b = items[j].trait;
-      if (!a.pol || !b.pol) continue;
+      const pa = polForConflicts(a), pb = polForConflicts(b);
+      if (!Object.keys(pa).length || !Object.keys(pb).length) continue;
       if (contextual(a) || contextual(b)) continue;
       // A seated contradiction (audit §5) is the point, not a clash to warn about.
       if (items[i].contradiction || items[j].contradiction) continue;
       for (const axis of Object.keys(AXIS_LABELS)){
-        if (a.pol[axis] === 1 && b.pol[axis] === -1 || a.pol[axis] === -1 && b.pol[axis] === 1){
+        if (pa[axis] === 1 && pb[axis] === -1 || pa[axis] === -1 && pb[axis] === 1){
           const pk = a.trait + '|' + b.trait;
           if (pairSeen.has(pk)) break;
           pairSeen.add(pk);
@@ -3584,6 +3585,40 @@ function nearDuplicateIndex(){
   });
   return (_NEAR_DUPS = idx);
 }
+/* Inferred polarity (audit §4a: 26% of the bank carries none, so conflict detection could
+   never see it). Keyword rules read the name and description of an untagged trait and give
+   it a DERIVED pole. It is used only to report conflicts, never to draw: polarityFit reads
+   t.pol alone, so a seed still builds the same character. A trait where both poles of an
+   axis match gets nothing on that axis. */
+const POL_INFER_RULES = [
+  ["vol", 1, /\b(loud|booming|shout|yell|talkative|chatter|rambl|monologu|long-winded|effusive|over-?shar)/i],
+  ["vol", -1, /\b(whisper|hushed|murmur|terse|laconic|mumbl|monosyll|ultra-brief|barely speaks)/i],
+  ["pace", -1, /\b(slow|drawl|unhurried|lingering|deliberate)/i], ["pace", 1, /\b(rapid|rushed|machine-gun|staccato|breathless|fast-talk)/i],
+  ["form", 1, /\b(formal|ceremon|courtly|stiff|elevated|pompous)/i], ["form", -1, /\b(casual|slang|colloquial|informal)/i],
+  ["warm", 1, /\b(warm|affection|tender|gentle|caring|soothing|reassur)/i], ["warm", -1, /\b(cold|curt|cutting|dismissive|aloof|detached|sneer|scornful|harsh|icy)/i],
+  ["hon", -1, /\b(evasive|deflect|spin|euphemis|hedg|vague|obfuscat|lies)/i], ["hon", 1, /\b(blunt|candid|frank|plain-spoken|brutally honest)/i],
+  ["asrt", 1, /\b(command|insist|firm|decisive|demand|dominat|authorit)/i], ["asrt", -1, /\b(hesitant|tentative|defer|yield|timid|diffident|deferential)/i],
+  ["emo", 1, /\b(expressive|tearful|gushing|wears (it|their)|open about)/i], ["emo", -1, /\b(guarded|stoic|reserved|bottled|deadpan|impassive|flat affect)/i],
+  ["mood", -1, /\b(sigh|grumbl|irritab|weary|snappish|sullen|moan|complain)/i], ["mood", 1, /\b(cheerful|sunny|chirpy|bubbly|upbeat)/i],
+  ["disc", 1, /\b(meticulous|methodical|orderly|rehears|structured|exact)/i], ["disc", -1, /\b(scattered|tangent|digress|chaotic|impulsive|disorgani)/i],
+  ["intel", 1, /\b(analytic|logical|hypothes|technical)/i], ["intel", -1, /\b(gut feeling|instinct|intuit|hunch)/i],
+  ["act", 1, /\b(fidget|restless|energetic|bounc)/i], ["act", -1, /\b(slump|languid|sedentary|lethargic|motionless)/i],
+  ["cur", 1, /\b(curious|probing|inquisitive|asks questions)/i],
+  ["ego", 1, /\b(boast|brag|swagger|self-assured)/i], ["ego", -1, /\b(self-deprecat|self-doubt|sheepish|insecure|small voice)/i],
+  ["man", -1, /\b(rude|crude|interrupt|swear|profan|belch)/i], ["man", 1, /\b(courteous|please and thank)/i],
+];
+function inferredPolarity(t){
+  if (t._polInf !== undefined) return t._polInf;
+  let out = {};
+  if (!t.pol || !Object.keys(t.pol).length){
+    const text = (t.trait || "") + " " + (t.desc || ""), hit = {};
+    POL_INFER_RULES.forEach(([ax, sg, re]) => { if (re.test(text)) (hit[ax] = hit[ax] || new Set()).add(sg); });
+    Object.entries(hit).forEach(([ax, set]) => { if (set.size === 1) out[ax] = [...set][0]; });
+  }
+  Object.defineProperty(t, "_polInf", {value: out, enumerable: false, writable: true});
+  return out;
+}
+let polForConflicts = t => (t.pol && Object.keys(t.pol).length) ? t.pol : inferredPolarity(t);
 const TRAIT_CLASH_PAIRS = [
   [/^(whisper-thin|whispered|whisper-soft|breathy-whisper swell)\b/i, /booming|bellow|thunder/i, "one speaks at the edge of hearing, the other fills the room"],
   [/^never-apologizes\b/i, /\b(over-apologetic|instant-apologizer|apology-flooding|apology-prefacing|anticipatory apologist|apology-and-repeat|apologetic-funny)/i, "one will not say sorry, the other says it for everything"],
@@ -4148,6 +4183,8 @@ const PROFILE_SECTIONS = [
    blurb:"The concrete ones — phobias, social dreads, bodily aversions — beside the abstract Core Fear."},
   {id:"family", section:"Family Talk", label:"Family Talk", drawAll:false, defaultOn:false,
    blurb:"How much, and how, family comes into their conversation."},
+  {id:"conflictstyle", section:"Conflict Style", label:"Conflict Style", drawAll:false, defaultOn:false,
+   blurb:"How they fight: stonewalling, passive-aggression, arguing the record, smoothing, escalating then apologising, sulking, triangulating."},
 ];
 
 

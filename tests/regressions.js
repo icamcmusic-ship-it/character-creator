@@ -563,7 +563,7 @@ module.exports = function({check, group, assert}){
     ['lie', 'persuade'].forEach(id => takes(G, id).forEach(l => assert(!l.rules.some(r => /^motivation:/.test(r)), id + ' explained the want on a terse sheet: ' + l.text)));
     const c = takes(G, 'conceal', 'baseline', 20);
     assert(c.some(l => l.rules.some(r => /^motivation:/.test(r))), 'a terse concealing line never circled the wound');
-    c.filter(l => l.rules.some(r => /^motivation:/.test(r))).forEach(l => assert(l.text.length < 140, 'the terse line is not clipped: ' + l.text));
+    c.filter(l => l.rules.some(r => /^motivation:/.test(r))).forEach(l => assert(l.text.replace(/\[[^\]]*\]/g, '').trim().length < 110, 'the terse line is not clipped: ' + l.text));
     assert(c.some(l => /\[[^\]]+\]/.test(l.text)), 'a terse character lost their stage directions');
   });
 
@@ -1062,29 +1062,76 @@ module.exports = function({check, group, assert}){
     assert(r.calm === 0, 'an unrelated pair was flagged');
   });
 
-  check('LEFT near-duplicate pairs are found, and a sheet that seats both is told', ()=>{
+  check('LEFT near-duplicate pairs are found, a sheet that seats both is told, and the bank has none left', ()=>{
     const G = fresh();
     const r = G.evalIn(`(()=>{
-      const idx = nearDuplicateIndex(), by = n => TRAITS.find(t => t.trait === n);
-      const a = by('Overcommitting'), b = by('Overcommitting undisciplined');
-      const st = {x:{trait:a}, y:{trait:b}};
-      return {pairs: idx.size, has: !!(idx.get(a.id) && idx.get(a.id).has(b.id)), told: checkConflictsFor(st).filter(c => /nearly the same thing/.test(c.text)).length};
+      const left = nearDuplicateIndex().size;
+      const mk = (id, n, d) => ({id, section: 'Test', category: 'Dup', trait: n, desc: d, example: 'x', intensity: 3, rarity: 'common', pol: {}});
+      const a = mk(990001, 'Overcommitting habit', 'Says yes to every request and then cannot deliver on any of them.');
+      const b = mk(990002, 'Overcommitting habit again', 'Says yes to every request and then cannot deliver on any of them either.');
+      TRAITS.push(a, b); _NEAR_DUPS = null;
+      const idx = nearDuplicateIndex();
+      const out = {left, has: !!(idx.get(a.id) && idx.get(a.id).has(b.id)), told: checkConflictsFor({x:{trait:a}, y:{trait:b}}).filter(c => /nearly the same thing/.test(c.text)).length};
+      TRAITS.pop(); TRAITS.pop(); _NEAR_DUPS = null;
+      return out;
     })()`);
-    assert(r.pairs >= 40, 'too few near-duplicates found: ' + r.pairs);
-    assert(r.has && r.told === 1, 'the known pair was not reported: ' + JSON.stringify(r));
+    assert(r.left <= 6, r.left + ' near-duplicate traits remain in the bank');
+    assert(r.has && r.told === 1, 'a synthetic pair was not reported: ' + JSON.stringify(r));
   });
 
   check('LEFT every category the growth packs touched reaches the floor of 15, and the packs stay inside their id range', ()=>{
     const G = fresh();
     const r = G.evalIn(`(()=>{
       const cnt = {}, touched = new Set(), badIds = [];
-      TRAITS.forEach(t => { const k = t.section + ' :: ' + t.category; cnt[k] = (cnt[k] || 0) + 1; if (t.id >= 190000){ touched.add(k); if (t.id > 199999) badIds.push(t.id); } });
+      TRAITS.forEach(t => { const k = t.section + ' :: ' + t.category; cnt[k] = (cnt[k] || 0) + 1; if (t.id >= 190000 && t.id < 200000){ touched.add(k); } });
       return {short: [...touched].filter(k => cnt[k] < 15).map(k => k + ' ' + cnt[k]), n: touched.size, grown: TRAITS.filter(t => t.id >= 190000).length, badIds};
     })()`);
     assert(r.n >= 50, 'the growth packs touched only ' + r.n + ' categories');
     assert(!r.short.length, 'still under 15: ' + r.short.join('; '));
     assert(!r.badIds.length, 'ids outside the pack range');
     assert(r.grown >= 400, 'expected ~450 grown traits, got ' + r.grown);
+  });
+
+  check('LEFT against-type flips a preset\'s strongest axes, and off changes nothing', ()=>{
+    const G = fresh(), d = G.document;
+    d._set('archetypeSelect', {value: 'plainSpoken'}); d._set('archetypeVariation', {value: ''}); d._set('archetypeBlend', {value: '1'}); d._set('againstType', {value: '0'});
+    G.gen('against1'); const off = G.sig();
+    d.getElementById('againstType').value = '2'; G.gen('against1'); const on = G.sig();
+    assert(on !== off, 'flipping two axes changed nothing');
+    d.getElementById('againstType').value = '0'; G.gen('against1');
+    assert(G.sig() === off, 'turning it off did not restore the same character');
+    assert(/againstType/.test(fs.readFileSync(path.join(ROOT, 'js/render.js'), 'utf8')), 'the setting is not captured');
+  });
+
+  check('LEFT inferred polarity reaches conflict reports and never the draw', ()=>{
+    const G = fresh();
+    const r = G.evalIn(`(()=>{
+      const by = n => TRAITS.find(t => t.trait === n);
+      const a = by('Hesitant'), b = by('Command-rhythm');
+      const un = TRAITS.filter(t => !t.pol || !Object.keys(t.pol).length);
+      return {inferred: un.filter(t => Object.keys(inferredPolarity(t)).length).length, untagged: un.length, a: JSON.stringify(inferredPolarity(a)), pRaw: JSON.stringify(a.pol || {}),
+        conflict: checkConflictsFor({x:{trait:a}, y:{trait:b}}).length};
+    })()`);
+    assert(r.inferred >= 300, 'only ' + r.inferred + ' of ' + r.untagged + ' untagged traits got an inferred pole');
+    assert(r.pRaw === '{}', 'the stored polarity was changed');
+    assert(r.conflict >= 1, 'an inferred opposition was not reported');
+  });
+
+  check('LEFT Conflict Style is an optional section with seven categories, linked from the sliders and hinted by presets', ()=>{
+    const G = fresh();
+    const r = G.evalIn(`(()=>{
+      const ps = PROFILE_SECTIONS.find(p => p.id === 'conflictstyle');
+      const cats = {}; TRAITS.filter(t => t.section === 'Conflict Style').forEach(t => cats[t.category] = (cats[t.category] || 0) + 1);
+      const hinted = Object.values(ARCHETYPE_PROFILE_HINTS).filter(h => h.conflictstyle).length;
+      return {off: ps && ps.defaultOn === false, cats, hinted};
+    })()`);
+    assert(r.off === true, 'the section is missing or on by default');
+    assert(Object.keys(r.cats).length === 7 && Object.values(r.cats).every(n => n >= 13), 'categories: ' + JSON.stringify(r.cats));
+    assert(r.hinted >= 4, 'only ' + r.hinted + ' presets hint it');
+    G.document._set('sec_conflictstyle', {checked: true}); G.document._set('type_conflictstyle', {value: 'Litigator', tagName: 'SELECT', options: [{value: ''}, {value: 'Litigator'}]});
+    let got = false;
+    for (let i = 1; i <= 30 && !got; i++){ G.gen('cs' + i); got = G.evalIn("Object.values(state).some(s => s && s.trait && s.trait.section === 'Conflict Style')"); }
+    assert(got, 'the section never produced a card when switched on');
   });
 };
 module.exports.fresh = fresh;

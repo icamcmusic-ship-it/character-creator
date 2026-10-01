@@ -76,7 +76,7 @@ const TRAITS_GROWTH_C = (function(){
   ]);
 
   block(JAR, "Tech", 194500, [
-    ["'Have you tried turning it off and on'","Applies a restart to arguments, moods and relationships.","You're stuck. Walk it off, reboot, come back. Honestly.",4,"c",{mood:1}],
+    ["'Have you tried turning it off and on'","Tells an agitated person to power down for ten minutes and return with a clean slate, in the middle of a row.","Ten minutes, no talking, then we start fresh. Go.",4,"c",{mood:1}],
     ["Everything is a ticket","Logs requests, assigns owners and closes the issue in conversation.","Right, I'll raise it. Whose queue is the washing up in?",4,"c",{form:1,disc:1}],
     ["'Works on my machine'","Disclaims responsibility when something fails for anyone else.","Weird. It was fine when I did it. Must be your end.",3,"u",{ego:1,hon:-1,agr:-1}],
     ["Deprecates old habits","Describes outdated routines as deprecated, kept only for backwards compatibility.","Calling at six? That's legacy. We support it, we don't love it.",2,"d",{mood:1}],

@@ -45,6 +45,7 @@ const ASSETS = [
   './js/data/traits-growth-c.js',
   './js/data/traits-growth-d.js',
   './js/data/traits-growth-e.js',
+  './js/data/traits-conflict.js',
   './js/engine.js',
   './js/generate.js',
   './js/render.js',

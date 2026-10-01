@@ -1633,7 +1633,7 @@ const CHAR_FORMAT_VERSION = 2;
 // Every control that changes what a generation produces.
 const SETTING_FIELDS = ['mannerCount','vocabCount','personalityCount','profileDepth',
   'rarityPref','affinityBoost','rangeFocus','profileWeight','divergence',
-  'archetypeSelect','archetypeVariation','archetypeBlend','seedInput','sheetDensity','wildcardCount','pressureLevel',
+  'archetypeSelect','archetypeVariation','archetypeBlend','againstType','seedInput','sheetDensity','wildcardCount','pressureLevel',
   'lensSelect',
   /* The cast and foil controls were the one part of the workspace that no capture
      covered, so "export my setup" and Undo both silently dropped them and a cast was

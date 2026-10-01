@@ -300,6 +300,12 @@
             <select id="archetypeVariation" data-on="change" data-act="onSliderChange" data-args="[]"></select>
             <label for="archetypeBlend" class="sub" style="margin:8px 0 2px;">How much of the preset to keep <span id="archetypeBlendVal">65%</span></label>
             <input type="range" id="archetypeBlend" min="0.2" max="1" step="0.05" value="0.65" data-on="input" data-act="onArchetypeBlendInput" data-args="[]">
+            <label for="againstType" class="sub" style="margin:8px 0 2px;">Against type</label>
+            <select id="againstType" data-on="change" data-act="onSliderChange" data-args="[]">
+              <option value="0">Off: as written</option>
+              <option value="1">Flip its strongest axis</option>
+              <option value="2">Flip its two strongest</option>
+            </select>
             <div class="sub" id="archetypeIntentNote" style="margin:4px 0 0;"></div>
           </div>
         </div>
@@ -1007,6 +1013,7 @@
 <script src="js/data/traits-growth-c.js" defer></script>
 <script src="js/data/traits-growth-d.js" defer></script>
 <script src="js/data/traits-growth-e.js" defer></script>
+<script src="js/data/traits-conflict.js" defer></script>
 <script src="js/engine.js" defer></script>
 <script src="js/generate.js" defer></script>
 <script src="js/render.js" defer></script>

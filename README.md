@@ -212,6 +212,9 @@ button instead of (or as well as) a confirm.
   beats, recovery names the cast member they trust and the one who makes it worse, and a logged arc
   event adds a beat. The bank also reports pairs that cannot both hold (whispers vs booms) and pairs
   that say nearly the same thing.
+* **Conflict Style** (an optional section, off by default) covers how they fight: stonewalling,
+  passive-aggression, arguing the record, smoothing, escalating then apologising, sulking and
+  triangulating. **Against type**, under a preset's tuning, flips its one or two strongest axes.
 * **History** lists the last twenty rolls: restore one (it is itself undoable) or compare it
   with the sheet on screen, trait by trait and slider by slider. **Find on this sheet**
   filters the cards and opens folded sections while you search; which sections you fold is

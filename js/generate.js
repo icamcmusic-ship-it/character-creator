@@ -658,7 +658,16 @@ function _runGeneration(){
 
   const archKey = strVal('archetypeSelect', '');
   // The preset with its chosen variation folded in — see effectiveArchetype.
-  const arch = effectiveArchetype(archKey, strVal('archetypeVariation', ''));
+  let arch = effectiveArchetype(archKey, strVal('archetypeVariation', ''));
+  /* "Against type" (audit §5c): invert the preset's one or two strongest axes that are not
+     its must-axes, so a Mentor comes out hoarding knowledge. Off (0) changes nothing, so
+     existing seeds and share links build as before. */
+  const againstN = clamp(intVal('againstType', 0), 0, 2);
+  if (arch && arch.pers && againstN > 0){
+    const must = new Set((arch.intent && arch.intent.must) || []);
+    const ranked = Object.entries(arch.pers).filter(([ax]) => !must.has(ax)).sort((a, b) => Math.abs(b[1]) - Math.abs(a[1])).slice(0, againstN);
+    arch = Object.assign({}, arch, {pers: Object.assign({}, arch.pers, Object.fromEntries(ranked.map(([ax, v]) => [ax, -v])))});
+  }
   // BUG FIX: this used to WRITE the blended value back into the slider elements.
   // Because the blend reads the slider it just wrote, pressing Generate repeatedly
   // with an archetype selected pulled the sliders further toward the archetype each
