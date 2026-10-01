@@ -4446,6 +4446,38 @@ const ARCH_NOUN = {
   "Risk & Escape":["Gambler","Bolter"], "Restraint & Discipline":["Ascetic","Abstainer"],
   "Avoidance & Procrastination":["Postponer","Deferrer"],
 };
+/* Name shapes beyond "The [Adj] [Noun]": a verb phrase, a possession, or a disguise. */
+const ARCH_WHO = {
+  "Rigid & Principled":["Keeps the Rules Nobody Asked For","Will Not Bend"], "Pragmatic & Flexible":["Makes It Work","Reads the Room Twice"],
+  "Loyalty-Bound":["Stays Past Reason","Never Leaves First"], "Self-Interested":["Counts the Cost","Keeps a Ledger"],
+  "Idealistic & Visionary":["Still Believes","Builds Castles in Daylight"],
+  "Secure":["Holds Steady","Lets the Storm Pass"], "Anxious":["Checks Twice","Waits for the Other Shoe"],
+  "Avoidant":["Leaves the Room First","Answers Tomorrow"], "Disorganized":["Wants Both","Changes Their Mind Mid-Sentence"],
+  "Fight (attack the threat)":["Hits First","Squares Up"], "Flight (remove yourself)":["Is Already at the Door","Finds Another Errand"],
+  "Freeze (shut down)":["Goes Quiet","Stops Mid-Sentence"], "Fawn (appease the threat)":["Says Yes Too Fast","Smooths It Over"],
+  "Substance & Consumption":["Pours Another","Reaches for the Bottle"], "Compulsion & Ritual":["Needs It Just So","Repeats the Check"],
+  "Risk & Escape":["Takes the Bet","Bolts at the Best Part"], "Restraint & Discipline":["Does Without","Keeps the Rules for Themself"],
+  "Dry & Deadpan":["Never Smiles First"], "Cruel & Barbed":["Finds the Soft Spot"], "Self-Deprecating":["Goes First on the Joke"],
+};
+const ARCH_OF = {
+  "Rigid & Principled":["Iron Rules","the Written Law"], "Pragmatic & Flexible":["Small Compromises","Convenient Truths"],
+  "Loyalty-Bound":["Old Debts","Long Allegiance"], "Self-Interested":["Quiet Leverage","the Open Hand, Closed"],
+  "Idealistic & Visionary":["Unfinished Futures","Borrowed Light"],
+  "Secure":["Level Ground"], "Anxious":["Held Breath","Small Alarms"], "Avoidant":["Closed Doors","the Long Way Round"],
+  "Disorganized":["Crossed Wires","Half-Finished Things"],
+  "Substance & Consumption":["Empty Glasses"], "Compulsion & Ritual":["Small Rituals"], "Risk & Escape":["Burnt Bridges","Last Chances"],
+  "Restraint & Discipline":["Closed Fists, Open Hands"],
+  "Fight (attack the threat)":["Raised Voices"], "Flight (remove yourself)":["Packed Bags"],
+  "Freeze (shut down)":["Held Silence"], "Fawn (appease the threat)":["Soft Answers"],
+  "Dry & Deadpan":["Flat Delivery"], "Cruel & Barbed":["Sharp Edges"],
+};
+const ARCH_COAT = {
+  "Warm & Playful":["Cheer","Sunshine"], "Dry & Deadpan":["Indifference","Boredom"], "Cruel & Barbed":["Candour","Wit"],
+  "Self-Deprecating":["Modesty","Apology"], "Absurd & Chaotic":["Nonsense"],
+  "Rigid & Principled":["Principle","Duty"], "Pragmatic & Flexible":["Common Sense"], "Self-Interested":["Generosity","Good Advice"],
+  "Loyalty-Bound":["Duty"], "Idealistic & Visionary":["Idealism"],
+  "Secure":["Calm"], "Anxious":["Helpfulness"], "Avoidant":["Independence"], "Disorganized":["Spontaneity"],
+};
 // Deterministic when a seed is given (mulberry32 PRNG off a string hash), otherwise
 // falls back to rand(). Lets any caller opt into repeatable output — e.g. the
 // same character name always composing the same emergent title — without a global mode.
@@ -4499,6 +4531,19 @@ function emergentArchetypeName(st){
       }
       // "The Barbed Blade" — an adjective and noun from the same category is a tautology
       if (adj.toLowerCase() === noun.toLowerCase()) return null;
+      // Other shapes (2026 audit §5a): every composed name was "The [Adj] [Noun]".
+      const shape = seededRandom(seed + "shape")();
+      const pickOf = (map, cats, k) => { const c = cats.filter(x => map[x]); return c.length ? pickFrom(map[pickFrom(c, seed + k)], seed + k + "2") : null; };
+      if (shape >= 0.55 && shape < 0.75){
+        const who = pickOf(ARCH_WHO, [stress, attach, values, vices, humor], "w");
+        if (who) return noun + " Who " + who;
+      } else if (shape >= 0.75 && shape < 0.9){
+        const of = pickOf(ARCH_OF, [values, vices, attach, stress, humor], "o");
+        if (of) return "The " + noun + " of " + of;
+      } else if (shape >= 0.9){
+        const coat = pickOf(ARCH_COAT, [humor, values, attach], "c");
+        if (coat && role && ARCH_NOUN[role]) return "The " + pickFrom(ARCH_NOUN[role], seed + "rc") + " in " + coat + "'s Coat";
+      }
       return "The " + adj + " " + noun;
     }
     if (nounSrc.length) return "The " + pickFrom(ARCH_NOUN[pickFrom(nounSrc, seed+"n")], seed+"n2");
@@ -7616,8 +7661,19 @@ function composeVoiceLine(st, promptId, mode, opts){
   }
   // Core clause, same lean priority as the fragment composer.
   const order = ["direct","yielding","slippery","straight","open","guarded","warm","cold","mannered","blunt","terse"];
+  /* Leans blend (2026 audit §5b): the first matching lean used to win every line, so every
+     assertive character talked "direct". Each lean that applies is now weighted by how far
+     its axis sits from zero, and the take draws among them — a character who is both
+     direct and guarded speaks both ways, and the commoner lean still wins most takes. */
+  const _LEAN_AX = {direct:"asrt", yielding:"asrt", slippery:"hon", straight:"hon", open:"emo", guarded:"emo", warm:"warm", cold:"warm", mannered:"man", blunt:"man", terse:"vol"};
   let entry = null;
-  for (const k of order){ if (r[k] && table[k]){ entry = table[k]; break; } }
+  const cand = order.filter(k => r[k] && table[k]);
+  if (cand.length > 1){
+    const w = cand.map(k => { const v = Math.abs((r.profile || {})[_LEAN_AX[k]] || 0.3); return v * v + 0.05; });
+    let x = rng() * w.reduce((a, b) => a + b, 0), i = 0;
+    while (i < cand.length - 1 && x >= w[i]){ x -= w[i]; i++; }
+    entry = table[cand[i]];
+  } else if (cand.length) entry = table[cand[0]];
   if (!entry) entry = table.mid || table.straight || Object.values(table)[0];
   used.push(entry.rule);
   // Within one list of takes, a clause template is not reused until the pool is spent —

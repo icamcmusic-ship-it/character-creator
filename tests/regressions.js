@@ -963,4 +963,37 @@ module.exports = function({check, group, assert}){
     assert(/function ensureSeedPickerRendered/.test(eng) && /addEventListener\('toggle'/.test(eng), 'the seed picker is still built eagerly');
     assert(/_seedPickerRendered = true;\s*\n\s*const q = strVal/.test(eng), 'filtering does not render the options');
   });
+
+  // ---- §5a/§5b leftovers: name shapes, foil frames, lean blending ----
+  check('LEFT emergent names take more than one shape, and stay stable for a sheet', ()=>{
+    const G = fresh(); const shapes = {the: 0, who: 0, of: 0, coat: 0}; let n = 0;
+    for (let i = 1; i <= 80; i++){
+      G.gen('nm' + i);
+      const a = G.evalIn("(emergentArchetypeName(state)||{}).name || ''"), b = G.evalIn("(emergentArchetypeName(state)||{}).name || ''");
+      assert(a === b, 'the name changed between two reads: ' + a + ' / ' + b);
+      if (!a) continue; n++;
+      if (/ in .+'s Coat$/.test(a)) shapes.coat++; else if (/ Who /.test(a)) shapes.who++; else if (/^The \S+ of /.test(a)) shapes.of++; else shapes.the++;
+    }
+    assert(shapes.who + shapes.of + shapes.coat >= 3, 'every name still has one shape: ' + JSON.stringify(shapes));
+    assert(shapes.the > 0, 'the old shape vanished');
+  });
+
+  check('LEFT foils: premise frames cover humour, attachment, role and origin as well as the old six', ()=>{
+    const G = fresh(); const seen = new Set();
+    for (let i = 1; i <= 40; i++){
+      G.gen('fa' + i); G.evalIn("globalThis.__A = JSON.parse(JSON.stringify(state))");
+      G.gen('fb' + i);
+      const t = G.evalIn(`(function(){ const p = foilPremiseFromSheets(state, __A, mulberry32(${i}), {a:'Ann', b:'Bo'}); return p ? p.text : ''; })()`);
+      if (/funny in one register|loves .* loves |takes the .* seat|came from/.test(t)) seen.add(t.slice(0, 18));
+    }
+    assert(seen.size >= 2, 'the new frames never came up in 40 draws');
+  });
+
+  check('LEFT voice lines are deterministic with lean blending', ()=>{
+    const G = fresh(); G.gen('lean1');
+    const a = G.evalIn("JSON.stringify(voiceLines ? voiceLines(state, 'lean1', 'refuse') : '')");
+    G.gen('lean1');
+    const b = G.evalIn("JSON.stringify(voiceLines ? voiceLines(state, 'lean1', 'refuse') : '')");
+    assert(a === b, 'the same seed gave different lines');
+  });
 };

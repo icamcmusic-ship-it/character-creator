@@ -401,6 +401,15 @@ function foilPremiseFromSheets(src, foil, rng, names){
   if (va && vb && va.category !== vb.category) forms.push({text: `${A} runs on ${SV[va.category] || va.trait}; ${B} runs on ${SV[vb.category] || vb.trait}. They met on the day those two things asked for the same decision.`, from: [va, vb]});
   if (fear) forms.push({text: `${B} is what ${A}'s fear looks like lived in — ${_mxQ(fear.trait)} — and ${B} seems perfectly fine, which is worse.`, from: [fear]});
   if (need) forms.push({text: `${B} could give ${A} ${_mxQ(need.trait)} without even trying, and is the last person alive ${A} would take it from.`, from: [need]});
+  // Frames driven by the rest of the sheet (audit §5a): humour, attachment, competence, origin.
+  const hA = _mxT(src, "humor"), hB = _mxT(foil, "humor"), atA = _mxT(src, "attachment"), atB = _mxT(foil, "attachment");
+  const roleA = _mxT(src, "role"), roleB = _mxT(foil, "role"), cmpA = _mxT(src, "competence"), cmpB = _mxT(foil, "competence");
+  const orgA = _mxT(src, "origins"), orgB = _mxT(foil, "origins");
+  if (hA && hB && hA.category !== hB.category) forms.push({text: `${A} is funny in one register (${_mxLc(hA.category)}) and ${B} in another (${_mxLc(hB.category)}). Put them in a room and each of them finds the other's jokes either unforgivable or a relief.`, from: [hA, hB]});
+  if (atA && atB && atA.category !== atB.category) forms.push({text: `${A} loves ${_mxLc(atA.category)}; ${B} loves ${_mxLc(atB.category)}. Neither is wrong, and each is the other's standing proof that the other's way costs something.`, from: [atA, atB]});
+  if (cmpA && cmpB && cmpA.category !== cmpB.category) forms.push({text: `${B} is good at the thing ${A} is merely competent at — ${_mxQ(cmpB.trait)} — and ${A} has never decided whether to learn from it or resent it.`, from: [cmpA, cmpB]});
+  if (roleA && roleB && roleA.category !== roleB.category) forms.push({text: `${A} takes the ${_mxLc(roleA.category)} seat; ${B} takes the ${_mxLc(roleB.category)} one. The group works only while neither has to explain why.`, from: [roleA, roleB]});
+  if (orgA && orgB) forms.push({text: `${A} came from ${_mxQ(orgA.trait)}; ${B} from ${_mxQ(orgB.trait)}. They agree on nothing about how things are done, and each privately suspects the other got the easier start.`, from: [orgA, orgB]});
   if (!forms.length) return null;
   const pick = forms[Math.floor((rng || Math.random)() * forms.length)];
   return {text: pick.text, from: pick.from.map(t => t.trait)};
