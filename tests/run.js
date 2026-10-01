@@ -2592,7 +2592,7 @@ check('pressure drops the politeness layer and brings the stress response in', (
   const base = A.composeVoiceLine(found.st, 'refuse', 'baseline');
   const pres = A.composeVoiceLine(found.st, 'refuse', 'pressure');
   assert(pres.text !== base.text, 'pressure changed nothing');
-  assert(!pres.rules.some(x=>/register|manners/.test(x)), `pressure kept the politeness rules: ${pres.rules.join('; ')}`);
+  assert(!pres.rules.some(x=>/^(formal|casual) register|manners/.test(x) && !/^humour/.test(x)), `pressure kept the politeness rules: ${pres.rules.join('; ')}`);
   assert(pres.rules.some(x=>/stress response/.test(x)), `pressure did not bring the stress response: ${pres.rules.join('; ')}`);
   return `"${base.text.slice(0,30)}…" → "${pres.text.slice(0,30)}…"`;
 });

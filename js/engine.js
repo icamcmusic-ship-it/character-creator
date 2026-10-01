@@ -1025,6 +1025,18 @@ let ARCHETYPES = {
              pers:{confidence:90, curiosity:-50, assertiveness:70, intelligence:-35, honesty:-25, agreeableness:-40, manners:25, friendliness:20, positivity:30}},
   maliciousTrickster:  {label:"Malicious Trickster", verbosity:1, register:-1, composure:1, vocabPref:["Pragmatic Focus & Speech Functions","Phonetic & Auditory Qualities"],
              pers:{honesty:-75, agreeableness:-75, rebelliousness:70, positivity:40, discipline:-45, intelligence:50, friendliness:30, emotionalcapacity:-45, activeness:55}},
+  loudKind:            {label:"Loud & Kind", verbosity:1, register:-1, composure:0, vocabPref:["Phonetic & Auditory Qualities","Pragmatic Focus & Speech Functions"],
+             pers:{assertiveness:35, friendliness:80, agreeableness:55, positivity:50, manners:25, confidence:15, emotionalcapacity:60, honesty:65, discipline:55, activeness:30, curiosity:30}},
+  disciplinedRebel:    {label:"Disciplined Rebel", verbosity:0, register:0, composure:-1, vocabPref:["Directness & Literalness","Precision & Specificity Level"],
+             pers:{discipline:70, rebelliousness:70, assertiveness:45, honesty:55, intelligence:40, agreeableness:-35, confidence:40, friendliness:-10}},
+  anxiousLeader:       {label:"Anxious Leader", verbosity:1, register:1, composure:1, vocabPref:["Pragmatic Focus & Speech Functions","Semantic Density & Modifiers"],
+             pers:{assertiveness:40, confidence:-40, discipline:60, emotionalcapacity:-10, positivity:-30, intelligence:30, agreeableness:20, honesty:25}},
+  cheerfulNihilist:    {label:"Cheerful Nihilist", verbosity:0, register:-1, composure:0, vocabPref:["Abstractness & Sensory Modality","Phonetic & Auditory Qualities"],
+             pers:{positivity:70, rebelliousness:30, honesty:50, discipline:-40, intelligence:35, agreeableness:25, friendliness:45, confidence:20, curiosity:20, emotionalcapacity:-40}},
+  streetwiseSage:      {label:"Street-Wise Sage", verbosity:0, register:-2, composure:-1, vocabPref:["Directness & Literalness","Affective & Emotional Intensity"],
+             pers:{intelligence:-50, honesty:35, confidence:60, agreeableness:5, friendliness:15, curiosity:30, activeness:-35, assertiveness:-25, manners:-35, positivity:-20, discipline:30, emotionalcapacity:35}},
+  politeLiar:          {label:"Polite Liar", verbosity:0, register:2, composure:-1, vocabPref:["Register & Formality Spectrum","Pragmatic Focus & Speech Functions"],
+             pers:{manners:70, honesty:-70, discipline:-10, friendliness:-25, agreeableness:45, confidence:-15, intelligence:25, emotionalcapacity:-40, assertiveness:-35, positivity:40, activeness:35, curiosity:35, rebelliousness:30}},
 };
 
 /* Optional profile hints, per archetype. See ARCHETYPE PROFILE HINTS in accumulateBoost:
@@ -1101,6 +1113,12 @@ const ARCHETYPE_PROFILE_HINTS = {
   nosyNeighbour:        {role:"Connector", vices:"Compulsion & Ritual", values:"Rigid & Principled", humor:"Cruel & Barbed", attachment:"Anxious", texture:"Affiliations", beliefs:"Conspiracy-Adjacent"},
   pompousBlowhard:      {role:"Leader", humor:"Intellectual & Wordplay", values:"Self-Interested", stress:"Fight (attack the threat)", attachment:"Avoidant", money:"Status Signalling", dialect:"Class Register Shift"},
   maliciousTrickster:   {humor:"Cruel & Barbed", role:"Instigator", values:"Self-Interested", vices:"Risk & Escape", attachment:"Disorganized", beliefs:"Conspiracy-Adjacent", conversation:"Masking"},
+  loudKind:             {role:"Caretaker", humor:"Warm & Playful", attachment:"Secure", values:"Loyalty-Bound", stress:"Fight (attack the threat)", family:"Talks About Family Constantly"},
+  disciplinedRebel:     {values:"Rigid & Principled", role:"Outsider", humor:"Dry & Deadpan", stress:"Fight (attack the threat)", beliefs:"Political Temperament"},
+  anxiousLeader:        {role:"Leader", attachment:"Anxious", stress:"Freeze (shut down)", humor:"Self-Deprecating", vices:"Compulsion & Ritual", values:"Loyalty-Bound", conversation:"Masking"},
+  cheerfulNihilist:     {humor:"Gallows", values:"Pragmatic & Flexible", attachment:"Disorganized", role:"Outsider", stress:"Flight (remove yourself)", vices:"Avoidance & Procrastination", beliefs:"Secular Rituals"},
+  streetwiseSage:       {role:"Peacemaker", values:"Pragmatic & Flexible", humor:"Observational", attachment:"Secure", dialect:"Regional Features", money:"Thrift Talk"},
+  politeLiar:           {humor:"Dry & Deadpan", role:"Connector", values:"Self-Interested", attachment:"Avoidant", vices:"Restraint & Discipline", conversation:"Scripted Speech"},
 };
 Object.entries(ARCHETYPE_PROFILE_HINTS).forEach(([k, profile])=>{
   if (ARCHETYPES[k]) ARCHETYPES[k].profile = profile;
@@ -1261,6 +1279,12 @@ const ARCHETYPE_INTENT = {
   nosyNeighbour:        {must:["curiosity","honesty"], nudge:["role","vices","values","humor","attachment"], open:["stress"]},
   pompousBlowhard:      {must:["confidence","curiosity"], nudge:["role","humor","values","stress","attachment"], open:["vices"]},
   maliciousTrickster:   {must:["honesty","agreeableness"], nudge:["humor","role","values","vices","attachment"], open:["stress"]},
+  loudKind:             {must:["assertiveness","friendliness"], nudge:["role","humor","attachment","values","stress"], open:["vices"]},
+  disciplinedRebel:     {must:["discipline","rebelliousness"], nudge:["values","role","humor","stress","attachment"], open:["vices"]},
+  anxiousLeader:        {must:["assertiveness","confidence"], nudge:["role","attachment","stress","humor","vices"], open:["values"]},
+  cheerfulNihilist:     {must:["positivity","emotionalcapacity"], nudge:["humor","values","attachment","role","stress"], open:["vices"]},
+  streetwiseSage:       {must:["intelligence","honesty"], nudge:["role","values","humor","attachment"], open:["stress"]},
+  politeLiar:           {must:["manners","honesty"], nudge:["humor","role","values","attachment","vices"], open:["stress"]},
 };
 
 /* ================= NAMED VARIATIONS =================
@@ -1426,6 +1450,18 @@ const ARCHETYPE_VARIATIONS = {
   maliciousTrickster:[{id:"playful", label:"Mostly playful", pers:{friendliness:40, emotionalcapacity:20}, profile:{humor:"Absurd & Chaotic"}},
              {id:"cold", label:"Cold", pers:{friendliness:-50, positivity:-30}, profile:{humor:"Dry & Deadpan", role:"Outsider"}},
              {id:"avenger", label:"Settling scores", pers:{discipline:50}, profile:{values:"Rigid & Principled", stress:"Fight (attack the threat)"}}],
+  loudKind:[{id:"overbearing", label:"Overbearing", pers:{agreeableness:-30}, profile:{role:"Leader"}},
+             {id:"tender", label:"Tender underneath", pers:{manners:30}, profile:{humor:"Self-Deprecating"}}],
+  disciplinedRebel:[{id:"cause", label:"For a cause", pers:{friendliness:35}, profile:{values:"Idealistic & Visionary", role:"Instigator"}},
+             {id:"lone", label:"Lone operator", pers:{friendliness:-35}, profile:{role:"Outsider", attachment:"Avoidant"}}],
+  anxiousLeader:[{id:"overprepared", label:"Over-prepared", pers:{discipline:25}, profile:{vices:"Compulsion & Ritual"}},
+             {id:"cracking", label:"Starting to crack", pers:{emotionalcapacity:30}, profile:{stress:"Fight (attack the threat)"}}],
+  cheerfulNihilist:[{id:"gentle", label:"Gentle", pers:{agreeableness:30}, profile:{role:"Peacemaker"}},
+             {id:"sharp", label:"Sharp", pers:{agreeableness:-30}, profile:{humor:"Cruel & Barbed"}}],
+  streetwiseSage:[{id:"mentor", label:"Mentor", pers:{friendliness:25}, profile:{role:"Caretaker"}},
+             {id:"hard", label:"Hard-won", pers:{positivity:-30}, profile:{humor:"Gallows"}}],
+  politeLiar:[{id:"kind-lies", label:"Kind lies", pers:{friendliness:35}, profile:{role:"Peacemaker"}},
+             {id:"self-serving", label:"Self-serving", pers:{friendliness:-35}, profile:{role:"Instigator"}}],
 };
 Object.entries(ARCHETYPE_INTENT).forEach(([k, v])=>{ if (ARCHETYPES[k]) ARCHETYPES[k].intent = v; });
 Object.entries(ARCHETYPE_VARIATIONS).forEach(([k, v])=>{ if (ARCHETYPES[k]) ARCHETYPES[k].variations = v; });
@@ -3491,8 +3527,69 @@ function checkConflictsFor(stateObj){
       }
     }
   }
+  /* Pairs polarity cannot see (2026 audit §4a: a quarter of the bank has no polarity):
+     an explicit table of names that exclude each other. Matched on the trait name and
+     the category, one conflict per pair. */
+  for (let i=0;i<items.length;i++){
+    for (let j=i+1;j<items.length;j++){
+      if (groups[i] && groups[i] === groups[j]) continue;
+      const a = items[i].trait, b = items[j].trait;
+      if (contextual(a) || contextual(b) || items[i].contradiction || items[j].contradiction) continue;
+      const na = a.trait + ' ' + (a.category || ''), nb = b.trait + ' ' + (b.category || '');
+      for (const [ra, rb, why] of TRAIT_CLASH_PAIRS){
+        if ((ra.test(na) && rb.test(nb) && !rb.test(na) && !ra.test(nb)) || (ra.test(nb) && rb.test(na) && !rb.test(nb) && !ra.test(na))){
+          const key = `${a.trait}|${b.trait}|clash:${why}`;
+          const severity = (a.intensity||3) + (b.intensity||3), tier = conflictTier(severity);
+          if (!found.has(key)) found.set(key, {key, severity, tier: tier.label, tierNote: tier.note,
+            text: `"${a.trait}" and "${b.trait}" cannot both hold: ${why}.`});
+          break;
+        }
+      }
+    }
+  }
+  const nd = nearDuplicateIndex(), seenDup = new Set();
+  items.forEach((it, i) => {
+    const mates = nd.get(it.trait.id); if (!mates) return;
+    items.forEach((ot, j) => {
+      if (j <= i || !mates.has(ot.trait.id) || (groups[i] && groups[i] === groups[j])) return;
+      const key = `${it.trait.trait}|${ot.trait.trait}|nearly-same`;
+      if (seenDup.has(key)) return; seenDup.add(key);
+      found.set(key, {key, severity: 2, tier: "soft", tierNote: "Not a contradiction: a repeat.",
+        text: `"${it.trait.trait}" and "${ot.trait.trait}" say nearly the same thing; one of them is wasted. Reroll one.`});
+    });
+  });
   return [...found.values()].sort((x,y)=> y.severity - x.severity);
 }
+/* Near-duplicates (audit §4a): an older trait next to a later pack's rewrite of it, in one
+   category. Found once, lazily, by name and description overlap; the draw is left alone
+   (changing it would change what an existing seed builds), and a sheet that seats both
+   is told so, so one can be rerolled. */
+let _NEAR_DUPS = null;
+function nearDuplicateIndex(){
+  if (_NEAR_DUPS) return _NEAR_DUPS;
+  const tok = x => new Set(String(x || "").toLowerCase().replace(/[^a-z0-9 -]/g, " ").split(/[\s-]+/).filter(w => w.length > 2));
+  const jac = (a, b) => { let n = 0; a.forEach(w => { if (b.has(w)) n++; }); return n / ((a.size + b.size - n) || 1); };
+  const byCat = new Map();
+  TRAITS.forEach(t => { const k = t.section + "|" + t.category; if (!byCat.has(k)) byCat.set(k, []); byCat.get(k).push(t); });
+  const idx = new Map();
+  byCat.forEach(list => {
+    const nt = list.map(t => tok(t.trait)), dt = list.map(t => tok(t.desc));
+    for (let i = 0; i < list.length; i++) for (let j = i + 1; j < list.length; j++){
+      const n = jac(nt[i], nt[j]), d = jac(dt[i], dt[j]);
+      if ((n >= 0.6 && d >= 0.35) || d >= 0.7){
+        if (!idx.has(list[i].id)) idx.set(list[i].id, new Set()); idx.get(list[i].id).add(list[j].id);
+        if (!idx.has(list[j].id)) idx.set(list[j].id, new Set()); idx.get(list[j].id).add(list[i].id);
+      }
+    }
+  });
+  return (_NEAR_DUPS = idx);
+}
+const TRAIT_CLASH_PAIRS = [
+  [/^(whisper-thin|whispered|whisper-soft|breathy-whisper swell)\b/i, /booming|bellow|thunder/i, "one speaks at the edge of hearing, the other fills the room"],
+  [/^never-apologizes\b/i, /\b(over-apologetic|instant-apologizer|apology-flooding|apology-prefacing|anticipatory apologist|apology-and-repeat|apologetic-funny)/i, "one will not say sorry, the other says it for everything"],
+  [/Minimal & Ultra-Brief$/i, /\b(rambl|monologu|long-winded|holds forth)/i, "one gives a word, the other a speech"],
+  [/\bTalks About Family Constantly\b/i, /\bNever Mentions Family\b/i, "one talks about family constantly, the other never mentions it"],
+];
 
 
 /* ================= POLARITY COVERAGE NORMALISATION =================
@@ -7446,7 +7543,33 @@ function backstoryBeats(st, meta){
   }
   if (want || aim || role) add("now", "Where it stands", "now",
     `${want ? `They want ${asAim(want)}` : `What they are after: ${asAim(aim)}`}${aim && want ? `, which right now means ${/^to /.test(asAim(aim)) ? 'trying ' + asAim(aim) : asAim(aim)}` : ``}${role ? `, and in any room they are the ${role.category.toLowerCase()}` : ``}.`, [want, aim, role]);
-  return beats.length >= 3 ? beats.slice(0, 5) : (beats.length ? beats : null);
+  /* Life-stage lenses reach the beats (audit §6a): a child has no "bill", a dying character's
+     "now" is what is left unsaid. Settings lenses stay in the voice and the draw. */
+  const lensIds = typeof activeLensIds === "function" ? activeLensIds() : [];
+  const fl = beats.find(b => b.key === "failure"), nw = beats.find(b => b.key === "now");
+  if (lensIds.includes("child") || lensIds.includes("adolescent")){
+    if (fl){
+      const home = lensIds.includes("child");
+      fl.text = `${pick(["The last time it went wrong,", "It happened again recently,"], "lc")} ${home ? "at home, where nobody asked why:" : "at school, in front of people:"} they ${stress ? (STRATEGY_BY_STRESS_PAST[stress.category] || `fell back on ${asNounPhrase(stress)}`) : "fell back on the old habit"}.`;
+    }
+  }
+  if (nw && lensIds.includes("dying")){
+    nw.title = "What is left unsaid"; nw.when = "now";
+    nw.text = `${want ? `They still want ${asAim(want)}` : `Still unfinished: ${asAim(aim)}`}${need ? `, and what they have never said is ${asAim(need)}` : ``}. There is not much time to keep not saying it.`;
+  } else if (nw && lensIds.includes("latelife")){
+    nw.text = nw.text.replace(/\.$/, "") + ", and has stopped pretending otherwise at this age.";
+  }
+  const base = beats.length >= 3 ? beats.slice(0, 5) : (beats.length ? beats : null);
+  /* Arcs reach the backstory (audit §6a): every accepted event is a beat after the five. */
+  const evs = (typeof arcEvents !== "undefined" && Array.isArray(arcEvents) ? arcEvents : []).filter(e => (e.changes || []).some(c => c.accepted));
+  if (base && evs.length){
+    evs.slice().sort((a, b) => a.seq - b.seq).slice(0, 4).forEach(e => {
+      const n = (e.changes || []).filter(c => c.accepted).length;
+      base.push({key: "event" + e.seq, title: e.title || "An event", when: "since", from: [],
+        text: `${e.title || "Something happened"}. ${n} thing${n === 1 ? "" : "s"} on the sheet moved because of it, and the earlier beats are what it moved from.`});
+    });
+  }
+  return base;
 }
 
 /* ---------- 1. COMPOSITIONAL VOICE LINES ----------
@@ -7787,6 +7910,11 @@ function composeVoiceLine(st, promptId, mode, opts){
   /* The inner-conflict engine (mechanics.js): under load the LOSING drive leaks into the
      line — the need under the want, the want under the line they hold, the fear under
      the role. A slip now and then in a calm line; more often when cornered. */
+  // Since the event: a character who has lived through a logged arc event sometimes dates their silence by it.
+  if (!minimal && (kind === "conceal" || kind === "askhelp") && typeof arcEvents !== "undefined" && arcEvents.some(e => (e.changes || []).some(c => c.accepted)) && rng() < 0.3){
+    const ev = arcEvents.filter(e => (e.changes || []).some(c => c.accepted)).slice(-1)[0];
+    if (ev && ev.title && ev.title.length < 40){ extra.push(`Not since ${_lowerFirst(ev.title.replace(/[.!?]+$/, ""))}.`); rule(`arc: ${ev.title} — the line is dated by the event`); }
+  }
   if (typeof innerConflictLeak === 'function' && rng() < (underPressure ? (minimal ? 0.45 : 0.6) : (minimal ? 0 : 0.12))){
     const lk = innerConflictLeak(st, rng, {short: minimal, meta: opts.meta});
     if (lk){ extra.push(lk.text); rule(lk.rule); }

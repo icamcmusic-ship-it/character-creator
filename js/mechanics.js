@@ -357,8 +357,24 @@ function assignCastRoles(members){
 function optimiseCastVoices(entries, seedKey, rebuild, opts){
   const o = Object.assign({passes: 3, attempts: 4}, opts || {});
   if (!entries || entries.length < 2 || typeof voiceCollisionMatrix !== "function") return {before: 0, after: 0, rerolled: 0};
-  const total = arr => voiceCollisionMatrix(arr, "baseline", 0).totals.reduce((a, b) => a + b, 0);
-  let cur = entries.slice(), m = voiceCollisionMatrix(cur, "baseline", 0);
+  /* Motivation collisions (audit §6a): two members who share a Lie, Wound or Want, or the
+     same stress and attachment pair, get identical pressure and recovery text. They count
+     alongside the shared voice devices. */
+  const motiv = arr => {
+    const keys = arr.map(c => {
+      const st = c.state, k = [];
+      ["The Lie", "Core Wound", "Core Want"].forEach(r => { const t = _mxT(st, "motivation", new RegExp(r, "i")); if (t) k.push("m:" + t.id); });
+      const a = _mxT(st, "attachment"), x = _mxT(st, "stress"); if (a && x) k.push("p:" + a.category + "|" + x.category);
+      return k;
+    });
+    return keys.map((k, i) => keys.reduce((n, o, j) => n + (j !== i ? k.filter(x => o.includes(x)).length : 0), 0));
+  };
+  const matrix = arr => { const v = voiceCollisionMatrix(arr, "baseline", 0), mo = motiv(arr);
+    const totals = v.totals.map((t, i) => t + mo[i]); let worst = -1;
+    totals.forEach((t, i) => { if (t > 0 && (worst < 0 || t > totals[worst])) worst = i; });
+    return {totals, worst}; };
+  const total = arr => matrix(arr).totals.reduce((a, b) => a + b, 0);
+  let cur = entries.slice(), m = matrix(cur);
   const before = m.totals.reduce((a, b) => a + b, 0);
   let now = before, rerolled = 0;
   for (let pass = 0; pass < o.passes && now > 0; pass++){
@@ -376,7 +392,7 @@ function optimiseCastVoices(entries, seedKey, rebuild, opts){
     }
     if (!best) break;
     cur = best.trial; now = best.t; rerolled++;
-    m = voiceCollisionMatrix(cur, "baseline", 0);
+    m = matrix(cur);
   }
   cur.forEach((c, j) => { entries[j] = c; });
   return {before, after: now, rerolled};
@@ -708,7 +724,22 @@ const _RECOVER_CELL = {
     "Disorganized": {first:"They over-give, then resent it, then apologise for the resentment. It takes a day to settle into one feeling.",
       who:"to the person they wronged and away from them again, unsure which of them owes the apology"}},
 };
-function recoverySheet(st){
+/* Relationships feed pressure (audit §6a): when the sheet belongs to a cast member, "who they
+   go to" names the person they trust most, and the person who makes it worse is named too. */
+function recoveryCastContext(st){
+  if (typeof castStates === "undefined" || typeof relationshipEdges === "undefined") return null;
+  const me = castStates.find(c => c && c.state === st);
+  return me ? {selfId: me.id, members: castStates, edges: relationshipEdges} : null;
+}
+function _castNames(ctx){
+  if (!ctx) return {};
+  const name = id => { const m = ctx.members.find(c => c.id === id); return m && m.meta && m.meta.name ? m.meta.name : null; };
+  const mine = ctx.edges.filter(e => e.from === ctx.selfId && name(e.to));
+  const near = mine.filter(e => e.role !== "antagonist" && e.role !== "rival").sort((a, b) => (b.trust || 0) - (a.trust || 0))[0];
+  const bad = mine.filter(e => e.role === "antagonist" || e.role === "rival" || (e.trust || 3) <= 1).sort((a, b) => (a.trust || 3) - (b.trust || 3))[0];
+  return {goTo: near && (near.trust || 3) >= 3 ? name(near.to) : null, makesWorse: bad ? name(bad.to) : null};
+}
+function recoverySheet(st, ctx){
   const g = (id, re) => _mxT(st, id, re);
   const stress = g("stress"), attach = g("attachment"), need = g("motivation", /The Need/i), lie = g("motivation", /The Lie/i);
   const repair = g("repair"), texture = g("texture"), vices = g("vices"), values = g("values"), origin = g("origins");
@@ -717,21 +748,25 @@ function recoverySheet(st){
   const d = t => t && t.desc ? ` — ${_mxLc(t.desc)}` : "";
   const row = (key, title, text, from) => { if (text) rows.push({key, title, text, from: (from || []).filter(Boolean).map(t => t.trait)}); };
   const cell = stress && attach && _RECOVER_CELL[stress.category] ? _RECOVER_CELL[stress.category][attach.category] : null;
-  row("first", "First hours", cell ? cell.first : stress ? _RECOVER_FIRST[stress.category] : null, [stress, attach]);
+  const lensDying = typeof activeLensIds === "function" && activeLensIds().includes("dying");
+  const firstText = cell ? cell.first : stress ? _RECOVER_FIRST[stress.category] : null;
+  row("first", "First hours", firstText && lensDying ? "There is less time to waste on it than there used to be. " + firstText : firstText, [stress, attach]);
   const who = cell ? cell.who : (attach ? _RECOVER_WHO[attach.category] : null);
-  row("who", "Who they go to", who ? `They go ${who}.` : null, [attach, stress]);
+  const cn = _castNames(ctx);
+  row("who", "Who they go to", who ? `They go ${who}.${cn.goTo ? ` In this cast, that is ${cn.goTo}.` : ``}` : null, [attach, stress]);
   row("helps", "What actually helps", need ? V("helps", ["{n}{d}.", "The one thing that works: {n}{d}.", "What actually gets through: {n}{d}."], {n: _mxUnrun(need.trait), d: d(need)}) : null, [need]);
   row("ground", "What grounds them", texture ? V("ground", ["Back to {t}{d}.", "What steadies them: {t}{d}.", "Home base: {t}{d}."], {t: _mxLc(texture.trait), d: d(texture)})
     : origin ? V("groundO", ["The memory of {o}.", "What they lean on: the memory of {o}."], {o: _mxLc(origin.trait)}) : null, [texture || origin]);
   row("hurts", "What does not help", vices ? V("hurts", ["{v} — it feels like recovery and is not.", "{v} — it looks like coping and is not.", "The trap: {v}. It feels like relief and is not."], {v: _mxUnrun(vices.trait)})
     : values && values.category === "Rigid & Principled" ? V("hurtsR", ["Being told it was not their fault; they will argue.", "Being told to let it go; they will dig in."]) : null, [vices || values]);
+  if (cn.makesWorse) row("worse", "Who makes it worse", V("worse", ["Being around {n}. Every old thing comes back at once.", "{n} in the room, whatever {n} says.", "{n}. The history makes it worse."], {n: cn.makesWorse}), []);
   row("repair", "How they repair it", repair ? V("repair", ["{r}{d}.", "The repair they make: {r}{d}."], {r: _mxUnrun(repair.trait), d: d(repair)}) : null, [repair]);
   row("scar", "The story they tell afterwards", lie ? V("scar", ["That it proves {q} — unless someone gets to them first.", "The version that sticks: it proves {q}. Someone has to get to them before that hardens.", "They will file it under {q}, unless someone offers a better story first."], {q: _mxQ(lie.trait)}) : null, [lie]);
   const summary = typeof pressureRecovery === "function" ? pressureRecovery(st) : null;
   return rows.length ? {summary, rows} : null;
 }
 function pressureEscalationHTML(st, pst, meta){
-  const esc = pressureEscalation(st, pst, meta), rec = recoverySheet(st);
+  const esc = pressureEscalation(st, pst, meta), rec = recoverySheet(st, recoveryCastContext(st));
   let h = "";
   if (esc.stages.length){
     h += `<div class="pressureStages" aria-label="Escalation stages">` + esc.stages.map(sg =>
@@ -745,7 +780,7 @@ function pressureEscalationHTML(st, pst, meta){
   return h;
 }
 function pressureEscalationMarkdown(st, pst, meta){
-  const esc = pressureEscalation(st, pst, meta), rec = recoverySheet(st), L = [];
+  const esc = pressureEscalation(st, pst, meta), rec = recoverySheet(st, recoveryCastContext(st)), L = [];
   esc.stages.forEach(sg => { L.push(`**${sg.label}**${sg.id === esc.current ? " (current)" : ""}`); sg.signs.forEach(s => L.push(`- ${s.text}`)); });
   if (rec){ L.push("", "**Recovery sheet**"); rec.rows.forEach(r => L.push(`- ${r.title}: ${r.text}`)); }
   return L.join("\n");

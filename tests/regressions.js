@@ -1011,4 +1011,80 @@ module.exports = function({check, group, assert}){
     assert(cs.size >= 3, 'chain shapes: ' + [...cs]);
     assert(bs.size >= 3, 'beat shapes: ' + [...bs]);
   });
+
+  check('LEFT recovery names the cast member they trust and the one who makes it worse', ()=>{
+    const G = fresh(); G.gen('rc1');
+    const r = G.evalIn(`(()=>{
+      const st = state, other = {id:'o1', meta:{name:'Marit'}, state: st}, foe = {id:'o2', meta:{name:'Dov'}, state: st}, me = {id:'me', meta:{name:'Self'}, state: st};
+      const ctx = {selfId:'me', members:[me, other, foe], edges:[{from:'me', to:'o1', role:'confidant', trust:5}, {from:'me', to:'o2', role:'rival', trust:1}]};
+      const a = recoverySheet(st), b = recoverySheet(st, ctx);
+      return {a: a && a.rows.map(x=>x.key+':'+x.text), b: b && b.rows.map(x=>x.key+':'+x.text)};
+    })()`);
+    assert(r.b.some(x => /^who:.*Marit/.test(x)), 'the trusted member was not named: ' + r.b.join(' | '));
+    assert(r.b.some(x => /^worse:.*Dov/.test(x)), 'the rival was not named');
+    assert(!r.a.some(x => /Marit|Dov/.test(x)), 'a lone sheet named a cast member');
+  });
+
+  check('LEFT cast optimisation counts shared Lie / Wound / Want and stress-attachment pairs', ()=>{
+    const G = fresh(); G.gen('co1'); G.evalIn('globalThis.__a = state'); G.gen('co2');
+    const r = G.evalIn(`(()=>{
+      const mk = (id, st) => ({id, state: st, meta:{name:id}});
+      const same = [mk('x', __a), mk('y', __a), mk('z', state)];
+      let calls = 0;
+      const out = optimiseCastVoices(same, 'co', i => { calls++; return {state: state, variants: {}}; }, {passes: 2, attempts: 2});
+      return {before: out.before, calls};
+    })()`);
+    assert(r.before > 0, 'two identical members registered no collisions');
+    assert(r.calls > 0, 'the optimiser never tried to reroll the colliding member');
+  });
+
+  check('LEFT life-stage lenses reach the beats and the recovery sheet', ()=>{
+    const G = fresh(); G.document._set('lensSelect', {value: ''}); G.gen('ln1');
+    const get = lens => { G.evalIn(`document.getElementById('lensSelect').value = '${lens}'`);
+      return G.evalIn("JSON.stringify({b: backstoryBeats(state, {age:'40'}), r: recoverySheet(state)})"); };
+    const base = get(''), dying = get('dying'), child = get('child');
+    assert(/What is left unsaid/.test(dying) && !/What is left unsaid/.test(base), 'the dying lens did not rewrite the last beat');
+    assert(/less time to waste/.test(dying), 'the dying lens did not reach recovery');
+    assert(/where nobody asked why/.test(child), 'the child lens left the failure beat alone');
+    G.evalIn("document.getElementById('lensSelect').value = ''");
+  });
+
+  check('LEFT an explicit clash table catches pairs polarity cannot see', ()=>{
+    const G = fresh();
+    const r = G.evalIn(`(()=>{
+      const by = n => TRAITS.find(t => t.trait === n);
+      const w = by('Whispered'), b = by('Resonant-booming'), q = by('Never-apologizes'), o = by('Over-apologetic gasp'), x = by('Interruptive');
+      const st = {a:{trait:w}, b:{trait:b}, c:{trait:q}, d:{trait:o}};
+      const calm = {a:{trait:w}, b:{trait:x}};
+      return {clash: checkConflictsFor(st).filter(c => /cannot both hold/.test(c.text)).map(c => c.text), calm: checkConflictsFor(calm).filter(c => /cannot both hold/.test(c.text)).length};
+    })()`);
+    assert(r.clash.length === 2, 'expected the whisper/boom and apology clashes, got: ' + JSON.stringify(r.clash));
+    assert(r.calm === 0, 'an unrelated pair was flagged');
+  });
+
+  check('LEFT near-duplicate pairs are found, and a sheet that seats both is told', ()=>{
+    const G = fresh();
+    const r = G.evalIn(`(()=>{
+      const idx = nearDuplicateIndex(), by = n => TRAITS.find(t => t.trait === n);
+      const a = by('Overcommitting'), b = by('Overcommitting undisciplined');
+      const st = {x:{trait:a}, y:{trait:b}};
+      return {pairs: idx.size, has: !!(idx.get(a.id) && idx.get(a.id).has(b.id)), told: checkConflictsFor(st).filter(c => /nearly the same thing/.test(c.text)).length};
+    })()`);
+    assert(r.pairs >= 40, 'too few near-duplicates found: ' + r.pairs);
+    assert(r.has && r.told === 1, 'the known pair was not reported: ' + JSON.stringify(r));
+  });
+
+  check('LEFT every category the growth packs touched reaches the floor of 15, and the packs stay inside their id range', ()=>{
+    const G = fresh();
+    const r = G.evalIn(`(()=>{
+      const cnt = {}, touched = new Set(), badIds = [];
+      TRAITS.forEach(t => { const k = t.section + ' :: ' + t.category; cnt[k] = (cnt[k] || 0) + 1; if (t.id >= 190000){ touched.add(k); if (t.id > 199999) badIds.push(t.id); } });
+      return {short: [...touched].filter(k => cnt[k] < 15).map(k => k + ' ' + cnt[k]), n: touched.size, grown: TRAITS.filter(t => t.id >= 190000).length, badIds};
+    })()`);
+    assert(r.n >= 50, 'the growth packs touched only ' + r.n + ' categories');
+    assert(!r.short.length, 'still under 15: ' + r.short.join('; '));
+    assert(!r.badIds.length, 'ids outside the pack range');
+    assert(r.grown >= 400, 'expected ~450 grown traits, got ' + r.grown);
+  });
 };
+module.exports.fresh = fresh;

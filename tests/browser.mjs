@@ -115,6 +115,7 @@ await step('surprise me rolls blends, anti-archetypes, lens dice and a wild sect
     if (n < 10) throw new Error('only ' + n + ' cards after a surprise: ' + t);
   }
   if (seen.size < 3) throw new Error('only saw ' + [...seen].join(',') + ' in 30 rolls');
+  await page.evaluate(()=>{ if (typeof clearLenses === 'function') clearLenses(); });
 });
 /* The features added in the 2026 content pass are all live-DOM: the lens repaints the
    cards, the voice lab composes on render, and the arc rewrites `state` in place. A

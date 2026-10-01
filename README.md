@@ -201,6 +201,17 @@ button instead of (or as well as) a confirm.
   card. **Ctrl/⌘+Enter** builds, **Ctrl/⌘+Z** undoes, **Shift+Ctrl/⌘+Z** / **Ctrl+Y** redoes,
   **Ctrl/⌘+S** saves, **1 2 3** switch tab, **/** searches traits, **Esc** closes the menus
   and **?** opens the full list. None of them fire while you are typing or a dialog is open.
+* **Surprise me** rolls one of four shapes: a preset pulled off its defaults, a blend of two presets
+  with a slider split, an anti-archetype (a preset's axes inverted, its inner life kept) or sliders
+  from nothing. It may also throw lens dice (one or two lenses, clashing ones allowed) and switch
+  on one section that is off by default; the toast says what it did.
+* **Chains and beats take more than one shape.** The motivation chain can lead from the need, from
+  an origin that went right, or treat the belief as once true; the backstory can be a late loss, two
+  formative events that disagree, a wound with no event, or a turning point that turned nothing.
+  Emergent names have four shapes, foils have eleven premise frames, a life-stage lens rewrites the
+  beats, recovery names the cast member they trust and the one who makes it worse, and a logged arc
+  event adds a beat. The bank also reports pairs that cannot both hold (whispers vs booms) and pairs
+  that say nearly the same thing.
 * **History** lists the last twenty rolls: restore one (it is itself undoable) or compare it
   with the sheet on screen, trait by trait and slider by slider. **Find on this sheet**
   filters the cards and opens folded sections while you search; which sections you fold is
@@ -553,6 +564,8 @@ no quiet content to redraw into.
 - `js/data/traits-polarity.js` — the axes the bank leaned on hardest, answered (ids 161000+)
 - `js/data/traits-life.js` — competence, positive origins, goals, ordinary texture,
   recovery, contradiction functions and role by context (ids 170000+)
+- `js/data/traits-gaps.js` — the gap sections (romance, dialect, beliefs, jargon, conversation, body, money, fears, family, humour subtypes; ids 180000+)
+- `js/data/traits-growth-a.js` … `-e.js` — the category-floor growth pass (ids 190000+): every category in those sections is at least 15 traits, written as behaviour, with quiet signatures and loud commons
 - `js/engine.js` — indexes, tagging passes, the weight matrix, and every pick path
 - `js/generate.js` — seeded generation, reroll, pins, undo, scoring
 - `js/render.js` — the sheet, exports, imports, toasts
