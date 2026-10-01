@@ -2431,35 +2431,93 @@ function toggleCardControls(el){
    fails the build on a duplicate top-level function declaration so the next one is
    caught at the source rather than by reading two files side by side. */
 
+/* Surprise me, in four shapes (2026 audit §5c): a preset pulled off its defaults, a blend of
+   two presets with a slider split, an anti-archetype (a preset's axes inverted, its
+   motivation hints kept: "a Mentor who hoards knowledge"), or sliders from nothing. Each
+   roll may also throw lens dice (one or two lenses, clashing ones allowed) and switch on
+   one section that is off by default. */
+const _SURPRISE_AXES = ['verbositySlider', 'registerSlider', 'composureSlider'];
+function _presetRaw(arch, axisId){ return clamp(Math.round((arch.pers && arch.pers[axisId]) || 0), -100, 100); }
+function _setPresetSliders(mix){
+  // mix: list of {arch, w, invert}; weights sum to 1.
+  PERSONALITY_AXES.forEach(axis=>{
+    const el = document.getElementById('pers_'+axis.id);
+    if (!el || isSliderLocked('pers_'+axis.id)) return;
+    el.value = String(clamp(Math.round(mix.reduce((t, m) => t + _presetRaw(m.arch, axis.id) * m.w * (m.invert ? -1 : 1), 0)), -100, 100));
+  });
+  [['verbositySlider', 'verbosity'], ['registerSlider', 'register'], ['composureSlider', 'composure']].forEach(([id, key])=>{
+    if (isSliderLocked(id)) return;
+    setVal(id, clamp(Math.round(mix.reduce((t, m) => t + (m.arch[key] || 0) * 50 * m.w * (m.invert ? -1 : 1), 0)), -100, 100));
+  });
+}
 function surpriseMe(){
   const keys = Object.keys(ARCHETYPES);
-  const pick = keys[Math.floor(rand() * keys.length)];
+  const pickKey = (not) => { let k; do { k = keys[Math.floor(rand() * keys.length)]; } while (k === not && keys.length > 1); return k; };
   const sel = document.getElementById('archetypeSelect');
-  // Half the time take a preset and pull it around; half the time go from nothing.
-  const useArchetype = sel && rand() < 0.5;
-  if (sel) sel.value = useArchetype ? pick : "";
-  if (useArchetype) applyArchetypeSetup(); else randomizeSliders('all');
-  if (useArchetype){
-    // Nudge every axis off the preset so two rolls of the same archetype differ.
+  const roll = rand();
+  const mode = roll < 0.3 ? "preset" : roll < 0.5 ? "blend" : roll < 0.68 ? "anti" : "free";
+  let said = "";
+  const a = pickKey();
+  if (mode === "preset"){
+    if (sel) sel.value = a;
+    onArchetypeChange(false);
     PERSONALITY_AXES.forEach(axis=>{
       const el = document.getElementById('pers_'+axis.id);
       if (!el || isSliderLocked('pers_'+axis.id)) return;
       el.value = String(clamp(intVal(el, 0) + Math.round((rand()*2-1) * 45), -100, 100));
     });
+    said = `Surprised you from "${ARCHETYPES[a].label}", pulled well off its defaults.`;
+  } else if (mode === "blend"){
+    const b = pickKey(a), t = 0.35 + Math.round(rand() * 6) * 0.05;
+    if (sel) sel.value = "";
+    onArchetypeChange(false);
+    _setPresetSliders([{arch: ARCHETYPES[a], w: 1 - t}, {arch: ARCHETYPES[b], w: t}]);
+    said = `Blended "${ARCHETYPES[a].label}" (${Math.round((1 - t) * 100)}%) with "${ARCHETYPES[b].label}" (${Math.round(t * 100)}%).`;
+  } else if (mode === "anti"){
+    if (sel) sel.value = "";
+    onArchetypeChange(false);
+    _setPresetSliders([{arch: ARCHETYPES[a], w: 1, invert: true}]);
+    said = `An anti-"${ARCHETYPES[a].label}": the axes inverted, the inner life kept.`;
+  } else {
+    if (sel) sel.value = "";
+    onArchetypeChange(false);
+    randomizeSliders('all');
+    said = "Every slider rolled, sections rolled, and the wildcard turned on.";
   }
   randomizeProfileTypes();
+  // The anti-archetype keeps what drives the preset: its motivation-side hints stay.
+  if (mode === "anti" && typeof ARCHETYPE_PROFILE_HINTS !== 'undefined' && ARCHETYPE_PROFILE_HINTS[a]){
+    ['values', 'beliefs', 'goals', 'origins', 'motivation', 'contradiction'].forEach(id=>{
+      const cat = ARCHETYPE_PROFILE_HINTS[a][id], tsel = document.getElementById('type_'+id);
+      if (cat && tsel && [...tsel.options].some(o => o.value === cat)){ tsel.value = cat; if (typeof clearAutoProfileType === 'function') clearAutoProfileType(id); }
+    });
+  }
   // divergence is a 0..1 range in steps of 0.05, not a 0..100 slider.
   const div = document.getElementById('divergence');
   if (div) div.value = (0.35 + Math.round(rand() * 8) * 0.05).toFixed(2);
   const wild = document.getElementById('wildcardToggle');
   if (wild) wild.checked = true;
+  // Lens dice: none, one, or two — a clashing pair is allowed on purpose.
+  const lensEl = document.getElementById('lensSelect');
+  if (lensEl && typeof LENSES !== 'undefined'){
+    const n = rand() < 0.55 ? 0 : rand() < 0.6 ? 1 : 2, picked = [];
+    while (picked.length < n){ const l = LENSES[Math.floor(rand() * LENSES.length)]; if (!picked.includes(l)) picked.push(l); }
+    lensEl.value = LENS_IDS.filter(id => picked.some(l => l.id === id)).join(',');
+    renderLensPicker();
+    if (picked.length) said += ` Lens dice: ${picked.map(l => l.label).join(" + ")}.`;
+  }
+  // A rotating wild section: one section that is off by default, on for this roll.
+  const offBy = PROFILE_SECTIONS.filter(ps => ps.defaultOn === false);
+  offBy.forEach(ps => { const tog = document.getElementById('sec_'+ps.id); if (tog) tog.checked = false; });
+  if (offBy.length && rand() < 0.4){
+    const ps = offBy[Math.floor(rand() * offBy.length)], tog = document.getElementById('sec_'+ps.id);
+    if (tog){ tog.checked = true; said += ` Wild section: ${ps.label}.`; }
+  }
   setVal('charName', "");
   invalidateSliderCache();
   onSliderChange();
   runGeneration();
-  toast(useArchetype
-    ? `Surprised you from "${ARCHETYPES[pick].label}", pulled well off its defaults. Everything is still yours to change.`
-    : "Every slider rolled, sections rolled, and the wildcard turned on. Everything is still yours to change.");
+  toast(said + " Everything is still yours to change.");
 }
 
 function randomizeSliders(scope){

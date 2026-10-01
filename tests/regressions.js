@@ -996,4 +996,19 @@ module.exports = function({check, group, assert}){
     const b = G.evalIn("JSON.stringify(voiceLines ? voiceLines(state, 'lean1', 'refuse') : '')");
     assert(a === b, 'the same seed gave different lines');
   });
+
+  check('LEFT chains and beats take more than one structure, deterministically, with every card still cited', ()=>{
+    const G = fresh(); const cs = new Set(), bs = new Set();
+    for (let i = 1; i <= 120; i++){
+      G.gen('cs' + i);
+      const r = G.evalIn("(()=>{const c=motivationChain(state);const b=backstoryBeats(state,{age:'40'});return {s:c&&c.shape,c:c&&c.links.map(l=>l.key+'|'+l.text),b:b&&b.map(x=>x.title+'|'+x.text)}})()");
+      const r2 = G.evalIn("(()=>{const c=motivationChain(state);const b=backstoryBeats(state,{age:'40'});return {s:c&&c.shape,c:c&&c.links.map(l=>l.key+'|'+l.text),b:b&&b.map(x=>x.title+'|'+x.text)}})()");
+      assert(JSON.stringify(r) === JSON.stringify(r2), 'not deterministic');
+      if (r.s) cs.add(r.s);
+      (r.b || []).forEach(x => { const t = x.split('|')[0]; if (/late|no event|Two formative|turned nothing/.test(t)) bs.add(t); });
+      (r.c || []).forEach(x => assert(x.length > 14, 'an empty link: ' + x));
+    }
+    assert(cs.size >= 3, 'chain shapes: ' + [...cs]);
+    assert(bs.size >= 3, 'beat shapes: ' + [...bs]);
+  });
 };

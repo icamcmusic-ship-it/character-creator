@@ -6161,7 +6161,36 @@ function motivationChain(st){
   if (fear) add("fear", `${pk("f", ["The thing they organise their life to avoid is", "What they are organised around not meeting:", "Underneath the routines sits a fear:", "The alarm that never fully switches off is"])} ${asNounPhrase(fear)}${wound ? pk("fw", [" — the wound happening again", " — the wound, coming round a second time", " — the old injury, repeated"]) : ``}.`, [fear]);
   if (origin) add("counterweight", `The one place the belief does not hold: ${traitPhrase(origin)}. ${origin.desc || ""}`.trim(), [origin]);
   if (aim || price) add("stakes", `${aim ? `Right now the aim is ${asAim(aim)}.` : ``}${price ? ` The cost they are already paying: ${traitPhrase(price)}.` : ``}`.trim(), [aim, price]);
-  return {want, fear, wound, lie, need, ghost, defence, origin, stress, values, links};
+  /* Chain shapes (2026 audit §5b). Every sheet read wound -> belief -> want; the same facts
+     now sometimes lead from elsewhere, chosen by the sheet hash and only where the cards exist:
+       need-led: they know what would help and refuse it;
+       inverted: the belief was once true and outlived its room;
+       origin-led: something went right first, and the belief grew in what it was lost to. */
+  const shapes = ["wound"];
+  if (need && lie) shapes.push("need");
+  if (lie && wound) shapes.push("inverted");
+  if (origin && wound) shapes.push("origin");
+  const shape = shapes.length > 1 && hashSeedString(_h + "|shape") % 5 < 3 ? shapes[1 + hashSeedString(_h + "|shape2") % (shapes.length - 1)] : "wound";
+  const L = k => links.find(l => l.key === k);
+  const place = (key, before) => { const l = L(key), b = L(before); if (!l || !b) return; links.splice(links.indexOf(l), 1); links.splice(links.indexOf(b), 0, l); };
+  if (shape === "need"){
+    const n = L("need"), b = L("belief");
+    n.text = `${pk("nn", ["They already know what would help:", "Somewhere they know what they need:", "The answer is no secret to them:"])} ${asAim(need)}. They do not take it, because ${lie ? `they believe ${asBelief(lie)}` : "of what they believe"}.`;
+    n.from = [need, lie].filter(Boolean).map(t => t.trait);
+    if (b){ b.text = `${pk("nb", ["The belief is why", "What stops them is the belief", "The belief that gets in the way:"])} ${asBelief(lie)}${want ? " — it makes the want look like the safe answer" : ""}.`; b.from = [lie, want].filter(Boolean).map(t => t.trait); place("belief", "want"); }
+    place("need", "want");
+    const w = L("want"); if (w) w.text = `So they chase ${asAim(want)} instead${want && want.desc ? ` — ${want.desc}` : ``}`;
+  } else if (shape === "inverted"){
+    const b = L("belief"), o = L("origin");
+    if (b) b.text = `${asBelief(lie)} was once simply accurate. It was a fair reading of the room they learned it in.`;
+    if (o) o.text = `${pk("iv", ["The room changed and the belief did not", "The room is long gone; the belief outlived it", "They left the room years ago and carried the rule out with them"])}: it came from ${asNounPhrase(wound)}${ghost ? `, and it is still attached to ${asNounPhrase(ghost)}` : ``}.`;
+  } else if (shape === "origin"){
+    const c = L("counterweight");
+    if (c){ c.text = `It started somewhere good: ${traitPhrase(origin)}. ${origin.desc || ""}`.trim(); place("counterweight", links[0].key); }
+    const o = L("origin");
+    if (o) o.text = `The belief grew in what that was lost to: ${asNounPhrase(wound)}${ghost ? `, still tied to ${asNounPhrase(ghost)}` : ``}.`;
+  }
+  return {want, fear, wound, lie, need, ghost, defence, origin, stress, values, links, shape};
 }
 
 /* The pressure sheet had a trigger and an aftermath but no middle: nothing said how the
@@ -7377,12 +7406,39 @@ function backstoryBeats(st, meta){
       wound ? `${pick(["It starts with","Before anything else came","The first thing that marked them was"], "f")} ${asNounPhrase(wound)}${ghost ? `, and it is still tied to ${asNounPhrase(ghost)}` : ``}.${origin ? ` What kept it from being everything: ${traitPhrase(origin)}.` : ``}`
             : `${pick(["What went right early:","The thing that held:"], "o")} ${traitPhrase(origin)}.`, [src, ghost, wound && origin]);
   }
+  /* Beat shapes (audit §5b): not every life starts with an event in childhood. Picked by the
+     sheet hash where the cards exist: a loss late in life, two formative events that disagree,
+     a chronic "nothing happened", or a turning point that turned nothing. */
+  const bshapes = [];
+  if (wound) bshapes.push("late", "chronic");
+  if (wound && origin) bshapes.push("contradict");
+  const bshape = bshapes.length && hashSeedString(h + "|bs") % 5 < 2 ? bshapes[hashSeedString(h + "|bs2") % bshapes.length] : "";
+  const fb = beats.find(b => b.key === "formative");
+  if (fb && bshape === "late"){
+    fb.title = "A loss that came late"; fb.when = at(0.7, 18, 60, "in adulthood");
+    fb.text = `${pick(["It did not start in childhood. It arrived late:", "Nothing marked them early. What did, much later, was"], "bl")} ${asNounPhrase(wound)}${ghost ? `, and it is tied to ${asNounPhrase(ghost)}` : ``}.${origin ? ` Until then: ${traitPhrase(origin)}.` : ``}`;
+  } else if (fb && bshape === "chronic"){
+    fb.title = "A wound with no event"; fb.when = at(0.25, 5, 14, "for years");
+    fb.text = `${pick(["There is no single day. It was slow:", "Nothing in particular happened, which was the problem:"], "bc")} ${asNounPhrase(wound)}${ghost ? `, still tied to ${asNounPhrase(ghost)}` : ``}.`;
+  } else if (fb && bshape === "contradict"){
+    fb.title = "Two formative events"; fb.when = at(0.25, 5, 14, "in childhood");
+    fb.text = `${pick(["Two things shaped them, and they do not agree:", "They carry two origins that contradict:"], "bk")} ${traitPhrase(origin)}, and ${asNounPhrase(wound)}${ghost ? ` (tied to ${asNounPhrase(ghost)})` : ``}.`;
+  }
   if (lie) add("lesson", "What they took from it", at(0.4, 8, 20, "in their teens"),
     `${pick(["They drew the conclusion","They learned, wrongly,","It taught them"], "l")} that ${asReportedBelief(lie)}.`, [lie]);
   if (defence || values || competence){
     const pivot = competence || values || defence;
     add("turning", "Turning point", at(0.6, 14, 40, "in early adulthood"),
       `${pick(["The turn came when","Everything changed when","The first time it paid off was when"], "t")} ${competence ? `${asNounPhrase(competence)} made them useful` : values ? `they chose ${STRATEGY_BY_VALUES[values.category] || `their line (${traitPhrase(values)})`} over the easier thing` : `they found the defence would hold`}${defence ? ` — and the defence (${traitPhrase(defence)}) set, from then on, into how they operate` : ``}.`, [pivot, defence]);
+  }
+  if (bshape === "late"){
+    const ls = beats.find(b => b.key === "lesson"), tp = beats.find(b => b.key === "turning");
+    if (ls) ls.when = at(0.78, 19, 70, "soon after"); if (tp) tp.when = at(0.88, 20, 80, "since then");
+  }
+  const tpb = beats.find(b => b.key === "turning");
+  if (tpb && hashSeedString(h + "|ft") % 6 === 0){
+    tpb.title = "A turning point that turned nothing";
+    tpb.text = `${pick(["They believe it changed everything. It changed the surface:", "They tell it as the day things turned. Underneath, nothing did:"], "ft")} ${competence ? asNounPhrase(competence) : values ? (STRATEGY_BY_VALUES[values.category] || traitPhrase(values)) : "the new habit"}${defence ? `, laid over the same defence (${traitPhrase(defence)})` : ``}.`;
   }
   if (stress || vice){
     add("failure", "Most recent failure", age ? "within the last year" : "recently",

@@ -104,6 +104,18 @@ await step('surprise me generates', async ()=>{
   const n = await page.locator('.traitCard').count();
   if (n < 10) throw new Error('only ' + n + ' cards after surprise');
 });
+await step('surprise me rolls blends, anti-archetypes, lens dice and a wild section, and every roll builds', async ()=>{
+  const seen = new Set();
+  for (let i = 0; i < 30 && seen.size < 4; i++){
+    await page.locator('[data-act="surpriseMe"]:visible').first().click({timeout:8000});
+    await page.waitForTimeout(250);
+    const t = await page.locator('.toast').last().innerText().catch(()=>'');
+    if (/Blended/.test(t)) seen.add('blend'); if (/anti-/.test(t)) seen.add('anti'); if (/Lens dice/.test(t)) seen.add('lens'); if (/Wild section/.test(t)) seen.add('wild');
+    const n = await page.locator('.traitCard').count();
+    if (n < 10) throw new Error('only ' + n + ' cards after a surprise: ' + t);
+  }
+  if (seen.size < 3) throw new Error('only saw ' + [...seen].join(',') + ' in 30 rolls');
+});
 /* The features added in the 2026 content pass are all live-DOM: the lens repaints the
    cards, the voice lab composes on render, and the arc rewrites `state` in place. A
    DOM stub cannot say whether any of that reaches the page. */
