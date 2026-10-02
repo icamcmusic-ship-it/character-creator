@@ -17,7 +17,7 @@ function fresh(){
     d._set('pw_'+ps.id,{value:'',tagName:'SELECT',options:[{value:''}]});
     d._set('type_'+ps.id,{value:'',tagName:'SELECT',options:[{value:''}]});
   });
-  d._set('seedInput',{value:''}); d._set('batchTray',{}); d._set('charName',{value:''});
+  d._set('seedInput',{value:''}); d._set('engineVersion',{value:'1'}); d._set('batchTray',{}); d._set('charName',{value:''});
   d._set('sheet',{classList:{contains(){return true},add(){},remove(){}}});
   d._set('pressureSheet',{}); d._set('stressToggle',{checked:false}); d._set('divergence',{value:'0.3'});
   g.evalIn("renderSheet=function(){};checkConflicts=function(){};renderNovelty=function(){};renderBatchTray=function(){};"
@@ -920,11 +920,11 @@ module.exports = function({check, group, assert}){
     G.evalIn("globalThis.btoa=s=>Buffer.from(s,'binary').toString('base64'); globalThis.atob=s=>Buffer.from(s,'base64').toString('binary');");
     G.Buffer = Buffer;
     const link = o => G.evalIn(`readShareFromHash('#share=' + _b64urlEncode(${JSON.stringify(JSON.stringify(o))}))`);
-    assert(link({v: 1, seed: 'v1-abc'}).seed === 'v1-abc', 'a current link was refused');
+    assert(link({v: 1, seed: 'v1-abc'}).seed === 'v1-abc' && link({v: 1, seed: 'v2-abc'}).seed === 'v2-abc', 'a current link was refused');
     let m = ''; try { link({v: 2, seed: 'v1-abc'}); } catch(e){ m = e.message; }
     assert(/newer version/.test(m), 'v2 link: ' + m);
-    m = ''; try { link({v: 1, seed: 'v2-abc'}); } catch(e){ m = e.message; }
-    assert(/format v2/.test(m), 'v2 seed: ' + m);
+    m = ''; try { link({v: 1, seed: 'v9-abc'}); } catch(e){ m = e.message; }
+    assert(/format v9/.test(m), 'unknown seed version: ' + m);
     m = ''; try { G.evalIn("checkFileVersion({version: 99}, 1, 'cast')"); } catch(e){ m = e.message; }
     assert(/newer version of this app/.test(m), 'file version: ' + m);
     assert(G.evalIn("checkFileVersion({}, 1, 'cast')") === 1 && G.evalIn("checkFileVersion({version: 1}, 1, 'cast')") === 1, 'a current or unstamped file was refused');
@@ -1132,6 +1132,33 @@ module.exports = function({check, group, assert}){
     let got = false;
     for (let i = 1; i <= 30 && !got; i++){ G.gen('cs' + i); got = G.evalIn("Object.values(state).some(s => s && s.trait && s.trait.section === 'Conflict Style')"); }
     assert(got, 'the section never produced a card when switched on');
+  });
+
+  check('SEEDV v1 seeds replay exactly as before; v2 seeds use the coverage changes', ()=>{
+    const G = fresh(); G.document._set('sec_conflictstyle', {checked: false});
+    let h = 0;
+    for (let i = 1; i <= 12; i++){ G.gen('v1-' + (i * 7919).toString(36)); for (const c of G.sig()) h = (Math.imul(31, h) + c.charCodeAt(0)) | 0; }
+    assert((h >>> 0) === 3304622972, 'a v1 seed now builds a different character (hash ' + (h >>> 0) + '); old links would break');
+    const ids = (pre, n) => { const seen = new Set(), verb = new Set(); let noGhostOrDef = 0, sig = 0, tot = 0;
+      for (let i = 1; i <= n; i++){ G.gen(pre + (i * 104729).toString(36));
+        const r = G.evalIn("(()=>{const v=Object.values(state).find(s=>s&&s.slotId==='verbosity');const m=Object.values(state).filter(s=>s&&s.trait&&s.trait.section==='Motivation & Wound'&&/_\\d+$/.test(s.slotId||'')).length;const sg=Object.values(state).filter(s=>s&&s.trait&&s.trait.rarity==='signature').length;return {v:v&&v.trait?v.trait.category:'',m,sg,n:Object.values(state).filter(s=>s&&s.trait).length}})()");
+        verb.add(r.v); if (r.m < 7) noGhostOrDef++; sig += r.sg; tot += r.n; }
+      return {verb: verb.size, drop: noGhostOrDef, sigShare: sig / tot}; };
+    const a = ids('v1-', 80), b = ids('v2-', 80);
+    assert(a.verb === 1, 'v1 verbosity should stay pacing-only at neutral, got ' + a.verb);
+    assert(b.verb >= 3, 'v2 neutral verbosity reached only ' + b.verb + ' categories');
+    assert(a.drop === 0 && b.drop >= 10, 'omitted motivation cards: v1 ' + a.drop + ', v2 ' + b.drop);
+    assert(b.sigShare > a.sigShare, 'v2 did not draw signature traits more often: ' + a.sigShare + ' vs ' + b.sigShare);
+  });
+
+  check('SEEDV a blank-seed roll prints a v2 seed, and restoring an old link sets the engine to 1', ()=>{
+    const G = fresh(); G.document._set('engineVersion', {value: '2'});
+    G.gen('');
+    assert(/^v2-/.test(G.evalIn('lastSeedUsed')), 'blank roll printed ' + G.evalIn('lastSeedUsed'));
+    G.document._set('engineVersion', {value: '2'});
+    G.evalIn("restoreSettings({fields: {}})");
+    assert(G.document.getElementById('engineVersion').value === '1', 'an old link did not restore engine 1');
+    assert(G.evalIn("engineVersionFor('v1-abc')") === 1 && G.evalIn("engineVersionFor('v2-abc')") === 2, 'a prefixed seed does not pick its own engine');
   });
 };
 module.exports.fresh = fresh;

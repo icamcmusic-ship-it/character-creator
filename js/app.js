@@ -4036,8 +4036,8 @@ function readShareFromHash(hash){
   if (p.v !== undefined && p.v !== SHARE_LINK_VERSION)
     throw new Error(`it was made by ${p.v > SHARE_LINK_VERSION ? 'a newer' : 'an older'} version of this app (link version ${p.v}; this one reads version ${SHARE_LINK_VERSION}), so it cannot bring back the same character. Ask for a fresh link from the current version.`);
   const sv = /^v(\d+)-/.exec(p.seed);
-  if (sv && +sv[1] !== SEED_CODEC_VERSION)
-    throw new Error(`its seed is in format v${sv[1]}, but this version of the app reads v${SEED_CODEC_VERSION}, so the seed would build a different person.`);
+  if (sv && !SUPPORTED_SEED_VERSIONS.includes(+sv[1]))
+    throw new Error(`its seed is in format v${sv[1]}, but this version of the app reads v${SUPPORTED_SEED_VERSIONS.join(' and v')}, so the seed would build a different person.`);
   if (p.settings != null && (typeof p.settings !== 'object' || Array.isArray(p.settings))) throw new Error("the link's settings are malformed.");
   // The same structural check an imported file gets, BEFORE anything is applied — a
   // malformed constraint block used to clear the recipient's own bans and then throw.

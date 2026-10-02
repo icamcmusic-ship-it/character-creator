@@ -3127,15 +3127,17 @@ function rarityNorm(list){
    two-member class in a twenty-trait pool outweigh an eleven-member one. The thin
    classes are still lifted, just not to the point of dominating. */
 const RARITY_NORM_EXP = 0.5;
+const _V2_LIFT = {distinctive: 1.25, signature: 1.5};
+function _v2RarityLift(tier){ return ENGINE_V >= 2 ? (_V2_LIFT[tier] || 1) : 1; }
 function rarityWeight(t, pref, norm){
   const tier = t.rtier || rarityTier(t);
   const base = (norm && norm[tier]) ? 1 / Math.pow(norm[tier], RARITY_NORM_EXP) : 1;
   const p = rarityPrefValue(pref);
-  if (!p) return base;
+  if (!p) return base * _v2RarityLift(tier);
   // 3^(pref * tierScore): symmetric either way, with the two middle tiers sitting
   // proportionally between the poles rather than being dragged along with whichever
   // end they were lumped into.
-  return base * Math.pow(3, p * (RTIER_SCORE[tier] !== undefined ? RTIER_SCORE[tier] : 0));
+  return base * Math.pow(3, p * (RTIER_SCORE[tier] !== undefined ? RTIER_SCORE[tier] : 0)) * _v2RarityLift(tier);
 }
 function pickWeighted(arr, pref){
   if (!arr.length) return null;
@@ -4364,7 +4366,15 @@ function pickProfileSlots(rarityPref, resolvedCats, onlySectionId, skipSectionId
       const spreadAll = (base, i) => n > 1
         ? clamp(base + (((i + rot) % n) / (n - 1) - 0.5) * MOTIVATION_TARGET_SPREAD, 1, 5)
         : base;
+      /* v2: every sheet carried all seven Motivation cards, which is most of the "same
+         skeleton" feeling. About a third of sheets now leave out the Ghost or the Defence
+         (the two the chain and the pressure ladder can do without), so some characters
+         simply do not have one. */
+      const droppable = ENGINE_V >= 2 && ps.id === MOTIVATION_SECTION_ID
+        ? cats.map((c, i) => /The Ghost|The Defence/i.test(c) ? i : -1).filter(i => i >= 0) : [];
+      const dropIdx = droppable.length && rand() < 0.33 ? droppable[Math.floor(rand() * droppable.length)] : -1;
       cats.forEach((cat,i)=>{
+        if (i === dropIdx) return;
         const pool = byFilter(ps.section, cat);
         const slotId = `prof_${ps.id}_${i}`;
         const tgt = spreadAll(target, i);
@@ -5659,6 +5669,7 @@ function mkSlot(slotId, label, target, trait, extra){
   if (!trait) return emptySlot(slotId, label, Object.assign({target}, extra || {}));
   return Object.assign({slotId, locked:false, label, target, trait}, extra || {});
 }
+let ENGINE_V = 1;   // 1 = the original build; 2 = the 2026 coverage changes (see generate.js)
 function pickVerbositySlot(verbLevel, rarityPref){
   // Crossover narrowed from ±0.3 (raw ±15) to ±0.12 (raw ±6): the old dead band
   // meant nearly a third of the slider produced identical pacing-pool draws.
@@ -5700,6 +5711,17 @@ function pickVerbositySlot(verbLevel, rarityPref){
   } else {
     // Dead centre now means "situational pacing at low intensity" rather than an
     // unfiltered free-for-all — the neutral band respects the range engine too.
+    /* v2: dead centre used to mean pacing and nothing else, so four of the five Verbosity
+       categories (about 330 traits) were unreachable at default settings. Half the time
+       the neutral band now draws a quiet entry from any of them. */
+    if (ENGINE_V >= 2 && rand() < 0.5){
+      const cats = [AXES.verbosityLow, AXES.verbosityHigh, AXES.circular];
+      const ax = cats[Math.floor(rand() * cats.length)];
+      const pool2 = byFilter(ax.section, ax.category);
+      const t2 = poolFloorTarget(pool2, targetFromMag(14));
+      return mkSlot("verbosity", "Verbosity (neutral, " + ax.category.split(" ")[0].toLowerCase() + ")", t2,
+                    withSlotMemory("verbosity", ()=>pickInRange(pool2, rarityPref, t2, 8, true)));
+    }
     const pool = byFilter(AXES.pacing.section, AXES.pacing.category);
     const t = poolFloorTarget(pool, targetFromMag(18));
     return mkSlot("verbosity", "Verbosity (pacing-driven)", t,

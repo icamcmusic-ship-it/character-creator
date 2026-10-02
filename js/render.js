@@ -1633,7 +1633,7 @@ const CHAR_FORMAT_VERSION = 2;
 // Every control that changes what a generation produces.
 const SETTING_FIELDS = ['mannerCount','vocabCount','personalityCount','profileDepth',
   'rarityPref','affinityBoost','rangeFocus','profileWeight','divergence',
-  'archetypeSelect','archetypeVariation','archetypeBlend','againstType','seedInput','sheetDensity','wildcardCount','pressureLevel',
+  'archetypeSelect','archetypeVariation','archetypeBlend','againstType','engineVersion','seedInput','sheetDensity','wildcardCount','pressureLevel',
   'lensSelect',
   /* The cast and foil controls were the one part of the workspace that no capture
      covered, so "export my setup" and Undo both silently dropped them and a cast was
@@ -1691,6 +1691,8 @@ function captureSettings(){
 
 function restoreSettings(s){
   if (!s) return;
+  // Settings from before the engine version existed were built by engine 1.
+  { const ev = document.getElementById('engineVersion'); if (ev) ev.value = (s.fields && s.fields.engineVersion) || '1'; }
   Object.entries(s.fields||{}).forEach(([id,v])=>{
     const el = document.getElementById(id); if (!el) return;
     if (el.tagName === 'SELECT'){ if ([...el.options].some(o=>o.value===v)) el.value = v; }

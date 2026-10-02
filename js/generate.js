@@ -28,21 +28,41 @@ let lastSeedUsed = null;
    One format, one parser, both directions:
      v1-<base36>   an app-generated seed; decodes straight back to its number
      anything else a user's own text, hashed as before (old shares still work) */
-const SEED_PREFIX = 'v1-';
-function encodeSeed(num){ return SEED_PREFIX + (num >>> 0).toString(36); }
+/* Seed formats are also ENGINE versions. The number a seed decodes to is the same in both,
+   but v2 builds with the 2026 coverage changes (the neutral verbosity band draws from more
+   than one category, a sheet can omit one of the optional motivation cards, distinctive and
+   signature traits are drawn a little more often). A v1 seed keeps building exactly what it
+   always did, so every old seed and share link replays unchanged. ENGINE_V is set around a
+   single-character build (see _runGeneration) and is 1 everywhere else, so cast and foil
+   builds are unchanged. */
+const SEED_PREFIX = 'v1-';            // the oldest format; kept for the codec check in app.js
+const SUPPORTED_SEED_VERSIONS = [1, 2];
+const DEFAULT_ENGINE_V = 2;
+function encodeSeed(num){ return 'v' + ENGINE_V + '-' + (num >>> 0).toString(36); }
 function seedNumberFrom(str){
   const t = String(str == null ? '' : str).trim();
   if (!t) return null;
-  if (t.startsWith(SEED_PREFIX)){
-    // Only a strict v1-<base36> that fits in 32 bits decodes; "v1-abc#2" or an
+  const m = /^v(\d+)-(.*)$/.exec(t);
+  if (m && SUPPORTED_SEED_VERSIONS.includes(+m[1])){
+    // Only a strict v<n>-<base36> that fits in 32 bits decodes; "v1-abc#2" or an
     // overflowing body is user text and is hashed whole, so it cannot collide.
-    const body = t.slice(SEED_PREFIX.length);
+    const body = m[2];
     if (/^[0-9a-z]+$/.test(body)){
       const n = parseInt(body, 36);
       if (n <= 0xFFFFFFFF) return n >>> 0;
     }
   }
   return hashSeedString(t);
+}
+/* Which engine a build uses: a v<n>- seed says so itself; anything else (a typed phrase, a
+   blank box) uses the engineVersion setting, which links and settings files from before the
+   field existed restore as 1. */
+function engineVersionFor(rawSeed){
+  const m = /^v(\d+)-[0-9a-z]+$/.exec(String(rawSeed || '').trim());
+  if (m && SUPPORTED_SEED_VERSIONS.includes(+m[1])) return +m[1];
+  const el = document.getElementById('engineVersion');
+  const v = el ? parseInt(el.value, 10) : DEFAULT_ENGINE_V;
+  return SUPPORTED_SEED_VERSIONS.includes(v) ? v : DEFAULT_ENGINE_V;
 }
 /* Resolve the seed for one build: returns {num, label} where label is exactly what the
    user can paste back to reproduce `num`. */
@@ -639,6 +659,11 @@ function exploreCandidatesEnabled(){
   return el ? !!el.checked : true;
 }
 function _runGeneration(){
+  const si = document.getElementById('seedInput');
+  ENGINE_V = engineVersionFor(si ? si.value : '');
+  try { return _runGenerationInner(); } finally { ENGINE_V = 1; }
+}
+function _runGenerationInner(){
   snapshotHistory();
   diffLog = {};
   changedSlots = new Set();   // recomputed once the new state is in place
