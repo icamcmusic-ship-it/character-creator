@@ -821,7 +821,9 @@
   .stickyBar {
     position:fixed; left:0; right:0; bottom:0; z-index:50; display:none;
     align-items:center; gap:10px; padding:10px 18px;
-    background:rgba(255,252,249,.94); backdrop-filter:blur(8px);
+    /* Follows the theme: a hard-coded light rgba left a pale strip under dark mode. */
+    background:rgba(255,252,249,.94);
+    background:color-mix(in srgb, var(--panel) 94%, transparent); backdrop-filter:blur(8px);
     border-top:1.5px solid var(--border-strong); box-shadow:0 -4px 18px rgba(38,84,124,.08);
   }
   body.on-single-tab .stickyBar { display:flex; }
@@ -1444,3 +1446,162 @@
   .relWeb, .pressureStages { grid-template-columns:minmax(0, 1fr); }
   .recoverySheet dl { grid-template-columns:minmax(0, 1fr); }
 }
+
+/* ---------- Audit §2: first-move fixes ---------- */
+#sheetTitle { scroll-margin-top:12px; }
+.onboard { margin-top:0; }
+
+/* One primary Build button; the other ways to roll live in a menu beside it. */
+.buildRow { align-items:flex-start; }
+.moreRolls { position:relative; align-self:stretch; }
+.moreRolls > summary {
+  list-style:none; cursor:pointer; padding:11px 16px; border:1.5px solid var(--border-strong);
+  border-radius:var(--radius-sm); background:var(--panel); color:var(--text); font-weight:600;
+  font-size:.9rem; white-space:nowrap; display:flex; align-items:center; gap:8px; height:100%; box-sizing:border-box;
+}
+.moreRolls > summary::-webkit-details-marker { display:none; }
+.moreRolls > summary::after { content:"▾"; font-size:.8em; opacity:.7; }
+.moreRolls[open] > summary::after { content:"▴"; }
+.moreRolls > summary:focus-visible { outline:3px solid var(--dusk-blue-mid); outline-offset:2px; }
+.moreRollsMenu {
+  position:absolute; z-index:20; top:calc(100% + 6px); left:0; min-width:260px; padding:8px;
+  display:flex; flex-direction:column; gap:6px; background:var(--panel);
+  border:1.5px solid var(--border-strong); border-radius:var(--radius-sm); box-shadow:0 12px 28px rgba(38,84,124,.16);
+}
+.moreRollsMenu button { text-align:left; width:100%; }
+@media (max-width:640px){
+  .moreRolls { flex:1 1 100%; }
+  .moreRolls > summary { justify-content:center; }
+  .moreRollsMenu { position:static; margin-top:6px; box-shadow:none; }
+}
+
+/* A count on a collapsed Advanced panel's heading. */
+.panelBadge {
+  display:inline-block; margin-left:10px; padding:1px 9px; border-radius:999px; vertical-align:middle;
+  font-size:.7rem; font-weight:700; letter-spacing:.02em; background:var(--dusk-blue-mid); color:var(--panel);
+}
+.panelBadge[hidden] { display:none; }
+.ruleReview {
+  margin-left:4px; padding:2px 10px; border-radius:999px; border:1px solid var(--border-strong);
+  background:var(--panel); color:var(--text); font:inherit; cursor:pointer;
+}
+.ruleReview:hover { border-color:var(--dusk-blue-mid); }
+
+/* A chip can now carry a section list ("archetype adds Dialect & Linguistic Background,
+   Family Talk"); nowrap pushed the page 44px wide on a phone. */
+.ruleChip { white-space:normal; max-width:100%; overflow-wrap:anywhere; }
+
+/* Inner conflict panel */
+.innerConflict .icRow { margin:4px 0; font-size:.9rem; }
+
+/* File menu: two headed groups, one line of description under each item */
+.fileMenuHead { padding:8px 12px 2px; font-size:.68rem; letter-spacing:.09em; text-transform:uppercase; opacity:.65; font-weight:700; }
+.fileMenuList button { display:flex; flex-direction:column; align-items:flex-start; gap:1px; text-align:left; }
+.fileMenuList button .fmLabel { font-weight:600; }
+.fileMenuList button small { font-size:.72rem; opacity:.72; font-weight:400; line-height:1.3; white-space:normal; }
+
+.sheetNav { display:flex; gap:6px; flex-wrap:wrap; margin:0 0 12px; }
+.sheetNav button { padding:5px 12px; border-radius:999px; border:1.5px solid var(--border-strong); background:var(--panel); color:var(--text); font:inherit; font-size:.8rem; font-weight:600; cursor:pointer; }
+.sheetNav button:hover { border-color:var(--dusk-blue-mid); }
+.sheetNav button.dim { opacity:.45; }
+.coachMark { display:flex; gap:12px; align-items:center; justify-content:space-between; flex-wrap:wrap; margin:0 0 12px; padding:10px 14px; border:1.5px dashed var(--border-strong); border-radius:var(--radius-sm); background:var(--panel2); font-size:.85rem; line-height:1.5; }
+.coachMark[hidden] { display:none; }
+.fileMenuList { min-width:290px; }
+
+.pageHead { align-items:flex-start; }
+.headTools { display:flex; align-items:center; gap:10px; flex-wrap:wrap; justify-content:flex-end; }
+.projectChip { padding:5px 12px; border-radius:999px; border:1.5px solid var(--border-strong); background:var(--panel); color:var(--text); font:inherit; font-size:.8rem; cursor:pointer; max-width:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.projectChip b { font-weight:700; }
+.saveState { font-size:.72rem; opacity:.7; }
+.saveState.warn { opacity:1; color:var(--bubblegum); font-weight:700; }
+.benchBadgeText { font-size:.78rem; font-weight:700; margin-left:2px; }
+.benchBadge { width:auto !important; height:auto !important; padding:8px 14px !important; border-radius:999px !important; font-size:.95rem !important; display:inline-flex; align-items:center; gap:4px; }
+
+.emptyNotice { display:flex; gap:12px; align-items:center; flex-wrap:wrap; padding:14px 16px; margin:0 0 14px; border:1.5px dashed var(--border-strong); border-radius:var(--radius-sm); background:var(--panel2); }
+.emptyNotice[hidden] { display:none; }
+
+.infoTip { margin-left:6px; width:20px; height:20px; padding:0; border-radius:50%; border:1.5px solid var(--border-strong); background:var(--panel); color:var(--dusk-blue-mid); font-size:.72rem; line-height:1; cursor:pointer; vertical-align:middle; }
+.infoTip:hover, .infoTip[aria-expanded="true"] { background:var(--dusk-blue-mid); color:var(--panel); }
+.tipText { display:block; margin:6px 0; padding:8px 10px; border-radius:var(--radius-sm); background:var(--panel2); border:1px solid var(--border); font-size:.8rem; line-height:1.5; font-weight:400; text-transform:none; letter-spacing:0; color:var(--text); }
+.tipText[hidden] { display:none; }
+.moreRollsMenu button { display:flex; flex-direction:column; align-items:flex-start; gap:1px; }
+.moreRollsMenu button .fmLabel { font-weight:600; }
+.moreRollsMenu button small { font-size:.72rem; opacity:.72; font-weight:400; line-height:1.3; white-space:normal; text-align:left; }
+.moreRollsMenu { min-width:300px; }
+
+.lensChip.on { background:var(--dusk-blue-mid); color:var(--panel); border-color:var(--dusk-blue-mid); font-weight:700; }
+.lensChip.on::before { content:"✓ "; }
+.lensClear { padding:3px 10px; border-radius:999px; border:1px solid var(--border-strong); background:none; color:var(--text); font:inherit; font-size:.75rem; cursor:pointer; }
+.ctlGroupTitle { margin:18px 0 6px; font-family:var(--font-display); font-size:1rem; color:var(--dusk-blue); letter-spacing:.01em; }
+.ctlGroupTitle .sub { font-family:var(--font-body,inherit); font-size:.75rem; font-weight:400; }
+
+/* Sticky bar: secondary actions fold behind a ⋯ button on a phone */
+.stickyMoreBtn { display:none; }
+.stickyExtra { display:contents; }
+.stickySeed { background:none; border:none; padding:4px 6px; font-family:var(--font-mono); font-size:.7rem; color:var(--muted); cursor:copy; }
+.stickySeed:hover { text-decoration:underline; }
+@media (max-width:640px){
+  .stickyBar { overflow:visible; }
+  .stickyMoreBtn { display:inline-flex; }
+  .stickyExtra { display:none; position:absolute; left:8px; right:8px; bottom:calc(100% + 6px); flex-direction:column; align-items:stretch; gap:8px; padding:10px; background:var(--panel); border:1.5px solid var(--border-strong); border-radius:var(--radius-sm); box-shadow:var(--shadow-lg); }
+  .stickyExtra.open { display:flex; }
+  .stickyExtra > * { width:100%; box-sizing:border-box; }
+  .stickyExtra .stickySeed { display:block !important; text-align:left; margin-left:0; }
+}
+
+/* Phone layout: segmented tabs, compact header, folding inputs */
+.tabShort { display:none; }
+.inputsBar { display:none; }
+@media (max-width:720px){
+  .tabs { display:grid; grid-template-columns:repeat(3,1fr); gap:6px; }
+  .tabs button { justify-content:center; padding:9px 6px !important; font-size:.82rem; }
+  .tabs button .tabLong { display:none; }
+  .tabs button .tabShort { display:inline; }
+  .tabs button .tabIcon { display:none; }
+  .inputsBar:not([hidden]) { display:flex; align-items:center; justify-content:space-between; gap:10px; margin:0 0 12px; padding:10px 12px; border:1.5px solid var(--border-strong); border-radius:var(--radius-sm); background:var(--panel2); font-size:.82rem; }
+  #view-single.inputsCollapsed #controlsStart { display:none; }
+  .pageHead { flex-direction:column; gap:10px; }
+  .headTools { justify-content:flex-start; width:100%; }
+}
+@media (max-width:420px){
+  .pageHead h1 { font-size:1.55rem; line-height:1.15; }
+  .pageHead .sub { font-size:.86rem; }
+  .pageHead { margin-bottom:16px; }
+}
+
+.shortcutTable { border-collapse:collapse; width:100%; font-size:.86rem; }
+.shortcutTable th { text-align:left; padding:10px 0 4px; font-size:.7rem; letter-spacing:.09em; text-transform:uppercase; opacity:.65; }
+.shortcutTable td { padding:4px 10px 4px 0; vertical-align:top; }
+.shortcutTable td:first-child { white-space:nowrap; }
+kbd { display:inline-block; min-width:1.4em; text-align:center; padding:1px 6px; border:1px solid var(--border-strong); border-bottom-width:2px; border-radius:5px; background:var(--panel2); font-family:var(--font-mono); font-size:.78em; }
+
+.themeBtn { padding:5px 12px; border-radius:999px; border:1.5px solid var(--border-strong); background:var(--panel); color:var(--text); font:inherit; font-size:.8rem; cursor:pointer; }
+
+/* History drawer */
+.historyDrawer { margin:0 0 14px; padding:12px 14px; border:1.5px solid var(--border-strong); border-radius:var(--radius-sm); background:var(--panel2); }
+.historyDrawer[hidden] { display:none; }
+.histHead { display:flex; gap:10px; align-items:baseline; margin-bottom:6px; }
+.histHead .savedAct { margin-left:auto; }
+.histList { list-style:none; margin:0; padding:0; max-height:260px; overflow:auto; }
+.histList li { display:flex; justify-content:space-between; gap:10px; align-items:center; padding:6px 0; border-top:1px solid var(--border); font-size:.85rem; }
+.histList li:first-child { border-top:none; }
+.histNow { opacity:.85; }
+.histBtns { display:flex; gap:6px; flex-shrink:0; }
+.sliderDiff { margin:0 0 6px; padding-left:18px; columns:2; font-size:.82rem; }
+
+.sliderLabelRow { display:flex; align-items:center; justify-content:space-between; gap:6px; }
+.sliderLock { display:inline-flex; align-items:center; gap:3px; font-size:.72rem; opacity:.55; cursor:pointer; text-transform:none; letter-spacing:0; margin:0; }
+.sliderLock:hover, .sliderLock:has(input:checked) { opacity:1; }
+.sliderLock input { margin:0; }
+
+.traitCard[hidden], .axisGroup[hidden] { display:none !important; }
+.sheetFind { margin-left:auto; min-width:160px; max-width:240px; padding:5px 12px; border-radius:999px; border:1.5px solid var(--border-strong); background:var(--panel); color:var(--text); font:inherit; font-size:.8rem; }
+
+.reduce-motion *, .reduce-motion *::before, .reduce-motion *::after { animation:none !important; transition:none !important; scroll-behavior:auto !important; }
+.sliderLabelRow { width:100%; min-width:0; }
+.sliderLabelRow > label:first-child { flex:1 1 auto; min-width:0; overflow-wrap:anywhere; margin:0; }
+.sliderLock { flex:0 0 auto; }
+@media (max-width:520px){ .sliderLock span { display:none; } .sliderLock input { width:16px; height:16px; } }
+
+.backupReminder { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin:0 0 12px; padding:10px 14px; border:1.5px solid var(--golden-deep, var(--border-strong)); border-radius:var(--radius-sm); background:var(--panel2); font-size:.85rem; }
+.backupReminder[hidden] { display:none; }

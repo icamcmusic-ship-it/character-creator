@@ -47,7 +47,12 @@ const storage = (function(){
       const v = backend.getItem(PREFIX + key);
       return v === null ? null : { value: v };
     },
-    async set(key, value){ backend.setItem(PREFIX + key, value); },
+    // A failed write (full quota, blocked storage) used to surface only where a caller happened
+    // to catch it — preferences and filings failed in silence. Every failure raises the banner.
+    async set(key, value){
+      try { backend.setItem(PREFIX + key, value); }
+      catch(e){ if (typeof noteStorageFailure === 'function') noteStorageFailure(e); throw e; }
+    },
     async delete(key){ backend.removeItem(PREFIX + key); },
     async list(prefix){
       const keys = [];
@@ -122,6 +127,18 @@ async function savedCharacterExists(name){
 /* Is this browser going to keep what we write? Everything that reports a save, lists
    saves, or offers persistence asks here rather than assuming. */
 function storageIsDurable(){ return storage.durable !== false; }
+let _storageFailures = 0;
+function noteStorageFailure(e){
+  _storageFailures++;
+  const el = document.getElementById('storageStatus');
+  if (el){
+    el.style.display = 'block'; el.className = 'storageStatus warn';
+    el.textContent = (typeof isQuotaError === 'function' && isQuotaError(e))
+      ? "This browser's storage is full, so the last change was NOT kept. Delete a saved character, or export a backup (File ▾ → Export full backup) and clear some space."
+      : "This browser refused to store the last change, so it was NOT kept. Export a backup (File ▾ → Export full backup) to keep your work.";
+  }
+  if (typeof markSaved === 'function') markSaved(false);
+}
 function announceStorageMode(){
   const el = document.getElementById('storageStatus');
   if (!el) return;
@@ -142,6 +159,15 @@ async function editCharacterLabel(){
   renderSheet();
 }
 function clearCharacterLabel(){ delete charMeta.label; renderSheet(); }
+// Swap which side of the inner conflict wins under load. The choice lives in charMeta, so
+// it saves, exports and undoes with the sheet, and the pressure ladder and voice lab follow it.
+function flipInnerConflict(){
+  if (!Object.keys(state).length) return;
+  snapshotHistory();
+  charMeta.conflictFlip = !charMeta.conflictFlip;
+  renderSheet();
+  toast(charMeta.conflictFlip ? "The other side now wins under load — see the pressure ladder and the voice lab." : "Back to the default: the inner conflict resolves the way the sheet implies.");
+}
 async function answerContradiction(key, clear){
   const contra = (typeof structuredContradiction === 'function') ? structuredContradiction(state, charMeta) : null;
   const field = contra && contra.fields.find(f => f.key === key);
@@ -201,6 +227,7 @@ async function saveCharacter(btnEl){
       arcBase: arcBase ? compressSlots(arcBase) : null, arcEvents,
       settings: captureSettings(), savedAt: new Date().toISOString(),
     }));
+    markWorkSaved();
     await loadSavedList();
     // A saved character is an accepted one: the diversity objective measures the next
     // batch against it, and "same world" avoids it.
@@ -332,7 +359,10 @@ async function loadSavedCharacter(name){
     if (typeof viewContext !== 'undefined') viewContext = CONTEXT_MODE_IDS.includes(charMeta.viewContext) ? charMeta.viewContext : 'baseline';
     if (typeof resetArc === 'function'){
       arcEvents = (Array.isArray(rec.arcEvents) ? rec.arcEvents : []).filter(e=>!validateArcEvent(e).length);
-      arcBase = rec.arcBase ? expandSlots(rec.arcBase) : JSON.parse(JSON.stringify(state)); if (arcEvents.length) arcReplay(); else renderArc(); }
+      arcBase = rec.arcBase ? expandSlots(rec.arcBase) : JSON.parse(JSON.stringify(state));
+      // What the arc alone produces; anything the saved sheet has beyond it was an edit.
+      arcOverrides = {}; arcLastReplay = JSON.parse(JSON.stringify(replayArc(arcBase, arcEvents)));
+      if (arcEvents.length) arcReplay(); else renderArc(); }
     pressureState = rec.pressureState || null;
     pinnedTargets = rec.pinnedTargets || {};
     charVariants = rec.charVariants || {};
@@ -351,6 +381,7 @@ async function loadSavedCharacter(name){
     document.getElementById('pressureSheet').style.display = pressureState ? "block" : "none";
     lastSheetTraits = null;
     onSliderChange(); renderSheet(); checkConflicts();
+    markWorkSaved();
     toast('Loaded "'+name+'"');
     reportDecodeLosses(rec);
   } catch(e){ console.error(e); toast("Could not load that character: " + e.message, "warn", 6000); }
@@ -522,6 +553,69 @@ let lastCastSeed = null;
 let lastCastOptimisation = null;   // {before, after, rerolled} from optimiseCastVoices
 function randomAxisLevel(){ return (rand()*4) - 2; }
 
+/* One cast member, drawn from the current settings. generateCast uses it for the whole
+   cast; "regenerate the most similar member" uses it for one. Draws from whatever rng is
+   live, so the caller decides how it is seeded. */
+function makeCastRoller(){
+  const rarityPref = rarityPrefVal();
+  const mannerCount = intVal('mannerCount', 3);
+  const vocabCount = intVal('vocabCount', 2);
+  const anchored = boolVal('castAnchor', false) && Object.keys(state).length > 0;
+  const spread = clamp(floatVal('castSpread', 0.55), 0.15, 1);
+  const baseVerb = rawToLevel(intVal('verbositySlider', 0));
+  const baseReg  = rawToLevel(intVal('registerSlider', 0));
+  const baseComp = rawToLevel(intVal('composureSlider', 0));
+  const around = (base, s) => clamp(base + (rand()*2 - 1) * 2 * s, -2, 2);
+  return () => {
+    const verbLevel = anchored ? around(baseVerb, spread) : randomAxisLevel();
+    const regLevel  = anchored ? around(baseReg,  spread) : randomAxisLevel();
+    const compLevel = anchored ? around(baseComp, spread) : randomAxisLevel();
+    const personalityOverrides = {};
+    PERSONALITY_AXES.forEach(axis=>{
+      personalityOverrides[axis.id] = anchored
+        ? Math.round(clamp(intVal('pers_'+axis.id, 0) + (rand()*2 - 1) * 100 * spread, -100, 100))
+        : Math.round(randomAxisLevel()*50);
+    });
+    rollCharacterVariants();
+    /* Cast members used to call buildCharacterState and stop there — no required
+       traits, no budgets, no exclusivity — so a cast generated with a named
+       required trait and every rarity cap at zero honoured none of them, while the
+       chips on screen said otherwise. Same finalizer as everything else; pins are
+       the single-character sheet's and deliberately do not travel. */
+    const cand = finalizeSheet(buildCharacterState({verbLevel, regLevel, compLevel, mannerCount, vocabCount,
+      rarityPref, vocabPref:null, personalityOverrides}), {rarityPref, applyPins:false});
+    return {state: cand, variants: Object.assign({}, charVariants)};
+  };
+}
+/* "Regenerate the most similar member": the one who collides with the rest on the most
+   voice devices (the same score the joint optimisation minimises) is redrawn until the
+   cast's total drops. Undo brings the old member back. */
+function regenerateMostSimilarMember(){
+  if (castStates.length < 2){ toast("A cast needs at least two members to compare.", "warn"); return; }
+  const m = voiceCollisionMatrix(castStates, "baseline", 0);
+  const i = m.worst;
+  if (!(i >= 0) || !castStates[i]){ toast("No member stands out as the most similar.", "warn"); return; }
+  const before = m.totals.reduce((a, b) => a + b, 0);
+  const restore = _castSnapshot();
+  const old = castStates[i];
+  let best = null;
+  const baseKey = String(lastCastSeed || "cast") + "|regen|" + (old.meta.name || i) + "|" + (_regenCount++);
+  withReplayMode(true, ()=> withoutContextBias(()=> withSpeculativeGeneration(()=> {
+    for (let a = 0; a < 6; a++){
+      withRng(mulberry32(hashSeedString(baseKey + "|" + a)), ()=>{
+        const cand = makeCastRoller()();
+        const trial = castStates.map((c, j) => j === i ? Object.assign({}, c, cand) : c);
+        const t = voiceCollisionMatrix(trial, "baseline", 0).totals.reduce((x, y) => x + y, 0);
+        if (!best || t < best.t) best = {t, cand};
+      });
+    }
+  })));
+  if (!best){ toast("Could not draw a replacement.", "warn"); return; }
+  castStates[i] = Object.assign({}, old, best.cand, {meta: old.meta});
+  renderCast(); refreshRelSelectors();
+  toastUndo(`Redrew "${old.meta.name}", the member most like the others: shared voice devices ${before} → ${best.t}.`, ()=>{ restore(); toast(`"${old.meta.name}" is back.`); }, 10000);
+}
+let _regenCount = 0;
 function generateCast(){
   const count = intVal('castCount', 3);
   // BUG FIX: the cast read your Generate-group checkboxes and per-section profile
@@ -538,6 +632,9 @@ function generateCast(){
   // label used to be `seedNum.toString(36)`, which could not be pasted back.
   const castSeed = resolveSeed(seedInput ? seedInput.value : "");
   const seedNum = castSeed.num;
+  // The cast and its edges are replaced wholesale — keep a way back (Undo toast below).
+  const hadCast = castStates.length > 0 || relationshipEdges.length > 0;
+  const restoreCast = hadCast ? _castSnapshot() : null;
   lastCastSeed = castSeed.label;
   castStates = [];
   relationshipEdges = [];
@@ -585,26 +682,7 @@ function generateCast(){
      empty session history, so the seed in the readout rebuilds exactly this cast, from
      any session, whether it was typed in or rolled. */
   withReplayMode(true, ()=> withoutContextBias(()=> withSpeculativeGeneration(()=> withRng(mulberry32(seedNum), ()=>{
-    const rollOne = () => {
-      const verbLevel = anchored ? around(baseVerb, spread) : randomAxisLevel();
-      const regLevel  = anchored ? around(baseReg,  spread) : randomAxisLevel();
-      const compLevel = anchored ? around(baseComp, spread) : randomAxisLevel();
-      const personalityOverrides = {};
-      PERSONALITY_AXES.forEach(axis=>{
-        personalityOverrides[axis.id] = anchored
-          ? Math.round(clamp(intVal('pers_'+axis.id, 0) + (rand()*2 - 1) * 100 * spread, -100, 100))
-          : Math.round(randomAxisLevel()*50);
-      });
-      rollCharacterVariants();
-      /* Cast members used to call buildCharacterState and stop there — no required
-         traits, no budgets, no exclusivity — so a cast generated with a named
-         required trait and every rarity cap at zero honoured none of them, while the
-         chips on screen said otherwise. Same finalizer as everything else; pins are
-         the single-character sheet's and deliberately do not travel. */
-      const cand = finalizeSheet(buildCharacterState({verbLevel, regLevel, compLevel, mannerCount, vocabCount,
-        rarityPref, vocabPref:null, personalityOverrides}), {rarityPref, applyPins:false});
-      return {state: cand, variants: Object.assign({}, charVariants)};
-    };
+    const rollOne = makeCastRoller();
     const drafts = [];
     for (let i=0;i<count;i++){
       let d = null;
@@ -640,6 +718,8 @@ function generateCast(){
   // BUG FIX: the Relationships dropdowns were only rebuilt by switchTab('rel'), so a
   // cast generated while sitting on that tab left stale (or empty) selectors behind.
   refreshRelSelectors();
+  if (restoreCast) toastUndo("New cast generated — the previous cast and its relationships were replaced.",
+    ()=>{ restoreCast(); toast("The previous cast is back."); });
 }
 /* Theme-aware: these are drawn into inline SVG fill/stroke attributes, which resolve
    CSS custom properties just as a stylesheet would, so the cast overlay follows the
@@ -721,6 +801,8 @@ async function renameCastMember(i){
   c.meta.name = next;
   renderCast();
   refreshRelSelectors();
+  // The edge cards print member names too; they kept the old one until the next edit.
+  if (typeof renderEdges === 'function') renderEdges();
 }
 async function removeCastMember(i){
   const c = castStates[i];
@@ -755,6 +837,39 @@ function castToMarkdown(){
 function copyCast(btnEl){
   copyText(castToMarkdown(), btnEl);
 }
+/* The cast as a spreadsheet: one row per card per member (long format), so it sorts and
+   pivots. A BOM makes Excel read the em dashes as UTF-8. */
+function _csvCell(v){ const s = String(v == null ? "" : v); return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; }
+function castToCSV(){
+  const head = ["Member", "Age", "Context", "Archetype", "Slot", "Section", "Category", "Trait", "Intensity", "Rarity", "Kept"];
+  const rows = [head];
+  castStates.forEach(c => {
+    Object.keys(c.state || {}).forEach(k => {
+      const s = c.state[k]; if (!s || !s.trait) return;
+      rows.push([c.meta.name, c.meta.age || "", c.meta.context || "", c.meta.archetypeLabel || "", s.label || k, s.trait.section, s.trait.category, s.trait.trait, s.trait.intensity, s.trait.rarity, s.locked ? "yes" : ""]);
+    });
+  });
+  return "\ufeff" + rows.map(r => r.map(_csvCell).join(",")).join("\r\n") + "\r\n";
+}
+// The relationship web, as a standalone .svg: theme variables are resolved to real colours so it
+// looks the same outside the page.
+function downloadRelationshipSvg(){
+  const svg = document.querySelector('#relWeb svg');
+  if (!svg){ toast("Draw the web first: link at least two members on the Relationships tab.", "warn"); return; }
+  const clone = svg.cloneNode(true);
+  clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+  const vb = (clone.getAttribute('viewBox') || "").split(/[ ,]+/).map(Number);
+  if (vb.length === 4 && !clone.getAttribute('width')){ clone.setAttribute('width', vb[2]); clone.setAttribute('height', vb[3]); }
+  const cs = getComputedStyle(document.documentElement);
+  let out = new XMLSerializer().serializeToString(clone).replace(/var\((--[a-z0-9-]+)\)/gi, (m, n) => cs.getPropertyValue(n).trim() || m);
+  const bg = cs.getPropertyValue('--panel').trim() || '#ffffff';
+  out = out.replace(/(<svg[^>]*>)/, `$1<rect width="100%" height="100%" fill="${bg}"/>`);
+  downloadText('<?xml version="1.0" encoding="UTF-8"?>\n' + out, "relationship_web.svg", "image/svg+xml");
+}
+function downloadCastCSV(){
+  if (!castStates.length){ toast("Build a cast first.", "warn"); return; }
+  downloadText(castToCSV(), "character_cast.csv", "text/csv");
+}
 function downloadCast(){
   downloadText(castToMarkdown(), "character_cast.md");
 }
@@ -776,20 +891,45 @@ function importCastJSON(fileInput){
     try {
       const p = JSON.parse(reader.result);
       if (!p || p.format !== "character-voice-cast") throw new Error("Not a cast file.");
-      /* B16: this replaced the whole ensemble with no confirm and no way back. */
-      if (castStates.length && !await askForConfirm(`Replace the ${castStates.length} character${castStates.length===1?'':'s'} on the Cast tab with the ${Array.isArray(p.members) ? p.members.length : 0} in this file?`, "Replace")){
-        fileInput.value = ""; return;
+      checkFileVersion(p, CAST_FORMAT_VERSION, "cast");
+      let mergeMode = false;
+      if (castStates.length){
+        const inCount = Array.isArray(p.members) ? p.members.length : 0;
+        const choice = await askChoice(`The Cast tab already has ${castStates.length} character${castStates.length === 1 ? '' : 's'}. What should the ${inCount} in this file do?`,
+          [{value: 'merge', label: 'Add to the cast'}, {value: 'replace', label: 'Replace the cast'}]);
+        if (!choice){ fileInput.value = ""; return; }
+        mergeMode = choice === 'merge';
       }
+      // (B16: replacing the ensemble used to happen with no confirm and no way back; the choice above and the Undo toast below are that fix.)
       const restore = _castSnapshot();
       const hadCast = castStates.length > 0;
       // Same structural validation and id re-linking the single-character import does —
       // a malformed member must not get as far as renderCast and throw there.
-      const {orphans, dropped} = applyCastBundle(p);
+      let orphans, dropped;
+      if (mergeMode){
+        // Import into the live globals, then fold the incoming members and edges into what was there.
+        const curMembers = castStates.slice(), curEdges = relationshipEdges.slice();
+        ({orphans, dropped} = applyCastBundle(p));
+        const incoming = castStates, inEdges = relationshipEdges, ids = new Set(curMembers.map(c => c.id)), names = new Set(curMembers.map(c => c.meta && c.meta.name));
+        const remap = {}; let renamed = 0;
+        incoming.forEach(c => {
+          if (ids.has(c.id)){ const nid = newCharacterId(); remap[c.id] = nid; c.id = nid; }
+          ids.add(c.id);
+          let n = c.meta && c.meta.name, k = 2;
+          while (names.has(n)){ n = `${c.meta.name} (${k++})`; }
+          if (n !== (c.meta && c.meta.name)){ c.meta = Object.assign({}, c.meta, {name: n}); renamed++; }
+          names.add(n);
+        });
+        const rm = id => remap[id] || id;
+        castStates = curMembers.concat(incoming);
+        relationshipEdges = pruneEdges(curEdges.concat(inEdges.map(e => Object.assign({}, e, {from: rm(e.from), to: rm(e.to)}))), castStates);
+        if (renamed) toast(`${renamed} member name${renamed === 1 ? ' was' : 's were'} already in use and got a number.`, "ok", 6000);
+      } else ({orphans, dropped} = applyCastBundle(p));
       renderCast();
       refreshRelSelectors();
       renderEdges();
       switchTab('cast');
-      const msg = `Imported ${castStates.length} cast member${castStates.length===1?'':'s'}${relationshipEdges.length ? ` and ${relationshipEdges.length} edge${relationshipEdges.length===1?'':'s'}` : ``}.`;
+      const msg = `${mergeMode ? 'Added to the cast: it now has' : 'Imported'} ${castStates.length} cast member${castStates.length===1?'':'s'}${relationshipEdges.length ? ` and ${relationshipEdges.length} edge${relationshipEdges.length===1?'':'s'}` : ``}.`;
       if (hadCast) toastUndo(msg, ()=>{ restore(); toast("The previous cast is back."); }, 12000);
       else toast(msg);
       if (orphans) toast(orphans + " trait(s) in this file no longer exist in the pool; their saved text was kept as-is.", "warn", 6000);
@@ -975,15 +1115,37 @@ function applyCastBundle(p){
    or removing an event replays from the base rather than trying to invert an edit. */
 let arcBase = null;
 let arcEvents = [];
-function arcReplay(){
+/* Sheet edits made while an arc is open — a reroll, a pin, a lock — are not arc events,
+   and replaying from `arcBase` used to throw them away the moment a change was accepted
+   or declined. The replay now remembers what it produced last (`arcLastReplay`); any
+   slot that differs from it on the next replay is the author's edit and is laid back
+   over the replayed sheet (`arcOverrides`). Deciding an arc change on a slot hands that
+   slot back to the arc. */
+let arcOverrides = {};
+let arcLastReplay = null;
+function _arcCaptureEdits(){
+  const ref = arcLastReplay || arcBase;
+  if (!ref) return;
+  Object.keys(state || {}).forEach(k => {
+    if (JSON.stringify(state[k]) !== JSON.stringify(ref[k])) arcOverrides[k] = JSON.parse(JSON.stringify(state[k]));
+  });
+}
+function arcReplay(releaseSlot){
   if (!arcBase) return;
-  state = replayArc(arcBase, arcEvents);
+  _arcCaptureEdits();
+  if (releaseSlot) delete arcOverrides[releaseSlot];
+  const replayed = replayArc(arcBase, arcEvents);
+  arcLastReplay = JSON.parse(JSON.stringify(replayed));
+  Object.entries(arcOverrides).forEach(([k, v]) => { if (replayed[k]) replayed[k] = JSON.parse(JSON.stringify(v)); });
+  state = replayed;
   charMeta.arc = arcSummary(arcEvents);
   renderSheet();
   renderArc();
 }
 function resetArc(keepBase){
   arcEvents = [];
+  arcOverrides = {};
+  arcLastReplay = null;
   arcBase = keepBase ? arcBase : (Object.keys(state).length ? JSON.parse(JSON.stringify(state)) : null);
   if (charMeta) delete charMeta.arc;
 }
@@ -1037,7 +1199,7 @@ function setArcChange(eventId, slotId, accepted){
   const c = e && (e.changes || []).find(x => x.slotId === slotId);
   if (!c) return;
   c.accepted = !!accepted;
-  arcReplay();
+  arcReplay(slotId);
 }
 async function removeArcEvent(id){
   const e = arcEvents.find(x => x.id === id);
@@ -1112,14 +1274,16 @@ function renderVoiceLab(){
     const btn = document.getElementById('vlMode_' + m);
     if (btn){ btn.classList.toggle('active', voiceLabMode === m); btn.setAttribute('aria-pressed', voiceLabMode === m); }
   });
-  host.innerHTML = voiceLab(state, voiceLabMode, voiceLabReroll).map(l => `
+  host.innerHTML = voiceLab(state, voiceLabMode, voiceLabReroll, charMeta).map(l => `
     <div class="voiceCard${l.user ? ' userPrompt' : ''}">
       <div class="voiceHead"><b>${escHTML(l.prompt)}</b> <span class="sub">${escHTML(l.setup)}</span>${l.user
         ? ` <button class="savedAct savedDel" ${actAttr('click', 'removeVoicePrompt', l.promptId)} aria-label="Remove the prompt ${escAttr(l.prompt)}">remove</button>` : ``}</div>
       <blockquote class="voiceLine">${escHTML(l.text)}</blockquote>
+      <div class="sub vlStats">${(rs => `${rs.words} word${rs.words === 1 ? '' : 's'} · reads at grade ${rs.grade}`)(readingStats(l.text))}
+        <button type="button" class="savedAct" ${actAttr('click', 'copyVoiceLine', l.promptId, '$el')}>copy line</button></div>
       <div class="sub">Shaped by: ${escHTML(l.rules.join("; ") || "nothing on this sheet")}${l.device ? ` · habitual device: <b>${escHTML(l.device.label)}</b>` : ``}</div>
       <button class="btn-secondary vlTen" ${actAttr('click', 'toggleVoiceTen', l.promptId)} aria-expanded="${voiceTenOpen === l.promptId ? 'true' : 'false'}">${voiceTenOpen === l.promptId ? 'Hide the 10 lines' : '10 lines'}</button>
-      ${voiceTenOpen === l.promptId ? `<ol class="vlTenList">${voiceLines(state, l.promptId, voiceLabMode, 10, voiceLabReroll).map(x => `<li>${escHTML(x.text)}</li>`).join("")}</ol>` : ``}
+      ${voiceTenOpen === l.promptId ? `<ol class="vlTenList">${voiceLines(state, l.promptId, voiceLabMode, 10, voiceLabReroll, charMeta).map(x => `<li>${escHTML(x.text)}</li>`).join("")}</ol>` : ``}
     </div>`).join("");
 }
 /* The "10 lines" view (audit §5): ten composed takes of one situation, so the range of
@@ -1141,7 +1305,15 @@ function renderLensPicker(){
       title="${escAttr((l.up || []).slice(0, 3).join(', ') + (l.taboo && l.taboo.length ? ' · taboo: ' + l.taboo.join(', ') : ''))}">${escHTML(l.label)}</button>`;
   host.innerHTML = `<span class="lensGroup"><span class="lensKind">Setting</span>${LENSES.filter(l => l.kind === 'setting').map(chip).join('')}</span>`
     + `<span class="lensGroup"><span class="lensKind">Life stage</span>${LENSES.filter(l => l.kind === 'life').map(chip).join('')}</span>`
+    + (on.size ? `<button type="button" class="lensClear" ${actAttr('click', 'clearLenses')} title="Turn every lens off">Clear</button>` : ``)
     + (on.size ? `<span class="sub lensTaboo">Off-limits in their lines: ${escHTML(lensTaboos().join(', ') || 'nothing')}</span>` : ``);
+}
+function clearLenses(){
+  const el = document.getElementById('lensSelect');
+  if (!el) return;
+  el.value = '';
+  renderLensPicker();
+  if (typeof onSliderChange === 'function') onSliderChange();
 }
 function toggleLens(id){
   const el = document.getElementById('lensSelect');
@@ -1173,6 +1345,12 @@ function renderVoiceCompare(){
         ? `<span class="sharedDevice" title="More than one character in this cast reaches for this">${escHTML(rule)}</span>`
         : escHTML(rule)).join("; ") || "nothing"}</div>
     </div>`).join("");
+}
+// One line, without the stage direction's brackets stripped: what the character would say, as composed.
+function copyVoiceLine(promptId, btnEl){
+  const l = voiceLab(state, voiceLabMode, voiceLabReroll, charMeta).find(x => x.promptId === promptId);
+  if (!l){ toast("That line is no longer on the page.", "warn"); return; }
+  copyText(l.text, btnEl);
 }
 function copyVoiceLab(btnEl){
   if (!Object.keys(state).length){ toast("Generate a character first.", "warn"); return; }
@@ -1435,13 +1613,21 @@ async function renameProject(id){
 async function deleteProject(id){
   const p = projects.find(x => x.id === id);
   if (!p) return;
-  if (!await askForConfirm(`Delete the project "${p.name}"? Its ${projectSummary(p)} go with it. The characters saved separately are untouched.`, "Delete")) return;
+  const wasCurrent = currentProjectId === id;
   await storage.delete(PROJECT_KEY(id));
   projects = projects.filter(x => x.id !== id);
-  if (currentProjectId === id) currentProjectId = projects.length ? projects[0].id : null;
+  if (wasCurrent) currentProjectId = projects.length ? projects[0].id : null;
   applyProjectPreferences();
   renderProjects();
-  toast(`Deleted "${p.name}".`);
+  // Undo, not a confirm: the whole record is kept until the toast goes, so nothing is lost.
+  toastUndo(`Deleted the project "${p.name}" (${projectSummary(p)}).`, async ()=>{
+    await saveProject(p);
+    if (!projects.some(x => x.id === id)) projects.push(p);
+    if (wasCurrent) currentProjectId = id;
+    applyProjectPreferences();
+    renderProjects();
+    toast(`"${p.name}" is back.`);
+  }, 12000);
 }
 /* File the work in front of you into the current project: the sheet, the cast, the
    edges, the arc, the settings that produced them and the diversity archive. */
@@ -1450,24 +1636,28 @@ async function fileIntoProject(){
   if (!p){ toast("Create a project first.", "warn"); return; }
   if (!Object.keys(state).length){ toast("Generate or load a character first.", "warn"); return; }
   const name = charMeta.name && charMeta.name !== "Unnamed Character" ? charMeta.name : "Character " + (p.characters.length + 1);
-  const record = {name, state: compressSlots(state), charMeta,
-    arcBase: arcBase ? compressSlots(arcBase) : null, arcEvents,
+  // Copies, not references: later edits to the open sheet must not rewrite what was filed.
+  const _copy = v => JSON.parse(JSON.stringify(v));
+  const record = {name, state: compressSlots(state), charMeta: _copy(charMeta),
+    arcBase: arcBase ? compressSlots(arcBase) : null, arcEvents: _copy(arcEvents),
     savedAt: new Date().toISOString()};
   const at = p.characters.findIndex(c => c.name === name);
   if (at >= 0){
     if (!await askForConfirm(`"${name}" is already in this project. Replace it with what is on screen?`, "Replace")) return;
     p.characters[at] = record;
   } else p.characters.push(record);
-  if (castStates.length) p.casts = [{name: "Cast", members: castStates.map(c => ({id: c.id, name: c.meta.name, state: compressSlots(c.state), meta: c.meta}))}];
-  p.edges = pruneEdges(relationshipEdges, castStates);
-  p.events = arcEvents;
+  if (castStates.length) p.casts = [{name: "Cast", members: castStates.map(c => ({id: c.id, name: c.meta.name, state: compressSlots(c.state), meta: _copy(c.meta)}))}];
+  p.edges = _copy(pruneEdges(relationshipEdges, castStates));
+  p.events = _copy(arcEvents);
   p.settings = captureSettings();
   if (typeof exportArchive === 'function') p.archive = exportArchive();
   await saveProject(p);
   renderProjects();
+  markWorkSaved();
   toast(`Filed "${name}" into "${p.name}" — ${projectSummary(p)}.`, "ok", 6000);
 }
 function renderProjects(){
+  refreshProjectChip();
   const host = document.getElementById('projectList');
   if (!host) return;
   host.innerHTML = projects.length ? projects.map(p => `
@@ -1492,6 +1682,7 @@ async function exportBackupBundle(){
   const loose = await _looseCharacters();
   const bundle = makeBackupBundle(projects, loose, {archive: (typeof exportArchive === 'function') ? exportArchive() : []});
   downloadText(JSON.stringify(bundle, null, 2), "character_backup.json");
+  markBackedUp(); markWorkSaved();
   toast(`Backed up ${projects.length} project${projects.length===1?'':'s'} and ${loose.length} saved character${loose.length===1?'':'s'}.`, "ok", 6000);
 }
 let _pendingBackup = null;
@@ -1902,7 +2093,7 @@ function buildPersonalitySliders(){
       const lo = axis.neg.split('—')[1] ? axis.neg.split('—')[1].trim() : 'Low';
       const hi = axis.pos.split('—')[1] ? axis.pos.split('—')[1].trim() : 'High';
       div.innerHTML = `
-        <label for="pers_${axis.id}">${escHTML(axis.label)}</label>
+        <div class="sliderLabelRow"><label for="pers_${axis.id}">${escHTML(axis.label)}</label>${sliderLockHTML('pers_' + axis.id, axis.label)}</div>
         <div class="sliderWrap"><span class="neutralBand" aria-hidden="true"></span><span class="blendBand" aria-hidden="true"></span>
         <input type="range" id="pers_${axis.id}" min="-100" max="100" value="0" step="1"
                ${actAttr('input', 'onSliderChange')} aria-label="${escHTML(axis.label)}: ${escHTML(lo)} to ${escHTML(hi)}"
@@ -2038,16 +2229,64 @@ function askForConfirm(message, confirmLabel){
   });
 }
 
+/* A dialog with more than two answers (Replace / Add / Cancel). Resolves to the chosen value,
+   or null for Cancel and Escape. */
+function askChoice(message, choices){
+  return new Promise(resolve=>{
+    const dlg = document.createElement('dialog');
+    dlg.className = 'nameDialog';
+    dlg.innerHTML = `<form method="dialog"><label>${escHTML(message)}</label><div class="nameDialogBtns">`
+      + `<button value="__cancel" type="submit">Cancel</button>`
+      + choices.map((c, i) => `<button value="${escAttr(c.value)}" type="submit"${i === 0 ? ' class="primary"' : ''}>${escHTML(c.label)}</button>`).join("")
+      + `</div></form>`;
+    const opener = document.activeElement;
+    document.body.appendChild(dlg);
+    let settled = false;
+    const done = v => { if (settled) return; settled = true; dlg.remove(); if (opener && opener.focus && document.contains(opener)) opener.focus(); resolve(v); };
+    dlg.addEventListener('close', ()=> done(dlg.returnValue && dlg.returnValue !== '__cancel' ? dlg.returnValue : null));
+    if (typeof dlg.showModal === 'function'){ dlg.showModal(); const p = dlg.querySelector('.primary'); if (p) p.focus(); }
+    else done(choices[0].value);
+  });
+}
+/* Every exporter stamps a version. A file from a newer build is refused with a sentence, not
+   parsed on the assumption it has this build's shape. */
+function checkFileVersion(p, supported, what){
+  const v = (p && p.version === undefined) ? 1 : (p && p.version);
+  if (typeof v !== 'number' || !Number.isFinite(v)) throw new Error(`that ${what} file's version stamp is not a number.`);
+  if (v > supported) throw new Error(`that ${what} file was written by a newer version of this app (file version ${v}; this one reads up to ${supported}). Update the app, or re-export the file from the version that reads it.`);
+  return v;
+}
 async function resetAllToDefaults(){
   // BUG FIX: this cleared persisted preferences and per-slot UI state BEFORE asking
   // for confirmation, so cancelling the dialog still silently wiped your saved
   // settings. Confirm first, mutate second.
-  if (!await askForConfirm("Reset every slider, toggle, and field back to defaults? Your generated character stays until you generate again.", "Reset")) return;
+  // No confirm dialog: the whole workspace is snapshotted first and the toast at the end undoes it.
+  snapshotHistory();
+  /* Hold every intermediate save until the end: clearConstraints() used to persist the
+     half-reset workspace (old budgets still set) partway through, and that is what came
+     back on the next reload. One save, after every step, of the finished defaults. */
+  const wasReady = prefsReady;
+  prefsReady = false;
   try { storage.delete(PREF_KEY); } catch(e){}
   rerollExclusions = {}; rerollHistory = {}; whyOpen = {}; lastDepthUntouched = []; pinnedTargets = {};
   lastAxesUsed = null; lastAxisTrimActive = false;
   Object.entries(DEFAULTS.fields).forEach(([id, v])=>{ const el = document.getElementById(id); if (el) el.value = v; });
   Object.entries(DEFAULTS.toggles).forEach(([id, v])=>{ const el = document.getElementById(id); if (el) el.checked = v; });
+  /* Anything in the workspace the table above does not name goes back to what the page
+     shipped with — its HTML default — so a new setting can never be missed by Reset. */
+  SETTING_FIELDS.concat(['castOptimise']).filter(id => !(id in DEFAULTS.fields)).forEach(id=>{
+    const el = document.getElementById(id); if (!el) return;
+    if (el.type === 'checkbox'){ el.checked = !!el.defaultChecked; return; }
+    if (el.tagName === 'SELECT'){
+      const opt = Array.from(el.options || []).find(o => o.defaultSelected) || (el.options || [])[0];
+      el.value = opt ? opt.value : ""; return;
+    }
+    el.value = el.defaultValue !== undefined ? el.defaultValue : "";
+  });
+  SETTING_TOGGLES.filter(id => !(id in DEFAULTS.toggles)).forEach(id=>{
+    const el = document.getElementById(id); if (el) el.checked = !!el.defaultChecked;
+  });
+  if (typeof renderLensPicker === 'function') renderLensPicker();
   PERSONALITY_AXES.forEach(a=>{ const el = document.getElementById('pers_'+a.id); if (el) el.value = 0; });
   PROFILE_SECTIONS.forEach(ps=>{
     // A section's shipped default, not "on": the §6 sections that ship off stay off.
@@ -2067,7 +2306,9 @@ async function resetAllToDefaults(){
   togglePersonalityPanel();
   toggleCompact();
   onSliderChange();
-  toast("Everything reset to defaults.");
+  prefsReady = wasReady;
+  savePrefs();
+  toastUndo("Everything reset to defaults. Your character stays until you build again.", ()=>{ undoLast(); savePrefs(); }, 10000);
 }
 
 function randomRawSlider(){
@@ -2106,8 +2347,8 @@ function randomRawSlider(){
    Handlers that were multi-statement inline bodies are named functions now, which is
    where they should have been anyway. */
 const ACTION_EVENTS = ['click', 'change', 'input', 'keydown'];
-function _actionArgs(el, ev){
-  let raw = el.getAttribute('data-args');
+function _actionArgs(el, ev, suffix){
+  let raw = el.getAttribute('data-args' + (suffix || ''));
   if (!raw) return [];
   let parsed;
   try { parsed = JSON.parse(raw); }
@@ -2115,8 +2356,8 @@ function _actionArgs(el, ev){
   if (!Array.isArray(parsed)) parsed = [parsed];
   return parsed.map(a => a === "$el" ? el : a === "$event" ? ev : a);
 }
-function _runAction(el, ev){
-  const name = el.getAttribute('data-act');
+function _runAction(el, ev, suffix){
+  const name = el.getAttribute('data-act' + (suffix || ''));
   const fn = name && globalThis[name];
   if (typeof fn !== 'function'){ console.error('[action] no such action:', name); return; }
   /* Roughly a third of the actions dispatched here are `async`, and a synchronous
@@ -2124,7 +2365,7 @@ function _runAction(el, ev){
      that threw after its first `await` produced an unhandled rejection in the console
      and nothing at all on screen. Catch the returned promise too. */
   try {
-    const out = fn.apply(null, _actionArgs(el, ev));
+    const out = fn.apply(null, _actionArgs(el, ev, suffix));
     if (out && typeof out.catch === 'function'){
       out.catch(err=>{
         console.error('[action] ' + name + ' rejected', err);
@@ -2139,6 +2380,11 @@ function _runAction(el, ev){
 }
 ACTION_EVENTS.forEach(type=>{
   document.addEventListener(type, (ev)=>{
+    /* An element can carry one action per event: `data-act-keydown` / `data-args-keydown`
+       sit beside the plain `data-act`. Writing `data-act` twice on one tag does not do
+       this — the parser keeps the first copy and silently drops the second. */
+    const perType = ev.target && ev.target.closest && ev.target.closest('[data-act-' + type + ']');
+    if (perType){ _runAction(perType, ev, '-' + type); return; }
     const target = ev.target && ev.target.closest && ev.target.closest('[data-act]');
     if (!target) return;
     // An element declares which events it wants; without this, a text input carrying a
@@ -2152,6 +2398,7 @@ ACTION_EVENTS.forEach(type=>{
 
 // ---- The handlers that used to be multi-statement inline bodies ----
 function openHelpPanel(){
+  if (typeof closeShortcuts === 'function') closeShortcuts();
   const p = document.getElementById('helpPanel');
   if (!p) return;
   p.open = true;
@@ -2177,7 +2424,6 @@ function toggleCardControls(el){
   el.setAttribute('aria-label', (open ? 'Hide' : 'Show') + ' the controls for this card');
   el.title = (open ? 'Hide' : 'Show') + ' the controls for this card';
 }
-function randomizeAndGenerate(){ randomizeSliders('all'); generateCharacter(); }
 /* `printSheet` was DEFINED TWICE — render.js has the real one with summary scoping,
    and this file redefined it below it in load order as a bare print() wrapper, so both
    Print and Print Summary dispatched to the same unscoped implementation and the
@@ -2185,51 +2431,114 @@ function randomizeAndGenerate(){ randomizeSliders('all'); generateCharacter(); }
    fails the build on a duplicate top-level function declaration so the next one is
    caught at the source rather than by reading two files side by side. */
 
+/* Surprise me, in four shapes (2026 audit §5c): a preset pulled off its defaults, a blend of
+   two presets with a slider split, an anti-archetype (a preset's axes inverted, its
+   motivation hints kept: "a Mentor who hoards knowledge"), or sliders from nothing. Each
+   roll may also throw lens dice (one or two lenses, clashing ones allowed) and switch on
+   one section that is off by default. */
+const _SURPRISE_AXES = ['verbositySlider', 'registerSlider', 'composureSlider'];
+function _presetRaw(arch, axisId){ return clamp(Math.round((arch.pers && arch.pers[axisId]) || 0), -100, 100); }
+function _setPresetSliders(mix){
+  // mix: list of {arch, w, invert}; weights sum to 1.
+  PERSONALITY_AXES.forEach(axis=>{
+    const el = document.getElementById('pers_'+axis.id);
+    if (!el || isSliderLocked('pers_'+axis.id)) return;
+    el.value = String(clamp(Math.round(mix.reduce((t, m) => t + _presetRaw(m.arch, axis.id) * m.w * (m.invert ? -1 : 1), 0)), -100, 100));
+  });
+  [['verbositySlider', 'verbosity'], ['registerSlider', 'register'], ['composureSlider', 'composure']].forEach(([id, key])=>{
+    if (isSliderLocked(id)) return;
+    setVal(id, clamp(Math.round(mix.reduce((t, m) => t + (m.arch[key] || 0) * 50 * m.w * (m.invert ? -1 : 1), 0)), -100, 100));
+  });
+}
 function surpriseMe(){
   const keys = Object.keys(ARCHETYPES);
-  const pick = keys[Math.floor(rand() * keys.length)];
+  const pickKey = (not) => { let k; do { k = keys[Math.floor(rand() * keys.length)]; } while (k === not && keys.length > 1); return k; };
   const sel = document.getElementById('archetypeSelect');
-  // Half the time take a preset and pull it around; half the time go from nothing.
-  const useArchetype = sel && rand() < 0.5;
-  if (sel) sel.value = useArchetype ? pick : "";
-  if (useArchetype) applyArchetypeSetup(); else randomizeSliders('all');
-  if (useArchetype){
-    // Nudge every axis off the preset so two rolls of the same archetype differ.
+  const roll = rand();
+  const mode = roll < 0.3 ? "preset" : roll < 0.5 ? "blend" : roll < 0.68 ? "anti" : "free";
+  let said = "";
+  const a = pickKey();
+  if (mode === "preset"){
+    if (sel) sel.value = a;
+    onArchetypeChange(false);
     PERSONALITY_AXES.forEach(axis=>{
       const el = document.getElementById('pers_'+axis.id);
-      if (!el) return;
+      if (!el || isSliderLocked('pers_'+axis.id)) return;
       el.value = String(clamp(intVal(el, 0) + Math.round((rand()*2-1) * 45), -100, 100));
     });
+    said = `Surprised you from "${ARCHETYPES[a].label}", pulled well off its defaults.`;
+  } else if (mode === "blend"){
+    const b = pickKey(a), t = 0.35 + Math.round(rand() * 6) * 0.05;
+    if (sel) sel.value = "";
+    onArchetypeChange(false);
+    _setPresetSliders([{arch: ARCHETYPES[a], w: 1 - t}, {arch: ARCHETYPES[b], w: t}]);
+    said = `Blended "${ARCHETYPES[a].label}" (${Math.round((1 - t) * 100)}%) with "${ARCHETYPES[b].label}" (${Math.round(t * 100)}%).`;
+  } else if (mode === "anti"){
+    if (sel) sel.value = "";
+    onArchetypeChange(false);
+    _setPresetSliders([{arch: ARCHETYPES[a], w: 1, invert: true}]);
+    said = `An anti-"${ARCHETYPES[a].label}": the axes inverted, the inner life kept.`;
+  } else {
+    if (sel) sel.value = "";
+    onArchetypeChange(false);
+    randomizeSliders('all');
+    said = "Every slider rolled, sections rolled, and the wildcard turned on.";
   }
   randomizeProfileTypes();
+  // The anti-archetype keeps what drives the preset: its motivation-side hints stay.
+  if (mode === "anti" && typeof ARCHETYPE_PROFILE_HINTS !== 'undefined' && ARCHETYPE_PROFILE_HINTS[a]){
+    ['values', 'beliefs', 'goals', 'origins', 'motivation', 'contradiction'].forEach(id=>{
+      const cat = ARCHETYPE_PROFILE_HINTS[a][id], tsel = document.getElementById('type_'+id);
+      if (cat && tsel && [...tsel.options].some(o => o.value === cat)){ tsel.value = cat; if (typeof clearAutoProfileType === 'function') clearAutoProfileType(id); }
+    });
+  }
   // divergence is a 0..1 range in steps of 0.05, not a 0..100 slider.
   const div = document.getElementById('divergence');
   if (div) div.value = (0.35 + Math.round(rand() * 8) * 0.05).toFixed(2);
   const wild = document.getElementById('wildcardToggle');
   if (wild) wild.checked = true;
+  // Lens dice: none, one, or two — a clashing pair is allowed on purpose.
+  const lensEl = document.getElementById('lensSelect');
+  if (lensEl && typeof LENSES !== 'undefined'){
+    const n = rand() < 0.55 ? 0 : rand() < 0.6 ? 1 : 2, picked = [];
+    while (picked.length < n){ const l = LENSES[Math.floor(rand() * LENSES.length)]; if (!picked.includes(l)) picked.push(l); }
+    lensEl.value = LENS_IDS.filter(id => picked.some(l => l.id === id)).join(',');
+    renderLensPicker();
+    if (picked.length) said += ` Lens dice: ${picked.map(l => l.label).join(" + ")}.`;
+  }
+  // A rotating wild section: one section that is off by default, on for this roll.
+  const offBy = PROFILE_SECTIONS.filter(ps => ps.defaultOn === false);
+  offBy.forEach(ps => { const tog = document.getElementById('sec_'+ps.id); if (tog) tog.checked = false; });
+  if (offBy.length && rand() < 0.4){
+    const ps = offBy[Math.floor(rand() * offBy.length)], tog = document.getElementById('sec_'+ps.id);
+    if (tog){ tog.checked = true; said += ` Wild section: ${ps.label}.`; }
+  }
   setVal('charName', "");
   invalidateSliderCache();
   onSliderChange();
   runGeneration();
-  toast(useArchetype
-    ? `Surprised you from "${ARCHETYPES[pick].label}", pulled well off its defaults. Everything is still yours to change.`
-    : "Every slider rolled, sections rolled, and the wildcard turned on. Everything is still yours to change.");
+  toast(said + " Everything is still yours to change.");
 }
 
 function randomizeSliders(scope){
+  // A slider with its lock ticked stays where it is: pin the axes you know, roll the rest.
   if (scope === 'voice' || scope === 'all'){
-    setVal('verbositySlider', randomRawSlider());
-    setVal('registerSlider', randomRawSlider());
-    setVal('composureSlider', randomRawSlider());
+    ['verbositySlider', 'registerSlider', 'composureSlider'].forEach(id => { if (!isSliderLocked(id)) setVal(id, randomRawSlider()); });
   }
   if (scope === 'personality' || scope === 'all'){
     PERSONALITY_AXES.forEach(axis=>{
       const el = document.getElementById('pers_'+axis.id);
-      if (el) el.value = randomRawSlider();
+      if (el && !isSliderLocked('pers_'+axis.id)) el.value = randomRawSlider();
     });
   }
   onSliderChange();
 }
+function isSliderLocked(id){ const el = document.getElementById('lock_' + id); return !!(el && el.checked); }
+function lockedSliderIds(){ return [...document.querySelectorAll('input[id^="lock_"]')].filter(e => e.checked).map(e => e.id.slice(5)); }
+function sliderLockHTML(id, name){
+  return `<label class="sliderLock" title="Lock: Randomize and Surprise me leave this slider where it is"><input type="checkbox" id="lock_${id}" ${actAttr('change', 'onSliderLockChange')} aria-label="Lock ${escAttr(name)}"><span aria-hidden="true">🔒</span></label>`;
+}
+function onSliderLockChange(){ if (typeof savePrefs === 'function') savePrefs(); }
 
 
 // ================= CUSTOM ARCHETYPES =================
@@ -2285,11 +2594,20 @@ async function deleteCustomArchetype(){
   const key = sel.value;
   if (!key.startsWith('custom_')){ toast("Select one of your custom archetypes in the dropdown first.", "warn"); return; }
   const name = key.replace('custom_','');
-  if (!await askForConfirm(`Delete the archetype "${name}"? This can't be undone.`, "Delete")) return;
+  // An Undo toast, not a confirm: the saved record is held until the toast goes.
+  let raw = null;
+  try { const r = await storage.get('archetype:'+name); raw = r && r.value; } catch(e){}
   try {
     await storage.delete('archetype:'+name);
     delete CUSTOM_ARCHETYPES[key];
     await loadCustomArchetypes();
+    toastUndo(`Deleted the archetype "${name}".`, async ()=>{
+      if (raw) await storage.set('archetype:'+name, raw);
+      await loadCustomArchetypes();
+      const s2 = document.getElementById('archetypeSelect'); if (s2 && CUSTOM_ARCHETYPES[key]) s2.value = key;
+      onArchetypeChange(true);
+      toast(`"${name}" is back.`);
+    }, 12000);
   } catch(e){ console.error(e); toast("Could not delete — try again.", "warn"); }
 }
 
@@ -2396,6 +2714,27 @@ function exportWorkspaceJSON(){
   const n = Object.keys(CUSTOM_ARCHETYPES).length;
   toast(`Exported your workspace${n ? ` and ${n} custom archetype${n===1?'':'s'}` : ''}.`);
 }
+/* Merging a workspace: the union of the constraint lists, the incoming caps only where you have
+   none, and everything else (sliders, toggles, fields, sections) left as it is. */
+function mergeWorkspaceSettings(cur, inc){
+  const out = JSON.parse(JSON.stringify(cur));
+  const c = out.constraints = out.constraints || {}, i = (inc && inc.constraints) || {};
+  ['bannedCategories', 'bannedSections', 'bannedTraitIds', 'requiredTraitIds', 'requiredCategories'].forEach(k => {
+    c[k] = [...new Set([...(c[k] || []), ...(Array.isArray(i[k]) ? i[k] : [])])];
+  });
+  const key = p => JSON.stringify(p);
+  const pairs = new Map((c.exclusivePairs || []).map(p => [key(p), p]));
+  (Array.isArray(i.exclusivePairs) ? i.exclusivePairs : []).forEach(p => pairs.set(key(p), p));
+  c.exclusivePairs = [...pairs.values()];
+  const tiers = new Map(c.categoryTiers || []);
+  (Array.isArray(i.categoryTiers) ? i.categoryTiers : []).forEach(([k, v]) => { if (!tiers.has(k)) tiers.set(k, v); });
+  c.categoryTiers = [...tiers.entries()];
+  ['rarityCaps', 'intensityCaps'].forEach(k => {
+    c[k] = Object.assign({}, i[k] || {}, Object.fromEntries(Object.entries(c[k] || {}).filter(([, v]) => v !== null && v !== undefined)));
+  });
+  out.disabledPacks = [...new Set([...(out.disabledPacks || []), ...((inc && inc.disabledPacks) || [])])];
+  return out;
+}
 async function importWorkspaceJSON(fileInput){
   const file = fileInput.files && fileInput.files[0];
   if (!file) return;
@@ -2405,6 +2744,7 @@ async function importWorkspaceJSON(fileInput){
   try {
     const p = JSON.parse(text);
     if (p.format !== "character-voice-workspace") throw new Error("Not a workspace file.");
+    checkFileVersion(p, WORKSPACE_FORMAT_VERSION, "workspace");
     if (p.settings != null && (typeof p.settings !== 'object' || Array.isArray(p.settings)))
       throw new Error("The `settings` block is not an object.");
     if (p.archetypes != null && !Array.isArray(p.archetypes))
@@ -2417,13 +2757,21 @@ async function importWorkspaceJSON(fileInput){
     if (p.settings) bits.push("your constraints, budgets, tiers and section settings");
     if (archetypes.length) bits.push(`${archetypes.length} custom archetype${archetypes.length===1?'':'s'}`);
     if (!bits.length) throw new Error("That workspace file is empty.");
-    if (!await askForConfirm(`Replace ${bits.join(" and ")} with the contents of this file?`, "Replace")) return;
+    const choice = await askChoice(`This file holds ${bits.join(" and ")}. Replace yours with it, or merge it into what you have?`,
+      [{value: 'merge', label: 'Merge into mine'}, {value: 'replace', label: 'Replace mine'}]);
+    if (!choice) return;
+    const merge = choice === 'merge';
     /* B16: the undo snapshot carries captureSettings(), so Undo (button, Ctrl+Z, or the
        toast) restores the constraints and settings this import replaced. */
     const prevSettings = captureSettings();
-    if (p.settings){ snapshotHistory(); restoreSettings(p.settings); }
-    let saved = 0;
+    if (p.settings){
+      snapshotHistory();
+      restoreSettings(merge ? mergeWorkspaceSettings(prevSettings, p.settings) : p.settings);
+    }
+    let saved = 0, skippedSame = [];
     for (const arch of archetypes){
+      // Merging keeps an archetype you already have under that name rather than overwriting it.
+      if (merge && CUSTOM_ARCHETYPES['custom_' + arch.label]){ skippedSame.push(arch.label); continue; }
       try { await storage.set('archetype:'+arch.label, JSON.stringify(arch)); saved++; }
       catch(e){ console.error(e); }
     }
@@ -2431,7 +2779,7 @@ async function importWorkspaceJSON(fileInput){
     refreshConstraintChips();
     onSliderChange();
     if (typeof savePrefs === 'function') savePrefs();
-    const msg = `Imported ${bits.join(" and ")}${saved < archetypes.length ? ` (${archetypes.length - saved} archetype(s) would not fit in storage)` : ''}.`;
+    const msg = `${merge ? 'Merged' : 'Imported'} ${bits.join(" and ")}${skippedSame.length ? ` (kept your own version of: ${skippedSame.join(', ')})` : ''}${saved + skippedSame.length < archetypes.length ? ` (${archetypes.length - saved - skippedSame.length} archetype(s) would not fit in storage)` : ''}.`;
     if (p.settings) toastUndo(msg, ()=>{
       restoreSettings(prevSettings); refreshConstraintChips(); onSliderChange();
       if (typeof savePrefs === 'function') savePrefs();
@@ -2442,7 +2790,19 @@ async function importWorkspaceJSON(fileInput){
 }
 
 // ================= RELATIONSHIP GENERATOR =================
+/* The Relationships tab was a page of empty dropdowns until a cast existed. Say what it
+   needs and offer the way there. */
+function refreshRelEmpty(){
+  const box = document.getElementById('relEmpty');
+  if (!box) return;
+  // The sheet on screen counts: the pair pickers offer it beside the cast members.
+  const n = castStates.length + (Object.keys(state).length ? 1 : 0);
+  box.hidden = n >= 2;
+  const c = document.getElementById('relEmptyCount');
+  if (c) c.textContent = n === 0 ? "There is no character or cast yet." : "There is one character so far — build a cast, or add this sheet to it.";
+}
 function refreshRelSelectors(){
+  refreshRelEmpty();
   if (typeof renderEdges === 'function') renderEdges();
   if (typeof renderVoiceCompare === 'function') renderVoiceCompare();
   const a = document.getElementById('relA'), b = document.getElementById('relB');
@@ -3222,7 +3582,24 @@ async function savePrefs(){
     const adv = document.getElementById('advancedToggle');
     if (adv) data.toggles.advancedToggle = !!adv.checked;
     await storage.set(PREF_KEY, JSON.stringify(data));
-  } catch(e){ /* storage unavailable — preferences just won't persist */ }
+    markSaved();
+  } catch(e){ /* storage unavailable — preferences just won't persist */ markSaved(false); }
+}
+/* The header's save state: what the app has kept for you, and when. Settings autosave; a
+   character is kept only when you save it or file it, and the line says which. */
+function markSaved(ok){
+  const el = document.getElementById('saveState');
+  if (!el) return;
+  if (ok === false || !storageIsDurable()){ el.textContent = "Not saved: storage is off"; el.classList.add('warn'); return; }
+  el.classList.remove('warn');
+  const t = new Date();
+  el.textContent = "Settings saved " + t.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+}
+function refreshProjectChip(){
+  const n = document.getElementById('projectChipName');
+  if (!n) return;
+  const p = currentProject();
+  n.textContent = p ? p.name : 'none';
 }
 
 async function loadPrefs(){
@@ -3276,6 +3653,25 @@ function wirePrefPersistence(){
    Generate. Quick mode shows the four that matter on a first pass — name, the three
    voice sliders, archetype — and hides the rest behind one switch, which is a
    presentation change only: everything hidden keeps its value and keeps applying. */
+/* "Review" on the in-force strip: show the Advanced controls if Quick mode hides them,
+   open every panel whose heading carries a count, and scroll to the first. */
+function reviewActiveRules(){
+  const adv = document.getElementById('advancedToggle');
+  if (adv && !adv.checked){ adv.checked = true; applyAdvancedMode(); if (typeof savePrefs === 'function') savePrefs(); }
+  if (typeof setInputsCollapsed === 'function') setInputsCollapsed(false);   // a phone may have folded the inputs
+  let first = null;
+  document.querySelectorAll('[data-badge]:not([hidden])').forEach(b=>{
+    const d = b.closest('details'); if (!d) return;
+    d.open = true; if (!first) first = d;
+  });
+  const target = first || document.getElementById('controlsStart');
+  if (target && target.scrollIntoView) target.scrollIntoView({block:'start', behavior: _prefersReducedMotion() ? 'auto' : 'smooth'});
+}
+document.addEventListener('click', (e)=>{
+  // Choosing something from the "More ways to roll" menu closes it.
+  const item = e.target && e.target.closest && e.target.closest('.moreRollsMenu button');
+  if (item){ const d = item.closest('details'); if (d) d.open = false; }
+});
 function applyAdvancedMode(){
   const on = document.getElementById('advancedToggle');
   const adv = !!(on && on.checked);
@@ -3292,15 +3688,19 @@ function applyAdvancedMode(){
    A 7,073-option datalist is also a lot of DOM for a control nobody can scroll.
    This is a debounced search over trait + description, showing the category, capped
    at a readable number of results and drawing from the WHOLE pool. */
-let _searchTimer = null;
-function searchTraits(inputId, resultsId, onPick){
+// One debounce timer per search box: a shared one let typing in one box cancel
+// another's pending results.
+const _searchTimers = {};
+function searchTraits(inputId, resultsId){
   const inp = document.getElementById(inputId);
   const box = document.getElementById(resultsId);
   if (!inp || !box) return;
-  if (_searchTimer) clearTimeout(_searchTimer);
-  _searchTimer = setTimeout(()=>{
+  if (_searchTimers[inputId]) clearTimeout(_searchTimers[inputId]);
+  _searchTimers[inputId] = setTimeout(()=>{
     const q = (inp.value||"").trim().toLowerCase();
-    if (q.length < 2){ box.innerHTML = ""; box.style.display = 'none'; return; }
+    // closeSearchResults also resets aria-expanded and aria-activedescendant, which
+    // would otherwise keep pointing at options that no longer exist.
+    if (q.length < 2){ closeSearchResults(inputId, resultsId); return; }
     const hits = [];
     for (const t of TRAITS){
       if (t.trait.toLowerCase().includes(q) || t.desc.toLowerCase().includes(q)){
@@ -3463,6 +3863,19 @@ function wireKeyboard(){
       if (inDialog || tag === 'textarea') return;
       e.preventDefault(); generateCharacter(); return;
     }
+    // Ctrl/Cmd+S keeps the character instead of asking the browser to save the page.
+    if (mod && (e.key === 's' || e.key === 'S') && !e.shiftKey){
+      if (inDialog) return;
+      e.preventDefault(); if (Object.keys(state).length) saveCharacter(null); else toast("Nothing to save yet — build a character first.", "warn"); return;
+    }
+    // Esc closes the menus that open over the page.
+    if (e.key === 'Escape'){
+      let closed = false;
+      const fm = document.getElementById('fileMenu'); if (fm && fm.open){ fm.open = false; closed = true; }
+      const mr = document.getElementById('moreRolls'); if (mr && mr.open){ mr.open = false; closed = true; }
+      const sx = document.getElementById('stickyExtra'); if (sx && sx.classList.contains('open')){ toggleStickyMore(); closed = true; }
+      if (closed) return;
+    }
     // Shift+Ctrl/Cmd+Z and Ctrl/Cmd+Y are the two conventions; support both.
     if (mod && ((e.key === 'z' || e.key === 'Z') && e.shiftKey || e.key === 'y' || e.key === 'Y')){
       if (typing || inDialog) return;     // B8: text fields keep their own redo
@@ -3473,21 +3886,32 @@ function wireKeyboard(){
       e.preventDefault(); undoLast(); return;
     }
     if (typing || inDialog || mod || e.altKey) return;
-    if (e.key === '?'){ const h = document.getElementById('helpPanel'); if (h){ h.open = !h.open; h.scrollIntoView({block:'nearest'}); } return; }
+    if (e.key === '?'){ openShortcuts(); return; }
+    // 1 / 2 / 3 switch tab; / goes to the trait search. Neither does anything on a focused control.
+    if (e.key === '1' || e.key === '2' || e.key === '3'){ switchTab(['single', 'cast', 'rel'][+e.key - 1]); return; }
+    if (e.key === '/'){
+      e.preventDefault();
+      const adv = document.getElementById('advancedToggle');
+      if (adv && !adv.checked){ adv.checked = true; applyAdvancedMode(); }
+      if (typeof setInputsCollapsed === 'function') setInputsCollapsed(false);
+      const inp = document.getElementById('constraintTraitSearch');
+      if (inp){ const d = inp.closest('details'); if (d) d.open = true; inp.focus(); inp.scrollIntoView({block:'center'}); }
+      return;
+    }
     if (tag === 'summary' || tag === 'button' || tag === 'a') {
       // A focused control inside a card still counts as "this card"; anywhere else a
       // letter key belongs to the control (and Space/Enter are its activation keys).
       if (!(t.closest && t.closest('.traitCard[data-slot]'))) return;
     }
     const k = e.key.toLowerCase();
-    if (k !== 'r' && k !== 'l') return;
+    if (k !== 'r' && k !== 'l' && k !== 'p') return;
     // B9: the focused card first (keyboard and touch), the hovered one as a fallback.
     const card = (t.closest && t.closest('.traitCard[data-slot]')) ||
                  document.querySelector('#sheet .traitCard[data-slot]:focus-within') ||
                  document.querySelector('.traitCard[data-slot]:hover');
     if (!card) return;
     const slot = card.getAttribute('data-slot');
-    const btn = card.querySelector(k === 'r' ? '.rerollBtn' : '.lockBtn');
+    const btn = card.querySelector(k === 'r' ? '.rerollBtn:not(.backBtn)' : k === 'l' ? '.lockBtn' : '.pinBtn');
     if (!btn) return;
     e.preventDefault();
     btn.click();
@@ -3498,7 +3922,7 @@ function wireKeyboard(){
       const next = document.querySelector(sel);
       if (next && document.activeElement !== next && !next.contains(document.activeElement)) next.focus({preventScroll:true});
       const sl = state[slot];
-      if (sl && sl.trait) srAnnounce(k === 'r' ? `Tossed. Now: ${sl.trait.trait}.` : `${sl.trait.trait} ${sl.locked ? 'kept' : 'released'}.`);
+      if (sl && sl.trait) srAnnounce(k === 'r' ? `Tossed. Now: ${sl.trait.trait}.` : k === 'p' ? `${sl.trait.trait} intensity ${pinnedTargets[slot] !== undefined ? 'pinned' : 'unpinned'}.` : `${sl.trait.trait} ${sl.locked ? 'kept' : 'released'}.`);
     });
   });
 }
@@ -3579,11 +4003,17 @@ function shareLinkFor(){
   if (!lastSeedUsed) return null;
   const settings = captureSettings();
   delete settings.rerollExclusions;
-  delete settings.favouriteTraitIds;
+  // Saved traits only shape a draw when the boost is on; then the link must carry them to replay.
+  if (!favouriteBoostEnabled()) delete settings.favouriteTraitIds;
   // Name/age/context travel so the replay lands in the same world; the seed field
   // itself is carried separately.
   if (settings.fields) delete settings.fields.seedInput;
+  /* Kept cards are seated before anything is drawn (finalizeSheet, carryLocked), so a
+     sheet built around them is only replayable with them. They travel with the link. */
+  const locked = {};
+  Object.entries(state || {}).forEach(([k, s2]) => { if (s2 && s2.locked && s2.trait) locked[k] = s2; });
   const payload = {v: 1, seed: lastSeedUsed, settings};
+  if (Object.keys(locked).length) payload.locked = compressSlots(locked);
   const url = location.href.split('#')[0];
   return url + '#share=' + _b64urlEncode(JSON.stringify(payload));
 }
@@ -3594,12 +4024,33 @@ function copyShareLink(btnEl){
   copyText(link, btnEl);
   toast("Share link copied. Opening it replays this character with these settings.");
 }
+const SHARE_LINK_VERSION = 1;
+const SEED_CODEC_VERSION = parseInt(String(SEED_PREFIX).replace(/\D/g, ''), 10) || 1;
 function readShareFromHash(hash){
   const m = /(?:^#|&)share=([A-Za-z0-9_-]+)/.exec(hash || "");
   if (!m) return null;
   const p = JSON.parse(_b64urlDecode(m[1]));
   if (!p || typeof p !== 'object' || typeof p.seed !== 'string' || !p.seed.trim()) throw new Error("the link has no seed.");
+  /* Links carry a version and the seed carries the codec's: a link from another build of the app
+     cannot replay faithfully, and used to produce a different character under the same words. */
+  if (p.v !== undefined && p.v !== SHARE_LINK_VERSION)
+    throw new Error(`it was made by ${p.v > SHARE_LINK_VERSION ? 'a newer' : 'an older'} version of this app (link version ${p.v}; this one reads version ${SHARE_LINK_VERSION}), so it cannot bring back the same character. Ask for a fresh link from the current version.`);
+  const sv = /^v(\d+)-/.exec(p.seed);
+  if (sv && !SUPPORTED_SEED_VERSIONS.includes(+sv[1]))
+    throw new Error(`its seed is in format v${sv[1]}, but this version of the app reads v${SUPPORTED_SEED_VERSIONS.join(' and v')}, so the seed would build a different person.`);
   if (p.settings != null && (typeof p.settings !== 'object' || Array.isArray(p.settings))) throw new Error("the link's settings are malformed.");
+  // The same structural check an imported file gets, BEFORE anything is applied — a
+  // malformed constraint block used to clear the recipient's own bans and then throw.
+  if (p.settings && typeof validateSheetPayload === 'function') validateSheetPayload({settings: p.settings});
+  if (p.locked != null){
+    if (typeof p.locked !== 'object' || Array.isArray(p.locked)) throw new Error("the link's kept cards are malformed.");
+    const exp = expandSlots(p.locked) || {};
+    Object.values(exp).forEach(s2 => {
+      if (!s2 || !s2.trait || !TRAITS_BY_ID.get(s2.trait.id)) throw new Error("the link keeps a card this bank does not have.");
+      s2.trait = TRAITS_BY_ID.get(s2.trait.id);
+    });
+    p.locked = exp;
+  }
   return p;
 }
 function applyShareFromHash(){
@@ -3608,19 +4059,34 @@ function applyShareFromHash(){
   try { p = readShareFromHash(location.hash); }
   catch(e){ toast("That share link could not be read: " + e.message, "warn", 7000); return false; }
   if (!p) return false;
+  /* The link's settings replace the recipient's own (the replay needs them), so the
+     workspace is snapshotted first: Undo gives the recipient their settings back, and a
+     failure part-way restores them rather than leaving half of each. */
+  const before = captureSettings();
+  const snap = _snapshotNow();
   try {
     if (p.settings) restoreSettings(p.settings);
     applyAdvancedMode();
     setVal('seedInput', p.seed);
     onSliderChange();
+    // Seat the link's kept cards exactly as the sender had them.
+    state = p.locked ? p.locked : {};
     runGeneration();
+    // The build pushed a snapshot of the half-applied workspace; undo should land on
+    // the recipient's own sheet and settings instead.
+    if (history.length) history[history.length - 1] = snap;
+  } catch(e){
+    state = expandSlots(snap.state) || {};
+    try { restoreSettings(before); } catch(e2){}
+    toast("That share link could not be opened: " + (e && e.message || e), "warn", 7000);
+    return false;
   } finally {
     // The seed replayed once; left in the field, every later roll would be the same one.
     setVal('seedInput', '');
     // window.history: the bare name is the undo stack (engine.js).
     try { window.history.replaceState(null, '', location.href.split('#')[0]); } catch(e){}
   }
-  toast(`Opened a shared character (seed ${p.seed}).`);
+  toast(`Opened a shared character (seed ${p.seed}). It came with its own settings — Undo puts yours back.`, "ok", 7000);
   markOnboarded();
   return true;
 }
@@ -3657,7 +4123,6 @@ function compareSheetsHTML(a, aName, b, bName){
   const rows = slots.map(k=>{
     const x = a[k] && a[k].trait, y = b[k] && b[k].trait;
     const eq = x && y && x.id === y.id;
-    const inOther = (!eq && x && B.has(x.id)) || (!eq && y && A.has(y.id));
     if (eq) same++;
     const label = (a[k] && a[k].label) || (b[k] && b[k].label) || k;
     const cell = (t, has) => t ? `<span class="${has ? 'cmpShared' : ''}">${escHTML(t.trait)}</span>` : `<span class="sub">—</span>`;
@@ -3704,6 +4169,301 @@ function renderFamiliar(){
 }
 function familiarBan(id){ banTrait(id); renderFamiliar(); }
 function onFamiliarToggle(el){ if (el && el.open) renderFamiliar(); }
+
+/* Inputs fold on a phone. A 34,000px page is mostly the controls; after a build the person
+   wants the sheet, so the inputs collapse to a one-line recap with a way back. */
+function _narrowScreen(){ return typeof matchMedia === 'function' && matchMedia('(max-width: 720px)').matches; }
+function inputsRecapText(){
+  const arch = document.getElementById('archetypeSelect');
+  const label = arch && arch.value && arch.selectedOptions[0] ? arch.selectedOptions[0].textContent : 'No archetype';
+  const rules = typeof activeRuleChips === 'function' ? activeRuleChips().length : 0;
+  const lenses = typeof activeLensIds === 'function' ? activeLensIds().length : 0;
+  return [label, lenses ? lenses + ' lens' + (lenses === 1 ? '' : 'es') : null, rules ? rules + ' rule' + (rules === 1 ? '' : 's') + ' in force' : null].filter(Boolean).join(' · ');
+}
+function setInputsCollapsed(on){
+  const view = document.getElementById('view-single'), bar = document.getElementById('inputsBar'), btn = document.getElementById('inputsToggle');
+  if (!view || !bar) return;
+  view.classList.toggle('inputsCollapsed', !!on);
+  bar.hidden = !Object.keys(state).length;
+  const rc = document.getElementById('inputsRecap'); if (rc) rc.textContent = inputsRecapText();
+  if (btn){ btn.setAttribute('aria-expanded', String(!on)); btn.textContent = on ? 'Edit inputs ▾' : 'Hide inputs ▴'; }
+}
+function collapseInputsAfterBuild(){ if (_narrowScreen()) setInputsCollapsed(true); }
+function toggleInputs(){
+  const view = document.getElementById('view-single');
+  const collapsed = !!(view && view.classList.contains('inputsCollapsed'));
+  setInputsCollapsed(!collapsed);
+  if (collapsed){ const c = document.getElementById('controlsStart'); if (c && c.scrollIntoView) c.scrollIntoView({block:'start'}); }
+}
+/* The shortcuts were a folded paragraph in the help panel. A real dialog, opened by ?. */
+function openShortcuts(){
+  const d = document.getElementById('shortcutDialog');
+  if (!d) return;
+  if (d.open){ d.close(); return; }
+  if (typeof d.showModal === 'function') d.showModal(); else d.setAttribute('open', '');
+}
+function closeShortcuts(){ const d = document.getElementById('shortcutDialog'); if (d && d.open) d.close(); }
+/* Theme: the CSS already answers `data-theme` and the system setting; nothing let you choose.
+   Auto follows the system, Light and Dark override it, and the choice is remembered. */
+const THEME_KEY = 'ui:theme', THEME_MODES = ['auto', 'light', 'dark'];
+let themeMode = 'auto';
+function applyTheme(mode){
+  themeMode = THEME_MODES.includes(mode) ? mode : 'auto';
+  const root = document.documentElement;
+  if (themeMode === 'auto') root.removeAttribute('data-theme'); else root.setAttribute('data-theme', themeMode);
+  const label = document.getElementById('themeLabel'), btn = document.getElementById('themeBtn');
+  const name = {auto:'Auto', light:'Light', dark:'Dark'}[themeMode];
+  if (label) label.textContent = name;
+  if (btn){
+    btn.setAttribute('aria-label', 'Colour theme: ' + name.toLowerCase());
+    btn.title = 'Colour theme: ' + name.toLowerCase() + (themeMode === 'auto' ? ' (follows your system)' : '') + '. Click to change.';
+  }
+}
+function cycleTheme(){
+  applyTheme(THEME_MODES[(THEME_MODES.indexOf(themeMode) + 1) % THEME_MODES.length]);
+  try { storage.set(THEME_KEY, themeMode); } catch(e){}
+}
+async function loadTheme(){
+  try { const r = await storage.get(THEME_KEY); if (r && r.value) applyTheme(r.value); else applyTheme('auto'); } catch(e){ applyTheme('auto'); }
+}
+// The seed chip in the sticky bar copies the seed; the seed promises the character (README).
+function copySeed(){
+  if (!lastSeedUsed){ toast("No character yet — build one and its seed appears here.", "warn"); return; }
+  copyText(lastSeedUsed, null);
+  toast("Seed " + lastSeedUsed + " copied. Paste it into the seed box to get this character back.");
+}
+// The ⋯ button folds the secondary sticky-bar actions away on a phone.
+function toggleStickyMore(){
+  const btn = document.getElementById('stickyMoreBtn'), box = document.getElementById('stickyExtra');
+  if (!btn || !box) return;
+  const open = !box.classList.contains('open');
+  box.classList.toggle('open', open);
+  btn.setAttribute('aria-expanded', String(open));
+}
+document.addEventListener('click', (e)=>{
+  const box = document.getElementById('stickyExtra');
+  if (!box || !box.classList.contains('open')) return;
+  const inside = e.target.closest && e.target.closest('#stickyExtra');
+  const isBtn = e.target.closest && e.target.closest('#stickyMoreBtn');
+  if (isBtn) return;
+  if (!inside || e.target.closest('#stickyExtra button')) toggleStickyMore();
+});
+/* ================= NAMED SLIDER SETS =================
+   Sixteen sliders, saved under a name. Lighter than the custom archetype builder, which
+   also stores constraints, counts and section toggles. */
+const SLIDERSET_PREFIX = 'sliderset:';
+async function loadSliderPresets(){
+  const sel = document.getElementById('sliderPresetSelect');
+  if (!sel) return;
+  const keep = sel.value;
+  let names = [];
+  try { const r = await storage.list(SLIDERSET_PREFIX); names = ((r && r.keys) || []).map(k => k.slice(SLIDERSET_PREFIX.length)).sort((a, b) => a.localeCompare(b)); } catch(e){}
+  sel.innerHTML = `<option value="">Slider sets…</option>` + names.map(n => `<option value="${escAttr(n)}">${escHTML(n)}</option>`).join("");
+  if (names.includes(keep)) sel.value = keep;
+}
+async function saveSliderPreset(){
+  const name = await askForName("Name this slider set:", "");
+  if (!name || !name.trim()) return;
+  const n = name.trim().slice(0, 60);
+  try {
+    await storage.set(SLIDERSET_PREFIX + n, JSON.stringify({format: "character-voice-sliders", sliders: captureSliders(), savedAt: new Date().toISOString()}));
+    await loadSliderPresets();
+    const sel = document.getElementById('sliderPresetSelect'); if (sel) sel.value = n;
+    toast(`Saved the sliders as "${n}".`);
+  } catch(e){ toast("Could not save the slider set.", "warn"); }
+}
+async function applySliderPreset(){
+  const sel = document.getElementById('sliderPresetSelect');
+  if (!sel || !sel.value){ toast("Pick a slider set first.", "warn"); return; }
+  let rec = null;
+  try { const r = await storage.get(SLIDERSET_PREFIX + sel.value); rec = r && JSON.parse(r.value); } catch(e){}
+  if (!rec || !rec.sliders){ toast("That slider set could not be read.", "warn"); return; }
+  const before = captureSliders(), name = sel.value;
+  // Locked sliders keep their value: the lock means "leave this one alone".
+  const next = {}; Object.entries(rec.sliders).forEach(([id, v]) => { if (!isSliderLocked(id)) next[id] = v; });
+  restoreSliders(next); invalidateSliderCache(); onSliderChange();
+  toastUndo(`Loaded "${name}".`, ()=>{ restoreSliders(before); invalidateSliderCache(); onSliderChange(); });
+}
+async function deleteSliderPreset(){
+  const sel = document.getElementById('sliderPresetSelect');
+  if (!sel || !sel.value){ toast("Pick a slider set first.", "warn"); return; }
+  const name = sel.value; let raw = null;
+  try { const r = await storage.get(SLIDERSET_PREFIX + name); raw = r && r.value; } catch(e){}
+  try { await storage.delete(SLIDERSET_PREFIX + name); } catch(e){ toast("Could not delete it.", "warn"); return; }
+  await loadSliderPresets();
+  toastUndo(`Deleted the slider set "${name}".`, async ()=>{ if (raw) await storage.set(SLIDERSET_PREFIX + name, raw); await loadSliderPresets(); }, 10000);
+}
+/* Reduce motion: the system setting was honoured; a switch in the page lets you choose it
+   here too. Remembered between visits (ui:reduceMotion). */
+function applyReduceMotion(on){
+  document.body.classList.toggle('reduce-motion', !!on);
+  const el = document.getElementById('reduceMotionToggle'); if (el) el.checked = !!on;
+}
+function toggleReduceMotion(){
+  const el = document.getElementById('reduceMotionToggle');
+  applyReduceMotion(!!(el && el.checked));
+  try { storage.set('ui:reduceMotion', el && el.checked ? '1' : ''); } catch(e){}
+}
+async function loadReduceMotion(){
+  try { const r = await storage.get('ui:reduceMotion'); if (r && r.value) applyReduceMotion(true); } catch(e){}
+}
+// The boost is part of the workspace: changing it re-saves, and the pool of saved traits is unchanged.
+function onFavouriteBoostChange(){ if (typeof onSliderChange === 'function') onSliderChange(); if (typeof savePrefs === 'function') savePrefs(); }
+// Plain-language hints that work on tap: a title= tooltip never shows on a phone.
+function toggleTip(btn){
+  const t = btn && btn.nextElementSibling;
+  if (!t || !t.classList.contains('tipText')) return;
+  const open = t.hidden;
+  t.hidden = !open;
+  btn.setAttribute('aria-expanded', String(open));
+}
+/* ================= BACKUP REMINDER AND UNSAVED-WORK GUARD =================
+   Work lives in this browser's storage, which a cleared cache or a new machine loses. After
+   two weeks without a backup the page says so once, with a button. Closing the tab with
+   kept cards, pins, an arc or a cast that were never saved or exported asks first. */
+const BACKUP_KEY = 'ui:lastBackup', BACKUP_SNOOZE_KEY = 'ui:backupSnooze', BACKUP_DAYS = 14;
+async function markBackedUp(){ try { await storage.set(BACKUP_KEY, String(Date.now())); } catch(e){} hideBackupReminder(); }
+function hideBackupReminder(){ const b = document.getElementById('backupReminder'); if (b) b.hidden = true; }
+async function checkBackupReminder(){
+  const box = document.getElementById('backupReminder');
+  if (!box) return;
+  let saved = 0, last = 0, snooze = 0;
+  try { const r = await storage.list('character:'); saved = ((r && r.keys) || []).length; } catch(e){}
+  saved += (typeof projects !== 'undefined') ? projects.length : 0;
+  try { const r = await storage.get(BACKUP_KEY); last = r ? +r.value || 0 : 0; } catch(e){}
+  try { const r = await storage.get(BACKUP_SNOOZE_KEY); snooze = r ? +r.value || 0 : 0; } catch(e){}
+  const days = last ? Math.floor((Date.now() - last) / 86400000) : null;
+  const due = saved > 0 && (days === null || days >= BACKUP_DAYS) && Date.now() > snooze;
+  box.hidden = !due;
+  const t = document.getElementById('backupReminderText');
+  if (due && t) t.textContent = days === null
+    ? `You have ${saved} saved item${saved === 1 ? '' : 's'} in this browser and no backup yet.`
+    : `Your last backup was ${days} days ago.`;
+}
+function snoozeBackupReminder(){
+  try { storage.set(BACKUP_SNOOZE_KEY, String(Date.now() + 7 * 86400000)); } catch(e){}
+  hideBackupReminder();
+}
+async function backupNow(){ await exportBackupBundle(); }
+// What would be lost: anything the writer invested effort in that has not been filed anywhere.
+function workSignature(){
+  const cards = Object.keys(state || {}).sort().map(k => { const s = state[k]; return s && s.trait ? [k, s.trait.id, !!s.locked] : null; });
+  return JSON.stringify([cards, pinnedTargets, traitNotes, charMeta && [charMeta.name, charMeta.label, charMeta.contradictionAnswers], (typeof arcEvents !== 'undefined') ? arcEvents.length : 0, castStates.map(c => c.id + ':' + (c.meta && c.meta.name))]);
+}
+let _savedWorkSignature = null;
+function markWorkSaved(){ _savedWorkSignature = workSignature(); }
+function hasUnsavedInvestment(){
+  const kept = Object.values(state || {}).some(s => s && s.locked);
+  const invested = kept || Object.keys(pinnedTargets || {}).length || Object.keys(traitNotes || {}).length
+    || (typeof arcEvents !== 'undefined' && arcEvents.length) || castStates.length || (charMeta && (charMeta.label || charMeta.contradictionAnswers));
+  return !!invested && workSignature() !== _savedWorkSignature;
+}
+if (typeof window !== 'undefined' && window.addEventListener){
+  window.addEventListener('beforeunload', (e)=>{
+    if (!hasUnsavedInvestment()) return;
+    e.preventDefault(); e.returnValue = "";   // the browser shows its own wording
+  });
+}
+
+/* ================= HISTORY DRAWER AND ROLL COMPARISON =================
+   The undo stack already holds the last rolls, but the only way into it was Undo, one step
+   at a time, blind. The drawer lists them, restores any one (through the same Undo and Redo
+   the buttons use, so a restore is itself undoable) and compares one with what is on screen. */
+function _ago(ts){
+  if (!ts) return "";
+  const s = Math.max(0, Math.round((Date.now() - ts) / 1000));
+  return s < 45 ? "just now" : s < 3600 ? Math.round(s / 60) + " min ago" : Math.round(s / 3600) + " h ago";
+}
+function historyEntries(){
+  return history.map((snap, i) => ({
+    i, at: snap.at, name: (snap.charMeta && snap.charMeta.name) || "Unnamed Character",
+    arch: (snap.charMeta && snap.charMeta.archetypeLabel) || "", seed: (snap.charMeta && snap.charMeta.seed) || "",
+    cards: Object.keys(snap.state || {}).length,
+  })).reverse();
+}
+function renderHistoryDrawer(){
+  const host = document.getElementById('historyDrawer');
+  if (!host || host.hidden) return;
+  const cur = Object.keys(state).length
+    ? `<li class="histNow"><b>${escHTML(charMeta.name || "Unnamed Character")}</b> <span class="sub">on screen now${charMeta.seed ? " · seed " + escHTML(charMeta.seed) : ""} · ${Object.keys(state).length} cards</span></li>` : "";
+  const rows = historyEntries().map(e => `<li><span><b>${escHTML(e.name)}</b> <span class="sub">${escHTML(e.arch)}${e.seed ? " · seed " + escHTML(e.seed) : ""} · ${e.cards} cards · ${escHTML(_ago(e.at))}</span></span>
+      <span class="histBtns"><button type="button" class="savedAct" ${actAttr('click', 'restoreHistoryAt', e.i)}>restore</button>
+      <button type="button" class="savedAct" ${actAttr('click', 'compareWithHistory', e.i)}>compare</button></span></li>`).join("");
+  host.innerHTML = `<div class="histHead"><b>Recent rolls</b> <span class="sub">newest first · the last ${HISTORY_MAX} are kept</span>
+    <button type="button" class="savedAct" ${actAttr('click', 'toggleHistoryDrawer')}>close</button></div>
+    <ul class="histList">${cur}${rows || `<li class="sub">Nothing earlier yet — build a few and they collect here.</li>`}</ul>`;
+}
+function toggleHistoryDrawer(){
+  const host = document.getElementById('historyDrawer'), btn = document.getElementById('historyBtn');
+  if (!host) return;
+  host.hidden = !host.hidden;
+  if (btn) btn.setAttribute('aria-expanded', String(!host.hidden));
+  renderHistoryDrawer();
+}
+function restoreHistoryAt(i){
+  if (!(i >= 0 && i < history.length)) return;
+  const steps = history.length - i;
+  for (let k = 0; k < steps; k++) undoLast();
+  renderHistoryDrawer();
+  toastUndo("Restored an earlier roll.", ()=>{ for (let k = 0; k < steps; k++) redoLast(); renderHistoryDrawer(); });
+}
+const _SLIDER_NAMES = {verbositySlider: "Verbosity", registerSlider: "Register", composureSlider: "Composure"};
+function sliderDiffHTML(before, after){
+  const name = id => _SLIDER_NAMES[id] || ((PERSONALITY_AXES.find(a => 'pers_' + a.id === id) || {}).label) || id;
+  const ids = [...new Set(Object.keys(before || {}).concat(Object.keys(after || {})))];
+  const rows = ids.filter(id => String((before || {})[id]) !== String((after || {})[id]))
+    .map(id => `<li><b>${escHTML(name(id))}</b> ${escHTML(String((before || {})[id] ?? "—"))} → ${escHTML(String((after || {})[id] ?? "—"))}</li>`);
+  return `<div class="sub" style="margin:10px 0 4px;"><b>Sliders</b> ${rows.length ? `— ${rows.length} moved` : "— unchanged"}</div>` + (rows.length ? `<ul class="sliderDiff">${rows.join("")}</ul>` : "");
+}
+// Two rolls side by side: the earlier one from the drawer against the sheet on screen.
+function compareWithHistory(i){
+  const snap = history[i];
+  if (!snap || !Object.keys(state).length) return;
+  const host = document.getElementById('comparePanel');
+  if (!host) return;
+  const past = expandSlots(snap.state) || {};
+  const pastName = (snap.charMeta && snap.charMeta.name || "Earlier roll") + (snap.charMeta && snap.charMeta.seed ? " (" + snap.charMeta.seed + ")" : "");
+  const nowName = (charMeta.name || "On screen") + (charMeta.seed ? " (" + charMeta.seed + ")" : "");
+  host.innerHTML = compareSheetsHTML(past, pastName, state, nowName) + sliderDiffHTML(snap.sliders, lastGeneratedSliders || captureSliders());
+  host.style.display = 'block';
+  const h = host.querySelector('h3'); if (h){ h.scrollIntoView({block: 'nearest'}); h.focus({preventScroll: true}); }
+}
+
+/* ================= SHEET NAV AND FIRST-CARD HINT =================
+   Everything under the sheet — Pressure, Voice lab, Arc, "Why does this feel familiar?",
+   the Project library — was reachable only by scrolling past ~37 cards. The nav goes to
+   each, opening a folded panel on the way. The hint explains keep / pin / toss once. */
+function jumpToPanel(id){
+  const el = document.getElementById(id);
+  if (!el || el.style.display === 'none'){ toast("That part is not on the page yet — build a character first, or switch on the pressure sheet.", "warn"); return; }
+  if (el.tagName === 'DETAILS') el.open = true;
+  const reduce = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  el.scrollIntoView({behavior: reduce ? 'auto' : 'smooth', block: 'start'});
+  if (el.tabIndex < 0 || el.hasAttribute('tabindex')) { try { el.focus({preventScroll:true}); } catch(e){} }
+}
+// Nav buttons that need something absent (the pressure sheet, before it is switched on) are dimmed.
+function refreshSheetNav(){
+  document.querySelectorAll('#sheetNav [data-needs]').forEach(b=>{
+    const t = document.getElementById(b.getAttribute('data-needs'));
+    const on = !!t && t.style.display !== 'none';
+    b.classList.toggle('dim', !on); b.setAttribute('aria-disabled', String(!on));
+  });
+}
+const COACH_KEY = 'ui:coach';
+let _coachSeen = null;
+async function refreshCoachMark(){
+  const box = document.getElementById('coachMark');
+  if (!box) return;
+  if (_coachSeen === null){
+    try { const r = await storage.get(COACH_KEY); _coachSeen = !!(r && r.value); } catch(e){ _coachSeen = false; }
+  }
+  box.hidden = _coachSeen || !Object.keys(state).length;
+}
+function dismissCoachMark(){
+  _coachSeen = true;
+  const box = document.getElementById('coachMark'); if (box) box.hidden = true;
+  try { storage.set(COACH_KEY, '1'); } catch(e){}
+}
 
 /* ================= ONBOARDING =================
    A first visit showed every dial and three preset buttons. One clear first move, and
@@ -3771,7 +4531,9 @@ buildPersonalitySliders();
 loadSavedList();
 // Say whether this browser will actually keep anything BEFORE the first save (B21).
 announceStorageMode();
-loadCustomArchetypes();
+// Prefs restore the archetype selection, which may be a custom_* option — so they wait
+// for the custom presets to exist, or the saved choice is silently dropped on reload.
+const _customArchetypesReady = loadCustomArchetypes();
 populateBanCategorySelect();
 refreshConstraintChips();
 renderLensPicker();
@@ -3790,7 +4552,8 @@ wireKeyboard();
 applyAdvancedMode();
 (function(){ const f = document.getElementById('familiarPanel');
   if (f) f.addEventListener('toggle', ()=> onFamiliarToggle(f)); })();
-loadPrefs().then(()=>{ applyShareFromHash(); initOnboarding(); });
+loadTheme(); loadSliderPresets(); loadCollapsedGroups(); loadReduceMotion();
+_customArchetypesReady.catch(()=>{}).then(()=>loadPrefs()).then(()=>{ applyShareFromHash(); initOnboarding(); checkBackupReminder(); });
 // Offline/repeat-visit caching. Registration is best-effort: the app is fully
 // functional without it, and file:// or an unsupported browser must not throw here.
 if (typeof navigator !== 'undefined' && navigator.serviceWorker && location.protocol.startsWith('http')){

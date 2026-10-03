@@ -28,21 +28,41 @@ let lastSeedUsed = null;
    One format, one parser, both directions:
      v1-<base36>   an app-generated seed; decodes straight back to its number
      anything else a user's own text, hashed as before (old shares still work) */
-const SEED_PREFIX = 'v1-';
-function encodeSeed(num){ return SEED_PREFIX + (num >>> 0).toString(36); }
+/* Seed formats are also ENGINE versions. The number a seed decodes to is the same in both,
+   but v2 builds with the 2026 coverage changes (the neutral verbosity band draws from more
+   than one category, a sheet can omit one of the optional motivation cards, distinctive and
+   signature traits are drawn a little more often). A v1 seed keeps building exactly what it
+   always did, so every old seed and share link replays unchanged. ENGINE_V is set around a
+   single-character build (see _runGeneration) and is 1 everywhere else, so cast and foil
+   builds are unchanged. */
+const SEED_PREFIX = 'v1-';            // the oldest format; kept for the codec check in app.js
+const SUPPORTED_SEED_VERSIONS = [1, 2];
+const DEFAULT_ENGINE_V = 2;
+function encodeSeed(num){ return 'v' + ENGINE_V + '-' + (num >>> 0).toString(36); }
 function seedNumberFrom(str){
   const t = String(str == null ? '' : str).trim();
   if (!t) return null;
-  if (t.startsWith(SEED_PREFIX)){
-    // Only a strict v1-<base36> that fits in 32 bits decodes; "v1-abc#2" or an
+  const m = /^v(\d+)-(.*)$/.exec(t);
+  if (m && SUPPORTED_SEED_VERSIONS.includes(+m[1])){
+    // Only a strict v<n>-<base36> that fits in 32 bits decodes; "v1-abc#2" or an
     // overflowing body is user text and is hashed whole, so it cannot collide.
-    const body = t.slice(SEED_PREFIX.length);
+    const body = m[2];
     if (/^[0-9a-z]+$/.test(body)){
       const n = parseInt(body, 36);
       if (n <= 0xFFFFFFFF) return n >>> 0;
     }
   }
   return hashSeedString(t);
+}
+/* Which engine a build uses: a v<n>- seed says so itself; anything else (a typed phrase, a
+   blank box) uses the engineVersion setting, which links and settings files from before the
+   field existed restore as 1. */
+function engineVersionFor(rawSeed){
+  const m = /^v(\d+)-[0-9a-z]+$/.exec(String(rawSeed || '').trim());
+  if (m && SUPPORTED_SEED_VERSIONS.includes(+m[1])) return +m[1];
+  const el = document.getElementById('engineVersion');
+  const v = el ? parseInt(el.value, 10) : DEFAULT_ENGINE_V;
+  return SUPPORTED_SEED_VERSIONS.includes(v) ? v : DEFAULT_ENGINE_V;
 }
 /* Resolve the seed for one build: returns {num, label} where label is exactly what the
    user can paste back to reproduce `num`. */
@@ -314,6 +334,47 @@ function archetypeFidelity(st, arch){
    sheet the user saw for one frame. One in-flight guard; the extra presses are dropped
    rather than queued, because "generate twice" is never what the second press meant. */
 let _generationInFlight = false;
+function _prefersReducedMotion(){
+  if (typeof document !== 'undefined' && document.body && document.body.classList && document.body.classList.contains('reduce-motion')) return true;
+  return typeof window !== 'undefined' && !!window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+/* After a build the sheet is thousands of pixels below the controls that produced it,
+   and on a phone the result appeared off-screen. Bring the sheet's heading into view —
+   but leave the page alone if it is already there. */
+/* A roll that cannot honour your rules used to say nothing: the sheet came back without the
+   trait you required and the only clue was a chip. After a build, name the rules that
+   contradict each other, and say why a required trait is missing. */
+function reportRuleProblems(){
+  if (typeof getConstraintConflicts !== 'function' || typeof toast !== 'function') return;
+  const conf = getConstraintConflicts() || [];
+  const seated = seatedIdSet(state || {});
+  const missing = requiredTraitIds.filter(id => !seated.has(id));
+  const strip = h => String(h || "").replace(/<[^>]+>/g, "").replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/\s+/g, " ").trim();
+  const bits = [];
+  if (conf.length) bits.push(`${conf.length} of your rules contradict each other: ${conf[0].message}${conf.length > 1 ? ` (and ${conf.length - 1} more — see Constraints)` : ""}`);
+  if (missing.length){
+    const t = TRAITS_BY_ID.get(missing[0]);
+    let why = "";
+    try { const r = explainWhyNot(t); why = strip(String(r).split('</div>')[0]).slice(0, 220); } catch(e){}
+    bits.push(`"${t ? t.trait : missing[0]}" is required but is not on this sheet${why ? ": " + why : "."}${missing.length > 1 ? ` (${missing.length - 1} more required trait${missing.length > 2 ? "s" : ""} missing too.)` : ""}`);
+  }
+  if (bits.length) toast(bits.join(" "), "warn", 9000);
+}
+function revealSheet(){
+  try { reportRuleProblems(); } catch(e){ console.error(e); }
+  if (typeof window === 'undefined' || typeof document === 'undefined') return;
+  if (typeof collapseInputsAfterBuild === 'function') collapseInputsAfterBuild();
+  // The live region says a build finished — the sheet is far from the button that made it.
+  if (typeof srAnnounce === 'function'){
+    const cards = Object.values(state || {}).filter(x => x && x.trait), kept = cards.filter(x => x.locked).length;
+    srAnnounce(`Built: ${cards.length} traits${kept ? `, ${kept} kept` : ''}. Seed ${lastSeedUsed || 'none'}.`);
+  }
+  const el = document.getElementById('sheetTitle');
+  if (!el || !el.getBoundingClientRect || !el.scrollIntoView) return;
+  const top = el.getBoundingClientRect().top, vh = window.innerHeight || 800;
+  if (top >= 0 && top < vh * 0.5) return;
+  el.scrollIntoView({block:'start', behavior: _prefersReducedMotion() ? 'auto' : 'smooth'});
+}
 function generateCharacter(){
   if (_generationInFlight) return;
   const sheetEl = document.getElementById('sheet');
@@ -321,7 +382,7 @@ function generateCharacter(){
   _generationInFlight = true;
   showSkeleton();
   requestAnimationFrame(()=> requestAnimationFrame(()=>{
-    try { runGeneration(); } finally { _generationInFlight = false; }
+    try { runGeneration(); revealSheet(); } finally { _generationInFlight = false; }
   }));
 }
 
@@ -453,6 +514,9 @@ function chooseBatch(i){
      belongs — on the one character the user kept, not on all five. The batch itself is
      isolated (see withSpeculativeGeneration); this is the deliberate commit. */
   if (pick.variants) charVariants = pick.variants;
+  // The kept candidate starts its own arc; arcBase must be THIS sheet, not whichever
+  // candidate happened to be built last.
+  if (typeof resetArc === 'function') resetArc(false);
   // Put the chosen candidate's sliders on screen too, so controls match the sheet.
   if (pick.sliders){ lastGeneratedSliders = pick.sliders; restoreSliders(pick.sliders); }
   if (pick.budgetReport && typeof setBudgetReport === 'function') setBudgetReport(pick.budgetReport);
@@ -473,6 +537,7 @@ function chooseBatch(i){
   const pEl = document.getElementById('pressureSheet');
   if (pEl) pEl.style.display = pressureState ? "block" : "none";
   renderSheet(); checkConflicts();
+  revealSheet();
   toast(`Kept "${charMeta.name && charMeta.name !== "Unnamed Character" ? charMeta.name : "that one"}". The rest are gone.`);
 }
 function dismissBatch(){ batchCandidates = []; renderBatchTray(); }
@@ -540,6 +605,7 @@ function generateSameWorld(){
     if (ok && keptName && charMeta) charMeta.name = keptName;
   }
   if (!ok) return;
+  revealSheet();
   charMeta.mode = 'same-world';
   toast(`Built someone else in the same world${keptName ? ' as "' + keptName + '"' : ''}: their traits, concept families and profile categories were all avoided.`);
 }
@@ -570,6 +636,7 @@ function generateVariation(){
     renderSheet();
   }
   if (!ok) return;
+  revealSheet();
   charMeta.mode = 'variation';
   toast(`A variation: the ${defining.length} most defining cards were held, everything else re-rolled without divergence.`);
 }
@@ -592,6 +659,11 @@ function exploreCandidatesEnabled(){
   return el ? !!el.checked : true;
 }
 function _runGeneration(){
+  const si = document.getElementById('seedInput');
+  ENGINE_V = engineVersionFor(si ? si.value : '');
+  try { return _runGenerationInner(); } finally { ENGINE_V = 1; }
+}
+function _runGenerationInner(){
   snapshotHistory();
   diffLog = {};
   changedSlots = new Set();   // recomputed once the new state is in place
@@ -611,7 +683,16 @@ function _runGeneration(){
 
   const archKey = strVal('archetypeSelect', '');
   // The preset with its chosen variation folded in — see effectiveArchetype.
-  const arch = effectiveArchetype(archKey, strVal('archetypeVariation', ''));
+  let arch = effectiveArchetype(archKey, strVal('archetypeVariation', ''));
+  /* "Against type" (audit §5c): invert the preset's one or two strongest axes that are not
+     its must-axes, so a Mentor comes out hoarding knowledge. Off (0) changes nothing, so
+     existing seeds and share links build as before. */
+  const againstN = clamp(intVal('againstType', 0), 0, 2);
+  if (arch && arch.pers && againstN > 0){
+    const must = new Set((arch.intent && arch.intent.must) || []);
+    const ranked = Object.entries(arch.pers).filter(([ax]) => !must.has(ax)).sort((a, b) => Math.abs(b[1]) - Math.abs(a[1])).slice(0, againstN);
+    arch = Object.assign({}, arch, {pers: Object.assign({}, arch.pers, Object.fromEntries(ranked.map(([ax, v]) => [ax, -v])))});
+  }
   // BUG FIX: this used to WRITE the blended value back into the slider elements.
   // Because the blend reads the slider it just wrote, pressing Generate repeatedly
   // with an archetype selected pulled the sliders further toward the archetype each
@@ -679,9 +760,13 @@ function _runGeneration(){
   let seedNum = seed.num;
   lastSeedUsed = seed.label;
   const wantStress = !!(document.getElementById('stressToggle')||{}).checked;
-  // An explicit seed means "give me this character again", so it suppresses the
-  // session-history branch of divergence (see REPLAY_MODE in engine.js). An
-  // unseeded roll is exploration and keeps it.
+  /* Every build runs in replay mode (REPLAY_MODE, engine.js): no avoid-recent window,
+     no divergence tally, nothing from session history reaches the draw. That is what
+     makes the printed seed a real promise — it used to replay only the first roll of a
+     session, because a blank-seed roll drew against history the pasted seed then lacked.
+     A blank seed still explores (best of three, below): the choice between candidates
+     reads the archive, but each candidate is a pure function of its own seed, and the
+     winner's seed is the one printed. */
   const replay = seed.explicit;
   // Setting / culture / life-stage lenses carry a register norm: a nudge on the dial.
   if (ctxInfo && ctxInfo.lensRegister) regLevel = clamp(regLevel + ctxInfo.lensRegister, -2, 2);
@@ -699,7 +784,7 @@ function _runGeneration(){
       const cands = [];
       for (let k = 0; k < EXPLORE_CANDIDATES; k++){
         const num = candidateSeed(seedNum, k);
-        const st = withSpeculativeGeneration(()=> withReplayMode(false, ()=>
+        const st = withSpeculativeGeneration(()=> withReplayMode(true, ()=>
           withArchetypeProfile(arch && arch.profile, ()=> withRng(mulberry32(num), ()=>{
             rollCharacterVariants(want0);
             return buildCharacterState({verbLevel, regLevel, compLevel, mannerCount, rarityPref,
@@ -718,7 +803,7 @@ function _runGeneration(){
   // The archetype's profile hints are live for the whole build and nothing else — see
   // ARCHETYPE PROFILE HINTS in engine.js. Cast, foil and gap-filler deliberately do not
   // inherit them; they are not this archetype's character.
-  withReplayMode(replay, ()=>
+  withReplayMode(true, ()=>
   withArchetypeProfile(arch && arch.profile, ()=> withRng(mulberry32(seedNum), ()=>{
     /* The character's presentation is committed BEFORE anything is drawn — including
        before the depth-first foundation draw, which goes through byFilter and is
@@ -996,8 +1081,9 @@ function rerollSlot(slotId){
     const cat = old.trait.category;
     const pool = byFilter(old.trait.section, cat);
     const tgt = profileTarget(old.sectionId);
-    replacement = drawFresh(()=>({slotId, locked:false, label: old.label, sectionId: old.sectionId, target:tgt,
-      trait: pickInRange(pool, rarityPref, tgt)}));
+    // A counterpoint card stays one after a reroll (tallyOveruse skips counterpoints).
+    replacement = drawFresh(()=>Object.assign({slotId, locked:false, label: old.label, sectionId: old.sectionId, target:tgt,
+      trait: pickInRange(pool, rarityPref, tgt)}, old.counterpoint ? {counterpoint: true} : {}));
   } else if (slotId.startsWith("pers_")){
     const axisId = slotId.replace("pers_","").replace(/__2$/,"");
     const axis = PERSONALITY_AXES.find(a=>a.id===axisId);
@@ -1061,14 +1147,18 @@ function rerollSlot(slotId){
 function rerollBack(slotId){
   const hist = rerollHistory[slotId];
   if (!hist || !hist.length){ toast("Nothing to step back to in this slot.", "warn"); return; }
-  const prev = hist.pop();
-  if (!prev || !prev.trait) return;
+  // A Kept card is frozen against every sheet mutation, this one included.
+  if (state[slotId] && state[slotId].locked){ toast("This card is Kept — unlock it before stepping back.", "warn"); return; }
+  // Peek, don't pop: a refused step-back must leave the history where it was.
+  const prev = hist[hist.length - 1];
+  if (!prev || !prev.trait){ hist.pop(); return; }
   // The trait you tossed here may have been drawn into a different slot since. Stepping
   // back to it would seat it twice on one sheet, so refuse rather than duplicate.
   if (seatedTraitIds(slotId).has(prev.trait.id)){
     toast(`"${prev.trait.trait}" has since been drawn into another slot — stepping back would put it on the sheet twice.`, "warn");
     return;
   }
+  hist.pop();
   snapshotHistory();
   if (rerollExclusions[slotId]) rerollExclusions[slotId].delete(prev.trait.id);
   const cur = state[slotId];
@@ -1127,7 +1217,7 @@ function favouriteTrait(id){
     toast(`"${t.trait}" removed from your saved traits.`);
   } else {
     favouriteTraitIds.add(id);
-    toast(`"${t.trait}" saved. This does not change what gets generated — use the pin button for that.`);
+    toast(favouriteBoostEnabled() ? `"${t.trait}" saved — it now counts double whenever it could be drawn.` : `"${t.trait}" saved. This does not change what gets generated unless you switch on "Saved traits count double" (Tinker Mode) — use the pin button for intensity.`);
   }
   refreshConstraintChips(); withPreservedFocus(()=>{ renderSheet(); });
   if (typeof savePrefs === 'function') savePrefs();
@@ -1178,11 +1268,13 @@ function lockAll(){
   snapshotHistory();
   Object.values(state).forEach(s=>{ if (s && s.trait) s.locked = true; });
   withPreservedFocus(()=>{ renderSheet(); });
+  toastUndo("Every card is kept.", ()=> undoLast());
 }
 function unlockAll(){
   snapshotHistory();
   Object.values(state).forEach(s=>{ if (s) s.locked = false; });
   withPreservedFocus(()=>{ renderSheet(); });
+  toastUndo("Every card is released.", ()=> undoLast());
 }
 
 /* ================= PIN INTENSITY =================
@@ -1245,6 +1337,7 @@ function unpinAll(){
   snapshotHistory();
   pinnedTargets = {};
   withPreservedFocus(()=>{ renderSheet(); });
+  toastUndo("All pins removed.", ()=> undoLast());
 }
 
 // Applied after a fresh buildCharacterState (before lock-merge, so lock still wins):

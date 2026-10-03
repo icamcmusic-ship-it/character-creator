@@ -104,6 +104,19 @@ await step('surprise me generates', async ()=>{
   const n = await page.locator('.traitCard').count();
   if (n < 10) throw new Error('only ' + n + ' cards after surprise');
 });
+await step('surprise me rolls blends, anti-archetypes, lens dice and a wild section, and every roll builds', async ()=>{
+  const seen = new Set();
+  for (let i = 0; i < 30 && seen.size < 4; i++){
+    await page.locator('[data-act="surpriseMe"]:visible').first().click({timeout:8000});
+    await page.waitForTimeout(250);
+    const t = await page.locator('.toast').last().innerText().catch(()=>'');
+    if (/Blended/.test(t)) seen.add('blend'); if (/anti-/.test(t)) seen.add('anti'); if (/Lens dice/.test(t)) seen.add('lens'); if (/Wild section/.test(t)) seen.add('wild');
+    const n = await page.locator('.traitCard').count();
+    if (n < 10) throw new Error('only ' + n + ' cards after a surprise: ' + t);
+  }
+  if (seen.size < 3) throw new Error('only saw ' + [...seen].join(',') + ' in 30 rolls');
+  await page.evaluate(()=>{ if (typeof clearLenses === 'function') clearLenses(); });
+});
 /* The features added in the 2026 content pass are all live-DOM: the lens repaints the
    cards, the voice lab composes on render, and the arc rewrites `state` in place. A
    DOM stub cannot say whether any of that reaches the page. */
@@ -521,9 +534,9 @@ await step('File menu → Open file routes a cast file to the cast importer, wit
   const before = await page.evaluate(()=> castStates.length);
   await page.locator('#fileMenu summary').click();
   await page.locator('#fileMenuInput').setInputFiles({name:'c.json', mimeType:'application/json', buffer: Buffer.from(bundle)});
-  // A cast exists, so replacing it asks first.
+  // A cast exists, so the import asks: add to it, or replace it.
   await page.waitForSelector('dialog[open]', {timeout:4000});
-  await page.locator('dialog[open] button[value="ok"], dialog[open] .btn-primary').first().click();
+  await page.locator('dialog[open] button[value="replace"]').click();
   await page.waitForSelector('.toastUndo', {timeout:4000});
   const n = await page.evaluate(()=> castStates.length);
   if (n !== JSON.parse(bundle).members.length) throw new Error('cast has ' + n + ' members');
@@ -746,6 +759,198 @@ await step('§5 an exploration build with a project archive picks the most disti
   });
   if (!r.ex || r.ex.considered !== 3) throw new Error('no best-of-three on an exploration build: ' + JSON.stringify(r.ex));
   if (!r.same) throw new Error('the printed seed of the chosen candidate did not replay it');
+});
+/* B2 (audit 2026-09): the comboboxes declared data-on/data-act twice, the parser kept
+   the first copy, and the keydown action silently never ran. */
+await step('trait search: ArrowDown moves the active option', async ()=>{
+  const r = await page.evaluate(async ()=>{
+    const inp = document.getElementById('whyNotSearch');
+    inp.closest('details') && (inp.closest('details').open = true);
+    inp.value = 'dr';
+    inp.dispatchEvent(new Event('input', {bubbles:true}));
+    await new Promise(res => setTimeout(res, 300));
+    const before = inp.getAttribute('aria-activedescendant');
+    inp.dispatchEvent(new KeyboardEvent('keydown', {key:'ArrowDown', bubbles:true}));
+    return {before, after: inp.getAttribute('aria-activedescendant')};
+  });
+  if (!r.before) throw new Error('no search results appeared');
+  if (r.after === r.before) throw new Error('ArrowDown did not move the active option (' + r.before + ')');
+});
+/* Audit §2: a build must bring the sheet into view, and the first-visit card must be
+   on screen without scrolling. */
+await step('a build scrolls the sheet into view', async ()=>{
+  await page.evaluate(()=> window.scrollTo(0, 0));
+  await page.evaluate(()=> generateCharacter());
+  await page.waitForFunction(()=> { const t = document.getElementById('sheetTitle').getBoundingClientRect().top; return t >= 0 && t < innerHeight * 0.5; }, null, {timeout: 6000});
+});
+await step('the More ways to roll menu opens, lists five rolls and closes on choice', async ()=>{
+  await page.evaluate(()=> { document.getElementById('moreRolls').open = true; });
+  const n = await page.locator('.moreRollsMenu button').count();
+  if (n !== 5) throw new Error('expected 5 rolls in the menu, found ' + n);
+  await page.locator('.moreRollsMenu button', {hasText: 'Variation'}).click();
+  if (await page.evaluate(()=> document.getElementById('moreRolls').open)) throw new Error('the menu stayed open after a choice');
+});
+/* Audit §2 second pass: keyboard, theme, seed chip, and the phone layout. */
+await step('the ? key opens the shortcuts dialog, 2 switches tab, Esc closes the File menu', async ()=>{
+  await page.evaluate(()=> { document.activeElement && document.activeElement.blur(); switchTab('single'); });
+  await page.keyboard.press('?');
+  if (!await page.evaluate(()=> document.getElementById('shortcutDialog').open)) throw new Error('? did not open the dialog');
+  await page.keyboard.press('Escape');
+  if (await page.evaluate(()=> document.getElementById('shortcutDialog').open)) throw new Error('Esc did not close the dialog');
+  await page.keyboard.press('2');
+  if (!await page.evaluate(()=> document.getElementById('view-cast').classList.contains('active'))) throw new Error('2 did not switch to the Cast tab');
+  await page.keyboard.press('1');
+  await page.evaluate(()=> { document.getElementById('fileMenu').open = true; });
+  await page.keyboard.press('Escape');
+  if (await page.evaluate(()=> document.getElementById('fileMenu').open)) throw new Error('Esc left the File menu open');
+});
+await step('the theme button cycles Auto, Light, Dark and sets data-theme', async ()=>{
+  const seq = [];
+  for (let i = 0; i < 3; i++){ await page.locator('#themeBtn').click(); seq.push(await page.evaluate(()=> document.documentElement.getAttribute('data-theme'))); }
+  if (seq.join() !== 'light,dark,') throw new Error('theme cycle was ' + seq.join('|'));
+});
+await step('the seed chip copies the seed', async ()=>{
+  await page.evaluate(()=> generateCharacter()); await page.waitForTimeout(600);
+  const before = await page.evaluate(()=> lastSeedUsed);
+  await page.evaluate(()=> { window.__copied = null; copyText = (t)=> { window.__copied = t; }; });
+  await page.locator('#stickySeed').click();
+  const got = await page.evaluate(()=> window.__copied);
+  if (!before || got !== before) throw new Error('copied ' + got + ', seed is ' + before);
+});
+await step('phone: tabs are three short pills, the sticky bar folds behind a menu, and inputs fold after a build', async ()=>{
+  await page.setViewportSize({width: 390, height: 800});
+  await page.evaluate(()=> { switchTab('single'); setInputsCollapsed(false); });
+  const tabs = await page.evaluate(()=> [...document.querySelectorAll('.tabs button')].map(b => ({w: Math.round(b.getBoundingClientRect().width), t: b.innerText.trim()})));
+  if (tabs.some(t => t.w > 140)) throw new Error('tabs are not compact: ' + JSON.stringify(tabs));
+  if (!tabs.every(t => /^(Single|Cast|Relations)$/.test(t.t))) throw new Error('tabs are not short: ' + JSON.stringify(tabs));
+  const bar = await page.evaluate(()=> { const b = document.getElementById('stickyBar'); return {sw: b.scrollWidth, cw: b.clientWidth, more: getComputedStyle(document.getElementById('stickyMoreBtn')).display, extra: getComputedStyle(document.getElementById('stickyExtra')).display}; });
+  if (bar.sw > bar.cw + 1) throw new Error('the sticky bar still scrolls sideways: ' + JSON.stringify(bar));
+  if (bar.more === 'none' || bar.extra !== 'none') throw new Error('the bar did not fold: ' + JSON.stringify(bar));
+  await page.locator('#stickyMoreBtn').click();
+  if (await page.evaluate(()=> getComputedStyle(document.getElementById('stickyExtra')).display) === 'none') throw new Error('the ⋯ button did not open the menu');
+  await page.keyboard.press('Escape');
+  await page.evaluate(()=> generateCharacter()); await page.waitForTimeout(900);
+  const folded = await page.evaluate(()=> ({controls: getComputedStyle(document.getElementById('controlsStart')).display, bar: !document.getElementById('inputsBar').hidden, recap: document.getElementById('inputsRecap').textContent}));
+  if (folded.controls !== 'none' || !folded.bar || !folded.recap) throw new Error('inputs did not fold: ' + JSON.stringify(folded));
+  await page.locator('#inputsToggle').click();
+  if (await page.evaluate(()=> getComputedStyle(document.getElementById('controlsStart')).display) === 'none') throw new Error('Edit inputs did not reopen them');
+  const h1 = await page.evaluate(()=> parseFloat(getComputedStyle(document.querySelector('.pageHead h1')).fontSize));
+  await page.setViewportSize({width: 1280, height: 900});
+  if (h1 > 28) throw new Error('the header title is still ' + h1 + 'px on a phone');
+});
+/* Audit §3 side features, in the real page. */
+await step('history drawer: build three, restore an earlier roll, compare it with the sheet', async ()=>{
+  await page.evaluate(async ()=> { for (let i = 0; i < 3; i++){ generateCharacter(); await new Promise(r => setTimeout(r, 500)); } });
+  await page.locator('#historyBtn').click();
+  const n = await page.locator('#historyDrawer .histList li').count();
+  if (n < 3) throw new Error('the drawer lists only ' + n + ' entries');
+  await page.locator('#historyDrawer .histList li:has(button) >> nth=0').locator('button', {hasText: 'compare'}).click();
+  if (!/Sliders/.test(await page.locator('#comparePanel').innerText())) throw new Error('no slider diff in the comparison');
+  const seedBefore = await page.evaluate(()=> lastSeedUsed);
+  await page.locator('#historyDrawer .histList li:has(button) >> nth=0').locator('button', {hasText: 'restore'}).click();
+  if (!await page.evaluate(()=> Object.keys(state).length > 0)) throw new Error('restore left no sheet');
+  await page.locator('#historyBtn').click();
+});
+await step('find on the sheet filters the cards and opens folded sections; folds survive a reload', async ()=>{
+  await page.evaluate(()=> { generateCharacter(); });
+  await page.waitForTimeout(700);
+  const total = await page.locator('#sheetBody .traitCard').count();
+  const word = await page.evaluate(()=> Object.values(state).find(s => s && s.trait).trait.trait.split(' ').find(w => w.length > 3) || 'a');
+  await page.fill('#sheetFind', word);
+  await page.waitForTimeout(300);
+  const shown = await page.locator('#sheetBody .traitCard:not([hidden])').count();
+  if (!(shown > 0 && shown < total)) throw new Error('the filter showed ' + shown + ' of ' + total);
+  if (!/of \d+ cards/.test(await page.locator('#sheetFindCount').innerText())) throw new Error('no match count');
+  await page.fill('#sheetFind', '');
+  await page.waitForTimeout(200);
+  await page.evaluate(()=> { collapsedGroups = {}; setAllGroups(true); });
+  await page.reload(); await page.waitForTimeout(800);
+  const kept = await page.evaluate(()=> Object.values(collapsedGroups).some(Boolean));
+  if (!kept) throw new Error('folded sections were forgotten on reload');
+  await page.evaluate(()=> { setAllGroups(false); });
+});
+await step('slider lock survives Randomize, and a named slider set saves and loads', async ()=>{
+  await page.evaluate(()=> { document.getElementById('advancedToggle').checked = true; applyAdvancedMode(); setInputsCollapsed(false); });
+  await page.evaluate(()=> { setVal('verbositySlider', 77); document.getElementById('lock_verbositySlider').checked = true; randomizeSliders('all'); });
+  if (await page.evaluate(()=> document.getElementById('verbositySlider').value) !== '77') throw new Error('Randomize moved the locked slider');
+  await page.evaluate(()=> { document.getElementById('lock_verbositySlider').checked = false; askForName = async ()=> 'Kit A'; setVal('composureSlider', 33); });
+  await page.evaluate(()=> saveSliderPreset()); await page.waitForTimeout(300);
+  if (!await page.evaluate(()=> [...document.getElementById('sliderPresetSelect').options].some(o => o.value === 'Kit A'))) throw new Error('the set was not listed after saving');
+  await page.evaluate(()=> { setVal('composureSlider', -60); document.getElementById('sliderPresetSelect').value = 'Kit A'; });
+  await page.evaluate(()=> applySliderPreset()); await page.waitForTimeout(300);
+  if (await page.evaluate(()=> document.getElementById('composureSlider').value) !== '33') throw new Error('loading the set did not restore the slider');
+  await page.evaluate(()=> deleteSliderPreset()); await page.waitForTimeout(300);
+});
+await step('the voice lab shows a word count, a reading level and a copy button per line', async ()=>{
+  await page.evaluate(()=> { generateCharacter(); }); await page.waitForTimeout(800);
+  const stats = await page.locator('#voiceLabBody .vlStats').first().innerText();
+  if (!/\d+ words? · reads at grade [\d.]+/.test(stats) || !/copy line/.test(stats)) throw new Error('stats line: ' + stats);
+});
+await step('cast: CSV and SVG downloads, and the redraw button, exist and work', async ()=>{
+  await page.evaluate(()=> { switchTab('cast'); document.getElementById('castCount').value = '4'; generateCast(); });
+  await page.waitForTimeout(900);
+  const [dl] = await Promise.all([page.waitForEvent('download', {timeout: 5000}), page.evaluate(()=> downloadCastCSV())]);
+  if (!/\.csv$/.test(dl.suggestedFilename())) throw new Error('the CSV download is named ' + dl.suggestedFilename());
+  await page.evaluate(()=> regenerateMostSimilarMember());
+  await page.evaluate(()=> { switchTab('rel'); });
+  await page.waitForTimeout(300);
+  await page.evaluate(()=> { if (typeof addAllRelationshipDirections === 'function') addAllRelationshipDirections(); });
+  await page.evaluate(()=> switchTab('single'));
+});
+/* Audit §3 robustness, in the real page. */
+await step('importing a cast can add to the current one, renaming clashing members', async ()=>{
+  const r = await page.evaluate(async ()=> {
+    switchTab('cast'); document.getElementById('castCount').value = '3'; generateCast();
+    await new Promise(res => setTimeout(res, 700));
+    const before = castStates.length, names = castStates.map(c => c.meta.name);
+    const json = JSON.stringify(castBundle());
+    askChoice = async ()=> 'merge';
+    const input = {files: [new File([json], 'cast.json', {type: 'application/json'})], value: 'x'};
+    importCastJSON(input);
+    await new Promise(res => setTimeout(res, 900));
+    const after = castStates.map(c => c.meta.name), ids = new Set(castStates.map(c => c.id));
+    return {before, after: after.length, unique: new Set(after).size, ids: ids.size, dupEdge: relationshipEdges.every(e => castStates.some(c => c.id === e.from) && castStates.some(c => c.id === e.to))};
+  });
+  if (r.after !== r.before * 2) throw new Error('merge gave ' + r.after + ' members from 2 x ' + r.before);
+  if (r.unique !== r.after || r.ids !== r.after) throw new Error('names or ids still clash: ' + JSON.stringify(r));
+  if (!r.dupEdge) throw new Error('an edge points at a member who is not in the cast');
+  await page.evaluate(()=> switchTab('single'));
+});
+await step('the backup reminder appears with saves and no backup, and snoozes', async ()=>{
+  const r = await page.evaluate(async ()=> {
+    await storage.delete('ui:lastBackup'); await storage.delete('ui:backupSnooze');
+    await storage.set('character:Reminder test', JSON.stringify({format: SAVE_FORMAT, state: {}, charMeta: {name: 'x'}}));
+    await checkBackupReminder();
+    const shown = !document.getElementById('backupReminder').hidden, text = document.getElementById('backupReminderText').textContent;
+    snoozeBackupReminder();
+    const hidden = document.getElementById('backupReminder').hidden;
+    await checkBackupReminder();
+    const stillHidden = document.getElementById('backupReminder').hidden;
+    await storage.delete('character:Reminder test'); await storage.delete('ui:backupSnooze');
+    return {shown, text, hidden, stillHidden};
+  });
+  if (!r.shown || !/no backup yet/.test(r.text)) throw new Error('reminder: ' + JSON.stringify(r));
+  if (!r.hidden || !r.stillHidden) throw new Error('snooze did not hold: ' + JSON.stringify(r));
+});
+await step('the seed picker holds no options until its panel is opened', async ()=> {
+  await page.reload(); await page.waitForTimeout(700);
+  const n0 = await page.evaluate(()=> document.getElementById('seedTraitSelect').options.length);
+  await page.evaluate(()=> { document.getElementById('seedTraitSelect').closest('details').open = true; });
+  await page.waitForTimeout(400);
+  const n1 = await page.evaluate(()=> document.getElementById('seedTraitSelect').options.length);
+  if (n0 > 1 || n1 < 1000) throw new Error('options before/after opening: ' + n0 + '/' + n1);
+});
+await step('a write the browser refuses raises the storage banner instead of failing in silence', async ()=> {
+  const shown = await page.evaluate(async ()=> {
+    const orig = Storage.prototype.setItem;
+    Storage.prototype.setItem = function(){ const e = new Error('full'); e.name = 'QuotaExceededError'; throw e; };
+    try { await storage.set('ui:test', '1'); } catch(e){}
+    Storage.prototype.setItem = orig;
+    const el = document.getElementById('storageStatus');
+    return {shown: el.style.display !== 'none', text: el.textContent};
+  });
+  if (!shown.shown || !/storage is full/i.test(shown.text)) throw new Error('banner: ' + JSON.stringify(shown));
+  await page.evaluate(()=> announceStorageMode());
 });
 await step('§5 lens row fits a phone width', async ()=>{
   await page.setViewportSize({width: 375, height: 800});

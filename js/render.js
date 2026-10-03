@@ -346,6 +346,7 @@ function renderSlotChange(slotId){
   if (!allPainted){ withPreservedFocus(()=>{ renderSheet(); }); return; }
   noteRenderedTraits();
   refreshDerivedViews(ids.size > 1 ? [...ids] : null);
+  if (sheetFilterActive()) applySheetFilter();
 }
 
 /* Everything downstream of the cards: the summary/diagnostics panel, the novelty
@@ -482,7 +483,7 @@ function traitCardHTML(id, s, includeControls, showDiff, accent, tagLabel){
           <button class="pinBtn ${pinnedTargets[id]!==undefined ? "pinned" : ""}" ${actAttr('click', 'togglePin', id)} title="Pin this slot's intensity target (not the exact trait) so future generations/rerolls stay near this level even as sliders move elsewhere" aria-pressed="${pinnedTargets[id]!==undefined?'true':'false'}">${pinnedTargets[id]!==undefined ? "pinned "+pinnedTargets[id].toFixed(1) : "pin"}</button>
           ${pinnedTargets[id]!==undefined ? `<button class="pinAdj" ${actAttr('click', 'adjustPin', id, -0.2)} title="Nudge pinned intensity down" aria-label="Nudge pinned intensity down">−</button><button class="pinAdj" ${actAttr('click', 'adjustPin', id, 0.2)} title="Nudge pinned intensity up" aria-label="Nudge pinned intensity up">+</button>` : ``}
         </div>
-        ${history ? `<button class="rerollBtn" ${actAttr('click', 'rerollBack', id)} title="Step back to the trait this slot held before the last toss">↺ back</button>` : ``}
+        ${history ? `<button class="rerollBtn backBtn" ${actAttr('click', 'rerollBack', id)} title="Step back to the trait this slot held before the last toss">↺ back</button>` : ``}
         ${slotDepthHTML(id, t)}
         <button class="whyBtn" ${actAttr('click', 'toggleWhy', id)} title="Why did I get this trait?" aria-expanded="${whyOpen[id]?'true':'false'}">why?</button>
         <!-- Favouriting and banning previously meant leaving the sheet, opening
@@ -535,7 +536,41 @@ function titleForSlotId(id){
    With profileDepth 4 and every section enabled a sheet runs past forty cards, and
    there was no way to fold any of it away. */
 let collapsedGroups = {};
-function toggleGroup(title){ collapsedGroups[title] = !collapsedGroups[title]; renderSheet(); }
+/* Which sections are folded is remembered between visits (and between characters): a
+   writer who collapses the twelve sections they never touch should not redo it on every
+   build. Stored under ui:collapsed. */
+const COLLAPSED_KEY = 'ui:collapsed';
+function persistCollapsed(){
+  try { storage.set(COLLAPSED_KEY, JSON.stringify(Object.keys(collapsedGroups).filter(t => collapsedGroups[t]))); } catch(e){}
+}
+async function loadCollapsedGroups(){
+  try {
+    const r = await storage.get(COLLAPSED_KEY);
+    const list = r && r.value ? JSON.parse(r.value) : [];
+    if (Array.isArray(list)){ list.forEach(t => { if (typeof t === 'string') collapsedGroups[t] = true; }); if (Object.keys(state || {}).length) renderSheet(); }
+  } catch(e){}
+}
+function toggleGroup(title){ collapsedGroups[title] = !collapsedGroups[title]; persistCollapsed(); renderSheet(); }
+/* FIND ON THE SHEET. Forty-odd cards is a long read for "where did the one about the
+   dog end up?". Two or more characters filter the cards (name, description, category,
+   example); sections that would hide the match are opened while a filter is active. */
+let sheetFindQuery = "";
+function sheetFilterActive(){ return sheetFindQuery.length >= 2; }
+function onSheetFind(el){ sheetFindQuery = String((el && el.value) || "").trim().toLowerCase(); renderSheet(); }
+function applySheetFilter(){
+  const count = document.getElementById('sheetFindCount');
+  const cards = document.querySelectorAll('#sheetBody .traitCard');
+  if (!sheetFilterActive()){
+    cards.forEach(c => { c.hidden = false; });
+    document.querySelectorAll('#sheetBody .axisGroup').forEach(g => { g.hidden = false; });
+    if (count) count.textContent = "";
+    return;
+  }
+  let shown = 0;
+  cards.forEach(c => { const hit = c.textContent.toLowerCase().includes(sheetFindQuery); c.hidden = !hit; if (hit) shown++; });
+  document.querySelectorAll('#sheetBody .axisGroup').forEach(g => { g.hidden = ![...g.querySelectorAll('.traitCard')].some(c => !c.hidden); });
+  if (count) count.textContent = shown ? `${shown} of ${cards.length} cards` : "No card matches.";
+}
 
 /* ================= SHEET DENSITY =================
    A default build produces ~38 populated slots and at profileDepth 4 with everything on
@@ -599,6 +634,7 @@ let SHEET_GROUPS = [];
 function setAllGroups(collapsed){
   document.querySelectorAll('#sheetBody .axisGroup').forEach(()=>{});
   SHEET_GROUP_TITLES.forEach(t=>{ collapsedGroups[t] = collapsed; });
+  persistCollapsed();
   renderSheet();
 }
 let SHEET_GROUP_TITLES = [];
@@ -812,7 +848,7 @@ function emptyGroupReason(title){
   }
   const ps = PROFILE_SECTIONS.find(p=>p.label === title);
   if (ps){
-    if (!profileSectionEnabled(ps)) return "Switched off in the Character Profile panel.";
+    if (!profileSectionEnabled(ps) && !archetypeAddedSections().includes(ps)) return "Switched off in the Character Profile panel.";
     if (charMeta && charMeta.shape && charMeta.shape.dropped === ps.label) return "Dropped by this sheet's shape — the signature budget spent the space on the sections that define them. Switch \"Vary the sheet's shape\" off to always draw it.";
     if (bannedSections.has(ps.section)) return `The whole "${ps.section}" section is banned in your constraints, so nothing here can ever be drawn.`;
     const cats = catsOf(ps.section);
@@ -945,7 +981,7 @@ function renderSheet(){
       return;
     }
     const div = document.createElement('div');
-    const collapsed = !!collapsedGroups[g.title];
+    const collapsed = !!collapsedGroups[g.title] && !sheetFilterActive();   // a filter opens every section
     div.className = "axisGroup" + (collapsed ? " collapsed" : "");
     div.id = sectionAnchorId(g.title);
     div.style.setProperty('--section-accent', cssColor(sectionColor(g.title)));
@@ -1042,6 +1078,25 @@ function renderSheet(){
         <div style="margin:6px 0; font-style:italic;">${escHTML(contra.question)}</div>
         ${fields}
         <div class="sub" style="margin:6px 0 0;">Not an error to fix. A ${escHTML(contra.tier.toLowerCase())} opposition on one axis is where a character stops being a list of traits — answer the question and the rest of the sheet reorganises around it.</div>
+      </div>`;
+    }
+    /* The inner conflict: a second tension, between the character's own drives rather
+       than two behaviours on one axis — which wins day to day, which wins under load, and
+       what the losing side leaks. Feeds the pressure ladder and the voice lab. */
+    const ic = (typeof innerConflict === 'function') ? innerConflict(state, charMeta) : null;
+    if (ic){
+      const qt = t => '“' + escHTML(t.trait) + '”';
+      h += `<div class="tensionBlock innerConflict" style="border-left-color:var(--dusk-blue-mid); margin-top:10px;">
+        <div class="tensionTitle">Inner conflict &mdash; ${escHTML(ic.label)}${ic.flipped ? ' <span class="sub">(swapped by you)</span>' : ''}</div>
+        <div style="margin:6px 0;"><b>${escHTML(ic.a.role)}</b> ${qt(ic.a.trait)} against <b>${escHTML(ic.b.role.toLowerCase())}</b> ${qt(ic.b.trait)}.</div>
+        <div class="icRow"><b>Day to day:</b> ${escHTML(ic.a.role.toLowerCase())} ${qt(ic.a.trait)} wins.</div>
+        <div class="icRow"><b>Under load:</b> ${ic.flips
+          ? `${escHTML(ic.winner.role.toLowerCase())} ${qt(ic.winner.trait)} takes over, ${escHTML(ic.when)}.`
+          : `it holds, ${escHTML(ic.when)} &mdash; at a cost.`}</div>
+        <div class="icRow"><b>Leaking meanwhile:</b> ${escHTML(ic.loser.role.toLowerCase())} ${qt(ic.loser.trait)} &mdash; in the voice lab and the pressure ladder.</div>
+        <div style="margin:6px 0; font-style:italic;">${escHTML(ic.question)}</div>
+        <button type="button" class="contraEdit" ${actAttr('click', 'flipInnerConflict')} title="Make the other side win under load">swap who wins under load</button>
+        <div class="sub" style="margin:6px 0 0;">Two characters with the same cards differ on which drive wins. This is the rule the pressure ladder and the voice lab follow.</div>
       </div>`;
     }
     (typeof seatedContradictions === 'function' ? seatedContradictions(state) : []).forEach(sc => {
@@ -1151,6 +1206,9 @@ function renderSheet(){
 
   if (typeof renderArc === 'function') renderArc();
   if (typeof renderVoiceLab === 'function') renderVoiceLab();
+  if (typeof refreshCoachMark === 'function') refreshCoachMark();
+  if (typeof refreshSheetNav === 'function') refreshSheetNav();
+  applySheetFilter();
   renderChangeList();
   refreshBudgetMeters();
   refreshJumpToSection();
@@ -1176,7 +1234,7 @@ function renderSheet(){
         `<li><b>${escHTML(sg.title)}.</b> ${escHTML(sg.text)} <span class="chainFrom">← ${escHTML(sg.from.join(" · ") || "the pressure dial")}</span></li>`).join("") + `</ol>`;
     }
     // Section 6: irritated → cornered → broken, and the day after (mechanics.js).
-    if (typeof pressureEscalationHTML === 'function') head += pressureEscalationHTML(state, pressureState);
+    if (typeof pressureEscalationHTML === 'function') head += pressureEscalationHTML(state, pressureState, charMeta);
     pbody.innerHTML = head;
     const pgroups = [
       {title:"Speech Under Pressure", ids:["verbosity","register","grammar"]},
@@ -1392,6 +1450,10 @@ function sheetToText(st, meta, pState){
       L.push("", `**The contradiction — ${contra.axisLabel}:** ${contra.hi.trait} and also ${contra.lo.trait}. _${contra.question}_`,
         ...contra.fields.map(f => `- ${f.prompt} ${f.answer || f.derived || "(unanswered)"}`));
     }
+    const icx = (typeof innerConflict === 'function') ? innerConflict(st, meta) : null;
+    if (icx){
+      L.push("", `**Inner conflict — ${icx.label}:** ${icx.a.role} “${icx.a.trait.trait}” against ${icx.b.role.toLowerCase()} “${icx.b.trait.trait}”. Day to day ${icx.a.role.toLowerCase()} wins; under load ${icx.flips ? `${icx.winner.role.toLowerCase()} takes over, ${icx.when}` : `it holds, ${icx.when}, at a cost`}. The ${icx.loser.role.toLowerCase()} leaks meanwhile. _${icx.question}_`);
+    }
     (typeof seatedContradictions === 'function' ? seatedContradictions(st) : []).forEach(sc => {
       L.push("", `**Seated contradiction — ${sc.axisLabel}:** ${sc.face ? sc.face.trait + " and also " : ""}${sc.exception.trait}${sc.fnTrait ? ` (for: ${sc.fnTrait.trait})` : ""}. _${sc.question}_`,
         ...sc.answers.map(a => `- ${a.prompt} ${a.answer}`));
@@ -1477,7 +1539,7 @@ function sheetToText(st, meta, pState){
       const chain = pressureChain(st, pState);
       if (chain) L.push(...chain.stages.map(sg => `1. **${sg.title}.** ${sg.text} (from: ${sg.from.join(", ") || "the pressure dial"})`), "");
     } catch(e){}
-    try { if (typeof pressureEscalationMarkdown === 'function'){ const esc = pressureEscalationMarkdown(st, pState); if (esc) L.push(esc, ""); } } catch(e){}
+    try { if (typeof pressureEscalationMarkdown === 'function'){ const esc = pressureEscalationMarkdown(st, pState, meta); if (esc) L.push(esc, ""); } } catch(e){}
     /* The base sheet's `block` helper filters slots whose TRAIT is null; the pressure
        section checked only that the slot existed, so one blanked or banned-out pressure
        slot threw `Cannot read properties of null (reading 'trait')` and aborted the
@@ -1511,7 +1573,16 @@ function sheetToText(st, meta, pState){
 }
 
 function copyText(text, btn){
-  const done = ()=>{ if (btn){ const old = btn.textContent; btn.textContent = "Copied!"; setTimeout(()=>btn.textContent=old, 1200); } };
+  // The label is remembered once, on the element: reading textContent on a second click
+  // inside the 1.2s window captured "Copied!" as the label and left it stuck there.
+  const done = ()=>{
+    if (!btn) return;
+    if (btn.dataset && btn.dataset.copyLabel === undefined) btn.dataset.copyLabel = btn.textContent;
+    const label = btn.dataset ? btn.dataset.copyLabel : btn.textContent;
+    btn.textContent = "Copied!";
+    clearTimeout(btn._copyTimer);
+    btn._copyTimer = setTimeout(()=>{ btn.textContent = label; if (btn.dataset) delete btn.dataset.copyLabel; }, 1200);
+  };
   // BUG FIX: navigator.clipboard is undefined in non-secure contexts (plain http,
   // file://) — this threw instead of copying. Guard it, and fall back to the
   // textarea/execCommand path so the button works everywhere.
@@ -1531,8 +1602,10 @@ function legacyCopy(text, done){
     if (ok) done(); else toast("Copy failed — your browser may block clipboard access here.", "warn");
   } catch(e){ toast("Copy failed — your browser may block clipboard access here.", "warn"); }
 }
-function downloadText(text, filename){
-  const blob = new Blob([text], {type:"text/markdown;charset=utf-8"});
+function downloadText(text, filename, mime){
+  // Every download used to be labelled text/markdown, the JSON exports included.
+  const type = mime || (/\.json$/i.test(filename) ? "application/json" : /\.md$/i.test(filename) ? "text/markdown" : "text/plain");
+  const blob = new Blob([text], {type: type + ";charset=utf-8"});
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url; a.download = filename; a.click();
@@ -1560,7 +1633,7 @@ const CHAR_FORMAT_VERSION = 2;
 // Every control that changes what a generation produces.
 const SETTING_FIELDS = ['mannerCount','vocabCount','personalityCount','profileDepth',
   'rarityPref','affinityBoost','rangeFocus','profileWeight','divergence',
-  'archetypeSelect','archetypeVariation','archetypeBlend','seedInput','sheetDensity','wildcardCount','pressureLevel',
+  'archetypeSelect','archetypeVariation','archetypeBlend','againstType','engineVersion','seedInput','sheetDensity','wildcardCount','pressureLevel',
   'lensSelect',
   /* The cast and foil controls were the one part of the workspace that no capture
      covered, so "export my setup" and Undo both silently dropped them and a cast was
@@ -1570,7 +1643,7 @@ const SETTING_FIELDS = ['mannerCount','vocabCount','personalityCount','profileDe
 const SETTING_TOGGLES = ['personalityToggle','depthFirstToggle','examplesToggle','stressToggle',
   'genPersonality','genSpeech','genVocab','genManner',
   'avoidRecentToggle','wildcardToggle','foilOpposeComposure','compactToggle','castAnchor',
-  'sheetShapeToggle','seatContradictions','exploreCandidates'];
+  'sheetShapeToggle','seatContradictions','exploreCandidates','archetypeSectionsToggle','favouriteBoostToggle'];
 
 function captureSettings(){
   const fields = {}, toggles = {}, sections = {};
@@ -1611,12 +1684,15 @@ function captureSettings(){
     // Content packs switched off for this workspace. Part of the settings because a
     // character generated with a pack off should replay with it off.
     disabledPacks: (typeof getDisabledPacks === 'function') ? getDisabledPacks() : [],
+    lockedSliders: (typeof lockedSliderIds === 'function') ? lockedSliderIds() : [],
     rerollExclusions: excl,
   };
 }
 
 function restoreSettings(s){
   if (!s) return;
+  // Settings from before the engine version existed were built by engine 1.
+  { const ev = document.getElementById('engineVersion'); if (ev) ev.value = (s.fields && s.fields.engineVersion) || '1'; }
   Object.entries(s.fields||{}).forEach(([id,v])=>{
     const el = document.getElementById(id); if (!el) return;
     if (el.tagName === 'SELECT'){ if ([...el.options].some(o=>o.value===v)) el.value = v; }
@@ -1664,6 +1740,9 @@ function restoreSettings(s){
   if (mbm) mbm.value = c.mutationBudgetMode || 'enforce';
   if (typeof setFavouriteTraitIds === 'function') setFavouriteTraitIds(s.favouriteTraitIds || []);
   if (typeof setDisabledPacks === 'function') setDisabledPacks(s.disabledPacks || []);
+  if (Array.isArray(s.lockedSliders)){
+    document.querySelectorAll('input[id^="lock_"]').forEach(e => { e.checked = s.lockedSliders.includes(e.id.slice(5)); });
+  }
   if (typeof refreshPackUI === 'function') refreshPackUI();
   if (typeof refreshBudgetUI === 'function') refreshBudgetUI();
   rerollExclusions = {};
@@ -1688,7 +1767,7 @@ function buildBudgetUI(){
         <label for="cap_${tier}" class="budgetLabel"><span class="rarityBadge rarity-${tier}"><span class="rarityGlyph" aria-hidden="true">${RTIER_GLYPH[tier]||"·"}</span>${escHTML(RTIER_LABEL[tier])}</span></label>
         <input type="number" id="cap_${tier}" min="0" max="60" step="1" placeholder="no cap"
                aria-label="Maximum ${escHTML(RTIER_LABEL[tier])} cards on one sheet"
-               ${actAttr('input', 'onRarityCapChange', "${tier}")}>
+               ${actAttr('input', 'onRarityCapChange', tier)}>
       </div>`).join("");
   }
   const ig = document.getElementById('intensityCapGrid');
@@ -1698,14 +1777,14 @@ function buildBudgetUI(){
         <label for="icap_${g.id}" class="budgetLabel">${escHTML(g.label)}</label>
         <input type="number" id="icap_${g.id}" min="0" max="400" step="1" placeholder="off"
                aria-label="Maximum total intensity for ${escHTML(g.label)}"
-               ${actAttr('input', 'onIntensityCapChange', "${g.id}")}>
+               ${actAttr('input', 'onIntensityCapChange', g.id)}>
         <span class="budgetMeter" id="imeter_${g.id}"><i></i><b></b></span>
       </div>`).join("");
   }
   const pr = document.getElementById('budgetPresetRow');
   if (pr){
     pr.innerHTML = Object.entries(BUDGET_PRESETS).map(([k,p])=>
-      `<button class="btn-secondary" ${actAttr('click', 'useBudgetPreset', "${k}")}>${escHTML(p.label)}</button>`).join("");
+      `<button class="btn-secondary" ${actAttr('click', 'useBudgetPreset', k)}>${escHTML(p.label)}</button>`).join("");
   }
   refreshBudgetUI();
 }
@@ -1779,9 +1858,16 @@ function useBudgetPreset(key){
   toast(`Budget preset: ${BUDGET_PRESETS[key].label}. Generate to apply it.`);
 }
 function clearBudgetsUI(){
+  const before = captureSettings();
   clearBudgets();
   refreshBudgetUI(); savePrefs();
-  toast("Budgets cleared.");
+  toastUndo("Budgets cleared.", ()=>{ restoreSettings(before); refreshBudgetUI(); savePrefs(); });
+}
+// Clear-all for the constraints panel, with a way back instead of a confirm dialog.
+function clearConstraintsUI(){
+  const before = captureSettings();
+  clearConstraints();
+  toastUndo("Constraints cleared.", ()=>{ restoreSettings(before); refreshConstraintChips(); savePrefs(); });
 }
 function refreshBudgetChips(){
   const box = document.getElementById('budgetChips');
@@ -1789,11 +1875,11 @@ function refreshBudgetChips(){
   let h = "";
   RTIER_ORDER.forEach(t=>{
     if (rarityCaps[t] == null) return;
-    h += `<span class="chip chip-tier">max ${rarityCaps[t]} ${escHTML(RTIER_LABEL[t])} <b ${actAttr('click', 'clearOneBudget', "rarity", "${t}")} title="Remove">&times;</b></span>`;
+    h += `<span class="chip chip-tier">max ${rarityCaps[t]} ${escHTML(RTIER_LABEL[t])} <b ${actAttr('click', 'clearOneBudget', "rarity", t)} title="Remove">&times;</b></span>`;
   });
   BUDGET_GROUPS.forEach(g=>{
     if (intensityCaps[g.id] == null) return;
-    h += `<span class="chip chip-tier">${escHTML(g.label)} intensity &le; ${intensityCaps[g.id]} <b ${actAttr('click', 'clearOneBudget', "intensity", "${g.id}")} title="Remove">&times;</b></span>`;
+    h += `<span class="chip chip-tier">${escHTML(g.label)} intensity &le; ${intensityCaps[g.id]} <b ${actAttr('click', 'clearOneBudget', "intensity", g.id)} title="Remove">&times;</b></span>`;
   });
   if (h && getBudgetMode() !== 'redraw') h += `<span class="chip chip-ban">over budget: ${getBudgetMode() === 'drop' ? 'drop the loudest' : 'warn only'}</span>`;
   box.innerHTML = h || '<span class="sub" style="margin:0;">No budgets set — every draw stands as dealt.</span>';
@@ -1876,9 +1962,12 @@ function exportCharacterJSON(){
     charMeta, state, pressureState, pinnedTargets, charVariants, traitNotes,
     sliders: captureSliders(),
     settings: captureSettings(),
+    arcBase: (typeof arcBase !== 'undefined' && arcBase) ? compressSlots(arcBase) : null,
+    arcEvents: (typeof arcEvents !== 'undefined') ? arcEvents : [],
   };
   const name = (charMeta.name || "character").replace(/[^a-z0-9_-]+/gi,'_');
   downloadText(JSON.stringify(payload, null, 2), name + ".character.json");
+  if (typeof markWorkSaved === 'function') markWorkSaved();
   toast("Exported " + name + ".character.json");
 }
 /* Structural validation for an imported sheet. Deliberately permissive about what it
@@ -2063,6 +2152,22 @@ function importCharacterJSON(fileInput){
       setVal('charContext', charMeta.context || "");
       setText('archetypeTag', charMeta.archetypeLabel || "Imported");
       document.getElementById('pressureSheet').style.display = pressureState ? "block" : "none";
+      if (typeof viewContext !== 'undefined') viewContext = CONTEXT_MODE_IDS.includes(charMeta.viewContext) ? charMeta.viewContext : 'baseline';
+      /* The arc belongs to the imported sheet. It used to be left over from the character
+         open before, so the first arc action rebuilt THAT character over this one. */
+      if (typeof resetArc === 'function'){
+        resetArc(false);
+        const evs = Array.isArray(staged.arcEvents) ? staged.arcEvents.filter(e => !validateArcEvent(e).length) : [];
+        if (evs.length && staged.arcBase){
+          const base = relink(expandSlots(staged.arcBase));
+          if (base && Object.keys(base).length){
+            arcBase = base; arcEvents = evs;
+            arcLastReplay = JSON.parse(JSON.stringify(replayArc(arcBase, arcEvents)));
+            charMeta.arc = arcSummary(arcEvents);
+          }
+        }
+        if (typeof renderArc === 'function') renderArc();
+      }
       onSliderChange(); renderSheet(); checkConflicts();
       if (!staged.settings) toast("Imported. This file predates full-settings export, so constraints and counts were left as they are.", "warn", 6000);
       else toast("Imported " + (charMeta.name || "character") + " — settings restored too.");
@@ -2144,7 +2249,9 @@ function importArchetypes(fileInput){
       if (!ok.length) throw new Error(rejected.length
         ? `none of the ${rejected.length} record(s) in that file are usable — ${rejected[0].why}`
         : "that file contains no archetypes.");
-      const replacing = ok.filter(a=> CUSTOM_ARCHETYPES[a.label] !== undefined || ARCHETYPES[a.label] !== undefined);
+      // Custom presets are keyed 'custom_'+label (loadCustomArchetypes); looking them up by
+      // the bare label never found one, so every overwrite was announced as "new".
+      const replacing = ok.filter(a=> CUSTOM_ARCHETYPES['custom_'+a.label] !== undefined);
       const adding = ok.length - replacing.length;
       const lines = [`${adding} new preset${adding===1?'':'s'}.`];
       if (replacing.length) lines.push(`${replacing.length} will REPLACE existing preset${replacing.length===1?'':'s'}: ${replacing.map(a=>a.label).join(', ')}.`);
@@ -2284,7 +2391,10 @@ function toastUndo(message, onUndo, ms, label){
    A condensed voice spec for pasting into a model's system prompt: who they are, how
    they talk, what they would never do, and a handful of sample lines — without the
    intensity/rarity bookkeeping sheetToText carries for a human reader. */
-function sheetToPrompt(st, meta){
+/* `opts.short` is the small-context version: trait names only, no descriptions, no sample
+   lines, no separate contradiction section — the same character in a fraction of the tokens. */
+function sheetToPrompt(st, meta, opts){
+  const short = !!(opts && opts.short);
   meta = meta || {};
   const name = meta.name && meta.name !== "Unnamed Character" ? meta.name : "this character";
   const L = [`# Voice spec: ${meta.name || "Unnamed Character"}`, ""];
@@ -2300,22 +2410,33 @@ function sheetToPrompt(st, meta){
   } catch(e){}
   const valid = ids => ids.filter(id => st[id] && st[id].trait);
   const keys = Object.keys(st || {});
-  const line = id => `- **${st[id].trait.trait}** — ${st[id].trait.desc}`;
+  const line = id => short ? `- ${st[id].trait.trait}` : `- **${st[id].trait.trait}** — ${st[id].trait.desc}`;
   const sec = (title, ids) => { const v = valid(ids); if (v.length) L.push("", `## ${title}`, ...v.map(line)); };
   sec("How they speak", ["verbosity","register","grammar"].concat(keys.filter(k=>k.startsWith("vocab")), keys.filter(k=>k.startsWith("manner"))));
   sec("Who they are", keys.filter(k=>k.startsWith("pers_") || k.startsWith("req_") || k.startsWith("reqcat_")));
   sec("What drives them", keys.filter(k=>k.startsWith("prof_")));
   sec("The one thing that doesn't fit", keys.filter(k=>k.startsWith("wild_")));
   try {
-    const contra = (typeof structuredContradiction === 'function') ? structuredContradiction(st, meta) : null;
+    const contra = (!short && typeof structuredContradiction === 'function') ? structuredContradiction(st, meta) : null;
     if (contra) L.push("", `## Central contradiction`, `${contra.hi.trait} — and also ${contra.lo.trait}. ${contra.question}`);
   } catch(e){}
-  const samples = valid(keys).map(id => st[id].trait.example).filter(Boolean).slice(0, 8);
+  try {
+    const ic = (typeof innerConflict === 'function') ? innerConflict(st, meta) : null;
+    if (ic) L.push("", `## Inner conflict (${ic.label})`,
+      `Day to day: ${ic.a.role.toLowerCase()} "${ic.a.trait.trait}" wins. Under load: ${ic.flips ? `${ic.winner.role.toLowerCase()} "${ic.winner.trait.trait}" takes over, ${ic.when}` : `it holds, ${ic.when}, at a cost`}.`,
+      `Meanwhile ${ic.loser.role.toLowerCase()} "${ic.loser.trait.trait}" leaks into what they say — let it show under stress, never as a speech about it.`);
+  } catch(e){}
+  const samples = short ? [] : valid(keys).map(id => st[id].trait.example).filter(Boolean).slice(0, 8);
   if (samples.length) L.push("", "## Sample lines (for rhythm, not to repeat verbatim)", ...samples.map(x => `> ${x}`));
+  if (short){ L.push("", "Keep the voice consistent line to line; show habits sparingly; under stress let it slip rather than become someone else."); return L.join("\n") + "\n"; }
   L.push("", "## Rules", "- Keep the verbosity, register and grammar above consistent line to line.",
     "- Use the mannerisms sparingly; a habit shown every line stops reading as a habit.",
     "- Under stress, let the voice slip rather than become someone else.");
   return L.join("\n") + "\n";
+}
+function copyPromptShort(btnEl){
+  if (!Object.keys(state).length){ toast("Generate a character first.", "warn"); return; }
+  copyText(sheetToPrompt(state, charMeta, {short: true}), btnEl);
 }
 function copyPrompt(btnEl){
   if (!Object.keys(state).length){ toast("Generate a character first.", "warn"); return; }

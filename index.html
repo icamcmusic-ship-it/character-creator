@@ -19,9 +19,17 @@
       <h1>Character Voice Generator</h1>
       <div class="sub" id="taglineSub">Build a character, compare a cast, and see how any two would get along. One card at a time.</div>
     </div>
-    <button type="button" class="benchBadge" title="How this works"
-            data-on="click" data-act="openHelpPanel" data-args="[]"
-            aria-label="How this works">🛠</button>
+    <div class="headTools">
+      <!-- The project library is where work persists, and it was a folded panel at the
+           bottom of the page. The current project and the save state live here. -->
+      <button type="button" class="projectChip" id="projectChip" data-on="click" data-act="jumpToPanel" data-args="[&quot;projectPanel&quot;]"
+              title="The project this work is filed under — open the project library">Project: <b id="projectChipName">none</b> <span aria-hidden="true">▾</span></button>
+      <span class="saveState" id="saveState" role="status" aria-live="polite"></span>
+      <button type="button" class="themeBtn" id="themeBtn" data-on="click" data-act="cycleTheme" data-args="[]" aria-label="Colour theme: automatic" title="Colour theme: automatic (follows your system). Click to change.">◐ <span id="themeLabel">Auto</span></button>
+      <button type="button" class="benchBadge" title="How this works: the guide"
+              data-on="click" data-act="openHelpPanel" data-args="[]"
+              aria-label="How this works">🛠 <span class="benchBadgeText">Guide</span></button>
+    </div>
   </header>
 
   <!-- The two intro explainers ran to roughly 900 words BEFORE the interface began.
@@ -31,9 +39,19 @@
   <a class="skipLink" href="#controlsStart">Skip to the controls</a>
 
   <div class="tabs" role="tablist" aria-label="Views">
-    <button id="tabSingleBtn" class="active" role="tab" aria-selected="true" aria-controls="view-single" data-on="click" data-act="switchTab" data-args="[&quot;single&quot;]"><span class="tabIcon" aria-hidden="true">👤</span>Single Character</button>
-    <button id="tabCastBtn" role="tab" aria-selected="false" aria-controls="view-cast" tabindex="-1" data-on="click" data-act="switchTab" data-args="[&quot;cast&quot;]"><span class="tabIcon" aria-hidden="true">🎭</span>Cast Comparison</button>
-    <button id="tabRelBtn" role="tab" aria-selected="false" aria-controls="view-rel" tabindex="-1" data-on="click" data-act="switchTab" data-args="[&quot;rel&quot;]"><span class="tabIcon" aria-hidden="true">🔗</span>Relationships</button>
+    <button id="tabSingleBtn" class="active" role="tab" aria-selected="true" aria-controls="view-single" data-on="click" data-act="switchTab" data-args="[&quot;single&quot;]"><span class="tabIcon" aria-hidden="true">👤</span><span class="tabLong">Single Character</span><span class="tabShort" aria-hidden="true">Single</span></button>
+    <button id="tabCastBtn" role="tab" aria-selected="false" aria-controls="view-cast" tabindex="-1" data-on="click" data-act="switchTab" data-args="[&quot;cast&quot;]"><span class="tabIcon" aria-hidden="true">🎭</span><span class="tabLong">Cast Comparison</span><span class="tabShort" aria-hidden="true">Cast</span></button>
+    <button id="tabRelBtn" role="tab" aria-selected="false" aria-controls="view-rel" tabindex="-1" data-on="click" data-act="switchTab" data-args="[&quot;rel&quot;]"><span class="tabIcon" aria-hidden="true">🔗</span><span class="tabLong">Relationships</span><span class="tabShort" aria-hidden="true">Relations</span></button>
+  </div>
+  <!-- First-visit card. It lived inside #emptyState, below every control, so a new
+       visitor never saw it without scrolling; it now sits directly under the tabs. -->
+  <div class="onboard" id="onboard" hidden>
+    <b class="onboardTitle">New here?</b>
+    <p>One click gets you a whole character to react to. The short version of the controls is on; you can switch every dial on at any time with Tinker Mode.</p>
+    <div class="onboardBtns">
+      <button type="button" class="btn-primary" data-on="click" data-act="onboardChoose" data-args="[&quot;quick&quot;]">&#10022; Build your first character</button>
+      <button type="button" class="btn-secondary" data-on="click" data-act="onboardChoose" data-args="[&quot;advanced&quot;]">Show me every control</button>
+    </div>
   </div>
   <details class="legendBox" id="helpPanel" style="margin:0 0 18px;">
     <summary><h3>How to use, and how generation works</h3></summary>
@@ -62,6 +80,11 @@
   <div id="srAnnounce" class="srOnly" role="status" aria-live="polite" aria-atomic="true"></div>
 
   <div id="view-single" class="viewSection active" role="tabpanel" aria-labelledby="tabSingleBtn">
+    <!-- On a phone the inputs fold away after a build, leaving a one-line recap and a way back. -->
+    <div class="inputsBar" id="inputsBar" hidden>
+      <span class="inputsRecap" id="inputsRecap"></span>
+      <button type="button" class="btn-secondary" id="inputsToggle" data-on="click" data-act="toggleInputs" data-args="[]" aria-expanded="false" aria-controls="controlsStart">Edit inputs ▾</button>
+    </div>
     <div class="controls" id="controlsStart" tabindex="-1">
       <div class="panelHead">
         <h2>Build a character.</h2>
@@ -82,25 +105,26 @@
         </div>
       </div>
       <div class="lensRow">
-        <div class="lensLabel" id="lensLabel">Lenses <span class="sub">— setting, culture and life stage; combine freely</span></div>
+        <div class="lensLabel" id="lensLabel">Lenses <span class="sub">— setting, culture and life stage; combine freely</span> <button type="button" class="infoTip" data-on="click" data-act="toggleTip" data-args="[&quot;$el&quot;]" aria-expanded="false" aria-label="What is this?">ⓘ</button><span class="tipText" hidden>A lens is a setting or a life stage — court, frontier, military, child, late life… It shifts which traits are likely, what register counts as normal there, and which topics stay out of the voice lines. Turn on as many as you like; press one again to turn it off.</span></div>
         <input type="hidden" id="lensSelect" value="">
+        <input type="hidden" id="engineVersion" value="2">
         <div class="lensPicker" id="lensPicker" role="group" aria-labelledby="lensLabel"></div>
       </div>
       <div class="row dialBox">
         <div class="field">
-          <label for="verbositySlider">Verbosity (Terse &rarr; Voluble)</label>
+          <div class="sliderLabelRow"><label for="verbositySlider">Verbosity (Terse &rarr; Voluble)</label><label class="sliderLock" title="Lock: Randomize and Surprise me leave this slider where it is"><input type="checkbox" id="lock_verbositySlider" data-on="change" data-act="onSliderLockChange" data-args="[]" aria-label="Lock Verbosity"><span aria-hidden="true">🔒</span></label></div>
           <input type="range" id="verbositySlider" min="-100" max="100" value="0" step="1" data-on="input" data-act="onSliderChange" data-args="[]">
           <div class="scaleLabels"><span>Silent</span><span>Balanced</span><span>Torrential</span></div>
           <div class="sliderVal" id="verbosityVal">0</div>
         </div>
         <div class="field">
-          <label for="registerSlider">Register (Plain &rarr; Elaborate)</label>
+          <div class="sliderLabelRow"><label for="registerSlider">Register (Plain &rarr; Elaborate)</label><label class="sliderLock" title="Lock: Randomize and Surprise me leave this slider where it is"><input type="checkbox" id="lock_registerSlider" data-on="change" data-act="onSliderLockChange" data-args="[]" aria-label="Lock Register"><span aria-hidden="true">🔒</span></label></div>
           <input type="range" id="registerSlider" min="-100" max="100" value="0" step="1" data-on="input" data-act="onSliderChange" data-args="[]">
           <div class="scaleLabels"><span>Blunt</span><span>Neutral</span><span>Ornate</span></div>
           <div class="sliderVal" id="registerVal">0</div>
         </div>
         <div class="field">
-          <label for="composureSlider">Composure (Steady &rarr; Volatile)</label>
+          <div class="sliderLabelRow"><label for="composureSlider">Composure (Steady &rarr; Volatile)</label><label class="sliderLock" title="Lock: Randomize and Surprise me leave this slider where it is"><input type="checkbox" id="lock_composureSlider" data-on="change" data-act="onSliderLockChange" data-args="[]" aria-label="Lock Composure"><span aria-hidden="true">🔒</span></label></div>
           <input type="range" id="composureSlider" min="-100" max="100" value="0" step="1" data-on="input" data-act="onSliderChange" data-args="[]">
           <div class="scaleLabels"><span>Calm</span><span>Mixed</span><span>Erratic</span></div>
           <div class="sliderVal" id="composureVal">0</div>
@@ -112,7 +136,7 @@
            every anti-sameness control switched off and out of sight. -->
       <div class="row">
         <div class="field" style="max-width:230px;">
-          <label for="divergence">Surprise me</label>
+          <label for="divergence">Surprise me <span class="sub">(divergence)</span> <button type="button" class="infoTip" data-on="click" data-act="toggleTip" data-args="[&quot;$el&quot;]" aria-expanded="false" aria-label="What is this?">ⓘ</button><span class="tipText" hidden>How often the generator steps away from the most typical trait for your sliders. Never = the expected person; Often = odder, and less coherent. It is the counterweight to the sliders, not a random mode.</span></label>
           <input type="range" id="divergence" min="0" max="1" value="0.15" step="0.05" data-on="input" data-act="onSliderChange" data-args="[]">
           <div class="scaleLabels"><span>Never</span><span>Sometimes</span><span>Often</span></div>
           <!-- These two sliders meaningfully change every character and shipped with no
@@ -144,12 +168,13 @@
         </div>
         <div class="field advOnly">
           <label>&nbsp;</label>
-          <div class="sub" style="margin:0;">Same seed + same settings = the exact same character, pressure sheet included, shareable as text. Every generation shows the seed it used — paste that seed back in to replay it, including the one the app generates for you when this box is blank. Pasting a seed puts the build in <b>replay mode</b>: it runs against an empty session history, so <b>Avoid recent traits</b> and the history-aware side of <b>Surprise me</b> have nothing to remember and the result is the same in any session. A blank box is <b>exploration</b> — it does take your recent characters into account, which is what stops a session converging on one person. One deliberate exception either way: rerolls are un-seeded, because a reroll is you overriding the dice.</div>
+          <div class="sub" style="margin:0;">Same seed + same settings = the exact same character, pressure sheet included, shareable as text. Every generation shows the seed it used — paste that seed back in to replay it, including the one the app generates for you when this box is blank. Every build draws against an empty session history, so the seed alone decides the character and it comes out the same in any session. A blank box is <b>exploration</b>: it draws three candidates and keeps the one least like your recent characters and your project archive, so <b>Avoid recent traits</b> steers <i>which</i> candidate is kept rather than the draw itself. The seed printed is the winner's, so pasting it back gives you that character. One deliberate exception either way: rerolls are un-seeded, because a reroll is you overriding the dice.</div>
         </div>
       </div>
 
+      <h4 class="ctlGroupTitle advOnly">Rules <span class="sub">— what must or must not appear</span></h4>
       <details class="advanced advOnly" style="margin:0 0 14px;">
-        <summary><h3>Constraints — always / never</h3></summary>
+        <summary><h3>Constraints — always / never</h3><span class="panelBadge" data-badge="constraints" hidden></span></summary>
         <div class="row" style="margin-top:10px;">
           <div class="field" style="max-width:320px;">
             <label for="banCategorySelect">Category</label>
@@ -165,7 +190,7 @@
             <button class="btn-secondary" style="margin-top:6px;" data-on="click" data-act="addSectionBan" data-args="[]">Ban section</button>
           </div>
           <div class="field" style="max-width:320px;">
-            <label for="tierCategorySelect">Weighted tier (softer than a ban)</label>
+            <label for="tierCategorySelect">Weighted tier (softer than a ban) <button type="button" class="infoTip" data-on="click" data-act="toggleTip" data-args="[&quot;$el&quot;]" aria-expanded="false" aria-label="What is this?">ⓘ</button><span class="tipText" hidden>Prefer ×3 makes a category three times as likely to be drawn; Rarely ×¼ makes it a quarter as likely. Neither guarantees nor bans anything — use Constraints for that.</span></label>
             <select id="tierCategorySelect"></select>
             <div class="actionRow" style="margin-top:6px;">
               <button class="btn-secondary" data-on="click" data-act="addCategoryTier" data-args="[&quot;prefer&quot;]">Prefer &times;3</button>
@@ -182,7 +207,7 @@
             <label for="constraintTraitSearch">Trait by name</label>
             <input type="text" id="constraintTraitSearch" placeholder="type at least two letters — searches names and descriptions…"
                    autocomplete="off" data-on="input" data-act="searchTraits" data-args="[&quot;constraintTraitSearch&quot;,&quot;constraintSearchResults&quot;]"
-                   data-on="keydown" data-act="searchKeydown" data-args="[&quot;$event&quot;,&quot;constraintTraitSearch&quot;,&quot;constraintSearchResults&quot;]" role="combobox" aria-expanded="false" aria-autocomplete="list">
+                   data-act-keydown="searchKeydown" data-args-keydown="[&quot;$event&quot;,&quot;constraintTraitSearch&quot;,&quot;constraintSearchResults&quot;]" role="combobox" aria-expanded="false" aria-autocomplete="list">
             <div class="searchResults" id="constraintSearchResults" style="display:none;"></div>
             <div class="actionRow" style="margin-top:6px;">
               <button class="btn-secondary" data-on="click" data-act="addTraitConstraint" data-args="[&quot;req&quot;]">Always include</button>
@@ -193,17 +218,17 @@
             <label>Mutually exclusive pair</label>
             <input type="text" id="exclusiveA" placeholder="first trait…" autocomplete="off"
                    data-on="input" data-act="searchTraits" data-args="[&quot;exclusiveA&quot;,&quot;exclusiveAResults&quot;]"
-                   data-on="keydown" data-act="searchKeydown" data-args="[&quot;$event&quot;,&quot;exclusiveA&quot;,&quot;exclusiveAResults&quot;]" role="combobox" aria-expanded="false" aria-autocomplete="list" aria-label="First trait of the exclusive pair">
+                   data-act-keydown="searchKeydown" data-args-keydown="[&quot;$event&quot;,&quot;exclusiveA&quot;,&quot;exclusiveAResults&quot;]" role="combobox" aria-expanded="false" aria-autocomplete="list" aria-label="First trait of the exclusive pair">
             <div class="searchResults" id="exclusiveAResults" style="display:none;"></div>
             <input type="text" id="exclusiveB" placeholder="second trait…" autocomplete="off" style="margin-top:6px;"
                    data-on="input" data-act="searchTraits" data-args="[&quot;exclusiveB&quot;,&quot;exclusiveBResults&quot;]"
-                   data-on="keydown" data-act="searchKeydown" data-args="[&quot;$event&quot;,&quot;exclusiveB&quot;,&quot;exclusiveBResults&quot;]" role="combobox" aria-expanded="false" aria-autocomplete="list" aria-label="Second trait of the exclusive pair">
+                   data-act-keydown="searchKeydown" data-args-keydown="[&quot;$event&quot;,&quot;exclusiveB&quot;,&quot;exclusiveBResults&quot;]" role="combobox" aria-expanded="false" aria-autocomplete="list" aria-label="Second trait of the exclusive pair">
             <div class="searchResults" id="exclusiveBResults" style="display:none;"></div>
             <button class="btn-secondary" style="margin-top:6px;" data-on="click" data-act="addExclusivePair" data-args="[]">Never both</button>
           </div>
           <div class="field">
             <label>&nbsp;</label>
-            <button class="btn-secondary" data-on="click" data-act="clearConstraints" data-args="[]">Clear all constraints</button>
+            <button class="btn-secondary" data-on="click" data-act="clearConstraintsUI" data-args="[]">Clear all constraints</button>
           </div>
         </div>
         <div id="constraintChips" style="margin-top:10px; display:flex; flex-wrap:wrap; gap:6px;"></div>
@@ -214,7 +239,7 @@
       </details>
 
       <details class="advanced advOnly" style="margin:0 0 14px;">
-        <summary><h3>Budgets — rarity caps &amp; intensity ceilings</h3></summary>
+        <summary><h3>Budgets — rarity caps &amp; intensity ceilings</h3><span class="panelBadge" data-badge="budgets" hidden></span></summary>
         <div class="sub" style="margin:10px 0;">Constraints say <i>what</i> can appear. Budgets say <i>how much</i>. Both run after the draw, so nothing here distorts the weighting or the <b>why?</b> explanations — a budget adjusts the result and tells you it did. Slots you locked, pinned or required are never modified, but they still <i>spend</i> the budget, so you can see when you've spent it yourself.</div>
 
         <div class="row">
@@ -249,24 +274,7 @@
         <div id="budgetChips" style="margin-top:10px; display:flex; flex-wrap:wrap; gap:6px;"></div>
       </details>
 
-      <details class="advanced advOnly" style="margin:0 0 14px;">
-        <summary><h3>Why didn't I get a particular trait?</h3></summary>
-        <div class="sub" style="margin:10px 0;">The per-card <b>why?</b> panel explains a pick. This explains an absence — which constraint, presentation lock, or active-range window is standing in the way, and what to move.</div>
-        <div class="row">
-          <div class="field" style="max-width:420px;">
-            <label for="whyNotSearch">Trait name</label>
-            <input type="text" id="whyNotSearch" placeholder="type at least two letters…" autocomplete="off"
-                   data-on="input" data-act="searchTraits" data-args="[&quot;whyNotSearch&quot;,&quot;whyNotResults&quot;]"
-                   data-on="keydown" data-act="searchKeydown" data-args="[&quot;$event&quot;,&quot;whyNotSearch&quot;,&quot;whyNotResults&quot;]" role="combobox" aria-expanded="false" aria-autocomplete="list">
-            <div class="searchResults" id="whyNotResults" style="display:none;"></div>
-          </div>
-          <div class="field">
-            <label>&nbsp;</label>
-            <button class="btn-secondary" data-on="click" data-act="explainWhyNotFromInput" data-args="[]">Explain</button>
-          </div>
-        </div>
-        <div id="whyNotResult" style="display:none; margin-top:8px;"></div>
-      </details>
+      
 
       <div class="stressToggleRow checkboxRow advOnly" style="flex-wrap:wrap; gap:14px;">
         <span style="font-size:.78rem; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); font-weight:700;">Generate:</span>
@@ -293,6 +301,12 @@
             <select id="archetypeVariation" data-on="change" data-act="onSliderChange" data-args="[]"></select>
             <label for="archetypeBlend" class="sub" style="margin:8px 0 2px;">How much of the preset to keep <span id="archetypeBlendVal">65%</span></label>
             <input type="range" id="archetypeBlend" min="0.2" max="1" step="0.05" value="0.65" data-on="input" data-act="onArchetypeBlendInput" data-args="[]">
+            <label for="againstType" class="sub" style="margin:8px 0 2px;">Against type</label>
+            <select id="againstType" data-on="change" data-act="onSliderChange" data-args="[]">
+              <option value="0">Off: as written</option>
+              <option value="1">Flip its strongest axis</option>
+              <option value="2">Flip its two strongest</option>
+            </select>
             <div class="sub" id="archetypeIntentNote" style="margin:4px 0 0;"></div>
           </div>
         </div>
@@ -322,16 +336,23 @@
         <div class="field advOnly">
           <label>&nbsp;</label>
           <div class="actionRow">
-            <button class="btn-secondary" data-on="click" data-act="surpriseMe" data-args="[]" title="Roll everything at once — sliders, archetype, sections, divergence — and generate">🎲 Roll everything</button>
               <button class="btn-secondary" data-on="click" data-act="randomizeSliders" data-args="[&quot;voice&quot;]">🎲 Randomize Voice</button>
             <button class="btn-secondary" data-on="click" data-act="randomizeSliders" data-args="[&quot;personality&quot;]">🎲 Randomize Personality</button>
             <button class="btn-secondary" data-on="click" data-act="suggestVoiceFromPersonality" data-args="[]">↳ Suggest voice from personality</button>
+          </div>
+          <!-- Slider sets: the sixteen sliders, saved under a name — a lighter thing than a custom
+               archetype, which also carries the constraints, counts and section toggles. -->
+          <div class="actionRow" style="margin-top:8px;">
+            <select id="sliderPresetSelect" aria-label="Saved slider sets"><option value="">Slider sets…</option></select>
+            <button class="btn-secondary" data-on="click" data-act="applySliderPreset" data-args="[]">Load</button>
+            <button class="btn-secondary" data-on="click" data-act="saveSliderPreset" data-args="[]" title="Save the voice and personality sliders as they are now, under a name">Save sliders as…</button>
+            <button class="btn-secondary" data-on="click" data-act="deleteSliderPreset" data-args="[]">Delete</button>
           </div>
         </div>
       </div>
       <div class="stressToggleRow checkboxRow advOnly">
         <input type="checkbox" id="stressToggle">
-        <label style="margin:0; text-transform:none; font-size:.85rem; color:var(--text);" for="stressToggle">Also generate an "Under Pressure" variant (situational mode)</label>
+        <label style="margin:0; text-transform:none; font-size:.85rem; color:var(--text);" for="stressToggle">Also generate an "Under Pressure" variant (situational mode)</label> <button type="button" class="infoTip" data-on="click" data-act="toggleTip" data-args="[&quot;$el&quot;]" aria-expanded="false" aria-label="What is this?">ⓘ</button><span class="tipText" hidden>Builds a second sheet showing this person under stress: their stress response takes over and some traits shift. The pressure ladder and recovery notes sit under it.</span>
       </div>
       <div class="stressToggleRow checkboxRow advOnly" style="margin-top:8px;">
         <input type="checkbox" id="personalityToggle" checked data-on="change" data-act="togglePersonalityPanel" data-args="[]">
@@ -344,7 +365,7 @@
 
       <div class="stressToggleRow checkboxRow advOnly" style="margin-top:8px;">
         <input type="checkbox" id="avoidRecentToggle" checked data-on="change" data-act="onSliderChange" data-args="[]">
-        <label style="margin:0; text-transform:none; font-size:.85rem; color:var(--text);" for="avoidRecentToggle">Avoid recent traits — softly penalise anything drawn in your last few characters</label>
+        <label style="margin:0; text-transform:none; font-size:.85rem; color:var(--text);" for="avoidRecentToggle">Avoid recent traits — when a blank-seed roll picks the best of three, prefer the candidate that repeats the fewest traits from your last few characters</label>
       </div>
       <div class="stressToggleRow checkboxRow advOnly" style="margin-top:8px;">
         <!-- On by default. This is the strongest anti-staleness tool in the app and it
@@ -376,34 +397,21 @@
       </div>
 
       <div class="stressToggleRow checkboxRow advOnly" style="margin-top:8px;">
+        <input type="checkbox" id="favouriteBoostToggle" data-on="change" data-act="onFavouriteBoostChange" data-args="[]">
+        <label style="margin:0; text-transform:none; font-size:.85rem; color:var(--text);" for="favouriteBoostToggle">Saved traits count double — the bookmark on a card becomes a soft "always consider"</label>
+      </div>
+      <div class="stressToggleRow checkboxRow advOnly" style="margin-top:8px;">
         <input type="checkbox" id="depthFirstToggle">
         <label style="margin:0; text-transform:none; font-size:.85rem; color:var(--text);" for="depthFirstToggle">Depth-first generation — resolve wound, values &amp; attachment first, then derive personality from them</label>
       </div>
       <div class="sub advOnly" style="margin:4px 0 0 26px; font-size:.76rem;">Heads up: this mode sets personality sliders <i>from</i> the deep facts, so the Coherence score on the sheet will read structurally higher here — that's the mode working as designed, not extra consistency you earned.</div>
 
-      <details class="advanced advOnly">
-        <summary><h3>Seed from a single trait</h3></summary>
-        <div class="sub" style="margin:10px 0;">Fix one trait you already know about this character; everything else is built outward from it through the correlation matrix.</div>
-        <div class="row">
-          <div class="field" style="flex:2;">
-            <label>Seed trait</label>
-            <input type="text" id="seedTraitFilter" placeholder="Filter (e.g. 'betrayed', 'leader', 'dry')..." data-on="input" data-act="filterSeedPicker" data-args="[]" style="margin-bottom:6px;">
-            <select id="seedTraitSelect"></select>
-          </div>
-          <div class="field">
-            <label>&nbsp;</label>
-            <div class="actionRow">
-              <button class="btn-primary" data-on="click" data-act="generateFromSeed" data-args="[]">Build outward from seed</button>
-            </div>
-          </div>
-        </div>
-      </details>
-
+      <h4 class="ctlGroupTitle advOnly">Shape <span class="sub">— what kind of person comes out</span></h4>
       <details class="advanced advOnly" id="profilePanel">
-        <summary><h3>Character Profile — Motivation, Values, Role &amp; more</h3></summary>
+        <summary><h3>Character Profile — Motivation, Values, Role &amp; more</h3><span class="panelBadge" data-badge="profile" hidden></span></summary>
         <div class="row" style="margin-top:10px;">
           <div class="field" style="max-width:220px;">
-            <label>Traits per section</label>
+            <label for="profileDepth">Traits per section</label>
             <select id="profileDepth" >
               <option value="1" selected>1 (concise)</option>
               <option value="2">2 (detailed)</option>
@@ -420,29 +428,25 @@
             </div>
           </div>
         </div>
+        <!-- Twelve sections here ship off. A preset that names one of them (Diaspora
+             Code-Switcher: Dialect; Scattered Genius: Conversation) switches it on for that
+             build; this is the one switch for that. -->
+        <div class="stressToggleRow checkboxRow" style="margin:8px 0;">
+          <input type="checkbox" id="archetypeSectionsToggle" checked data-on="change" data-act="onSliderChange" data-args="[]">
+          <label style="margin:0; text-transform:none; font-size:.85rem; color:var(--text);" for="archetypeSectionsToggle">Let an archetype switch on its own extra sections (Dialect, Conversation, Family…) even though they are off here</label>
+        </div>
         <div id="profileSectionsGrid"></div>
       </details>
-
-      <details class="advanced advOnly" id="packPanel">
-        <summary><h3>Content packs</h3></summary>
-        <div class="sub" style="margin:8px 0;">The bank ships as packs. Turning one off removes its traits from every draw — useful for keeping a setting clean, or for seeing what a pack actually contributes. The choice travels with exports and saved settings. <code>node tools/studio.js packs</code> prints the same list.</div>
-        <div id="packGrid" class="row"></div>
-        <div class="actionRow" style="margin-top:8px;">
-          <button class="btn-secondary" data-on="click" data-act="setAllPacks" data-args="[true]">Enable all</button>
-          <button class="btn-secondary" data-on="click" data-act="setAllPacks" data-args="[false]">Core only</button>
-        </div>
-      </details>
-
       <details class="advanced advOnly" id="personalityPanel">
         <summary><h3>Personality Profile (13 axes)</h3></summary>
         <div class="row" style="margin-top:10px;" id="personalitySlidersGrid"></div>
       </details>
-
       <details class="advanced advOnly">
         <summary><h3>Advanced: affinity weights</h3></summary>
+        <div class="sub" style="margin:8px 0 0;">How strongly your sliders pull on the traits and profile sections you get. <button type="button" class="infoTip" data-on="click" data-act="toggleTip" data-args="[&quot;$el&quot;]" aria-expanded="false" aria-label="What is this?">ⓘ</button><span class="tipText" hidden>Affinity is the link between a slider and the traits that suit it. A low boost is close to a random draw; a high one lets the sliders dictate almost everything.</span></div>
         <div class="row" style="margin-top:10px;">
           <div class="field" style="max-width:160px;">
-            <label>Boost strength</label>
+            <label for="affinityBoost">Boost strength</label>
             <!-- Was a bare number input with a 400-word explanation attached, in a UI
                  where every other dial is a slider with a resolved word beside it. -->
             <input type="range" id="affinityBoost" value="2.5" min="0" max="10" step="0.5" data-on="input" data-act="onSliderChange" data-args="[]">
@@ -461,13 +465,22 @@
         <div id="rangeReadout"></div>
         <div class="affinityList" id="affinityPreview"></div>
       </details>
-
+      <h4 class="ctlGroupTitle advOnly">Library <span class="sub">— packs and presets</span></h4>
+      <details class="advanced advOnly" id="packPanel">
+        <summary><h3>Content packs</h3><span class="panelBadge" data-badge="packs" hidden></span></summary>
+        <div class="sub" style="margin:8px 0;">The bank ships as packs. Turning one off removes its traits from every draw — useful for keeping a setting clean, or for seeing what a pack actually contributes. The choice travels with exports and saved settings. <code>node tools/studio.js packs</code> prints the same list.</div>
+        <div id="packGrid" class="row"></div>
+        <div class="actionRow" style="margin-top:8px;">
+          <button class="btn-secondary" data-on="click" data-act="setAllPacks" data-args="[true]">Enable all</button>
+          <button class="btn-secondary" data-on="click" data-act="setAllPacks" data-args="[false]">Core only</button>
+        </div>
+      </details>
       <details class="advanced advOnly">
         <summary><h3>Custom archetype builder</h3></summary>
         <div class="sub" style="margin:10px 0;">Set the sliders above however you like, then save them as a reusable archetype. The constraints, counts and section toggles in force are saved alongside — selecting the archetype still just blends its posture with yours, and "Restore full setup" is the explicit way to get the rest back. The library exports as a file, so a set of house archetypes can be shared or moved between machines.</div>
         <div class="row">
           <div class="field">
-            <label>Archetype name</label>
+            <label for="customArchName">Archetype name</label>
             <input type="text" id="customArchName" placeholder="e.g. Grizzled Mentor">
           </div>
           <div class="field">
@@ -483,6 +496,42 @@
         </div>
         <div class="savedList" id="customArchList"></div>
       </details>
+      <h4 class="ctlGroupTitle advOnly">Diagnostics <span class="sub">— why a roll came out the way it did</span></h4>
+      <details class="advanced advOnly" style="margin:0 0 14px;">
+        <summary><h3>Why didn't I get a particular trait?</h3></summary>
+        <div class="sub" style="margin:10px 0;">The per-card <b>why?</b> panel explains a pick. This explains an absence — which constraint, presentation lock, or active-range window is standing in the way, and what to move.</div>
+        <div class="row">
+          <div class="field" style="max-width:420px;">
+            <label for="whyNotSearch">Trait name</label>
+            <input type="text" id="whyNotSearch" placeholder="type at least two letters…" autocomplete="off"
+                   data-on="input" data-act="searchTraits" data-args="[&quot;whyNotSearch&quot;,&quot;whyNotResults&quot;]"
+                   data-act-keydown="searchKeydown" data-args-keydown="[&quot;$event&quot;,&quot;whyNotSearch&quot;,&quot;whyNotResults&quot;]" role="combobox" aria-expanded="false" aria-autocomplete="list">
+            <div class="searchResults" id="whyNotResults" style="display:none;"></div>
+          </div>
+          <div class="field">
+            <label>&nbsp;</label>
+            <button class="btn-secondary" data-on="click" data-act="explainWhyNotFromInput" data-args="[]">Explain</button>
+          </div>
+        </div>
+        <div id="whyNotResult" style="display:none; margin-top:8px;"></div>
+      </details>
+      <details class="advanced advOnly">
+        <summary><h3>Seed from a single trait</h3></summary>
+        <div class="sub" style="margin:10px 0;">Fix one trait you already know about this character; everything else is built outward from it through the correlation matrix.</div>
+        <div class="row">
+          <div class="field" style="flex:2;">
+            <label for="seedTraitFilter">Seed trait</label>
+            <input type="text" id="seedTraitFilter" aria-label="Filter the seed trait list" placeholder="Filter (e.g. 'betrayed', 'leader', 'dry')..." data-on="input" data-act="filterSeedPicker" data-args="[]" style="margin-bottom:6px;">
+            <select id="seedTraitSelect" aria-label="Seed trait"></select>
+          </div>
+          <div class="field">
+            <label>&nbsp;</label>
+            <div class="actionRow">
+              <button class="btn-primary" data-on="click" data-act="generateFromSeed" data-args="[]">Build outward from seed</button>
+            </div>
+          </div>
+        </div>
+      </details>
 
       <!-- Thirteen buttons in one undifferentiated row (with a stray checkbox in the
            middle of them) made the primary action hard to find. Four labelled groups. -->
@@ -490,18 +539,20 @@
            Advanced disclosure that Quick mode hides. See refreshActiveRuleStrip. -->
       <div class="activeRules" id="activeRules" role="status" style="display:none;"></div>
       <div class="buildRow">
-        <button class="btn-primary btn-build" data-on="click" data-act="generateCharacter" data-args="[]"><span aria-hidden="true">✦</span> Build &amp; Roll</button>
-        <button class="btn-secondary" data-on="click" data-act="generateBatch" data-args="[5]" title="Generate five complete characters at once and pick the one you want — the rest are discarded">Roll 5, pick one</button>
-        <button class="btn-primary btn-roll" data-on="click" data-act="randomizeAndGenerate" data-args="[]" title="Randomize every slider, then build">🎲 Randomize All</button>
-      </div>
-      <!-- The two named modes the audit asks for, plus the batch that picks itself.
-           "Same world" keeps the context and settings and avoids the current person's
-           traits, concept families and categories; "variation" holds the five most
-           defining cards and rerolls the rest. -->
-      <div class="buildRow buildRowModes">
-        <button class="btn-secondary" data-on="click" data-act="generateSameWorld" data-args="[]" title="Keep the world — context, age, settings — and build someone who shares as little as possible with the person on screen">Same world, different person</button>
-        <button class="btn-secondary" data-on="click" data-act="generateVariation" data-args="[]" title="Hold the five most defining cards and reroll everything else, with divergence off">Variation of this person</button>
-        <button class="btn-secondary" data-on="click" data-act="generateBatchDistinct" data-args="[5]" title="Roll five and keep the one furthest from your accepted characters, by the diversity objective">Roll 5, keep the most different</button>
+        <button class="btn-primary btn-build" data-on="click" data-act="generateCharacter" data-args="[]" aria-keyshortcuts="Control+Enter Meta+Enter"><span aria-hidden="true">✦</span> Build &amp; Roll</button>
+        <!-- One primary action. The other ways to roll used to sit beside it as two more
+             big buttons (one also primary-styled), so a new user had three answers to
+             "what do I press". They live here, each with what it does in a line. -->
+        <details class="moreRolls" id="moreRolls">
+          <summary>More ways to roll</summary>
+          <div class="moreRollsMenu">
+          <button type="button" class="btn-secondary" data-on="click" data-act="generateBatch" data-args="[5]" title="Generate five complete characters at once and pick the one you want — the rest are discarded"><span class="fmLabel">Roll 5, pick one</span><small>Five complete characters; you keep one, the rest are dropped.</small></button>
+          <button type="button" class="btn-secondary" data-on="click" data-act="generateBatchDistinct" data-args="[5]" title="Roll five and keep the one furthest from your accepted characters, by the diversity objective"><span class="fmLabel">Roll 5, keep the most different</span><small>Five characters; keeps the one furthest from the characters you have already accepted (the diversity objective).</small></button>
+          <button type="button" class="btn-secondary" data-on="click" data-act="generateSameWorld" data-args="[]" title="Keep the world — context, age, settings — and build someone who shares as little as possible with the person on screen"><span class="fmLabel">Same world, someone else</span><small>Same context, age and settings, but someone who shares as little as possible with this person.</small></button>
+          <button type="button" class="btn-secondary" data-on="click" data-act="generateVariation" data-args="[]" title="Hold the five most defining cards and reroll everything else, with divergence off"><span class="fmLabel">Variation of this person</span><small>Keeps the five most defining cards and rerolls the rest.</small></button>
+          <button type="button" class="btn-secondary" data-on="click" data-act="surpriseMe" data-args="[]" title="Roll everything at once — sliders, archetype, sections, divergence — and generate"><span class="fmLabel">🎲 Surprise me entirely</span><small>Rolls the sliders, archetype, sections and divergence, then builds.</small></button>
+          </div>
+        </details>
       </div>
       <label class="modeSwitch tinkerBar" title="Quick shows the essentials; Tinker Mode reveals every control. Hidden controls keep their values.">
         <input type="checkbox" id="advancedToggle" data-on="change" data-act="applyAdvancedMode" data-args="[]">
@@ -512,17 +563,23 @@
 
       <div class="actionGroups">
         <div class="actionGroup">
-          <span class="actionGroupLabel">Refine</span>
+          <span class="actionGroupLabel">Edit</span>
           <div class="actionRow">
             <button class="btn-secondary" data-on="click" data-act="undoLast" data-args="[]" id="undoBtn" disabled aria-keyshortcuts="Control+Z Meta+Z" title="Undo (Ctrl/&#8984;+Z)">Undo</button>
+            <button class="btn-secondary" data-on="click" data-act="toggleHistoryDrawer" data-args="[]" id="historyBtn" aria-expanded="false" aria-controls="historyDrawer" title="The last twenty rolls: restore one, or compare it with what is on screen">History</button>
             <button class="btn-secondary" data-on="click" data-act="redoLast" data-args="[]" id="redoBtn" disabled aria-keyshortcuts="Control+Shift+Z Control+Y Meta+Shift+Z" title="Step forward again through anything you have undone (Shift+Ctrl/&#8984;+Z or Ctrl+Y)">Redo</button>
-            <button class="btn-secondary" data-on="click" data-act="duplicateCharacter" data-args="[]" title="Add the sheet you are looking at to the Cast tab, so you can keep it (and compare it on the Relationships tab) while you carry on tweaking this one">Add to cast</button>
-            <button class="btn-secondary" data-on="click" data-act="resetAllToDefaults" data-args="[]">↺ Reset to Defaults</button>
-            <button class="btn-secondary" data-on="click" data-act="saveCharacter" data-args="[&quot;$el&quot;]">Save Character</button>
           </div>
         </div>
         <div class="actionGroup">
-          <span class="actionGroupLabel">File</span>
+          <span class="actionGroupLabel">Keep</span>
+          <div class="actionRow">
+            <button class="btn-secondary" data-on="click" data-act="saveCharacter" data-args="[&quot;$el&quot;]">Save Character</button>
+            <button class="btn-secondary" data-on="click" data-act="duplicateCharacter" data-args="[]" title="Add the sheet you are looking at to the Cast tab, so you can keep it (and compare it on the Relationships tab) while you carry on tweaking this one">Add to cast</button>
+            <button class="btn-secondary" data-on="click" data-act="fileIntoProject" data-args="[]" title="File this sheet, the cast and the settings that produced them into the current project">Add to project</button>
+          </div>
+        </div>
+        <div class="actionGroup">
+          <span class="actionGroupLabel">Share</span>
           <div class="actionRow">
             <button class="btn-secondary" data-on="click" data-act="copySheet" data-args="[&quot;$el&quot;]">Copy Sheet</button>
             <!-- One menu instead of five Import buttons and a row of Exports. "Open file…"
@@ -531,18 +588,19 @@
             <details class="fileMenu" id="fileMenu">
               <summary class="btn-secondary" aria-haspopup="true">File &#9662;</summary>
               <div class="fileMenuList">
-                <button type="button" data-on="click" data-act="openFilePicker" data-args="[]" title="Open any file this app exported: a character, cast, workspace, archetype library or backup">Open file&hellip;</button>
+                <button type="button" data-on="click" data-act="openFilePicker" data-args="[]" title="Open any file this app exported: a character, cast, workspace, archetype library or backup"><span class="fmLabel">Open file&hellip;</span><small>Load any file this app exported: a character, cast, workspace, archetypes or a backup.</small></button>
                 <input type="file" id="fileMenuInput" class="srOnly" tabindex="-1" aria-hidden="true" accept=".json,application/json" data-on="change" data-act="importAnyFile" data-args="[&quot;$el&quot;]">
-                <hr>
-                <button type="button" data-on="click" data-act="copyShareLink" data-args="[&quot;$el&quot;]" title="A link that replays this character: its seed and the settings that shaped it, in the URL">Copy share link</button>
-                <button type="button" data-on="click" data-act="copyPrompt" data-args="[&quot;$el&quot;]" title="A condensed voice spec in markdown, ready to paste into an LLM's system prompt">Copy as LLM prompt</button>
-                <button type="button" data-on="click" data-act="downloadPrompt" data-args="[]">Download LLM prompt .md</button>
-                <hr>
-                <button type="button" data-on="click" data-act="downloadSheet" data-args="[]">Download .md</button>
-                <button type="button" data-on="click" data-act="exportCharacterJSON" data-args="[]" title="Full-fidelity save: traits, pins, sliders, constraints, counts and toggles — re-importable exactly as-is">Export character .json</button>
-                <button type="button" data-on="click" data-act="exportWorkspaceJSON" data-args="[]" title="Your whole setup in one file: constraints, budgets, category tiers, section settings and every custom archetype with the setup it was saved with">Export workspace .json</button>
-                <button type="button" data-on="click" data-act="exportCastJSON" data-args="[]">Export cast .json</button>
-                <button type="button" data-on="click" data-act="exportBackupBundle" data-args="[]">Export full backup</button>
+                <div class="fileMenuHead" role="presentation">Share</div>
+                <button type="button" data-on="click" data-act="copyShareLink" data-args="[&quot;$el&quot;]" title="A link that replays this character: its seed and the settings that shaped it, in the URL"><span class="fmLabel">Copy share link</span><small>A link that replays this character: its seed and settings travel in the URL.</small></button>
+                <button type="button" data-on="click" data-act="copyPrompt" data-args="[&quot;$el&quot;]" title="A condensed voice spec in markdown, ready to paste into an LLM's system prompt"><span class="fmLabel">Copy as LLM prompt</span><small>A condensed voice spec, ready to paste into an LLM system prompt.</small></button>
+                <button type="button" data-on="click" data-act="copyPromptShort" data-args="[&quot;$el&quot;]"><span class="fmLabel">Copy short LLM prompt</span><small>Trait names only, no sample lines: for a small context window.</small></button>
+                <button type="button" data-on="click" data-act="downloadPrompt" data-args="[]"><span class="fmLabel">Download LLM prompt .md</span><small>The same voice spec as a markdown file.</small></button>
+                <button type="button" data-on="click" data-act="downloadSheet" data-args="[]"><span class="fmLabel">Download sheet .md</span><small>The sheet as readable markdown.</small></button>
+                <div class="fileMenuHead" role="presentation">Backup</div>
+                <button type="button" data-on="click" data-act="exportCharacterJSON" data-args="[]" title="Full-fidelity save: traits, pins, sliders, constraints, counts and toggles — re-importable exactly as-is"><span class="fmLabel">Export character .json</span><small>Everything on this sheet, re-importable exactly: traits, pins, sliders, settings.</small></button>
+                <button type="button" data-on="click" data-act="exportWorkspaceJSON" data-args="[]" title="Your whole setup in one file: constraints, budgets, category tiers, section settings and every custom archetype with the setup it was saved with"><span class="fmLabel">Export workspace .json</span><small>Your setup: constraints, budgets, sections and custom archetypes.</small></button>
+                <button type="button" data-on="click" data-act="exportCastJSON" data-args="[]"><span class="fmLabel">Export cast .json</span><small>The whole cast and its relationship edges.</small></button>
+                <button type="button" data-on="click" data-act="exportBackupBundle" data-args="[]"><span class="fmLabel">Export full backup</span><small>Every project and saved character, for another machine.</small></button>
               </div>
             </details>
             <button class="btn-secondary" data-on="click" data-act="printSheet" data-args="[false]">Print</button>
@@ -552,13 +610,25 @@
         <div class="actionGroup advOnly">
           <span class="actionGroupLabel">Derive</span>
           <div class="actionRow">
-            <button class="btn-secondary" data-on="click" data-act="generateFoil" data-args="[]">⚔ Generate Foil</button>
+            <button class="btn-secondary" data-on="click" data-act="generateFoil" data-args="[]">⚔ Build a foil</button> <button type="button" class="infoTip" data-on="click" data-act="toggleTip" data-args="[&quot;$el&quot;]" aria-expanded="false" aria-label="What is this?">ⓘ</button><span class="tipText" hidden>A foil is a second character built to be this one seen from the other side: their wound, lie and values answered by someone who chose differently. It is added to your cast.</span>
             <input type="text" id="foilSeed" placeholder="foil seed (optional)" style="max-width:170px;" aria-label="Foil seed">
             <label class="inlineToggle">
               <input type="checkbox" id="foilOpposeComposure">Foils should also clash under pressure
             </label>
           </div>
         </div>
+        <div class="actionGroup advOnly">
+          <span class="actionGroupLabel">Workspace</span>
+          <div class="actionRow">
+            <button class="btn-secondary" data-on="click" data-act="resetAllToDefaults" data-args="[]" title="Put every slider, toggle, constraint and budget back to its default. Undo brings them back.">↺ Reset to Defaults</button>
+          </div>
+        </div>
+      </div>
+      <div class="historyDrawer" id="historyDrawer" hidden aria-label="Recent rolls"></div>
+      <div class="backupReminder" id="backupReminder" role="status" hidden>
+        <span id="backupReminderText"></span>
+        <button type="button" class="btn-secondary" data-on="click" data-act="backupNow" data-args="[]">Back up now</button>
+        <button type="button" class="savedAct" data-on="click" data-act="snoozeBackupReminder" data-args="[]">Remind me next week</button>
       </div>
       <div class="storageStatus" id="storageStatus" role="status" style="display:none;"></div>
       <div class="savedTools" id="savedTools" hidden>
@@ -595,14 +665,6 @@
     <!-- The generate -> lock -> regenerate loop was documented only inside the folded
          help text, which is the one place a first-time user has not looked yet. -->
     <div id="emptyState" class="emptyState">
-      <div class="onboard" id="onboard" hidden>
-        <b class="onboardTitle">New here?</b>
-        <p>One click gets you a whole character to react to. The short version of the controls is on; you can switch every dial on at any time with Tinker Mode.</p>
-        <div class="onboardBtns">
-          <button type="button" class="btn-primary" data-on="click" data-act="onboardChoose" data-args="[&quot;quick&quot;]">&#10022; Generate your first character</button>
-          <button type="button" class="btn-secondary" data-on="click" data-act="onboardChoose" data-args="[&quot;advanced&quot;]">Show me every control</button>
-        </div>
-      </div>
       <b>Nothing generated yet.</b>
       <p>Press <b>Build &amp; Roll</b> (or Ctrl/&#8984;+Enter). Then work the loop this tool is built around:
       <b>keep</b> the cards you want, <b>toss</b> the ones you don't, and build again — kept cards survive.
@@ -623,6 +685,23 @@
     </div>
 
     <div class="sheet" id="sheet">
+      <!-- Voice lab, Arc, Pressure, "Why does this feel familiar?" and the Project library all
+           sit below the sheet, where a first-time user never scrolls. One row that goes to
+           each. -->
+      <nav class="sheetNav" id="sheetNav" aria-label="Go to a part of the page">
+        <button type="button" data-on="click" data-act="jumpToPanel" data-args="[&quot;sheetTitle&quot;]">Sheet</button>
+        <button type="button" data-on="click" data-act="jumpToPanel" data-args="[&quot;pressureSheet&quot;]" data-needs="pressureSheet">Pressure</button>
+        <button type="button" data-on="click" data-act="jumpToPanel" data-args="[&quot;voiceLabPanel&quot;]">Voice lab</button>
+        <button type="button" data-on="click" data-act="jumpToPanel" data-args="[&quot;arcPanel&quot;]">Arc</button>
+        <button type="button" data-on="click" data-act="jumpToPanel" data-args="[&quot;familiarPanel&quot;]">Feels familiar?</button>
+        <button type="button" data-on="click" data-act="jumpToPanel" data-args="[&quot;projectPanel&quot;]">Project</button>
+        <input type="search" id="sheetFind" class="sheetFind" placeholder="Find on this sheet…" aria-label="Find a trait on this sheet" data-on="input" data-act="onSheetFind" data-args="[&quot;$el&quot;]">
+        <span class="sub" id="sheetFindCount" role="status" aria-live="polite"></span>
+      </nav>
+      <div class="coachMark" id="coachMark" role="note" hidden>
+        <span><b>Every card is one trait.</b> <b>keep</b> holds it through every rebuild, <b>pin</b> holds how strongly it shows, <b>toss</b> draws a different one. Build again and only the cards you did not keep change.</span>
+        <button type="button" class="btn-secondary" data-on="click" data-act="dismissCoachMark" data-args="[]">Got it</button>
+      </div>
       <div class="handHead"><span>Your hand</span>
         <span class="handMeter" id="handMeter" hidden><span class="handTrack"><i></i></span><b>&mdash;</b></span>
         <!-- After locking eight cards nothing anywhere summarised what that meant for
@@ -675,6 +754,9 @@
         <button class="btn-secondary" data-on="click" data-act="setAllGroups" data-args="[false]">Expand all</button>
         <label class="inlineToggle">
           <input type="checkbox" id="compactToggle" data-on="change" data-act="toggleCompact" data-args="[]">Compact view
+        </label>
+        <label class="inlineToggle" title="Turns off animations and smooth scrolling, whatever your system says">
+          <input type="checkbox" id="reduceMotionToggle" data-on="change" data-act="toggleReduceMotion" data-args="[]">Reduce motion
         </label>
       </div>
       <div id="sheetBody"></div>
@@ -769,9 +851,11 @@
         <div class="field">
           <label>&nbsp;</label>
           <div class="actionRow">
-            <button class="btn-primary" data-on="click" data-act="generateCast" data-args="[]">Generate Cast</button>
+            <button class="btn-primary" data-on="click" data-act="generateCast" data-args="[]">Build cast</button>
             <button class="btn-secondary" data-on="click" data-act="copyCast" data-args="[&quot;$el&quot;]">Copy Cast</button>
             <button class="btn-secondary" data-on="click" data-act="downloadCast" data-args="[]">Download .md</button>
+            <button class="btn-secondary" data-on="click" data-act="downloadCastCSV" data-args="[]" title="One row per card per member, for a spreadsheet">Download .csv</button>
+            <button class="btn-secondary" data-on="click" data-act="regenerateMostSimilarMember" data-args="[]" title="Redraw the member who shares the most voice devices with the rest, and keep the redraw only if the cast gets more distinct">Redraw the most similar member</button>
             <button class="btn-secondary" data-on="click" data-act="exportCastJSON" data-args="[]" title="Round-trips the whole ensemble, re-importable exactly as-is">Export cast .json</button>
             <label class="btn-secondary" style="cursor:pointer;">Import cast .json
               <input type="file" accept="application/json,.json" class="srOnly" data-on="change" data-act="importCastJSON" data-args="[&quot;$el&quot;]">
@@ -789,6 +873,11 @@
   </div>
 
   <div id="view-rel" class="viewSection" role="tabpanel" aria-labelledby="tabRelBtn" aria-hidden="true">
+    <div class="emptyNotice" id="relEmpty" role="status" hidden>
+      <b>Relationships need at least two characters.</b>
+      <span id="relEmptyCount"></span>
+      <button type="button" class="btn-primary" data-on="click" data-act="switchTab" data-args="[&quot;cast&quot;]">Go to the Cast tab</button>
+    </div>
     <div class="controls">
       <h3 style="margin:0 0 4px;">Voice comparison</h3>
       <div class="sub" style="margin:0 0 8px;">The same situation, answered by every member of the cast. Devices more than one of them reaches for are marked — that is the ensemble speaking with one voice in different hats.</div>
@@ -804,11 +893,11 @@
       <div class="sub" style="margin:0 0 10px;">Generate a cast first, then analyse how any two members would rub together based on where their personality axes clash or align.</div>
       <div class="row">
         <div class="field">
-          <label>Character A</label>
+          <label for="relA">Character A</label>
           <select id="relA"></select>
         </div>
         <div class="field">
-          <label>Character B</label>
+          <label for="relB">Character B</label>
           <select id="relB"></select>
         </div>
         <div class="field">
@@ -822,7 +911,7 @@
       </div>
     </div>
     <div class="controls relWorkspace">
-      <h3 style="margin:0 0 4px;">Relationship workspace</h3>
+      <h3 style="margin:0 0 4px;">Relationship workspace <button type="button" class="infoTip" data-on="click" data-act="toggleTip" data-args="[&quot;$el&quot;]" aria-expanded="false" aria-label="What is this?">ⓘ</button><span class="tipText" hidden>An edge is one direction of a relationship: what A owes, knows, wants and hides from B. B’s view of A is a separate edge, which is how an unequal pair is modelled.</span></h3>
       <div class="sub" style="margin:0 0 10px;">Directed edges between cast members: what A owes, knows, wants and hides from B. Defaults are read off the two sheets; every field is yours to overwrite. Edges travel in the cast file.</div>
       <div class="row">
         <div class="field">
@@ -842,6 +931,7 @@
       <div id="relEdges" class="edgeList"></div>
       <h3 style="margin:14px 0 4px;">Relationship web</h3>
       <div class="sub" style="margin:0 0 8px;">The whole cast at once: factions, triads (stable or about to break), shared secrets and lopsided edges.</div>
+      <div class="actionRow" style="margin:0 0 8px;"><button class="btn-secondary" data-on="click" data-act="downloadRelationshipSvg" data-args="[]" title="The relationship web as a standalone vector image">Download web .svg</button></div>
       <div id="relWeb"></div>
     </div>
     <div class="sheet" id="relSheet">
@@ -852,6 +942,10 @@
 
   <div class="stickyBar" id="stickyBar">
     <button class="btn-primary" data-on="click" data-act="generateCharacter" data-args="[]" aria-keyshortcuts="Control+Enter Meta+Enter" title="Build a character (Ctrl/&#8984;+Enter)">✦ Build &amp; Roll</button>
+    <button class="btn-secondary" data-on="click" data-act="undoLast" data-args="[]" aria-keyshortcuts="Control+Z Meta+Z" title="Undo (Ctrl/&#8984;+Z)">Undo</button>
+    <button type="button" class="stickyMoreBtn" id="stickyMoreBtn" data-on="click" data-act="toggleStickyMore" data-args="[]" aria-expanded="false" aria-controls="stickyExtra" aria-label="More actions" title="More actions">⋯</button>
+    <!-- On a phone these fold behind the ⋯ button; on a wide screen they sit in the row. -->
+    <div class="stickyExtra" id="stickyExtra">
     <button class="btn-secondary" data-on="click" data-act="generateBatch" data-args="[5]" title="Roll five and pick one">Roll 5</button>
     <!-- Was randomizeSliders('all') + generate, which rolls the thirteen personality
          sliders and nothing else. surpriseMe rolls the archetype, the profile sections
@@ -860,18 +954,42 @@
          something, since the empty state is gone by then and the Advanced copy is
          hidden in quick mode. -->
     <button class="btn-secondary" data-on="click" data-act="surpriseMe" data-args="[]" title="Roll everything — sliders, archetype, sections, divergence — and generate">🎲 Surprise me</button>
-    <button class="btn-secondary" data-on="click" data-act="undoLast" data-args="[]" aria-keyshortcuts="Control+Z Meta+Z" title="Undo (Ctrl/&#8984;+Z)">Undo</button>
     <!-- A ~37-card sheet on a phone is a very long scroll, and the only navigation was
          collapse-all. This jumps straight to a section. -->
     <select id="jumpToSection" class="jumpSelect" aria-label="Jump to a section of the sheet"
             data-on="change" data-act="jumpToSectionFromSelect" data-args="[&quot;$el&quot;]">
       <option value="">Jump to…</option>
     </select>
-    <span class="stickySeed" id="stickySeed">no character yet</span>
-    <button type="button" class="stickyHelp" data-on="click" data-act="openHelpPanel" data-args="[]" aria-keyshortcuts="Shift+?" title="Keyboard shortcuts and how this works (?)" aria-label="Keyboard shortcuts and help">?</button>
+    <button type="button" class="stickySeed" id="stickySeed" data-on="click" data-act="copySeed" data-args="[]" title="The seed replays this exact character with these settings. Click to copy it.">no character yet</button>
+    </div>
+    <button type="button" class="stickyHelp" data-on="click" data-act="openShortcuts" data-args="[]" aria-keyshortcuts="Shift+?" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts and help">?</button>
   </div>
 
-  <div class="footerNote" id="footerTraitCount">Intensity, rarity, and conflict polarity are heuristically scored — a starting point, not gospel.</div>
+  <dialog id="shortcutDialog" class="nameDialog shortcutDialog" aria-labelledby="shortcutTitle">
+  <h2 id="shortcutTitle" style="margin:0 0 10px;">Keyboard shortcuts</h2>
+  <table class="shortcutTable">
+    <tbody>
+      <tr><th colspan="2">Anywhere</th></tr>
+      <tr><td><kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>Enter</kbd></td><td>Build a character</td></tr>
+      <tr><td><kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>Z</kbd> · <kbd>Y</kbd></td><td>Undo · redo</td></tr>
+      <tr><td><kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>S</kbd></td><td>Save the character</td></tr>
+      <tr><td><kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd></td><td>Single · Cast · Relationships</td></tr>
+      <tr><td><kbd>/</kbd></td><td>Search traits (opens Tinker Mode and Constraints)</td></tr>
+      <tr><td><kbd>Esc</kbd></td><td>Close the File menu or the roll menu</td></tr>
+      <tr><td><kbd>?</kbd></td><td>This list</td></tr>
+      <tr><th colspan="2">On a card (focused or under the pointer)</th></tr>
+      <tr><td><kbd>R</kbd></td><td>Toss: draw a different trait for this slot</td></tr>
+      <tr><td><kbd>L</kbd></td><td>Keep or release the trait</td></tr>
+      <tr><td><kbd>P</kbd></td><td>Pin or unpin its intensity</td></tr>
+    </tbody>
+  </table>
+  <div class="nameDialogBtns">
+    <button type="button" class="btn-secondary" data-on="click" data-act="openHelpPanel" data-args="[]">Open the guide</button>
+    <button type="button" class="primary" data-on="click" data-act="closeShortcuts" data-args="[]">Close</button>
+  </div>
+</dialog>
+
+<div class="footerNote" id="footerTraitCount">Intensity, rarity, and conflict polarity are heuristically scored — a starting point, not gospel.</div>
   <!-- The shape checker was excellent and completely undiscoverable: documented in the
        README, mentioned nowhere in the app it validates. -->
   <div class="footerNote" style="margin-top:6px;">
@@ -891,6 +1009,12 @@
 <script src="js/data/traits-polarity.js" defer></script>
 <script src="js/data/traits-life.js" defer></script>
 <script src="js/data/traits-gaps.js" defer></script>
+<script src="js/data/traits-growth-a.js" defer></script>
+<script src="js/data/traits-growth-b.js" defer></script>
+<script src="js/data/traits-growth-c.js" defer></script>
+<script src="js/data/traits-growth-d.js" defer></script>
+<script src="js/data/traits-growth-e.js" defer></script>
+<script src="js/data/traits-conflict.js" defer></script>
 <script src="js/engine.js" defer></script>
 <script src="js/generate.js" defer></script>
 <script src="js/render.js" defer></script>

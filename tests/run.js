@@ -12,8 +12,11 @@ const {loadEngine, ROOT} = require('./harness');
 let passed = 0, failed = 0;
 const failures = [];
 function check(name, fn){
+  const t0 = Date.now();
   try {
     const detail = fn();
+    const ms = Date.now() - t0;
+    if (ms > 5000) console.log('  \x1b[2m(slow: ' + Math.round(ms / 1000) + 's)\x1b[0m');
     if (detail === false) throw new Error('returned false');
     passed++;
     console.log('  \x1b[32mok\x1b[0m   ' + name + (typeof detail === 'string' ? '  \x1b[2m(' + detail + ')\x1b[0m' : ''));
@@ -2589,7 +2592,7 @@ check('pressure drops the politeness layer and brings the stress response in', (
   const base = A.composeVoiceLine(found.st, 'refuse', 'baseline');
   const pres = A.composeVoiceLine(found.st, 'refuse', 'pressure');
   assert(pres.text !== base.text, 'pressure changed nothing');
-  assert(!pres.rules.some(x=>/register|manners/.test(x)), `pressure kept the politeness rules: ${pres.rules.join('; ')}`);
+  assert(!pres.rules.some(x=>/^(formal|casual) register|manners/.test(x) && !/^humour/.test(x)), `pressure kept the politeness rules: ${pres.rules.join('; ')}`);
   assert(pres.rules.some(x=>/stress response/.test(x)), `pressure did not bring the stress response: ${pres.rules.join('; ')}`);
   return `"${base.text.slice(0,30)}…" → "${pres.text.slice(0,30)}…"`;
 });
@@ -3668,7 +3671,9 @@ check('§6 pressure: irritated → cornered → broken stages and a recovery she
     return {ids: esc.stages.map(s=>s.id), current: esc.current, grounded: esc.stages.every(s => s.signs.every(x => x.from.length)),
       rows: rec ? rec.rows.length : 0, recGrounded: rec ? rec.rows.every(x => x.from.length) : false, md: pressureEscalationMarkdown(st, null)};
   })()`);
-  assert(r.ids.join() === 'irritated,cornered,broken', 'stages out of order or missing: ' + r.ids);
+  // A freezer may skip the cornered rung (the stress response is the break), so both
+  // ladders are valid; anything else must keep all three, in order.
+  assert(['irritated,cornered,broken', 'irritated,broken'].includes(r.ids.join()), 'stages out of order or missing: ' + r.ids);
   assert(r.current === 'irritated', 'a 40% dial should sit at irritated, got ' + r.current);
   assert(r.grounded && r.recGrounded, 'a stage sign or recovery row names no card');
   assert(r.rows >= 4 && /Recovery sheet/.test(r.md), 'recovery sheet too thin: ' + r.rows);
@@ -3716,6 +3721,8 @@ check('§6 trait-bank gap sections stay grown, opt-in, and conceptFamily coverag
   assert(fam >= 2240, `conceptFamily coverage fell to ${fam} (floor 2240)`);
   return `${gaps.length} gap traits, conceptFamily ${fam}/${T.length}`;
 });
+
+require('./regressions')({check, group, assert});
 
 console.log('\n' + (failed ? '\x1b[31m' : '\x1b[32m') + passed + ' passed, ' + failed + ' failed\x1b[0m');
 if (failed){

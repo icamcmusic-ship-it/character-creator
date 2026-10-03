@@ -50,15 +50,15 @@ prints is pasted back and expected to reproduce both sheets exactly.
 ## What a seed promises
 
 A seed the app prints replays the character it names — base sheet, pressure sheet and
-all — from any session. Pasting a seed puts the build in **replay mode**, which runs
-against an empty session history, so the history-aware mechanisms (Avoid recent traits,
-and the side of Surprise me that refuses to land where it has already landed) have
-nothing to remember.
+all — from any session. Every build, seeded or not, runs against an **empty session
+history**: nothing from earlier rolls (the Avoid-recent window, the divergence category
+tally) reaches the draw, so a seed is a pure function of itself. Kept cards travel with a
+share link for the same reason: they are seated before anything is drawn.
 
-Leaving the box blank is **exploration**: that build *does* take the session's recent
-characters into account, which is what stops a long session converging on one person.
-The two modes are the same generator over the same seeded stream; only the history
-differs.
+Leaving the box blank is **exploration**. History does its work in the *choice* between
+candidates rather than inside the draw: the build draws three, and keeps the one least
+like your recent characters and the project archive (see best of three, below), which is
+what stops a long session converging on one person. The seed printed is the winner's.
 
 Rerolls stay deliberately un-seeded — a reroll is you overriding the dice.
 
@@ -82,10 +82,25 @@ the same seed under the same lenses and toggles gives the same sheet.
   lines** under any situation shows ten takes. Measured over 100 characters: 124 → ~640
   distinct lines of 700; the lie prompt 13 → ~94 distinct. Author prompts compose the
   same way through the situation they are "like".
+  The lines also read the sheet's **inner life**, and each addition names its card in the
+  rules list: concealing circles the Ghost (or Wound), lying and persuading are about the
+  Want, asking for help is bent by the Defence (a joke, a minimised ask, a bid of charm…),
+  the humour card adds a remark in its own register, each mannerism adds the stage
+  direction its own example authors (`[rubs temples]`), and the goals, family, money and
+  jargon cards lend their phrases to the topic pools. A character who says almost nothing
+  still gets a clipped concealing line and their stage directions.
 - **Seated contradictions** (Advanced, on by default). One or two axes are chosen before
   the draw; afterwards a trait against the sheet's actual lean on that axis is seated
   with a Contradiction Functions card saying what it is for, and its scene questions
   (what it is for, when, with whom, what changes, the cost) are answered from the sheet.
+- **Inner conflict.** Beside the axis contradiction, every sheet gets a second tension
+  between its own drives — Want vs Need, the line they hold vs Want, Role vs Fear, or
+  Defence vs Need — with a stated rule: which side wins day to day, which takes the wheel
+  under load (and what tips it), and what the losing side does meanwhile. The Cornered
+  stage of the pressure ladder states the rule, the Broken stage shows what leaks, and
+  the voice lab lets the losing drive slip into the line (about 55% of pressure lines,
+  about 8% of calm ones). Two sheets with the same cards can diverge on which drive wins;
+  a button on the panel swaps it, and the swap saves, exports and undoes with the sheet.
 - **Variable sheet shape** (on by default). A seeded signature budget gives one or two
   defining profile sections a second card, drops one thin section, and sets 0–3
   outliers. 40 seeds give ~6 sheet sizes and ~37 shapes, where every sheet used to be 42
@@ -101,6 +116,18 @@ the same seed under the same lenses and toggles gives the same sheet.
 - **Backstory beats.** The motivation chain is laid out in time: formative event, what
   they took from it, turning point, most recent failure, where it stands now — each tied
   to a seated card and dated from the age field when there is one.
+
+## Presets and the sections that ship off
+
+Twelve profile sections (Dialect, Conversation Mechanics, Family Talk, Body in Speech,
+Money & Class, Fears, Romance, Beliefs, Occupational Jargon, Ordinary Texture, Recovery &
+Repair, Role by Context) are off by default. Every archetype now names one or two of them
+in its profile hints, and a preset that names one **switches it on for that preset's
+builds**: Diaspora Code-Switcher draws Dialect (Code-Switching) and Family Talk, Scattered
+Genius draws Conversation Mechanics (Info-Dumping). The in-force strip shows
+"archetype adds …", the sheet shape never drops a section the preset switched on, and
+cast members, foils and the gap-filler are unaffected. One checkbox in the Character
+Profile panel turns the behaviour off. A section you switched on yourself is drawn either way.
 
 ## Generation order
 
@@ -170,9 +197,45 @@ button instead of (or as well as) a confirm.
   saved list can be searched and sorted.
 * **Why does this feel familiar?** lists traits recurring across your recent characters,
   each with a one-click ban.
-* Trait cards are focusable: **R** tosses and **L** keeps the focused (or hovered) card.
-  **Ctrl/⌘+Enter** generates, **Ctrl/⌘+Z** undoes, **Shift+Ctrl/⌘+Z** / **Ctrl+Y**
-  redoes, **?** opens help. None of them fire while you are typing or a dialog is open.
+* Trait cards are focusable: **R** tosses, **L** keeps and **P** pins the focused (or hovered)
+  card. **Ctrl/⌘+Enter** builds, **Ctrl/⌘+Z** undoes, **Shift+Ctrl/⌘+Z** / **Ctrl+Y** redoes,
+  **Ctrl/⌘+S** saves, **1 2 3** switch tab, **/** searches traits, **Esc** closes the menus
+  and **?** opens the full list. None of them fire while you are typing or a dialog is open.
+* **Surprise me** rolls one of four shapes: a preset pulled off its defaults, a blend of two presets
+  with a slider split, an anti-archetype (a preset's axes inverted, its inner life kept) or sliders
+  from nothing. It may also throw lens dice (one or two lenses, clashing ones allowed) and switch
+  on one section that is off by default; the toast says what it did.
+* **Chains and beats take more than one shape.** The motivation chain can lead from the need, from
+  an origin that went right, or treat the belief as once true; the backstory can be a late loss, two
+  formative events that disagree, a wound with no event, or a turning point that turned nothing.
+  Emergent names have four shapes, foils have eleven premise frames, a life-stage lens rewrites the
+  beats, recovery names the cast member they trust and the one who makes it worse, and a logged arc
+  event adds a beat. The bank also reports pairs that cannot both hold (whispers vs booms) and pairs
+  that say nearly the same thing.
+* **Conflict Style** (an optional section, off by default) covers how they fight: stonewalling,
+  passive-aggression, arguing the record, smoothing, escalating then apologising, sulking and
+  triangulating. **Against type**, under a preset's tuning, flips its one or two strongest axes.
+* **Seeds carry an engine version.** `v1-…` seeds and links made before the change build exactly what
+  they always did; `v2-…` seeds (what a blank roll now prints) use the coverage changes: neutral
+  verbosity draws from four categories, a neutral Register can draw Stylized & Elaborate, one personality axis in five draws a standout loud-pole trait, a sheet may omit the Ghost or Defence card, and
+  distinctive and signature traits are drawn slightly more often. A typed phrase uses the
+  engine the link or settings were saved with (old files restore as v1).
+* **History** lists the last twenty rolls: restore one (it is itself undoable) or compare it
+  with the sheet on screen, trait by trait and slider by slider. **Find on this sheet**
+  filters the cards and opens folded sections while you search; which sections you fold is
+  remembered. A **lock** beside each slider keeps it out of Randomize and Surprise me, and
+  **Slider sets** save the sixteen sliders under a name. **Saved traits count double** (Tinker
+  Mode) turns the card bookmark into a soft "always consider"; a share link then carries
+  the saved traits so it still replays. Each Voice lab line shows its word count and reading
+  grade and can be copied alone. On the Cast tab, **Redraw the most similar member** replaces
+  the one who shares the most voice devices (undoable), and the cast downloads as **.csv**;
+  the relationship web downloads as **.svg**; the File menu adds a **short LLM prompt**
+  (trait names only). **Reduce motion** is a switch in the page as well as a system setting.
+* Destructive actions — Reset to Defaults, Unpin/Keep/Release all, clearing constraints or
+  budgets, deleting an archetype or a project — undo through a toast rather than a confirm.
+  The header shows the current project, when settings were last saved, and a theme switch
+  (Auto / Light / Dark). On a phone the tabs are three short pills, the sticky bar folds its
+  secondary actions behind **⋯**, and the inputs fold to a one-line recap after a build.
 * The service worker is network-first (the cache is the offline fallback), so a deploy
   appears on the next load and never mixes files from two builds; a deploy that lands
   during a session offers a **Reload** toast.
@@ -509,6 +572,8 @@ no quiet content to redraw into.
 - `js/data/traits-polarity.js` — the axes the bank leaned on hardest, answered (ids 161000+)
 - `js/data/traits-life.js` — competence, positive origins, goals, ordinary texture,
   recovery, contradiction functions and role by context (ids 170000+)
+- `js/data/traits-gaps.js` — the gap sections (romance, dialect, beliefs, jargon, conversation, body, money, fears, family, humour subtypes; ids 180000+)
+- `js/data/traits-growth-a.js` … `-e.js` — the category-floor growth pass (ids 190000+): every category in those sections is at least 15 traits, written as behaviour, with quiet signatures and loud commons
 - `js/engine.js` — indexes, tagging passes, the weight matrix, and every pick path
 - `js/generate.js` — seeded generation, reroll, pins, undo, scoring
 - `js/render.js` — the sheet, exports, imports, toasts

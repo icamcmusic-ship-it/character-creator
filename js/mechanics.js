@@ -26,8 +26,11 @@ function mxTokens(text){
   return out;
 }
 function mxOverlap(a, b){ const B = b instanceof Set ? b : mxTokens(b); return [...(a instanceof Set ? a : mxTokens(a))].filter(w => B.has(w)); }
-function _mxQ(s){ return `"${String(s || "").trim().replace(/^['"\u2018\u201c]+|['"\u2019\u201d]+$/g, "")}"`; }
-function _mxLc(s){ s = String(s || "").trim().replace(/[.!]+$/, ""); return s ? s[0].toLowerCase() + s.slice(1) : s; }
+// A trait name that is one hyphen-joined run ("Being-liked-means-being-fake") is a
+// phrase, and reads as one only once the hyphens are spaces.
+function _mxUnrun(s){ return (!/\s/.test(s) && (s.match(/-/g) || []).length >= 2) ? s.replace(/-/g, " ") : s; }
+function _mxQ(s){ return `"${_mxUnrun(String(s || "").trim().replace(/^['"\u2018\u201c]+|['"\u2019\u201d]+$/g, ""))}"`; }
+function _mxLc(s){ s = _mxUnrun(String(s || "").trim().replace(/[.!]+$/, "")); return s ? s[0].toLowerCase() + s.slice(1) : s; }
 function _mxHash(s){ let h = 0; s = String(s); for (let i = 0; i < s.length; i++) h = Math.imul(31, h) + s.charCodeAt(i) | 0; return h >>> 0; }
 function _mxPick(arr, key){ return arr.length ? arr[_mxHash(key) % arr.length] : null; }
 function _mxSlot(st, sectionId, catRe){
@@ -354,8 +357,24 @@ function assignCastRoles(members){
 function optimiseCastVoices(entries, seedKey, rebuild, opts){
   const o = Object.assign({passes: 3, attempts: 4}, opts || {});
   if (!entries || entries.length < 2 || typeof voiceCollisionMatrix !== "function") return {before: 0, after: 0, rerolled: 0};
-  const total = arr => voiceCollisionMatrix(arr, "baseline", 0).totals.reduce((a, b) => a + b, 0);
-  let cur = entries.slice(), m = voiceCollisionMatrix(cur, "baseline", 0);
+  /* Motivation collisions (audit §6a): two members who share a Lie, Wound or Want, or the
+     same stress and attachment pair, get identical pressure and recovery text. They count
+     alongside the shared voice devices. */
+  const motiv = arr => {
+    const keys = arr.map(c => {
+      const st = c.state, k = [];
+      ["The Lie", "Core Wound", "Core Want"].forEach(r => { const t = _mxT(st, "motivation", new RegExp(r, "i")); if (t) k.push("m:" + t.id); });
+      const a = _mxT(st, "attachment"), x = _mxT(st, "stress"); if (a && x) k.push("p:" + a.category + "|" + x.category);
+      return k;
+    });
+    return keys.map((k, i) => keys.reduce((n, o, j) => n + (j !== i ? k.filter(x => o.includes(x)).length : 0), 0));
+  };
+  const matrix = arr => { const v = voiceCollisionMatrix(arr, "baseline", 0), mo = motiv(arr);
+    const totals = v.totals.map((t, i) => t + mo[i]); let worst = -1;
+    totals.forEach((t, i) => { if (t > 0 && (worst < 0 || t > totals[worst])) worst = i; });
+    return {totals, worst}; };
+  const total = arr => matrix(arr).totals.reduce((a, b) => a + b, 0);
+  let cur = entries.slice(), m = matrix(cur);
   const before = m.totals.reduce((a, b) => a + b, 0);
   let now = before, rerolled = 0;
   for (let pass = 0; pass < o.passes && now > 0; pass++){
@@ -373,7 +392,7 @@ function optimiseCastVoices(entries, seedKey, rebuild, opts){
     }
     if (!best) break;
     cur = best.trial; now = best.t; rerolled++;
-    m = voiceCollisionMatrix(cur, "baseline", 0);
+    m = matrix(cur);
   }
   cur.forEach((c, j) => { entries[j] = c; });
   return {before, after: now, rerolled};
@@ -398,6 +417,15 @@ function foilPremiseFromSheets(src, foil, rng, names){
   if (va && vb && va.category !== vb.category) forms.push({text: `${A} runs on ${SV[va.category] || va.trait}; ${B} runs on ${SV[vb.category] || vb.trait}. They met on the day those two things asked for the same decision.`, from: [va, vb]});
   if (fear) forms.push({text: `${B} is what ${A}'s fear looks like lived in — ${_mxQ(fear.trait)} — and ${B} seems perfectly fine, which is worse.`, from: [fear]});
   if (need) forms.push({text: `${B} could give ${A} ${_mxQ(need.trait)} without even trying, and is the last person alive ${A} would take it from.`, from: [need]});
+  // Frames driven by the rest of the sheet (audit §5a): humour, attachment, competence, origin.
+  const hA = _mxT(src, "humor"), hB = _mxT(foil, "humor"), atA = _mxT(src, "attachment"), atB = _mxT(foil, "attachment");
+  const roleA = _mxT(src, "role"), roleB = _mxT(foil, "role"), cmpA = _mxT(src, "competence"), cmpB = _mxT(foil, "competence");
+  const orgA = _mxT(src, "origins"), orgB = _mxT(foil, "origins");
+  if (hA && hB && hA.category !== hB.category) forms.push({text: `${A} is funny in one register (${_mxLc(hA.category)}) and ${B} in another (${_mxLc(hB.category)}). Put them in a room and each of them finds the other's jokes either unforgivable or a relief.`, from: [hA, hB]});
+  if (atA && atB && atA.category !== atB.category) forms.push({text: `${A} loves ${_mxLc(atA.category)}; ${B} loves ${_mxLc(atB.category)}. Neither is wrong, and each is the other's standing proof that the other's way costs something.`, from: [atA, atB]});
+  if (cmpA && cmpB && cmpA.category !== cmpB.category) forms.push({text: `${B} is good at the thing ${A} is merely competent at — ${_mxQ(cmpB.trait)} — and ${A} has never decided whether to learn from it or resent it.`, from: [cmpA, cmpB]});
+  if (roleA && roleB && roleA.category !== roleB.category) forms.push({text: `${A} takes the ${_mxLc(roleA.category)} seat; ${B} takes the ${_mxLc(roleB.category)} one. The group works only while neither has to explain why.`, from: [roleA, roleB]});
+  if (orgA && orgB) forms.push({text: `${A} came from ${_mxQ(orgA.trait)}; ${B} from ${_mxQ(orgB.trait)}. They agree on nothing about how things are done, and each privately suspects the other got the easier start.`, from: [orgA, orgB]});
   if (!forms.length) return null;
   const pick = forms[Math.floor((rng || Math.random)() * forms.length)];
   return {text: pick.text, from: pick.from.map(t => t.trait)};
@@ -540,7 +568,6 @@ function relationshipWebSVG(web, size){
 function relationshipWebHTML(members, edges){
   const web = relationshipWeb(members, edges);
   if (web.nodes.length < 2) return `<div class="sub">Add two or more cast members to see the web.</div>`;
-  const nm = i => escHTML(web.nodes[i].name);
   const list = (title, items) => items.length ? `<div class="relWebList"><b>${title}</b><ul>${items.map(x => `<li>${escHTML(x)}</li>`).join("")}</ul></div>` : "";
   return `<div class="relWeb">
     <div class="relWebChart">${web.pairs.length ? relationshipWebSVG(web, 320) : `<div class="sub">No edges yet — add some above, or use “Add both directions”. Factions below are guessed from shared Values.</div>`}
@@ -568,57 +595,178 @@ const _HUMOR_AT = {
 };
 const _BROKEN_BY_ATTACH = {"Secure":"they still reach for someone — it is the one thing that does not break", "Anxious":"they cling, and ask the same question until someone answers it the right way",
   "Avoidant":"they disappear — physically if they can, behind a wall if they cannot", "Disorganized":"they reach for someone and push them away in the same breath"};
-function pressureEscalation(st, pst){
+/* A sheet-stable pick. The pressure ladder and the recovery sheet used to be one sentence
+   frame per row, so 200 of 200 sheets opened six lines with the same six prefixes. Each
+   row now has several phrasings; which one a sheet gets is a hash of the sheet (never the
+   dice), so the same character reads the same every time it is rendered or exported. */
+function _mxSheetHash(st){
+  let h = 7; Object.keys(st || {}).sort().forEach(k => { const x = st[k]; if (x && x.trait) h = (h * 31 + x.trait.id) >>> 0; });
+  return h;
+}
+function _mxVar(st, salt, frames, vars){
+  const f = frames[_mxHash(_mxSheetHash(st) + "|" + salt) % frames.length];
+  return f.replace(/\{(\w+)\}/g, (m, k) => vars && vars[k] !== undefined ? vars[k] : m);
+}
+const _BROKEN_BY_ATTACH_ALT = {"Secure":"whoever is nearest hears about it, plainly, and that is what steadies them",
+  "Anxious":"they need to be told, more than once, that nobody is leaving",
+  "Avoidant":"the door closes and the answers get shorter until they stop",
+  "Disorganized":"they say two opposite things in a row and mean both"};
+function pressureEscalation(st, pst, meta){
   const g = (id, re) => _mxT(st, id, re);
   const manners = Object.keys(st || {}).filter(k => k.startsWith("manner") && st[k] && st[k].trait).map(k => st[k].trait);
   const pManners = Object.keys(pst || {}).filter(k => k.startsWith("p_manner") && pst[k] && pst[k].trait).map(k => pst[k].trait);
   const stress = g("stress"), values = g("values"), humor = g("humor"), attach = g("attachment"), vices = g("vices");
   const lie = g("motivation", /The Lie/i), defence = g("motivation", /The Defence/i), fear = g("motivation", /Core Fear/i);
   const TH = typeof THRESHOLD_BY_VALUES !== "undefined" ? THRESHOLD_BY_VALUES : {}, SS = typeof STRATEGY_BY_STRESS !== "undefined" ? STRATEGY_BY_STRESS : {};
+  const SST = typeof STRATEGY_BY_STRESS_THEY !== "undefined" ? STRATEGY_BY_STRESS_THEY : {};
   const shifted = Object.values(pst || {}).filter(s => s && s.shifted);
   const sig = (text, from) => ({text, from: (from || []).filter(Boolean).map(t => t.trait)});
+  const V = (salt, frames, vars) => _mxVar(st, salt, frames, vars);
   const stages = PRESSURE_STAGES.map(sg => ({id: sg.id, label: sg.label, level: sg.level, blurb: sg.blurb, signs: []}));
   const [irr, cor, brk] = stages;
-  if (manners[0]) irr.signs.push(sig(`The first tell: ${_mxLc(manners[0].trait)}${manners[0].desc ? ` — ${_mxLc(manners[0].desc)}` : ""}.`, [manners[0]]));
-  if (humor && _HUMOR_AT.irritated[humor.category]) irr.signs.push(sig(`Humour under strain: ${_HUMOR_AT.irritated[humor.category]}.`, [humor]));
-  if (fear) irr.signs.push(sig(`What they are already scanning for: ${_mxLc(fear.trait)}.`, [fear]));
-  if (stress) cor.signs.push(sig(`${stress.trait}: ${SS[stress.category] || _mxLc(stress.desc)}.`, [stress]));
-  if (values) cor.signs.push(sig(`The line they hold is ${_mxQ(values.trait)} — and it tips ${TH[values.category] || "when it finally costs too much"}.`, [values]));
-  if (defence) cor.signs.push(sig(`They reach for the defence: ${_mxLc(defence.trait)}.`, [defence]));
-  if (pManners[0]) cor.signs.push(sig(`The body joins in: ${_mxLc(pManners[0].trait)}.`, [pManners[0]]));
-  if (lie) brk.signs.push(sig(`The defence fails and the belief speaks for them: ${_mxQ(lie.trait)}.`, [lie]));
-  if (attach && _BROKEN_BY_ATTACH[attach.category]) brk.signs.push(sig(`With people: ${_BROKEN_BY_ATTACH[attach.category]}.`, [attach]));
-  if (vices) brk.signs.push(sig(`What they reach for: ${_mxLc(vices.trait)}.`, [vices]));
-  if (humor && _HUMOR_AT.broken[humor.category]) brk.signs.push(sig(`Humour: ${_HUMOR_AT.broken[humor.category]}.`, [humor]));
+  const dsc = t => t && t.desc ? ` — ${_mxLc(t.desc)}` : "";
+  if (manners[0]) irr.signs.push(sig(V("tell", ["The first tell: {m}{d}.", "It starts small: {m}{d}.", "Early on the body gives it away — {m}{d}.", "You see it start here: {m}{d}."],
+    {m: _mxLc(manners[0].trait), d: dsc(manners[0])}), [manners[0]]));
+  if (humor && _HUMOR_AT.irritated[humor.category]) irr.signs.push(sig(V("humI", ["Humour under strain: {h}.", "What happens to the humour: {h}.", "Their jokes change: {h}.", "As for the jokes: {h}."],
+    {h: _HUMOR_AT.irritated[humor.category]}), [humor]));
+  if (fear) irr.signs.push(sig(V("fear", ["What they are already scanning for: {f}.", "Half their attention is already on this: {f}.", "The alarm underneath, quietly: {f}.", "They are watching for {f}, and it shows."],
+    {f: _mxLc(fear.trait)}), [fear]));
+  if (stress) cor.signs.push(sig(V("stress", ["{t}: {ss}.", "Their stress response is {t} — under this much pressure they {they}.", "Now the stress response drives: they {they}.", "Cornered, they {they} ({t})."],
+    {t: stress.trait, ss: SS[stress.category] || _mxLc(stress.desc), they: SST[stress.category] || _mxLc(stress.desc)}), [stress]));
+  if (values) cor.signs.push(sig(V("values", ["The line they hold is {q} — and it tips {th}.", "They are holding a line, {q}, and it gives {th}.", "What they will not drop is {q}; it tips {th}.", "{q} is the line, and it tips {th}."],
+    {q: _mxQ(values.trait), th: TH[values.category] || "when it finally costs too much"}), [values]));
+  if (defence) cor.signs.push(sig(V("defence", ["They reach for the defence: {d}.", "The defence comes up: {d}.", "Their usual armour: {d}.", "Everything gets routed through this: {d}."],
+    {d: _mxLc(defence.trait)}), [defence]));
+  if (pManners[0]) cor.signs.push(sig(V("body", ["The body joins in: {b}.", "Physically: {b}.", "It reaches their body: {b}.", "Their body gives them away: {b}."],
+    {b: _mxLc(pManners[0].trait)}), [pManners[0]]));
+  if (lie) brk.signs.push(sig(V("lie", ["The defence fails and the belief speaks for them: {q}.", "What is left when the defence goes is the belief: {q}.", "The belief takes the floor: {q}.", "The mask slips, and what they say is {q}."],
+    {q: _mxQ(lie.trait)}), [lie]));
+  if (attach && _BROKEN_BY_ATTACH[attach.category]) brk.signs.push(sig(V("attach", ["With people: {x}.", "Toward the people close by: {x}.", "In company: {x}.", "What the people near them see: {y}."],
+    {x: _BROKEN_BY_ATTACH[attach.category], y: _BROKEN_BY_ATTACH_ALT[attach.category] || _BROKEN_BY_ATTACH[attach.category]}), [attach]));
+  if (vices) brk.signs.push(sig(V("vice", ["What they reach for: {v}.", "The old comfort comes out: {v}.", "The crutch: {v}.", "They fall back on it: {v}."],
+    {v: _mxLc(vices.trait)}), [vices]));
+  if (humor && _HUMOR_AT.broken[humor.category]) brk.signs.push(sig(V("humB", ["Humour: {h}.", "The humour goes: {h}."], {h: _HUMOR_AT.broken[humor.category]}), [humor]));
   shifted.slice(0, 2).forEach(s => brk.signs.push(sig(`Where they stand moves: ${s.fromCat} → ${s.toCat}.`, [s.trait])));
+  /* The inner conflict: what wins day to day, what takes the wheel when cornered, and
+     what the losing drive does meanwhile. */
+  const ic = typeof innerConflict === "function" ? innerConflict(st, meta) : null;
+  if (ic){
+    const w = ic.winner, l = ic.loser, q = t => _mxQ(t.trait);
+    cor.signs.push(sig(ic.flips
+      ? V("icC", ["The inner conflict tips: {wr} {w} takes over {when}.", "Now {wr} {w} drives, {when}; {lr} {l} has been pushing at it all along.", "{when}, {wr} {w} wins — the reverse of how it goes on a good day."],
+          {wr: w.role.toLowerCase(), w: q(w.trait), lr: l.role.toLowerCase(), l: q(l.trait), when: ic.when})
+      : V("icC", ["The inner conflict holds: {wr} {w} still wins {when}, and it costs them.", "They keep to {wr} {w} {when}, though {lr} {l} is pulling the other way.", "{wr} {w} holds {when}. Something else pays for it."],
+          {wr: w.role.toLowerCase(), w: q(w.trait), lr: l.role.toLowerCase(), l: q(l.trait), when: ic.when}), [ic.winner.trait, ic.loser.trait]));
+    brk.signs.push(sig(V("icB", ["What leaks: {lr} {l}.", "The losing drive speaks for them: {lr} {l}.", "Under everything, {lr} {l} is what comes out."],
+      {lr: l.role.toLowerCase(), l: q(l.trait)}), [ic.loser.trait]));
+  }
+  /* Not every ladder has three rungs. A freezer can go from strained straight to shut
+     down, with no cornered stage between: the stress response IS the break. */
+  if (stress && /Freeze/.test(stress.category) && cor.signs.length && brk.signs.length && _mxSheetHash(st) % 2 === 0){
+    brk.label = "Shut down";
+    brk.blurb = "There is no cornered stage. They go from strained to shut down, and the defence and the belief arrive together.";
+    brk.signs = cor.signs.concat(brk.signs); cor.signs = [];
+  }
   const level = pst && pst.__pressure ? pst.__pressure.level : 1;
-  const current = level < 0.5 ? "irritated" : level < 0.85 ? "cornered" : "broken";
-  return {level, current, stages: stages.filter(s => s.signs.length)};
+  const live = stages.filter(s => s.signs.length);
+  let current = level < 0.5 ? "irritated" : level < 0.85 ? "cornered" : "broken";
+  if (live.length && !live.some(s => s.id === current)){
+    const order = ["irritated", "cornered", "broken"];
+    const later = live.find(s => order.indexOf(s.id) > order.indexOf(current));
+    current = (later || live[live.length - 1]).id;
+  }
+  return {level, current, stages: live};
 }
+/* The recovery sheet's first two rows depend on the pair, not on either half: a Fight +
+   Anxious character and a Fight + Avoidant character recover in different ways, so the
+   text is a 4 x 4 table (stress x attachment) rather than two independent lookups. */
 const _RECOVER_FIRST = {"Fight (attack the threat)":"They need to move — a walk, a job with their hands. Do not follow them outside.",
   "Flight (remove yourself)":"Gone for a while. They come back on their own clock, and pretend they were never away.",
   "Freeze (shut down)":"Slow to restart. Speak first; they will answer later, sometimes days later.",
   "Fawn (appease the threat)":"They tidy, apologise and check everyone else is all right before they notice their own state."};
 const _RECOVER_WHO = {"Secure":"to the person it happened with, to talk it through", "Anxious":"to whoever answers first, and then to the next one",
   "Avoidant":"to nobody — to a task, a drive, a locked door", "Disorganized":"to someone, and then away from them before it helps"};
-function recoverySheet(st){
+const _RECOVER_CELL = {
+  "Fight (attack the threat)": {
+    "Secure": {first:"They need to move — a walk, a job with their hands — and they say where they are going, so no one has to worry.",
+      who:"to the person it happened with, once they have walked it off, to talk it through"},
+    "Anxious": {first:"They need to move, and they keep checking their phone: the anger goes out through their feet while the fear that they have ruined it comes in.",
+      who:"to whoever will tell them they were right, and then, quietly, to whoever will tell them it is all right"},
+    "Avoidant": {first:"They go out of reach — a walk, a garage, a run — and do not answer until it has cooled. Do not follow them.",
+      who:"to nobody — to a task, a drive, a locked door"},
+    "Disorganized": {first:"They storm off and start back three times. They may return angrier or apologising, and not know which until they are through the door.",
+      who:"to a friend, to be told they were right, and then straight to the person they fought with, to take it back"}},
+  "Flight (remove yourself)": {
+    "Secure": {first:"Gone for an hour or two, and they tell you they are going. They come back on their own clock and say so plainly.",
+      who:"to someone they trust, by phone if not in person, once they are steady"},
+    "Anxious": {first:"Gone, but not far and not for long: they are already composing the message that will smooth it over.",
+      who:"to the first person who answers, and then to the next, to check they have not been abandoned"},
+    "Avoidant": {first:"Gone for a good while — a day, sometimes more. They come back as if they were never away, and the subject is closed.",
+      who:"to nobody; a task, a drive, a locked door do the work a person would"},
+    "Disorganized": {first:"Gone, then back, then gone. Nobody, including them, can predict which state arrives.",
+      who:"to someone, and then away from them before it helps"}},
+  "Freeze (shut down)": {
+    "Secure": {first:"Slow to restart, but they say so: “I need a minute.” Speak first; they answer when they can, usually within the day.",
+      who:"to one person, in few words — “I froze. Can I sit here?”"},
+    "Anxious": {first:"Slow to restart, and afraid the silence is being read as rejection. A short, warm message helps more than a question.",
+      who:"to whoever answers first, in a run of messages, and then to the next"},
+    "Avoidant": {first:"A shutdown that can last days. They are fine, they say. Speak first, once, lightly, and then leave it.",
+      who:"to a screen, a book, a long bath — and to a person only once the person has stopped asking"},
+    "Disorganized": {first:"They go still, then flood: a long quiet, then too much at once. Let the first wave go past before answering it.",
+      who:"toward someone and then away, twice, before they manage to stay"}},
+  "Fawn (appease the threat)": {
+    "Secure": {first:"They tidy, apologise and check everyone else is all right — and, in time, remember to say what they needed too.",
+      who:"to a friend who needs nothing from them, to be looked after for once"},
+    "Anxious": {first:"They apologise repeatedly and keep checking they are forgiven. Reassure once, clearly; more only feeds the loop.",
+      who:"to whoever seems most likely to forgive them — and they need it said out loud"},
+    "Avoidant": {first:"They smooth it over and vanish into being useful. The apology arrives as a favour, never as a conversation.",
+      who:"to their work, and to people who need something done, where nobody asks how they are"},
+    "Disorganized": {first:"They over-give, then resent it, then apologise for the resentment. It takes a day to settle into one feeling.",
+      who:"to the person they wronged and away from them again, unsure which of them owes the apology"}},
+};
+/* Relationships feed pressure (audit §6a): when the sheet belongs to a cast member, "who they
+   go to" names the person they trust most, and the person who makes it worse is named too. */
+function recoveryCastContext(st){
+  if (typeof castStates === "undefined" || typeof relationshipEdges === "undefined") return null;
+  const me = castStates.find(c => c && c.state === st);
+  return me ? {selfId: me.id, members: castStates, edges: relationshipEdges} : null;
+}
+function _castNames(ctx){
+  if (!ctx) return {};
+  const name = id => { const m = ctx.members.find(c => c.id === id); return m && m.meta && m.meta.name ? m.meta.name : null; };
+  const mine = ctx.edges.filter(e => e.from === ctx.selfId && name(e.to));
+  const near = mine.filter(e => e.role !== "antagonist" && e.role !== "rival").sort((a, b) => (b.trust || 0) - (a.trust || 0))[0];
+  const bad = mine.filter(e => e.role === "antagonist" || e.role === "rival" || (e.trust || 3) <= 1).sort((a, b) => (a.trust || 3) - (b.trust || 3))[0];
+  return {goTo: near && (near.trust || 3) >= 3 ? name(near.to) : null, makesWorse: bad ? name(bad.to) : null};
+}
+function recoverySheet(st, ctx){
   const g = (id, re) => _mxT(st, id, re);
   const stress = g("stress"), attach = g("attachment"), need = g("motivation", /The Need/i), lie = g("motivation", /The Lie/i);
   const repair = g("repair"), texture = g("texture"), vices = g("vices"), values = g("values"), origin = g("origins");
   const rows = [];
+  const V = (salt, frames, vars) => _mxVar(st, salt, frames, vars);
+  const d = t => t && t.desc ? ` — ${_mxLc(t.desc)}` : "";
   const row = (key, title, text, from) => { if (text) rows.push({key, title, text, from: (from || []).filter(Boolean).map(t => t.trait)}); };
-  row("first", "First hours", stress ? _RECOVER_FIRST[stress.category] : null, [stress]);
-  row("who", "Who they go to", attach && _RECOVER_WHO[attach.category] ? `They go ${_RECOVER_WHO[attach.category]}.` : null, [attach]);
-  row("helps", "What actually helps", need ? `${need.trait}${need.desc ? ` — ${_mxLc(need.desc)}` : ""}.` : null, [need]);
-  row("ground", "What grounds them", texture ? `Back to ${_mxLc(texture.trait)}${texture.desc ? ` — ${_mxLc(texture.desc)}` : ""}.` : origin ? `The memory of ${_mxLc(origin.trait)}.` : null, [texture || origin]);
-  row("hurts", "What does not help", vices ? `${vices.trait} — it feels like recovery and is not.` : values && values.category === "Rigid & Principled" ? "Being told it was not their fault; they will argue." : null, [vices || values]);
-  row("repair", "How they repair it", repair ? `${repair.trait}${repair.desc ? ` — ${_mxLc(repair.desc)}` : ""}.` : null, [repair]);
-  row("scar", "The story they tell afterwards", lie ? `That it proves ${_mxQ(lie.trait)} — unless someone gets to them first.` : null, [lie]);
+  const cell = stress && attach && _RECOVER_CELL[stress.category] ? _RECOVER_CELL[stress.category][attach.category] : null;
+  const lensDying = typeof activeLensIds === "function" && activeLensIds().includes("dying");
+  const firstText = cell ? cell.first : stress ? _RECOVER_FIRST[stress.category] : null;
+  row("first", "First hours", firstText && lensDying ? "There is less time to waste on it than there used to be. " + firstText : firstText, [stress, attach]);
+  const who = cell ? cell.who : (attach ? _RECOVER_WHO[attach.category] : null);
+  const cn = _castNames(ctx);
+  row("who", "Who they go to", who ? `They go ${who}.${cn.goTo ? ` In this cast, that is ${cn.goTo}.` : ``}` : null, [attach, stress]);
+  row("helps", "What actually helps", need ? V("helps", ["{n}{d}.", "The one thing that works: {n}{d}.", "What actually gets through: {n}{d}."], {n: _mxUnrun(need.trait), d: d(need)}) : null, [need]);
+  row("ground", "What grounds them", texture ? V("ground", ["Back to {t}{d}.", "What steadies them: {t}{d}.", "Home base: {t}{d}."], {t: _mxLc(texture.trait), d: d(texture)})
+    : origin ? V("groundO", ["The memory of {o}.", "What they lean on: the memory of {o}."], {o: _mxLc(origin.trait)}) : null, [texture || origin]);
+  row("hurts", "What does not help", vices ? V("hurts", ["{v} — it feels like recovery and is not.", "{v} — it looks like coping and is not.", "The trap: {v}. It feels like relief and is not."], {v: _mxUnrun(vices.trait)})
+    : values && values.category === "Rigid & Principled" ? V("hurtsR", ["Being told it was not their fault; they will argue.", "Being told to let it go; they will dig in."]) : null, [vices || values]);
+  if (cn.makesWorse) row("worse", "Who makes it worse", V("worse", ["Being around {n}. Every old thing comes back at once.", "{n} in the room, whatever {n} says.", "{n}. The history makes it worse."], {n: cn.makesWorse}), []);
+  row("repair", "How they repair it", repair ? V("repair", ["{r}{d}.", "The repair they make: {r}{d}."], {r: _mxUnrun(repair.trait), d: d(repair)}) : null, [repair]);
+  row("scar", "The story they tell afterwards", lie ? V("scar", ["That it proves {q} — unless someone gets to them first.", "The version that sticks: it proves {q}. Someone has to get to them before that hardens.", "They will file it under {q}, unless someone offers a better story first."], {q: _mxQ(lie.trait)}) : null, [lie]);
   const summary = typeof pressureRecovery === "function" ? pressureRecovery(st) : null;
   return rows.length ? {summary, rows} : null;
 }
-function pressureEscalationHTML(st, pst){
-  const esc = pressureEscalation(st, pst), rec = recoverySheet(st);
+function pressureEscalationHTML(st, pst, meta){
+  const esc = pressureEscalation(st, pst, meta), rec = recoverySheet(st, recoveryCastContext(st));
   let h = "";
   if (esc.stages.length){
     h += `<div class="pressureStages" aria-label="Escalation stages">` + esc.stages.map(sg =>
@@ -631,8 +779,8 @@ function pressureEscalationHTML(st, pst){
   }
   return h;
 }
-function pressureEscalationMarkdown(st, pst){
-  const esc = pressureEscalation(st, pst), rec = recoverySheet(st), L = [];
+function pressureEscalationMarkdown(st, pst, meta){
+  const esc = pressureEscalation(st, pst, meta), rec = recoverySheet(st, recoveryCastContext(st)), L = [];
   esc.stages.forEach(sg => { L.push(`**${sg.label}**${sg.id === esc.current ? " (current)" : ""}`); sg.signs.forEach(s => L.push(`- ${s.text}`)); });
   if (rec){ L.push("", "**Recovery sheet**"); rec.rows.forEach(r => L.push(`- ${r.title}: ${r.text}`)); }
   return L.join("\n");
@@ -670,8 +818,27 @@ function _mxShift(t, delta){
   if (!t || typeof byFilter !== "function") return null;
   const pool = byFilter(t.section, t.category).filter(x => x.id !== t.id);
   const want = clamp((t.intensity || 3) + delta, 1, 5);
-  const exact = pool.filter(x => (x.intensity || 3) === want);
-  return exact.length ? exact[Math.floor(rand() * exact.length)] : pickInRange(pool, "balanced", want, 3);
+  /* Any trait one step louder or quieter used to do, so a Want of "a quiet partnership"
+     could shift to "mild preference" and the arc read "they choose an ordinary week over
+     mild preference". Stay with the same idea: the same concept family first, then the
+     closest wording, and only then anything at that intensity. */
+  const near = pool.filter(x => Math.abs((x.intensity || 3) - want) <= (delta ? 0 : 1));
+  const cands = near.length ? near : pool;
+  if (!cands.length) return null;
+  // Category boilerplate ("Wants…", "Fear of…") is shared by the whole pool, so it
+  // says nothing about closeness; the name carries the idea and counts triple.
+  const boiler = new Set(["want","wants","fear","need","core","being","thing"].map(w => _mxStem(w)));
+  const toks = x => new Set([...mxTokens(x)].filter(w => !boiler.has(w)));
+  const nameW = toks(t.trait), descW = toks(`${t.trait} ${t.desc || ""}`);
+  const score = x => (t.conceptFamily && x.conceptFamily === t.conceptFamily ? 10 : 0)
+    + 3 * mxOverlap(nameW, toks(x.trait)).length
+    + mxOverlap(descW, toks(`${x.trait} ${x.desc || ""}`)).length
+    + ((x.intensity || 3) === want ? 0.5 : 0);
+  const scored = cands.map(x => ({x, s: score(x)}));
+  const top = Math.max(...scored.map(o => o.s));
+  if (top <= 0.5) return near.length ? near[Math.floor(rand() * near.length)] : pickInRange(pool, "balanced", want, 3);
+  const best = scored.filter(o => o.s === top).map(o => o.x);
+  return best[Math.floor(rand() * best.length)];
 }
 /* Changes that come from the TEXT of the event, appended after the shape's own. */
 function arcTextChanges(st, event, shape, existing){
@@ -760,7 +927,7 @@ function _fillArcText(s, st){
     .replace(/\{want\}/g, want ? _mxLc(want.trait) : "what they wanted")
     .replace(/\{need\}/g, need ? _mxLc(need.trait) : "what would actually help")
     .replace(/\{values\}/g, values ? `${_mxQ(values.trait)}` : "the line they said they would never cross")
-    .replace(/\{price\}/g, price ? `${price.trait}.` : "More than they admit.");
+    .replace(/\{price\}/g, price ? `${_mxUnrun(price.trait)}.` : "More than they admit.");
 }
 /* A template becomes ordinary events, each with its proposals computed against the
    sheet as the PREVIOUS steps' proposals would leave it — so the steps read as a
@@ -780,4 +947,112 @@ function arcTemplateEvents(st, templateId, priorEvents){
     sim = applyArcEvent(sim, {id: ev.id, changes: ev.changes.map(c => Object.assign({}, c, {accepted: true}))});
   });
   return out;
+}
+
+// ================= 10. The inner-conflict engine =================
+/* The contradiction panel finds ONE tension, between two behaviours on one axis. That is
+   not where two characters with the same categories actually differ. They differ on which
+   of their own drives wins, and when. This finds a second tension between the drives —
+   what they want and what they need, the line they hold and what they want, the role they
+   play and what they fear, the defence and what it covers — and states a rule: which side
+   wins day to day, which wins under load, what tips it, and what the losing side does
+   meanwhile (it leaks). The pressure ladder and the voice lab both use the rule, so the
+   losing drive shows up in the line at the Cornered stage instead of nowhere.
+
+   Pure function of the sheet (a hash of it, never the dice); `meta.conflictFlip` lets the
+   author swap which side wins under pressure. */
+const INNER_CONFLICT_TYPES = {
+  "want-need":    {label: "Want vs Need",     roles: ["Want", "Need"],
+    question: "They chase the want; the need is what would actually help. Which one do they act on, and what does the other one look like from outside?"},
+  "values-want":  {label: "Values vs Want",   roles: ["The line they hold", "Want"],
+    question: "The line and the want cannot both be honoured. When they choose, which goes, and who sees the cost?"},
+  "fear-role":    {label: "Role vs Fear",     roles: ["The role they play", "Fear"],
+    question: "They play the role in every room. What happens to the role when the fear is in the room too?"},
+  "defence-need": {label: "Defence vs Need",  roles: ["The defence", "Need"],
+    question: "The defence exists to keep the need from being seen. What is the first moment it fails, and who is there?"},
+};
+const _IC_TRIGGER = {
+  "Fight (attack the threat)": "when someone pushes back",
+  "Flight (remove yourself)": "when there is a door and it is open",
+  "Freeze (shut down)": "when there is too much at once",
+  "Fawn (appease the threat)": "when someone is displeased with them",
+};
+function _icOpposition(x, y){
+  if (!x || !y || !x.pol || !y.pol) return 0;
+  let n = 0;
+  Object.keys(x.pol).forEach(a => { const p = x.pol[a], q = y.pol[a]; if (p && q && p !== q) n++; });
+  return Math.min(n, 2);
+}
+function innerConflict(st, meta){
+  const g = (id, re) => _mxT(st, id, re);
+  const want = g("motivation", /Core Want/i), need = g("motivation", /The Need/i), fear = g("motivation", /Core Fear/i);
+  const defence = g("motivation", /The Defence/i), values = g("values"), role = g("role");
+  const stress = g("stress"), attach = g("attachment");
+  const cands = [];
+  if (want && need) cands.push({type: "want-need", w: 3, a: want, b: need});
+  if (values && want) cands.push({type: "values-want", w: 2 + _icOpposition(values, want), a: values, b: want});
+  if (role && fear) cands.push({type: "fear-role", w: 2 + _icOpposition(role, fear), a: role, b: fear});
+  if (defence && need) cands.push({type: "defence-need", w: 2, a: defence, b: need});
+  if (!cands.length) return null;
+  const h = _mxHash(_mxSheetHash(st) + "|ic");
+  let r = h % cands.reduce((n, c) => n + c.w, 0), pick = cands[0];
+  for (const c of cands){ if (r < c.w){ pick = c; break; } r -= c.w; }
+  const T = INNER_CONFLICT_TYPES[pick.type];
+  // Which side takes the wheel under load. A side "wins" by driving what they do; the
+  // other one loses and leaks into what they say.
+  const sc = stress ? stress.category : "", parity = (h >> 3) % 2 === 0 ? "a" : "b";
+  let pressure;
+  if (pick.type === "want-need" || pick.type === "defence-need")
+    pressure = /Freeze|Fawn/.test(sc) ? "b" : /Fight|Flight/.test(sc) ? "a" : parity;
+  else if (pick.type === "values-want")
+    pressure = /Rigid|Loyalty|Idealistic/.test(pick.a.category) ? "a" : "b";
+  else
+    pressure = attach ? (attach.category === "Secure" ? "a" : "b") : parity;
+  const flipped = !!(meta && meta.conflictFlip);
+  if (flipped) pressure = pressure === "a" ? "b" : "a";
+  const TH = typeof THRESHOLD_BY_VALUES !== "undefined" ? THRESHOLD_BY_VALUES : {};
+  const when = pick.type === "values-want" && TH[pick.a.category] ? TH[pick.a.category]
+    : (_IC_TRIGGER[sc] || "when it costs enough");
+  const side = k => ({trait: pick[k], role: T.roles[k === "a" ? 0 : 1], key: k});
+  const A = side("a"), B = side("b");
+  const calmW = A, pressW = pressure === "a" ? A : B, loser = pressure === "a" ? B : A;
+  const flips = pressure !== "a";
+  const q = t => _mxQ(t.trait);
+  const summary = `${A.role} ${q(A.trait)} against ${B.role.toLowerCase()} ${q(B.trait)}. Day to day, ${A.role.toLowerCase()} ${q(A.trait)} wins. `
+    + (flips
+      ? `Under load ${pressW.role.toLowerCase()} ${q(pressW.trait)} takes over, ${when}; the other one has been leaking all along.`
+      : `Under load it holds, ${when} — and ${loser.role.toLowerCase()} ${q(loser.trait)} leaks out around it instead.`);
+  return {type: pick.type, label: T.label, question: T.question, a: A, b: B, calm: "a", pressure, flips, flipped,
+    winner: pressW, loser, when, summary, from: [pick.a, pick.b]};
+}
+const _ic = t => (typeof _spoken === "function" ? _spoken(t) : null) || _mxQ(t.trait);
+// The same phrase where a noun goes: "to be unnecessary" -> "being unnecessary",
+// "to matter to someone" -> "trying to matter to someone" ("done with to be unnecessary" reads as a typo).
+const _icNoun = t => { const s = _ic(t); return /^to be /.test(s) ? "being " + s.slice(6) : /^to /.test(s) ? "trying " + s : s; };
+const _IC_LEAK = {
+  "want-need": {
+    b: ["What I actually need is {b}.", "I keep saying {an}. It isn't that. It's {b}.", "Never mind {an}. I need {b}."],
+    a: ["And I still want {a}. God, I still want it.", "I said I was done with {an}. I'm not."]},
+  "values-want": {
+    b: ["I want {b}. That's the whole trouble. I want it and I won't.", "You think I don't want {b}? I do."],
+    a: ["I know, I know — {aq}. Not tonight.", "I know what I said about {aq}. Forget I said it."]},
+  "fear-role": {
+    b: ["I'm not afraid. It's just {b}, that's all.", "Don't make it about {b}. It isn't."],
+    a: ["I can't be the {role} right now.", "Someone else be the {role}. Please."]},
+  "defence-need": {
+    b: ["What I need is — no, forget it. I need {b}.", "I keep saying it's fine. It isn't. I need {b}."],
+    a: ["{aq} — that's what I do. I can't do it right now.", "I'm dropping the act. {aq}. It was always the act."]},
+};
+/* The line the losing side speaks. The shortest frame goes to a character who says
+   almost nothing. Returns null when the sheet has no conflict. */
+function innerConflictLeak(st, rng, opts){
+  opts = opts || {};
+  const ic = innerConflict(st, opts.meta);
+  if (!ic) return null;
+  const frames = _IC_LEAK[ic.type][ic.loser.key];
+  const f = opts.short ? frames.slice().sort((x, y) => x.length - y.length)[0] : frames[Math.floor(rng() * frames.length)];
+  const roleWord = ic.type === "fear-role" ? String(ic.a.trait.category || "one").toLowerCase().replace(/[^a-z ]/g, "").trim() || "one" : "";
+  const text = f.replace("{an}", _icNoun(ic.a.trait)).replace("{a}", _ic(ic.a.trait)).replace("{b}", _ic(ic.b.trait)).replace("{aq}", _mxQ(ic.a.trait.trait)).replace("{role}", roleWord);
+  return {text: text.charAt(0).toUpperCase() + text.slice(1),
+    rule: `inner conflict: ${ic.label} — ${ic.loser.role.toLowerCase()} “${ic.loser.trait.trait}” leaks out under load`};
 }

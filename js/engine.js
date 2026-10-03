@@ -329,9 +329,27 @@ function withSpeculativeGeneration(fn){
     lastGenerationSignature: (typeof lastGenerationSignature !== 'undefined') ? lastGenerationSignature : undefined,
     categoryUse: new Map(CATEGORY_USE),
     drawContext: captureDrawContext(),
+    // Per-sheet UI state _runGeneration clears for "the next character" — a
+    // speculative build is not the next character, so the sheet on screen keeps it.
+    ui: (typeof rerollHistory !== 'undefined') ? {rerollHistory, rerollExclusions, whyOpen,
+      diffLog, lastDepthUntouched,
+      changedSlots: (typeof changedSlots !== 'undefined') ? changedSlots : null,
+      openCards: (typeof OPEN_CARD_CONTROLS !== 'undefined') ? new Set(OPEN_CARD_CONTROLS) : null} : null,
+    arc: (typeof arcBase !== 'undefined') ? {arcBase, arcEvents, arcOverrides, arcLastReplay} : null,
   };
   try { return fn(); }
   finally {
+    if (saved.ui){
+      rerollHistory = saved.ui.rerollHistory; rerollExclusions = saved.ui.rerollExclusions;
+      whyOpen = saved.ui.whyOpen; diffLog = saved.ui.diffLog;
+      lastDepthUntouched = saved.ui.lastDepthUntouched;
+      if (saved.ui.changedSlots) changedSlots = saved.ui.changedSlots;
+      if (saved.ui.openCards){ OPEN_CARD_CONTROLS.clear(); saved.ui.openCards.forEach(x => OPEN_CARD_CONTROLS.add(x)); }
+    }
+    if (saved.arc){
+      arcBase = saved.arc.arcBase; arcEvents = saved.arc.arcEvents;
+      arcOverrides = saved.arc.arcOverrides; arcLastReplay = saved.arc.arcLastReplay;
+    }
     _applyDrawContext(saved.drawContext);
     charVariants = saved.charVariants;
     history = saved.history;
@@ -863,19 +881,19 @@ let ARCHETYPES = {
   // repeatedly-hit, conventional character types.
   burntIdealist:      {label:"Burnt-Out Idealist", verbosity:0, register:1, composure:-1, vocabPref:["Affective & Emotional Intensity","Temporal Orientation & Tense Usage"],
              pers:{positivity:-55, activeness:-55, emotionalcapacity:-30, honesty:60, agreeableness:-30, discipline:-20, confidence:-30, intelligence:50}},
-  charmingManipulator: {label:"Charming Manipulator", verbosity:1, register:0, composure:1, vocabPref:["Pragmatic Focus & Speech Functions","Affective & Emotional Intensity"],
-             pers:{honesty:-60, friendliness:75, agreeableness:55, emotionalcapacity:45, manners:55, confidence:40, assertiveness:-25}},
+  charmingManipulator: {label:"Charming Manipulator", verbosity:1, register:1, composure:-1, vocabPref:["Pragmatic Focus & Speech Functions","Semantic Density & Modifiers"],
+             pers:{honesty:-60, friendliness:65, agreeableness:55, emotionalcapacity:20, manners:55, confidence:65, assertiveness:30, discipline:55}},
   grievingParent:      {label:"Grieving Parent", verbosity:-1, register:0, composure:-1, vocabPref:["Temporal Orientation & Tense Usage","Abstractness & Sensory Modality"],
              pers:{emotionalcapacity:-35, positivity:-50, discipline:-30, friendliness:20, activeness:-45, honesty:50, confidence:-30}},
-  reluctantSecond:     {label:"Reluctant Second-in-Command", verbosity:-1, register:0, composure:0, vocabPref:["Directness & Literalness","Precision & Specificity Level"],
-             pers:{assertiveness:-30, confidence:-25, discipline:65, agreeableness:55, honesty:55, rebelliousness:-40, intelligence:45}},
+  reluctantSecond:     {label:"Reluctant Second-in-Command", verbosity:-1, register:1, composure:1, vocabPref:["Directness & Literalness","Precision & Specificity Level"],
+             pers:{assertiveness:-30, confidence:-25, discipline:65, agreeableness:55, honesty:55, rebelliousness:-40, intelligence:45, positivity:25, curiosity:30}},
   cheerfulSociopath:   {label:"Cheerful Sociopath", verbosity:1, register:0, composure:2, vocabPref:["Affective & Emotional Intensity","Pragmatic Focus & Speech Functions"],
              pers:{emotionalcapacity:-70, positivity:60, honesty:-40, friendliness:60, confidence:75, agreeableness:-20}},
   furiousCaretaker:    {label:"Quietly Furious Caretaker", verbosity:-1, register:0, composure:-2, vocabPref:["Directness & Literalness","Affective & Emotional Intensity"],
-             pers:{agreeableness:-30, discipline:60, emotionalcapacity:-40, assertiveness:-20, friendliness:20, rebelliousness:20}},
+             pers:{agreeableness:-30, discipline:60, emotionalcapacity:-40, assertiveness:-20, friendliness:20, rebelliousness:20, positivity:-40, honesty:-25}},
   washedUpProdigy:     {label:"Washed-Up Prodigy", verbosity:0, register:1, composure:-1, vocabPref:["Conceptual Framework & Loanwords","Register & Formality Spectrum"],
              pers:{intelligence:70, positivity:-45, confidence:40, discipline:-35, curiosity:-30, activeness:-40, rebelliousness:30, honesty:-30, friendliness:-30}},
-  companyLoyalist:     {label:"Company Loyalist", verbosity:0, register:1, composure:0, vocabPref:["Register & Formality Spectrum","Pragmatic Focus & Speech Functions"],
+  companyLoyalist:     {label:"Company Loyalist", verbosity:1, register:0, composure:0, vocabPref:["Pragmatic Focus & Speech Functions","Affective & Emotional Intensity"],
              pers:{discipline:65, honesty:35, rebelliousness:-70, agreeableness:50, manners:50, confidence:20, positivity:50, activeness:45, friendliness:40}},
   blackSheep:          {label:"Black-Sheep Returnee", verbosity:0, register:-1, composure:-1, vocabPref:["Directness & Literalness","Phonetic & Auditory Qualities"],
              pers:{rebelliousness:55, honesty:45, agreeableness:-25, confidence:20, friendliness:-15, discipline:-25, activeness:30, assertiveness:35}},
@@ -883,7 +901,7 @@ let ARCHETYPES = {
              pers:{discipline:70, assertiveness:55, agreeableness:-25, friendliness:40, activeness:55, curiosity:40, emotionalcapacity:20, confidence:40}},
   undiscussedSurvivor: {label:"Survivor Who Won't Discuss It", verbosity:-2, register:0, composure:1, vocabPref:["Directness & Literalness","Temporal Orientation & Tense Usage"],
              pers:{emotionalcapacity:-60, discipline:45, honesty:-35, friendliness:40, positivity:40, assertiveness:-35, agreeableness:45, curiosity:-30}},
-  workaholicAvoiding:  {label:"Workaholic Avoiding a Diagnosis", verbosity:0, register:0, composure:0, vocabPref:["Pragmatic Focus & Speech Functions","Precision & Specificity Level"],
+  workaholicAvoiding:  {label:"Workaholic Avoiding a Diagnosis", verbosity:-1, register:0, composure:1, vocabPref:["Pragmatic Focus & Speech Functions","Precision & Specificity Level"],
              pers:{discipline:55, activeness:65, emotionalcapacity:-50, honesty:-45, positivity:30, friendliness:-20, confidence:30, curiosity:-40}},
   formerTrueBeliever:  {label:"Former True Believer", verbosity:0, register:1, composure:0, vocabPref:["Conceptual Framework & Loanwords","Affective & Emotional Intensity"],
              pers:{rebelliousness:65, curiosity:60, positivity:-25, honesty:55, assertiveness:45, agreeableness:-35, intelligence:50, emotionalcapacity:-20}},
@@ -899,8 +917,8 @@ let ARCHETYPES = {
   // outsider, and the person defined by competence rather than injury were missing
   // outright. These are those. They cost nothing structurally — the blend maths takes
   // any number of presets — and they widen what the tool can be asked for.
-  competentProfessional: {label:"Quietly Excellent Professional", verbosity:-1, register:1, composure:-1, vocabPref:["Precision & Specificity Level","Directness & Literalness"],
-             pers:{discipline:70, intelligence:60, confidence:55, emotionalcapacity:-10, agreeableness:25, activeness:35, manners:45}},
+  competentProfessional: {label:"Quietly Excellent Professional", verbosity:0, register:1, composure:-1, vocabPref:["Precision & Specificity Level","Register & Formality Spectrum"],
+             pers:{discipline:60, intelligence:60, confidence:55, emotionalcapacity:15, agreeableness:35, activeness:35, manners:45, friendliness:30, curiosity:35}},
   contentedElder:      {label:"Contented Elder", verbosity:0, register:0, composure:-2, vocabPref:["Abstractness & Sensory Modality","Temporal Orientation & Tense Usage"],
              pers:{positivity:55, friendliness:50, emotionalcapacity:40, activeness:-40, curiosity:20, agreeableness:45, confidence:40, assertiveness:-20}},
   genuinelyFunny:      {label:"Genuinely Funny One", verbosity:1, register:-1, composure:0, vocabPref:["Phonetic & Auditory Qualities","Semantic Density & Modifiers"],
@@ -913,8 +931,8 @@ let ARCHETYPES = {
              pers:{intelligence:60, friendliness:-30, emotionalcapacity:-45, curiosity:70, manners:-25, honesty:70, agreeableness:-30}},
   unbotheredYoung:     {label:"Unbothered Young Person", verbosity:-1, register:-2, composure:-1, vocabPref:["Directness & Literalness","Pragmatic Focus & Speech Functions"],
              pers:{confidence:45, positivity:30, rebelliousness:40, manners:-40, emotionalcapacity:20, activeness:45, curiosity:35}},
-  steadyOrganiser:     {label:"Steady Organiser", verbosity:0, register:0, composure:-2, vocabPref:["Pragmatic Focus & Speech Functions","Precision & Specificity Level"],
-             pers:{discipline:60, agreeableness:45, friendliness:45, assertiveness:35, activeness:50, positivity:35, emotionalcapacity:15}},
+  steadyOrganiser:     {label:"Steady Organiser", verbosity:1, register:0, composure:-2, vocabPref:["Temporal Orientation & Tense Usage","Pragmatic Focus & Speech Functions"],
+             pers:{discipline:60, agreeableness:45, friendliness:45, assertiveness:35, activeness:50, positivity:35, emotionalcapacity:15, honesty:45, curiosity:25}},
 
   /* ---- FILLING THE HOLES IN THE AXIS COVERAGE ----------------------------------
      The previous widening pass fixed the THEMES — the note about nine of twenty being
@@ -937,7 +955,7 @@ let ARCHETYPES = {
      someone would actually want, and between them they close the gaps. Written low on
      intelligence WITHOUT being written stupid — the point of the axis is how someone
      thinks, not how much they are worth. */
-  cheerfulMess:        {label:"Cheerful Mess", verbosity:1, register:-1, composure:1, vocabPref:["Pragmatic Focus & Speech Functions","Affective & Emotional Intensity"],
+  cheerfulMess:        {label:"Cheerful Mess", verbosity:2, register:-2, composure:2, vocabPref:["Phonetic & Auditory Qualities","Abstractness & Sensory Modality"],
              pers:{discipline:-70, friendliness:60, positivity:55, agreeableness:45, activeness:40, emotionalcapacity:35, manners:-20, confidence:30, intelligence:-20}},
   plainSpoken:         {label:"Plain-Spoken Practical", verbosity:-1, register:-2, composure:-2, vocabPref:["Directness & Literalness","Precision & Specificity Level"],
              pers:{intelligence:-45, honesty:60, friendliness:45, agreeableness:35, assertiveness:30, positivity:35, activeness:40, curiosity:-30, confidence:-15, manners:10}},
@@ -947,8 +965,8 @@ let ARCHETYPES = {
              pers:{assertiveness:80, discipline:55, manners:-55, agreeableness:-45, honesty:40, emotionalcapacity:-35, confidence:60, friendliness:-35, activeness:50}},
   dreamyDrifter:       {label:"Dreamy Drifter", verbosity:0, register:1, composure:1, vocabPref:["Abstractness & Sensory Modality","Temporal Orientation & Tense Usage"],
              pers:{discipline:-55, curiosity:65, intelligence:-25, activeness:-35, positivity:35, emotionalcapacity:40, assertiveness:-30, rebelliousness:25, confidence:-20}},
-  stubbornCraftsman:   {label:"Stubborn Craftsman", verbosity:-2, register:-1, composure:-2, vocabPref:["Precision & Specificity Level","Directness & Literalness"],
-             pers:{intelligence:-30, discipline:70, rebelliousness:-35, assertiveness:40, curiosity:-25, manners:-15, emotionalcapacity:-25}},
+  stubbornCraftsman:   {label:"Stubborn Craftsman", verbosity:-2, register:-1, composure:-1, vocabPref:["Directness & Literalness","Morphological & Structural Lexicon"],
+             pers:{intelligence:-30, discipline:70, rebelliousness:-35, assertiveness:40, curiosity:-25, manners:-15, emotionalcapacity:-25, friendliness:-15}},
 
   /* ---- THE 2026 AUDIT'S INPUT-BALANCE PASS (§4.5) -------------------------------
      Measured over the 34 presets above: discipline set positive in 20 and negative
@@ -966,8 +984,8 @@ let ARCHETYPES = {
              pers:{emotionalcapacity:75, discipline:-60, friendliness:55, honesty:50, agreeableness:35, positivity:-15, curiosity:40, confidence:-35, activeness:-25}},
   weepingBrawler:      {label:"Weeping Brawler", verbosity:0, register:-2, composure:2, vocabPref:["Directness & Literalness","Phonetic & Auditory Qualities"],
              pers:{emotionalcapacity:70, assertiveness:60, discipline:-45, agreeableness:-40, manners:-45, positivity:-20, honesty:30, friendliness:-15}},
-  lovableLiar:         {label:"Lovable Liar", verbosity:1, register:-1, composure:-1, vocabPref:["Pragmatic Focus & Speech Functions","Affective & Emotional Intensity"],
-             pers:{honesty:-65, friendliness:70, emotionalcapacity:45, discipline:-40, positivity:45, confidence:30, curiosity:-20}},
+  lovableLiar:         {label:"Lovable Liar", verbosity:1, register:-1, composure:0, vocabPref:["Affective & Emotional Intensity","Temporal Orientation & Tense Usage"],
+             pers:{honesty:-65, friendliness:70, emotionalcapacity:65, discipline:-25, positivity:45, confidence:10, curiosity:50, manners:-20, intelligence:35}},
   incuriousContent:    {label:"Incurious and Content", verbosity:-1, register:-1, composure:-2, vocabPref:["Directness & Literalness","Pragmatic Focus & Speech Functions"],
              pers:{curiosity:-70, positivity:40, discipline:-35, agreeableness:50, friendliness:35, activeness:-45, intelligence:-20, rebelliousness:-30, confidence:20}},
   gloomyRomantic:      {label:"Gloomy Romantic", verbosity:0, register:1, composure:-1, vocabPref:["Affective & Emotional Intensity","Temporal Orientation & Tense Usage"],
@@ -1007,6 +1025,18 @@ let ARCHETYPES = {
              pers:{confidence:90, curiosity:-50, assertiveness:70, intelligence:-35, honesty:-25, agreeableness:-40, manners:25, friendliness:20, positivity:30}},
   maliciousTrickster:  {label:"Malicious Trickster", verbosity:1, register:-1, composure:1, vocabPref:["Pragmatic Focus & Speech Functions","Phonetic & Auditory Qualities"],
              pers:{honesty:-75, agreeableness:-75, rebelliousness:70, positivity:40, discipline:-45, intelligence:50, friendliness:30, emotionalcapacity:-45, activeness:55}},
+  loudKind:            {label:"Loud & Kind", verbosity:1, register:-1, composure:0, vocabPref:["Phonetic & Auditory Qualities","Pragmatic Focus & Speech Functions"],
+             pers:{assertiveness:35, friendliness:80, agreeableness:55, positivity:50, manners:25, confidence:15, emotionalcapacity:60, honesty:65, discipline:55, activeness:30, curiosity:30}},
+  disciplinedRebel:    {label:"Disciplined Rebel", verbosity:0, register:0, composure:-1, vocabPref:["Directness & Literalness","Precision & Specificity Level"],
+             pers:{discipline:70, rebelliousness:70, assertiveness:45, honesty:55, intelligence:40, agreeableness:-35, confidence:40, friendliness:-10}},
+  anxiousLeader:       {label:"Anxious Leader", verbosity:1, register:1, composure:1, vocabPref:["Pragmatic Focus & Speech Functions","Semantic Density & Modifiers"],
+             pers:{assertiveness:40, confidence:-40, discipline:60, emotionalcapacity:-10, positivity:-30, intelligence:30, agreeableness:20, honesty:25}},
+  cheerfulNihilist:    {label:"Cheerful Nihilist", verbosity:0, register:-1, composure:0, vocabPref:["Abstractness & Sensory Modality","Phonetic & Auditory Qualities"],
+             pers:{positivity:70, rebelliousness:30, honesty:50, discipline:-40, intelligence:35, agreeableness:25, friendliness:45, confidence:20, curiosity:20, emotionalcapacity:-40}},
+  streetwiseSage:      {label:"Street-Wise Sage", verbosity:0, register:-2, composure:-1, vocabPref:["Directness & Literalness","Affective & Emotional Intensity"],
+             pers:{intelligence:-50, honesty:35, confidence:60, agreeableness:5, friendliness:15, curiosity:30, activeness:-35, assertiveness:-25, manners:-35, positivity:-20, discipline:30, emotionalcapacity:35}},
+  politeLiar:          {label:"Polite Liar", verbosity:0, register:2, composure:-1, vocabPref:["Register & Formality Spectrum","Pragmatic Focus & Speech Functions"],
+             pers:{manners:70, honesty:-70, discipline:-10, friendliness:-25, agreeableness:45, confidence:-15, intelligence:25, emotionalcapacity:-40, assertiveness:-35, positivity:40, activeness:35, curiosity:35, rebelliousness:30}},
 };
 
 /* Optional profile hints, per archetype. See ARCHETYPE PROFILE HINTS in accumulateBoost:
@@ -1022,62 +1052,73 @@ let ARCHETYPES = {
    hints at one STRONG link were measured too weak to carry identity: 50% hint fidelity
    and 28-39 distinct emergent names in 40 builds of the same preset (2026 audit §4).
 
+   Most presets also name one or two of the twelve sections that ship OFF (Dialect,
+   Conversation Mechanics, Family Talk, Body in Speech, ...). Those hints do double duty:
+   they steer the category AND switch the section on for that preset's builds — see
+   archetypeOptsIn — which is the only way a preset could ever reach those 690 traits.
+
    Deliberately spread: eleven of these name Secure attachment and nine name Restraint
    or Discipline, against the "damaged person with a secret" pull the preset list was
    already corrected for once on the personality axes but never on the profile. */
 const ARCHETYPE_PROFILE_HINTS = {
-  soldier:              {attachment:"Avoidant", stress:"Freeze (shut down)", values:"Loyalty-Bound", humor:"Dry & Deadpan", vices:"Substance & Consumption", competence:"Hands & Materials"},
-  conartist:            {values:"Self-Interested", humor:"Cruel & Barbed", role:"Instigator", vices:"Risk & Escape", stress:"Flight (remove yourself)", competence:"People & Rooms"},
-  intern:               {attachment:"Anxious", stress:"Fawn (appease the threat)", humor:"Self-Deprecating", role:"Peacemaker", vices:"Compulsion & Ritual", origins:"Earned Success"},
-  scholar:              {role:"Skeptic", humor:"Intellectual & Wordplay", vices:"Avoidance & Procrastination", values:"Rigid & Principled", attachment:"Avoidant", competence:"Craft & Knowledge"},
-  noble:                {attachment:"Avoidant", values:"Rigid & Principled", role:"Leader", humor:"Dry & Deadpan", stress:"Freeze (shut down)", origins:"Stable Care"},
-  child:                {attachment:"Secure", humor:"Absurd & Chaotic", role:"Connector", values:"Idealistic & Visionary", stress:"Flight (remove yourself)", origins:"Stable Care"},
-  burntIdealist:        {values:"Idealistic & Visionary", vices:"Avoidance & Procrastination", stress:"Freeze (shut down)", humor:"Self-Deprecating", attachment:"Anxious"},
-  charmingManipulator:  {attachment:"Avoidant", values:"Self-Interested", role:"Connector", humor:"Warm & Playful", stress:"Fawn (appease the threat)", competence:"People & Rooms"},
-  grievingParent:       {attachment:"Anxious", stress:"Freeze (shut down)", humor:"Humorless & Absent", vices:"Substance & Consumption", role:"Caretaker"},
-  reluctantSecond:      {role:"Caretaker", values:"Loyalty-Bound", attachment:"Secure", stress:"Fawn (appease the threat)", humor:"Dry & Deadpan", competence:"Systems & Logistics"},
-  cheerfulSociopath:    {attachment:"Avoidant", values:"Self-Interested", humor:"Cruel & Barbed", stress:"Fight (attack the threat)", role:"Instigator"},
-  furiousCaretaker:     {role:"Caretaker", stress:"Fawn (appease the threat)", vices:"Restraint & Discipline", humor:"Dry & Deadpan", values:"Loyalty-Bound"},
-  washedUpProdigy:      {vices:"Substance & Consumption", humor:"Self-Deprecating", values:"Pragmatic & Flexible", role:"Outsider", stress:"Flight (remove yourself)"},
-  companyLoyalist:      {values:"Loyalty-Bound", role:"Peacemaker", vices:"Restraint & Discipline", humor:"Warm & Playful", attachment:"Secure", competence:"Systems & Logistics"},
-  blackSheep:           {role:"Outsider", attachment:"Disorganized", values:"Self-Interested", humor:"Dry & Deadpan", stress:"Flight (remove yourself)"},
-  compulsiveFixer:      {vices:"Compulsion & Ritual", role:"Caretaker", stress:"Fight (attack the threat)", attachment:"Anxious", humor:"Warm & Playful", competence:"Hands & Materials"},
-  undiscussedSurvivor:  {attachment:"Avoidant", stress:"Flight (remove yourself)", humor:"Absurd & Chaotic", values:"Pragmatic & Flexible", role:"Peacemaker"},
-  workaholicAvoiding:   {vices:"Avoidance & Procrastination", attachment:"Avoidant", stress:"Fight (attack the threat)", role:"Leader", humor:"Humorless & Absent", competence:"Systems & Logistics"},
-  formerTrueBeliever:   {role:"Skeptic", values:"Pragmatic & Flexible", attachment:"Disorganized", humor:"Intellectual & Wordplay", stress:"Fight (attack the threat)"},
-  goldenChild:          {attachment:"Anxious", role:"Leader", values:"Idealistic & Visionary", humor:"Warm & Playful", stress:"Fawn (appease the threat)", origins:"Earned Success"},
-  competentProfessional: {attachment:"Secure", vices:"Restraint & Discipline", role:"Skeptic", humor:"Dry & Deadpan", values:"Pragmatic & Flexible", competence:"Craft & Knowledge"},
-  contentedElder:       {attachment:"Secure", humor:"Warm & Playful", values:"Pragmatic & Flexible", role:"Peacemaker", vices:"Compulsion & Ritual", origins:"Stable Care"},
-  genuinelyFunny:       {humor:"Intellectual & Wordplay", role:"Connector", attachment:"Anxious", vices:"Risk & Escape", stress:"Flight (remove yourself)"},
-  careerBureaucrat:     {values:"Rigid & Principled", vices:"Restraint & Discipline", humor:"Humorless & Absent", stress:"Freeze (shut down)", attachment:"Avoidant", competence:"Systems & Logistics"},
-  trueZealot:           {values:"Idealistic & Visionary", role:"Instigator", stress:"Fight (attack the threat)", attachment:"Disorganized", humor:"Humorless & Absent"},
-  alienLogic:           {role:"Outsider", humor:"Intellectual & Wordplay", attachment:"Avoidant", values:"Rigid & Principled", stress:"Freeze (shut down)"},
-  unbotheredYoung:      {attachment:"Secure", humor:"Dry & Deadpan", values:"Pragmatic & Flexible", vices:"Avoidance & Procrastination", role:"Instigator"},
-  steadyOrganiser:      {role:"Leader", vices:"Restraint & Discipline", humor:"Warm & Playful", values:"Loyalty-Bound", attachment:"Secure", competence:"People & Rooms", origins:"Learned Trust"},
-  cheerfulMess:         {attachment:"Disorganized", humor:"Absurd & Chaotic", vices:"Risk & Escape", role:"Connector", stress:"Fawn (appease the threat)"},
-  plainSpoken:          {attachment:"Secure", values:"Pragmatic & Flexible", role:"Caretaker", humor:"Warm & Playful", stress:"Freeze (shut down)", competence:"Hands & Materials", origins:"Stable Care"},
-  softSpokenSecond:     {role:"Peacemaker", stress:"Fawn (appease the threat)", attachment:"Anxious", values:"Loyalty-Bound", humor:"Self-Deprecating"},
-  bluntForeman:         {role:"Leader", stress:"Fight (attack the threat)", values:"Rigid & Principled", humor:"Cruel & Barbed", competence:"Hands & Materials", vices:"Substance & Consumption"},
-  dreamyDrifter:        {role:"Outsider", vices:"Avoidance & Procrastination", attachment:"Secure", humor:"Absurd & Chaotic", values:"Idealistic & Visionary"},
-  stubbornCraftsman:    {values:"Rigid & Principled", vices:"Compulsion & Ritual", attachment:"Avoidant", role:"Skeptic", humor:"Humorless & Absent", competence:"Craft & Knowledge"},
-  openHeartedShambles:  {attachment:"Anxious", vices:"Substance & Consumption", humor:"Warm & Playful", role:"Connector", stress:"Fawn (appease the threat)"},
-  weepingBrawler:       {stress:"Fight (attack the threat)", vices:"Risk & Escape", attachment:"Disorganized", values:"Loyalty-Bound", role:"Instigator"},
-  lovableLiar:          {values:"Self-Interested", humor:"Absurd & Chaotic", role:"Connector", attachment:"Anxious", stress:"Flight (remove yourself)"},
-  incuriousContent:     {humor:"Humorless & Absent", values:"Pragmatic & Flexible", role:"Peacemaker", attachment:"Secure", vices:"Restraint & Discipline"},
-  gloomyRomantic:       {attachment:"Anxious", humor:"Self-Deprecating", vices:"Substance & Consumption", values:"Idealistic & Visionary", stress:"Freeze (shut down)"},
-  scatteredGenius:      {humor:"Intellectual & Wordplay", vices:"Compulsion & Ritual", role:"Outsider", attachment:"Disorganized", stress:"Flight (remove yourself)"},
-  jadedFixer:           {values:"Pragmatic & Flexible", humor:"Cruel & Barbed", stress:"Flight (remove yourself)", role:"Skeptic", attachment:"Avoidant", competence:"People & Rooms"},
-  bigHeartedBoss:       {role:"Leader", humor:"Warm & Playful", vices:"Risk & Escape", attachment:"Secure", stress:"Fight (attack the threat)", origins:"Learned Trust"},
-  newParent:            {attachment:"Anxious", role:"Caretaker", stress:"Freeze (shut down)", humor:"Self-Deprecating", values:"Loyalty-Bound", origins:"Stable Care"},
-  midlifeReinventor:    {vices:"Risk & Escape", role:"Instigator", values:"Idealistic & Visionary", attachment:"Disorganized", humor:"Self-Deprecating"},
-  restlessRetiree:      {vices:"Compulsion & Ritual", humor:"Dry & Deadpan", role:"Skeptic", values:"Rigid & Principled", competence:"Craft & Knowledge", stress:"Fight (attack the threat)"},
-  codeSwitcher:         {role:"Connector", values:"Loyalty-Bound", stress:"Fawn (appease the threat)", humor:"Intellectual & Wordplay", attachment:"Secure", origins:"Learned Trust"},
-  preciseLiteralist:    {role:"Outsider", humor:"Dry & Deadpan", values:"Rigid & Principled", vices:"Compulsion & Ritual", stress:"Flight (remove yourself)", competence:"Craft & Knowledge"},
-  incurableFlirt:       {attachment:"Disorganized", humor:"Warm & Playful", role:"Connector", vices:"Risk & Escape", values:"Idealistic & Visionary"},
-  secularIdeologue:     {values:"Rigid & Principled", role:"Instigator", stress:"Fight (attack the threat)", humor:"Humorless & Absent", attachment:"Avoidant"},
-  nosyNeighbour:        {role:"Connector", vices:"Compulsion & Ritual", values:"Rigid & Principled", humor:"Cruel & Barbed", attachment:"Anxious"},
-  pompousBlowhard:      {role:"Leader", humor:"Intellectual & Wordplay", values:"Self-Interested", stress:"Fight (attack the threat)", attachment:"Avoidant"},
-  maliciousTrickster:   {humor:"Cruel & Barbed", role:"Instigator", values:"Self-Interested", vices:"Risk & Escape", attachment:"Disorganized"},
+  soldier:              {attachment:"Avoidant", stress:"Freeze (shut down)", values:"Loyalty-Bound", humor:"Dry & Deadpan", vices:"Substance & Consumption", competence:"Hands & Materials", body:"Pain & Fatigue", jargon:"Military"},
+  conartist:            {values:"Self-Interested", humor:"Cruel & Barbed", role:"Instigator", vices:"Risk & Escape", stress:"Flight (remove yourself)", competence:"People & Rooms", money:"Status Signalling", conversation:"Scripted Speech"},
+  intern:               {attachment:"Anxious", stress:"Fawn (appease the threat)", humor:"Self-Deprecating", role:"Peacemaker", vices:"Compulsion & Ritual", origins:"Earned Success", fears:"Social Dreads", texture:"Practised Badly"},
+  scholar:              {role:"Skeptic", humor:"Intellectual & Wordplay", vices:"Avoidance & Procrastination", values:"Rigid & Principled", attachment:"Avoidant", competence:"Craft & Knowledge", jargon:"Academic", conversation:"Info-Dumping"},
+  noble:                {attachment:"Avoidant", values:"Rigid & Principled", role:"Leader", humor:"Dry & Deadpan", stress:"Freeze (shut down)", origins:"Stable Care", money:"Money Taboo", family:"Parent-Voice Echo"},
+  child:                {attachment:"Secure", humor:"Absurd & Chaotic", role:"Connector", values:"Idealistic & Visionary", stress:"Flight (remove yourself)", origins:"Stable Care", dialect:"Youth Register", fears:"Phobias"},
+  burntIdealist:        {values:"Idealistic & Visionary", vices:"Avoidance & Procrastination", stress:"Freeze (shut down)", humor:"Self-Deprecating", attachment:"Anxious", beliefs:"Secular Rituals", texture:"Preferences & Small Pleasures"},
+  charmingManipulator:  {attachment:"Avoidant", values:"Self-Interested", role:"Instigator", humor:"Teasing as Affection", stress:"Fawn (appease the threat)", competence:"People & Rooms", romance:"Courtship Speech", conversation:"Masking"},
+  grievingParent:       {attachment:"Anxious", stress:"Freeze (shut down)", humor:"Humorless & Absent", vices:"Substance & Consumption", role:"Caretaker", repair:"Changed Boundaries & Failed Repair", family:"Talks About Family Constantly"},
+  reluctantSecond:      {role:"Peacemaker", values:"Loyalty-Bound", attachment:"Secure", stress:"Freeze (shut down)", humor:"Self-Deprecating", competence:"Systems & Logistics", contextrole:"Under Authority", texture:"Routines"},
+  cheerfulSociopath:    {attachment:"Avoidant", values:"Self-Interested", humor:"Cruel & Barbed", stress:"Fight (attack the threat)", role:"Instigator", repair:"Apology", conversation:"Turn-Timing"},
+  furiousCaretaker:     {role:"Caretaker", stress:"Fawn (appease the threat)", vices:"Restraint & Discipline", humor:"Gallows", values:"Loyalty-Bound", contextrole:"With Dependents", body:"Pain & Fatigue", attachment:"Anxious"},
+  washedUpProdigy:      {vices:"Substance & Consumption", humor:"Self-Deprecating", values:"Pragmatic & Flexible", role:"Outsider", stress:"Flight (remove yourself)", money:"Class-Mobility Tells", texture:"Practised Badly"},
+  companyLoyalist:      {values:"Loyalty-Bound", role:"Connector", vices:"Restraint & Discipline", humor:"Warm & Playful", attachment:"Secure", competence:"People & Rooms", texture:"Affiliations", contextrole:"Among Peers"},
+  blackSheep:           {role:"Outsider", attachment:"Disorganized", values:"Self-Interested", humor:"Dry & Deadpan", stress:"Flight (remove yourself)", family:"Sibling Rivalry", dialect:"Regional Features"},
+  compulsiveFixer:      {vices:"Compulsion & Ritual", role:"Caretaker", stress:"Fight (attack the threat)", attachment:"Anxious", humor:"Warm & Playful", competence:"Hands & Materials", repair:"Restitution & Practical Care", jargon:"Kitchen & Trade"},
+  undiscussedSurvivor:  {attachment:"Avoidant", stress:"Flight (remove yourself)", humor:"Absurd & Chaotic", values:"Pragmatic & Flexible", role:"Peacemaker", family:"Never Mentions Family", repair:"Avoidance & Humour"},
+  workaholicAvoiding:   {vices:"Avoidance & Procrastination", attachment:"Avoidant", stress:"Fight (attack the threat)", role:"Outsider", humor:"Humorless & Absent", competence:"Systems & Logistics", body:"Medication & Management", jargon:"Medical", conflictstyle:"Stonewalling & Withdrawal"},
+  formerTrueBeliever:   {role:"Skeptic", values:"Pragmatic & Flexible", attachment:"Disorganized", humor:"Intellectual & Wordplay", stress:"Fight (attack the threat)", beliefs:"Lapsed Faith", family:"Parent-Voice Echo"},
+  goldenChild:          {attachment:"Anxious", role:"Leader", values:"Idealistic & Visionary", humor:"Warm & Playful", stress:"Fawn (appease the threat)", origins:"Earned Success", family:"Sibling Rivalry", money:"Status Signalling"},
+  competentProfessional: {attachment:"Secure", vices:"Restraint & Discipline", role:"Skeptic", humor:"Dry & Deadpan", values:"Pragmatic & Flexible", competence:"Craft & Knowledge", contextrole:"Among Peers", jargon:"Tech"},
+  contentedElder:       {attachment:"Secure", humor:"Warm & Playful", values:"Pragmatic & Flexible", role:"Peacemaker", vices:"Compulsion & Ritual", origins:"Stable Care", dialect:"Era References", texture:"Preferences & Small Pleasures"},
+  genuinelyFunny:       {humor:"Intellectual & Wordplay", role:"Connector", attachment:"Anxious", vices:"Risk & Escape", stress:"Flight (remove yourself)", conversation:"Turn-Timing", fears:"Social Dreads"},
+  careerBureaucrat:     {values:"Rigid & Principled", vices:"Restraint & Discipline", humor:"Humorless & Absent", stress:"Freeze (shut down)", attachment:"Avoidant", competence:"Systems & Logistics", jargon:"Legal", money:"Thrift Talk", conflictstyle:"Litigator"},
+  trueZealot:           {values:"Idealistic & Visionary", role:"Instigator", stress:"Fight (attack the threat)", attachment:"Disorganized", humor:"Humorless & Absent", beliefs:"Faith Practice", conversation:"Scripted Speech"},
+  alienLogic:           {role:"Outsider", humor:"Intellectual & Wordplay", attachment:"Avoidant", values:"Rigid & Principled", stress:"Freeze (shut down)", conversation:"Sensory Load", dialect:"Second-Language Speaker"},
+  unbotheredYoung:      {attachment:"Secure", humor:"Dry & Deadpan", values:"Pragmatic & Flexible", vices:"Avoidance & Procrastination", role:"Instigator", dialect:"Youth Register", texture:"Preferences & Small Pleasures"},
+  steadyOrganiser:      {role:"Leader", vices:"Restraint & Discipline", humor:"Warm & Playful", values:"Loyalty-Bound", attachment:"Secure", competence:"People & Rooms", origins:"Learned Trust", texture:"Routines", family:"Talks About Family Constantly", conflictstyle:"Peacekeeper & Smoother"},
+  cheerfulMess:         {attachment:"Disorganized", humor:"Absurd & Chaotic", vices:"Risk & Escape", role:"Connector", stress:"Fawn (appease the threat)", texture:"Practised Badly", romance:"Jealousy Tells", conflictstyle:"Escalate then Apologise"},
+  plainSpoken:          {attachment:"Secure", values:"Pragmatic & Flexible", role:"Caretaker", humor:"Warm & Playful", stress:"Freeze (shut down)", competence:"Hands & Materials", origins:"Stable Care", jargon:"Kitchen & Trade", money:"Thrift Talk"},
+  softSpokenSecond:     {role:"Peacemaker", stress:"Fawn (appease the threat)", attachment:"Anxious", values:"Loyalty-Bound", humor:"Self-Deprecating", fears:"Social Dreads", contextrole:"Under Authority", conflictstyle:"Passive-Aggressive"},
+  bluntForeman:         {role:"Leader", stress:"Fight (attack the threat)", values:"Rigid & Principled", humor:"Cruel & Barbed", competence:"Hands & Materials", vices:"Substance & Consumption", body:"Hearing & Sight", contextrole:"With Dependents"},
+  dreamyDrifter:        {role:"Outsider", vices:"Avoidance & Procrastination", attachment:"Secure", humor:"Absurd & Chaotic", values:"Idealistic & Visionary", beliefs:"Superstition", texture:"Preferences & Small Pleasures"},
+  stubbornCraftsman:    {values:"Rigid & Principled", vices:"Compulsion & Ritual", attachment:"Avoidant", role:"Skeptic", humor:"Humorless & Absent", competence:"Craft & Knowledge", jargon:"Kitchen & Trade", texture:"Routines"},
+  openHeartedShambles:  {attachment:"Anxious", vices:"Substance & Consumption", humor:"Warm & Playful", role:"Connector", stress:"Fawn (appease the threat)", romance:"Pining Tells", money:"Money Taboo"},
+  weepingBrawler:       {stress:"Fight (attack the threat)", vices:"Risk & Escape", attachment:"Disorganized", values:"Loyalty-Bound", role:"Instigator", body:"Stammer & Speech Blocks", family:"Sibling Rivalry"},
+  lovableLiar:          {values:"Self-Interested", humor:"Callback & Running Bit", role:"Connector", attachment:"Anxious", stress:"Flight (remove yourself)", beliefs:"Superstition", fears:"Social Dreads"},
+  incuriousContent:     {humor:"Humorless & Absent", values:"Pragmatic & Flexible", role:"Peacemaker", attachment:"Secure", vices:"Restraint & Discipline", texture:"Routines", money:"Thrift Talk"},
+  gloomyRomantic:       {attachment:"Anxious", humor:"Self-Deprecating", vices:"Substance & Consumption", values:"Idealistic & Visionary", stress:"Freeze (shut down)", romance:"Pining Tells", beliefs:"Lapsed Faith"},
+  scatteredGenius:      {humor:"Intellectual & Wordplay", vices:"Compulsion & Ritual", role:"Outsider", attachment:"Disorganized", stress:"Flight (remove yourself)", conversation:"Info-Dumping", jargon:"Tech"},
+  jadedFixer:           {values:"Pragmatic & Flexible", humor:"Cruel & Barbed", stress:"Flight (remove yourself)", role:"Skeptic", attachment:"Avoidant", competence:"People & Rooms", conversation:"Masking", dialect:"Code-Switching"},
+  bigHeartedBoss:       {role:"Leader", humor:"Warm & Playful", vices:"Risk & Escape", attachment:"Secure", stress:"Fight (attack the threat)", origins:"Learned Trust", contextrole:"With Dependents", jargon:"Service"},
+  newParent:            {attachment:"Anxious", role:"Caretaker", stress:"Freeze (shut down)", humor:"Self-Deprecating", values:"Loyalty-Bound", origins:"Stable Care", family:"Talks About Family Constantly", body:"Breath & Stamina"},
+  midlifeReinventor:    {vices:"Risk & Escape", role:"Instigator", values:"Idealistic & Visionary", attachment:"Disorganized", humor:"Self-Deprecating", money:"Class-Mobility Tells", texture:"Affiliations"},
+  restlessRetiree:      {vices:"Compulsion & Ritual", humor:"Dry & Deadpan", role:"Skeptic", values:"Rigid & Principled", competence:"Craft & Knowledge", stress:"Fight (attack the threat)", dialect:"Dated Slang", body:"Hearing & Sight"},
+  codeSwitcher:         {role:"Connector", values:"Loyalty-Bound", stress:"Fawn (appease the threat)", humor:"Intellectual & Wordplay", attachment:"Secure", origins:"Learned Trust", dialect:"Code-Switching", family:"Parent-Voice Echo"},
+  preciseLiteralist:    {role:"Outsider", humor:"Dry & Deadpan", values:"Rigid & Principled", vices:"Compulsion & Ritual", stress:"Flight (remove yourself)", competence:"Craft & Knowledge", conversation:"Literal Uptake", texture:"Routines"},
+  incurableFlirt:       {attachment:"Disorganized", humor:"Warm & Playful", role:"Connector", vices:"Risk & Escape", values:"Idealistic & Visionary", romance:"Flirting Style", conversation:"Turn-Timing"},
+  secularIdeologue:     {values:"Rigid & Principled", role:"Instigator", stress:"Fight (attack the threat)", humor:"Humorless & Absent", attachment:"Avoidant", beliefs:"Political Temperament", conversation:"Info-Dumping"},
+  nosyNeighbour:        {role:"Connector", vices:"Compulsion & Ritual", values:"Rigid & Principled", humor:"Cruel & Barbed", attachment:"Anxious", texture:"Affiliations", beliefs:"Conspiracy-Adjacent"},
+  pompousBlowhard:      {role:"Leader", humor:"Intellectual & Wordplay", values:"Self-Interested", stress:"Fight (attack the threat)", attachment:"Avoidant", money:"Status Signalling", dialect:"Class Register Shift"},
+  maliciousTrickster:   {humor:"Cruel & Barbed", role:"Instigator", values:"Self-Interested", vices:"Risk & Escape", attachment:"Disorganized", beliefs:"Conspiracy-Adjacent", conversation:"Masking", conflictstyle:"Triangulator"},
+  loudKind:             {role:"Caretaker", humor:"Warm & Playful", attachment:"Secure", values:"Loyalty-Bound", stress:"Fight (attack the threat)", family:"Talks About Family Constantly"},
+  disciplinedRebel:     {values:"Rigid & Principled", role:"Outsider", humor:"Dry & Deadpan", stress:"Fight (attack the threat)", beliefs:"Political Temperament"},
+  anxiousLeader:        {role:"Leader", attachment:"Anxious", stress:"Freeze (shut down)", humor:"Self-Deprecating", vices:"Compulsion & Ritual", values:"Loyalty-Bound", conversation:"Masking"},
+  cheerfulNihilist:     {humor:"Gallows", values:"Pragmatic & Flexible", attachment:"Disorganized", role:"Outsider", stress:"Flight (remove yourself)", vices:"Avoidance & Procrastination", beliefs:"Secular Rituals"},
+  streetwiseSage:       {role:"Peacemaker", values:"Pragmatic & Flexible", humor:"Observational", attachment:"Secure", dialect:"Regional Features", money:"Thrift Talk"},
+  politeLiar:           {humor:"Dry & Deadpan", role:"Connector", values:"Self-Interested", attachment:"Avoidant", vices:"Restraint & Discipline", conversation:"Scripted Speech"},
 };
 Object.entries(ARCHETYPE_PROFILE_HINTS).forEach(([k, profile])=>{
   if (ARCHETYPES[k]) ARCHETYPES[k].profile = profile;
@@ -1238,6 +1279,12 @@ const ARCHETYPE_INTENT = {
   nosyNeighbour:        {must:["curiosity","honesty"], nudge:["role","vices","values","humor","attachment"], open:["stress"]},
   pompousBlowhard:      {must:["confidence","curiosity"], nudge:["role","humor","values","stress","attachment"], open:["vices"]},
   maliciousTrickster:   {must:["honesty","agreeableness"], nudge:["humor","role","values","vices","attachment"], open:["stress"]},
+  loudKind:             {must:["assertiveness","friendliness"], nudge:["role","humor","attachment","values","stress"], open:["vices"]},
+  disciplinedRebel:     {must:["discipline","rebelliousness"], nudge:["values","role","humor","stress","attachment"], open:["vices"]},
+  anxiousLeader:        {must:["assertiveness","confidence"], nudge:["role","attachment","stress","humor","vices"], open:["values"]},
+  cheerfulNihilist:     {must:["positivity","emotionalcapacity"], nudge:["humor","values","attachment","role","stress"], open:["vices"]},
+  streetwiseSage:       {must:["intelligence","honesty"], nudge:["role","values","humor","attachment"], open:["stress"]},
+  politeLiar:           {must:["manners","honesty"], nudge:["humor","role","values","attachment","vices"], open:["stress"]},
 };
 
 /* ================= NAMED VARIATIONS =================
@@ -1403,6 +1450,18 @@ const ARCHETYPE_VARIATIONS = {
   maliciousTrickster:[{id:"playful", label:"Mostly playful", pers:{friendliness:40, emotionalcapacity:20}, profile:{humor:"Absurd & Chaotic"}},
              {id:"cold", label:"Cold", pers:{friendliness:-50, positivity:-30}, profile:{humor:"Dry & Deadpan", role:"Outsider"}},
              {id:"avenger", label:"Settling scores", pers:{discipline:50}, profile:{values:"Rigid & Principled", stress:"Fight (attack the threat)"}}],
+  loudKind:[{id:"overbearing", label:"Overbearing", pers:{agreeableness:-30}, profile:{role:"Leader"}},
+             {id:"tender", label:"Tender underneath", pers:{manners:30}, profile:{humor:"Self-Deprecating"}}],
+  disciplinedRebel:[{id:"cause", label:"For a cause", pers:{friendliness:35}, profile:{values:"Idealistic & Visionary", role:"Instigator"}},
+             {id:"lone", label:"Lone operator", pers:{friendliness:-35}, profile:{role:"Outsider", attachment:"Avoidant"}}],
+  anxiousLeader:[{id:"overprepared", label:"Over-prepared", pers:{discipline:25}, profile:{vices:"Compulsion & Ritual"}},
+             {id:"cracking", label:"Starting to crack", pers:{emotionalcapacity:30}, profile:{stress:"Fight (attack the threat)"}}],
+  cheerfulNihilist:[{id:"gentle", label:"Gentle", pers:{agreeableness:30}, profile:{role:"Peacemaker"}},
+             {id:"sharp", label:"Sharp", pers:{agreeableness:-30}, profile:{humor:"Cruel & Barbed"}}],
+  streetwiseSage:[{id:"mentor", label:"Mentor", pers:{friendliness:25}, profile:{role:"Caretaker"}},
+             {id:"hard", label:"Hard-won", pers:{positivity:-30}, profile:{humor:"Gallows"}}],
+  politeLiar:[{id:"kind-lies", label:"Kind lies", pers:{friendliness:35}, profile:{role:"Peacemaker"}},
+             {id:"self-serving", label:"Self-serving", pers:{friendliness:-35}, profile:{role:"Instigator"}}],
 };
 Object.entries(ARCHETYPE_INTENT).forEach(([k, v])=>{ if (ARCHETYPES[k]) ARCHETYPES[k].intent = v; });
 Object.entries(ARCHETYPE_VARIATIONS).forEach(([k, v])=>{ if (ARCHETYPES[k]) ARCHETYPES[k].variations = v; });
@@ -1740,6 +1799,13 @@ let _avoidRecentActive = false;   // resolved once per build, not per draw
 const RECENT_DECAY = 0.82;            // per character of age
 const RECENT_FAMILY_PENALTY = 0.7;    // same concept family as a recent trait
 let recentFamilies = [];              // array of Sets of conceptFamily, newest last
+/* Saved traits (the bookmark on each card) are a personal "always consider" list. By
+   default they steer nothing; with the switch on they count double in every draw. */
+const FAVOURITE_BOOST = 2;
+function favouriteBoostEnabled(){ const el = settingEl('favouriteBoostToggle'); return el ? !!el.checked : false; }
+function favouriteMultiplier(t){
+  return (favouriteBoostEnabled() && typeof favouriteTraitIds !== 'undefined' && favouriteTraitIds.has(t.id)) ? FAVOURITE_BOOST : 1;
+}
 function recentPenalty(t){
   let m = avoidPenalty(t) * retirePenalty(t);
   if (!_avoidRecentActive || !recentTraitIds.length) return m;
@@ -2126,7 +2192,7 @@ function _pickInRangeInner(pool, rarityPref, target, minCount, flatten){
       // The same coin now flips the trait-level fit too.
       if (fit) w *= clamp(1 + aff*fit*(_divergeThisDraw ? -1 : 1), 0.15, 3);
     }
-    w *= recentPenalty(t) * slotRepeatPenalty(t) * worldTagMultiplier(t);
+    w *= recentPenalty(t) * slotRepeatPenalty(t) * worldTagMultiplier(t) * favouriteMultiplier(t);
     return w;
   });
   const total = weights.reduce((a,b)=>a+b,0);
@@ -3061,15 +3127,17 @@ function rarityNorm(list){
    two-member class in a twenty-trait pool outweigh an eleven-member one. The thin
    classes are still lifted, just not to the point of dominating. */
 const RARITY_NORM_EXP = 0.5;
+const _V2_LIFT = {distinctive: 1.25, signature: 1.5};
+function _v2RarityLift(tier){ return ENGINE_V >= 2 ? (_V2_LIFT[tier] || 1) : 1; }
 function rarityWeight(t, pref, norm){
   const tier = t.rtier || rarityTier(t);
   const base = (norm && norm[tier]) ? 1 / Math.pow(norm[tier], RARITY_NORM_EXP) : 1;
   const p = rarityPrefValue(pref);
-  if (!p) return base;
+  if (!p) return base * _v2RarityLift(tier);
   // 3^(pref * tierScore): symmetric either way, with the two middle tiers sitting
   // proportionally between the poles rather than being dragged along with whichever
   // end they were lumped into.
-  return base * Math.pow(3, p * (RTIER_SCORE[tier] !== undefined ? RTIER_SCORE[tier] : 0));
+  return base * Math.pow(3, p * (RTIER_SCORE[tier] !== undefined ? RTIER_SCORE[tier] : 0)) * _v2RarityLift(tier);
 }
 function pickWeighted(arr, pref){
   if (!arr.length) return null;
@@ -3441,12 +3509,13 @@ function checkConflictsFor(stateObj){
     for (let j=i+1;j<items.length;j++){
       if (groups[i] && groups[i] === groups[j]) continue;
       const a = items[i].trait, b = items[j].trait;
-      if (!a.pol || !b.pol) continue;
+      const pa = polForConflicts(a), pb = polForConflicts(b);
+      if (!Object.keys(pa).length || !Object.keys(pb).length) continue;
       if (contextual(a) || contextual(b)) continue;
       // A seated contradiction (audit §5) is the point, not a clash to warn about.
       if (items[i].contradiction || items[j].contradiction) continue;
       for (const axis of Object.keys(AXIS_LABELS)){
-        if (a.pol[axis] === 1 && b.pol[axis] === -1 || a.pol[axis] === -1 && b.pol[axis] === 1){
+        if (pa[axis] === 1 && pb[axis] === -1 || pa[axis] === -1 && pb[axis] === 1){
           const pk = a.trait + '|' + b.trait;
           if (pairSeen.has(pk)) break;
           pairSeen.add(pk);
@@ -3461,8 +3530,103 @@ function checkConflictsFor(stateObj){
       }
     }
   }
+  /* Pairs polarity cannot see (2026 audit §4a: a quarter of the bank has no polarity):
+     an explicit table of names that exclude each other. Matched on the trait name and
+     the category, one conflict per pair. */
+  for (let i=0;i<items.length;i++){
+    for (let j=i+1;j<items.length;j++){
+      if (groups[i] && groups[i] === groups[j]) continue;
+      const a = items[i].trait, b = items[j].trait;
+      if (contextual(a) || contextual(b) || items[i].contradiction || items[j].contradiction) continue;
+      const na = a.trait + ' ' + (a.category || ''), nb = b.trait + ' ' + (b.category || '');
+      for (const [ra, rb, why] of TRAIT_CLASH_PAIRS){
+        if ((ra.test(na) && rb.test(nb) && !rb.test(na) && !ra.test(nb)) || (ra.test(nb) && rb.test(na) && !rb.test(nb) && !ra.test(na))){
+          const key = `${a.trait}|${b.trait}|clash:${why}`;
+          const severity = (a.intensity||3) + (b.intensity||3), tier = conflictTier(severity);
+          if (!found.has(key)) found.set(key, {key, severity, tier: tier.label, tierNote: tier.note,
+            text: `"${a.trait}" and "${b.trait}" cannot both hold: ${why}.`});
+          break;
+        }
+      }
+    }
+  }
+  const nd = nearDuplicateIndex(), seenDup = new Set();
+  items.forEach((it, i) => {
+    const mates = nd.get(it.trait.id); if (!mates) return;
+    items.forEach((ot, j) => {
+      if (j <= i || !mates.has(ot.trait.id) || (groups[i] && groups[i] === groups[j])) return;
+      const key = `${it.trait.trait}|${ot.trait.trait}|nearly-same`;
+      if (seenDup.has(key)) return; seenDup.add(key);
+      found.set(key, {key, severity: 2, tier: "soft", tierNote: "Not a contradiction: a repeat.",
+        text: `"${it.trait.trait}" and "${ot.trait.trait}" say nearly the same thing; one of them is wasted. Reroll one.`});
+    });
+  });
   return [...found.values()].sort((x,y)=> y.severity - x.severity);
 }
+/* Near-duplicates (audit §4a): an older trait next to a later pack's rewrite of it, in one
+   category. Found once, lazily, by name and description overlap; the draw is left alone
+   (changing it would change what an existing seed builds), and a sheet that seats both
+   is told so, so one can be rerolled. */
+let _NEAR_DUPS = null;
+function nearDuplicateIndex(){
+  if (_NEAR_DUPS) return _NEAR_DUPS;
+  const tok = x => new Set(String(x || "").toLowerCase().replace(/[^a-z0-9 -]/g, " ").split(/[\s-]+/).filter(w => w.length > 2));
+  const jac = (a, b) => { let n = 0; a.forEach(w => { if (b.has(w)) n++; }); return n / ((a.size + b.size - n) || 1); };
+  const byCat = new Map();
+  TRAITS.forEach(t => { const k = t.section + "|" + t.category; if (!byCat.has(k)) byCat.set(k, []); byCat.get(k).push(t); });
+  const idx = new Map();
+  byCat.forEach(list => {
+    const nt = list.map(t => tok(t.trait)), dt = list.map(t => tok(t.desc));
+    for (let i = 0; i < list.length; i++) for (let j = i + 1; j < list.length; j++){
+      const n = jac(nt[i], nt[j]), d = jac(dt[i], dt[j]);
+      if ((n >= 0.6 && d >= 0.35) || d >= 0.7){
+        if (!idx.has(list[i].id)) idx.set(list[i].id, new Set()); idx.get(list[i].id).add(list[j].id);
+        if (!idx.has(list[j].id)) idx.set(list[j].id, new Set()); idx.get(list[j].id).add(list[i].id);
+      }
+    }
+  });
+  return (_NEAR_DUPS = idx);
+}
+/* Inferred polarity (audit §4a: 26% of the bank carries none, so conflict detection could
+   never see it). Keyword rules read the name and description of an untagged trait and give
+   it a DERIVED pole. It is used only to report conflicts, never to draw: polarityFit reads
+   t.pol alone, so a seed still builds the same character. A trait where both poles of an
+   axis match gets nothing on that axis. */
+const POL_INFER_RULES = [
+  ["vol", 1, /\b(loud|booming|shout|yell|talkative|chatter|rambl|monologu|long-winded|effusive|over-?shar)/i],
+  ["vol", -1, /\b(whisper|hushed|murmur|terse|laconic|mumbl|monosyll|ultra-brief|barely speaks)/i],
+  ["pace", -1, /\b(slow|drawl|unhurried|lingering|deliberate)/i], ["pace", 1, /\b(rapid|rushed|machine-gun|staccato|breathless|fast-talk)/i],
+  ["form", 1, /\b(formal|ceremon|courtly|stiff|elevated|pompous)/i], ["form", -1, /\b(casual|slang|colloquial|informal)/i],
+  ["warm", 1, /\b(warm|affection|tender|gentle|caring|soothing|reassur)/i], ["warm", -1, /\b(cold|curt|cutting|dismissive|aloof|detached|sneer|scornful|harsh|icy)/i],
+  ["hon", -1, /\b(evasive|deflect|spin|euphemis|hedg|vague|obfuscat|lies)/i], ["hon", 1, /\b(blunt|candid|frank|plain-spoken|brutally honest)/i],
+  ["asrt", 1, /\b(command|insist|firm|decisive|demand|dominat|authorit)/i], ["asrt", -1, /\b(hesitant|tentative|defer|yield|timid|diffident|deferential)/i],
+  ["emo", 1, /\b(expressive|tearful|gushing|wears (it|their)|open about)/i], ["emo", -1, /\b(guarded|stoic|reserved|bottled|deadpan|impassive|flat affect)/i],
+  ["mood", -1, /\b(sigh|grumbl|irritab|weary|snappish|sullen|moan|complain)/i], ["mood", 1, /\b(cheerful|sunny|chirpy|bubbly|upbeat)/i],
+  ["disc", 1, /\b(meticulous|methodical|orderly|rehears|structured|exact)/i], ["disc", -1, /\b(scattered|tangent|digress|chaotic|impulsive|disorgani)/i],
+  ["intel", 1, /\b(analytic|logical|hypothes|technical)/i], ["intel", -1, /\b(gut feeling|instinct|intuit|hunch)/i],
+  ["act", 1, /\b(fidget|restless|energetic|bounc)/i], ["act", -1, /\b(slump|languid|sedentary|lethargic|motionless)/i],
+  ["cur", 1, /\b(curious|probing|inquisitive|asks questions)/i],
+  ["ego", 1, /\b(boast|brag|swagger|self-assured)/i], ["ego", -1, /\b(self-deprecat|self-doubt|sheepish|insecure|small voice)/i],
+  ["man", -1, /\b(rude|crude|interrupt|swear|profan|belch)/i], ["man", 1, /\b(courteous|please and thank)/i],
+];
+function inferredPolarity(t){
+  if (t._polInf !== undefined) return t._polInf;
+  let out = {};
+  if (!t.pol || !Object.keys(t.pol).length){
+    const text = (t.trait || "") + " " + (t.desc || ""), hit = {};
+    POL_INFER_RULES.forEach(([ax, sg, re]) => { if (re.test(text)) (hit[ax] = hit[ax] || new Set()).add(sg); });
+    Object.entries(hit).forEach(([ax, set]) => { if (set.size === 1) out[ax] = [...set][0]; });
+  }
+  Object.defineProperty(t, "_polInf", {value: out, enumerable: false, writable: true});
+  return out;
+}
+let polForConflicts = t => (t.pol && Object.keys(t.pol).length) ? t.pol : inferredPolarity(t);
+const TRAIT_CLASH_PAIRS = [
+  [/^(whisper-thin|whispered|whisper-soft|breathy-whisper swell)\b/i, /booming|bellow|thunder/i, "one speaks at the edge of hearing, the other fills the room"],
+  [/^never-apologizes\b/i, /\b(over-apologetic|instant-apologizer|apology-flooding|apology-prefacing|anticipatory apologist|apology-and-repeat|apologetic-funny)/i, "one will not say sorry, the other says it for everything"],
+  [/Minimal & Ultra-Brief$/i, /\b(rambl|monologu|long-winded|holds forth)/i, "one gives a word, the other a speech"],
+  [/\bTalks About Family Constantly\b/i, /\bNever Mentions Family\b/i, "one talks about family constantly, the other never mentions it"],
+];
 
 
 /* ================= POLARITY COVERAGE NORMALISATION =================
@@ -3580,8 +3744,13 @@ function assertAxisTables(){
   return problems;
 }
 
+const CONTRADICTION_SKIP_SECTIONS = new Set(["Positive Origins","Motivation & Wound","Goals & Stakes",
+  "Recovery & Repair","Contradiction Functions","Money & Class","Family Talk","Fears & Aversions"]);
 function contradictionFor(stateObj){
-  const items = Object.values(stateObj || {}).filter(s=> s && s.trait && s.trait.pol);
+  /* Only cards that describe how someone BEHAVES can contradict each other. History and
+     circumstance (an origin, a wound, a goal) share axis tags too, and the panel used to
+     set "Parents who liked each other" against a mannerism as if they were two faces. */
+  const items = Object.values(stateObj || {}).filter(s=> s && s.trait && s.trait.pol && !CONTRADICTION_SKIP_SECTIONS.has(s.trait.section));
   let best = null;
   for (let i = 0; i < items.length; i++){
     for (let j = i + 1; j < items.length; j++){
@@ -3887,6 +4056,20 @@ function pickPersonalitySlot(axis, level, rarityPref){
        Still flagged neutral:true, because it is still a neutral reading — that is what
        keeps checkEnsembleBalance from counting it as posture, which would be the wrong
        answer for a character whose slider was never moved. */
+    /* v2: a moderate character used to draw only quiet traits, so the loud end of every
+       axis (intensity 4-5, 70-99% of it never drawn at default settings) was out of reach
+       unless a slider moved. One axis in five now draws a single standout trait from a
+       random pole: a middling sheet with one thing about them that is not middling. It stays
+       flagged neutral, so the radar and the ensemble check do not read it as a posture. */
+    if (ENGINE_V >= 2 && rand() < 0.2){
+      const side = rand() < 0.5 ? axis.pos : axis.neg;
+      const loud = byFilter("Personality Traits", side);
+      if (loud.length){
+        const lt = 3.6 + rand() * 1.2;
+        return {slotId:"pers_"+axis.id, locked:false, label:axis.label, target: lt, neutral:true,
+                trait: withSlotMemory("pers_"+axis.id, ()=>pickInRange(loud, rarityPref, lt, 10, true))};
+      }
+    }
     const quiet = cat => byFilter("Personality Traits", cat).filter(t => traitPos(t) <= NEUTRAL_POLE_CEILING);
     const widened = neutralPool.concat(quiet(axis.pos), quiet(axis.neg));
     const pool = widened.length > neutralPool.length ? widened : neutralPool;
@@ -4016,16 +4199,44 @@ const PROFILE_SECTIONS = [
    blurb:"The concrete ones — phobias, social dreads, bodily aversions — beside the abstract Core Fear."},
   {id:"family", section:"Family Talk", label:"Family Talk", drawAll:false, defaultOn:false,
    blurb:"How much, and how, family comes into their conversation."},
+  {id:"conflictstyle", section:"Conflict Style", label:"Conflict Style", drawAll:false, defaultOn:false,
+   blurb:"How they fight: stonewalling, passive-aggression, arguing the record, smoothing, escalating then apologising, sulking, triangulating."},
 ];
 
 
 /* Is this section drawn? A missing toggle (a trimmed page, the test harness) used to
    read as ON, which was fine when every section shipped on. The §6 sections ship off
    by default, so an absent control has to mean "the shipped default", not "yes". */
-function profileSectionEnabled(ps){
+// The section's own switch, as the Profile panel shows it.
+function profileSectionChecked(ps){
   const tog = settingEl('sec_'+ps.id);
   if (tog) return !!tog.checked;
   return ps.defaultOn !== false;
+}
+/* Twelve sections ship off, so no preset could ever reach them: 690 traits, 0% reach.
+   A preset that hints one of them (ARCHETYPE_PROFILE_HINTS) brings it in for that build
+   — "Diaspora Code-Switcher" draws Dialect, "Scattered Genius" draws Conversation — and
+   only while its profile is the live one (a build, or a preview), so cast members, foils
+   and the gap-filler stay exactly as they were. One switch turns this off. */
+function archetypeSectionsEnabled(){
+  const el = settingEl('archetypeSectionsToggle');
+  return el ? !!el.checked : true;
+}
+function archetypeOptsIn(ps){
+  return ps.defaultOn === false && !!CURRENT_ARCHETYPE_PROFILE && !!CURRENT_ARCHETYPE_PROFILE[ps.id] && archetypeSectionsEnabled();
+}
+function profileSectionEnabled(ps){
+  return profileSectionChecked(ps) || archetypeOptsIn(ps);
+}
+// The sections the SELECTED preset switches on that the panel shows as off — for the
+// in-force strip and the "why not" tool, which run outside a build.
+function archetypeAddedSections(){
+  if (!archetypeSectionsEnabled() || typeof effectiveArchetype !== 'function') return [];
+  const key = (document.getElementById('archetypeSelect')||{}).value || '';
+  if (!key) return [];
+  const arch = effectiveArchetype(key, (document.getElementById('archetypeVariation')||{}).value);
+  const prof = arch && arch.profile;
+  return prof ? PROFILE_SECTIONS.filter(ps => ps.defaultOn === false && prof[ps.id] && !profileSectionChecked(ps)) : [];
 }
 
 // Resolves which TYPE each profile section lands on, one section at a time, in the order
@@ -4169,7 +4380,15 @@ function pickProfileSlots(rarityPref, resolvedCats, onlySectionId, skipSectionId
       const spreadAll = (base, i) => n > 1
         ? clamp(base + (((i + rot) % n) / (n - 1) - 0.5) * MOTIVATION_TARGET_SPREAD, 1, 5)
         : base;
+      /* v2: every sheet carried all seven Motivation cards, which is most of the "same
+         skeleton" feeling. About a third of sheets now leave out the Ghost or the Defence
+         (the two the chain and the pressure ladder can do without), so some characters
+         simply do not have one. */
+      const droppable = ENGINE_V >= 2 && ps.id === MOTIVATION_SECTION_ID
+        ? cats.map((c, i) => /The Ghost|The Defence/i.test(c) ? i : -1).filter(i => i >= 0) : [];
+      const dropIdx = droppable.length && rand() < 0.33 ? droppable[Math.floor(rand() * droppable.length)] : -1;
       cats.forEach((cat,i)=>{
+        if (i === dropIdx) return;
         const pool = byFilter(ps.section, cat);
         const slotId = `prof_${ps.id}_${i}`;
         const tgt = spreadAll(target, i);
@@ -4385,6 +4604,38 @@ const ARCH_NOUN = {
   "Risk & Escape":["Gambler","Bolter"], "Restraint & Discipline":["Ascetic","Abstainer"],
   "Avoidance & Procrastination":["Postponer","Deferrer"],
 };
+/* Name shapes beyond "The [Adj] [Noun]": a verb phrase, a possession, or a disguise. */
+const ARCH_WHO = {
+  "Rigid & Principled":["Keeps the Rules Nobody Asked For","Will Not Bend"], "Pragmatic & Flexible":["Makes It Work","Reads the Room Twice"],
+  "Loyalty-Bound":["Stays Past Reason","Never Leaves First"], "Self-Interested":["Counts the Cost","Keeps a Ledger"],
+  "Idealistic & Visionary":["Still Believes","Builds Castles in Daylight"],
+  "Secure":["Holds Steady","Lets the Storm Pass"], "Anxious":["Checks Twice","Waits for the Other Shoe"],
+  "Avoidant":["Leaves the Room First","Answers Tomorrow"], "Disorganized":["Wants Both","Changes Their Mind Mid-Sentence"],
+  "Fight (attack the threat)":["Hits First","Squares Up"], "Flight (remove yourself)":["Is Already at the Door","Finds Another Errand"],
+  "Freeze (shut down)":["Goes Quiet","Stops Mid-Sentence"], "Fawn (appease the threat)":["Says Yes Too Fast","Smooths It Over"],
+  "Substance & Consumption":["Pours Another","Reaches for the Bottle"], "Compulsion & Ritual":["Needs It Just So","Repeats the Check"],
+  "Risk & Escape":["Takes the Bet","Bolts at the Best Part"], "Restraint & Discipline":["Does Without","Keeps the Rules for Themself"],
+  "Dry & Deadpan":["Never Smiles First"], "Cruel & Barbed":["Finds the Soft Spot"], "Self-Deprecating":["Goes First on the Joke"],
+};
+const ARCH_OF = {
+  "Rigid & Principled":["Iron Rules","the Written Law"], "Pragmatic & Flexible":["Small Compromises","Convenient Truths"],
+  "Loyalty-Bound":["Old Debts","Long Allegiance"], "Self-Interested":["Quiet Leverage","the Open Hand, Closed"],
+  "Idealistic & Visionary":["Unfinished Futures","Borrowed Light"],
+  "Secure":["Level Ground"], "Anxious":["Held Breath","Small Alarms"], "Avoidant":["Closed Doors","the Long Way Round"],
+  "Disorganized":["Crossed Wires","Half-Finished Things"],
+  "Substance & Consumption":["Empty Glasses"], "Compulsion & Ritual":["Small Rituals"], "Risk & Escape":["Burnt Bridges","Last Chances"],
+  "Restraint & Discipline":["Closed Fists, Open Hands"],
+  "Fight (attack the threat)":["Raised Voices"], "Flight (remove yourself)":["Packed Bags"],
+  "Freeze (shut down)":["Held Silence"], "Fawn (appease the threat)":["Soft Answers"],
+  "Dry & Deadpan":["Flat Delivery"], "Cruel & Barbed":["Sharp Edges"],
+};
+const ARCH_COAT = {
+  "Warm & Playful":["Cheer","Sunshine"], "Dry & Deadpan":["Indifference","Boredom"], "Cruel & Barbed":["Candour","Wit"],
+  "Self-Deprecating":["Modesty","Apology"], "Absurd & Chaotic":["Nonsense"],
+  "Rigid & Principled":["Principle","Duty"], "Pragmatic & Flexible":["Common Sense"], "Self-Interested":["Generosity","Good Advice"],
+  "Loyalty-Bound":["Duty"], "Idealistic & Visionary":["Idealism"],
+  "Secure":["Calm"], "Anxious":["Helpfulness"], "Avoidant":["Independence"], "Disorganized":["Spontaneity"],
+};
 // Deterministic when a seed is given (mulberry32 PRNG off a string hash), otherwise
 // falls back to rand(). Lets any caller opt into repeatable output — e.g. the
 // same character name always composing the same emergent title — without a global mode.
@@ -4438,6 +4689,19 @@ function emergentArchetypeName(st){
       }
       // "The Barbed Blade" — an adjective and noun from the same category is a tautology
       if (adj.toLowerCase() === noun.toLowerCase()) return null;
+      // Other shapes (2026 audit §5a): every composed name was "The [Adj] [Noun]".
+      const shape = seededRandom(seed + "shape")();
+      const pickOf = (map, cats, k) => { const c = cats.filter(x => map[x]); return c.length ? pickFrom(map[pickFrom(c, seed + k)], seed + k + "2") : null; };
+      if (shape >= 0.55 && shape < 0.75){
+        const who = pickOf(ARCH_WHO, [stress, attach, values, vices, humor], "w");
+        if (who) return noun + " Who " + who;
+      } else if (shape >= 0.75 && shape < 0.9){
+        const of = pickOf(ARCH_OF, [values, vices, attach, stress, humor], "o");
+        if (of) return "The " + noun + " of " + of;
+      } else if (shape >= 0.9){
+        const coat = pickOf(ARCH_COAT, [humor, values, attach], "c");
+        if (coat && role && ARCH_NOUN[role]) return "The " + pickFrom(ARCH_NOUN[role], seed + "rc") + " in " + coat + "'s Coat";
+      }
       return "The " + adj + " " + noun;
     }
     if (nounSrc.length) return "The " + pickFrom(ARCH_NOUN[pickFrom(nounSrc, seed+"n")], seed+"n2");
@@ -5050,6 +5314,17 @@ function buildSeedPicker(){
   if (!sel) return;
   SEEDABLE_TRAITS = TRAITS.filter(t => t.section==="Personality Traits" ||
     PROFILE_SECTIONS.some(ps=>ps.section===t.section));
+  /* The picker held ~6,300 <option>s — three quarters of the page's DOM — inside a panel almost
+     nobody opens. It is now built the first time the panel is opened (or the filter is used). */
+  const panel = sel.closest && sel.closest('details');
+  if (panel && panel.addEventListener && !panel.open){
+    panel.addEventListener('toggle', ()=>{ if (panel.open) ensureSeedPickerRendered(); });
+  } else ensureSeedPickerRendered();
+}
+let _seedPickerRendered = false;
+function ensureSeedPickerRendered(){
+  if (_seedPickerRendered) return;
+  _seedPickerRendered = true;
   renderSeedOptions(SEEDABLE_TRAITS);
 }
 function renderSeedOptions(list){
@@ -5070,6 +5345,7 @@ function renderSeedOptions(list){
   if ([...sel.options].some(o=>o.value===prevValue)) sel.value = prevValue;
 }
 function filterSeedPicker(){
+  _seedPickerRendered = true;
   const q = strVal('seedTraitFilter', '').trim().toLowerCase();
   if (!q){ renderSeedOptions(SEEDABLE_TRAITS); return; }
   const filtered = SEEDABLE_TRAITS.filter(t =>
@@ -5321,8 +5597,10 @@ let redoStack = [];
    field can never be added to the workspace and forgotten by Undo again.
    `captureSettings`/`restoreSettings` live in render.js and read the DOM; under the
    test harness they may be absent, hence the typeof guards. */
+const HISTORY_MAX = 20;   // the history drawer lists these, so the depth is a promise
 function _snapshotNow(){
   return {
+    at: Date.now(),
     state: compressSlots(state),
     charMeta: {...charMeta},
     pressureState: compressSlots(pressureState),
@@ -5331,9 +5609,19 @@ function _snapshotNow(){
     charVariants: Object.assign({}, (typeof charVariants !== 'undefined' ? charVariants : {})),
     traitNotes: Object.assign({}, traitNotes || {}),
     settings: (typeof captureSettings === 'function') ? captureSettings() : null,
+    // The arc and the context lens belong to the sheet; undo used to leave B's arc
+    // sitting on A's sheet.
+    arc: (typeof arcBase !== 'undefined') ? {
+      base: arcBase ? compressSlots(arcBase) : null,
+      events: JSON.parse(JSON.stringify(arcEvents || [])),
+      overrides: compressSlots(arcOverrides || {}),
+      lastReplay: arcLastReplay ? compressSlots(arcLastReplay) : null,
+    } : null,
+    viewContext: (typeof viewContext !== 'undefined') ? viewContext : null,
   };
 }
 function updateUndoButtons(){
+  if (typeof renderHistoryDrawer === 'function') renderHistoryDrawer();
   const u = document.getElementById('undoBtn'); if (u) u.disabled = history.length === 0;
   const r = document.getElementById('redoBtn'); if (r) r.disabled = redoStack.length === 0;
 }
@@ -5341,7 +5629,7 @@ function snapshotHistory(){
   // A fresh action invalidates anything that was ahead of us on the timeline.
   redoStack = [];
   history.push(_snapshotNow());
-  if (history.length > 15) history.shift();
+  if (history.length > HISTORY_MAX) history.shift();
   updateUndoButtons();
 }
 // Shared by undo and redo: the restore half is identical, only which stack the current
@@ -5355,6 +5643,14 @@ function _restoreSnapshot(prev){
   if (prev.pinnedTargets) pinnedTargets = JSON.parse(JSON.stringify(prev.pinnedTargets));
   if (prev.charVariants && typeof charVariants !== 'undefined') charVariants = Object.assign({}, prev.charVariants);
   if (prev.traitNotes) traitNotes = Object.assign({}, prev.traitNotes);
+  if (prev.arc && typeof arcBase !== 'undefined'){
+    arcBase = prev.arc.base ? expandSlots(prev.arc.base) : null;
+    arcEvents = JSON.parse(JSON.stringify(prev.arc.events || []));
+    arcOverrides = expandSlots(prev.arc.overrides) || {};
+    arcLastReplay = prev.arc.lastReplay ? expandSlots(prev.arc.lastReplay) : null;
+    if (charMeta){ if (arcEvents.length) charMeta.arc = arcSummary(arcEvents); else delete charMeta.arc; }
+  }
+  if (prev.viewContext && typeof viewContext !== 'undefined') viewContext = prev.viewContext;
   restoreSliders(prev.sliders);
   lastGeneratedSliders = prev.sliders; // the restored state now corresponds to these again
   setVal('charName', charMeta.name || "");
@@ -5365,18 +5661,19 @@ function _restoreSnapshot(prev){
   diffLog = {}; rerollExclusions = {}; rerollHistory = {}; whyOpen = {}; OPEN_CARD_CONTROLS.clear();
   onSliderChange();
   renderSheet(); checkConflicts();
+  if (typeof renderArc === 'function') renderArc();
   updateUndoButtons();
 }
 function undoLast(){
   if (!history.length) return;
   redoStack.push(_snapshotNow());
-  if (redoStack.length > 15) redoStack.shift();
+  if (redoStack.length > HISTORY_MAX) redoStack.shift();
   _restoreSnapshot(history.pop());
 }
 function redoLast(){
   if (!redoStack.length) return;
   history.push(_snapshotNow());
-  if (history.length > 15) history.shift();
+  if (history.length > HISTORY_MAX) history.shift();
   _restoreSnapshot(redoStack.pop());
 }
 
@@ -5386,6 +5683,7 @@ function mkSlot(slotId, label, target, trait, extra){
   if (!trait) return emptySlot(slotId, label, Object.assign({target}, extra || {}));
   return Object.assign({slotId, locked:false, label, target, trait}, extra || {});
 }
+let ENGINE_V = 1;   // 1 = the original build; 2 = the 2026 coverage changes (see generate.js)
 function pickVerbositySlot(verbLevel, rarityPref){
   // Crossover narrowed from ±0.3 (raw ±15) to ±0.12 (raw ±6): the old dead band
   // meant nearly a third of the slider produced identical pacing-pool draws.
@@ -5427,6 +5725,17 @@ function pickVerbositySlot(verbLevel, rarityPref){
   } else {
     // Dead centre now means "situational pacing at low intensity" rather than an
     // unfiltered free-for-all — the neutral band respects the range engine too.
+    /* v2: dead centre used to mean pacing and nothing else, so four of the five Verbosity
+       categories (about 330 traits) were unreachable at default settings. Half the time
+       the neutral band now draws a quiet entry from any of them. */
+    if (ENGINE_V >= 2 && rand() < 0.5){
+      const cats = [AXES.verbosityLow, AXES.verbosityHigh, AXES.circular];
+      const ax = cats[Math.floor(rand() * cats.length)];
+      const pool2 = byFilter(ax.section, ax.category);
+      const t2 = poolFloorTarget(pool2, targetFromMag(14));
+      return mkSlot("verbosity", "Verbosity (neutral, " + ax.category.split(" ")[0].toLowerCase() + ")", t2,
+                    withSlotMemory("verbosity", ()=>pickInRange(pool2, rarityPref, t2, 8, true)));
+    }
     const pool = byFilter(AXES.pacing.section, AXES.pacing.category);
     const t = poolFloorTarget(pool, targetFromMag(18));
     return mkSlot("verbosity", "Verbosity (pacing-driven)", t,
@@ -5456,8 +5765,12 @@ function pickRegisterSlot(regLevel, rarityPref){
        deliberate statement about how formally they speak, and how PLAINLY they put
        things and how they SOUND are equally good answers to that. Draw from all three,
        weighted by depth so the widest category still leads. */
+    /* v2: Verbosity > Stylized & Elaborate (123 traits) was reachable only above +0.12 on the
+       Register slider, so at a neutral setting it was never drawn. A lightly ornate way of
+       speaking is as honest a reading of "no deliberate statement" as the other three. */
     const pool = NEUTRAL_REGISTER_CATS
-      .flatMap(c => byFilter("Vocabulary Traits", c));
+      .flatMap(c => byFilter("Vocabulary Traits", c))
+      .concat(ENGINE_V >= 2 ? byFilter(AXES.stylized.section, AXES.stylized.category) : []);
     // 83 traits returning 15, one of them ("Hushed-deliberate") in 28% of all
     // characters, because targetFromMag(18) sits below the pool's floor. See the
     // POOL-FLOOR TARGETS note above.
@@ -5896,6 +6209,21 @@ const STRATEGY_BY_STRESS = {
   "Freeze (shut down)": "goes still and waits for it to pass",
   "Fawn (appease the threat)": "makes themselves useful to it until it stops being a threat",
 };
+/* The table above is third-person singular ("Trait: goes still…"). Spliced after
+   "they" it read "they goes still" on every sheet with a stress card, so the chain and
+   the beats take these conjugated forms instead. */
+const STRATEGY_BY_STRESS_THEY = {
+  "Fight (attack the threat)": "meet it head-on before it can land",
+  "Flight (remove yourself)": "leave before it can land",
+  "Freeze (shut down)": "go still and wait for it to pass",
+  "Fawn (appease the threat)": "make themselves useful to it until it stops being a threat",
+};
+const STRATEGY_BY_STRESS_PAST = {
+  "Fight (attack the threat)": "met it head-on before it could land",
+  "Flight (remove yourself)": "left before it could land",
+  "Freeze (shut down)": "went still and waited for it to pass",
+  "Fawn (appease the threat)": "made themselves useful to it until it stopped being a threat",
+};
 const STRATEGY_BY_VALUES = {
   "Rigid & Principled": "a rule they will not bend",
   "Pragmatic & Flexible": "whatever works this time",
@@ -5903,6 +6231,76 @@ const STRATEGY_BY_VALUES = {
   "Self-Interested": "their own position first",
   "Idealistic & Visionary": "a picture of how it ought to be",
 };
+/* ---------- TRAIT NAMES INSIDE PROSE ----------
+   Trait names are labels, not grammar: "Keeps a spreadsheet for everything",
+   "Was the family translator", "Fear-of-wasted-potential", "'I-have-to-earn-my-place'",
+   "Get through Friday". Pasted raw into a sentence they read as "…when keeps a
+   spreadsheet for everything made them useful" and "there was was…". Every splice in
+   the chain, the beats and the mechanics prose goes through these instead. */
+const _PROSE_PAST = /^(was|were|shamed|mocked|dismissed|overlooked|replaced|cheated|humiliated|excluded|punished|rejected|blamed|chosen|abandoned|forgotten|bullied|ignored|adopted|called|given|watched|failed|survived|lost|betrayed|grew|taught|made|told|passed|won|finished|got|learned|learnt|lent|trusted|read|allowed|sent|praised|held|left|saw|found|raised|buried|moved|spent|had|kept|became|broke|fled|missed|nursed|carried|heard|walked|stayed|came|went|took|gave|chose|married|divorced|inherited|outlived|mediated)$/i;
+const _PROSE_MODAL = /^(can|cannot|can't|could|will|won't|would|never|always|only|rarely|still|mildly|quietly|secretly|slightly)$/i;
+const _PROSE_BARE = /^(live|stay|talk|finally|put|send|bring|teach|lose|give|take|run|hold|look|walk|sleep|quit|get|make|be|keep|find|win|see|have|build|learn|retire|fix|finish|sell|say|leave|clear|go|prove|become|earn|pay|buy|save|stop|start|help|protect|return|move|write|tell|hear|reach|open|close|repair|raise|marry|own|visit|meet|beat|escape|survive|forgive|matter|belong|land|pass|finally)$/i;
+const _PROSE_NOT_VERB = /^(parents|adults|mastery|recognition|belonging|nothing|always|others|debts|less|loss|access|process|success|progress|business|kindness|bus|status|chaos|focus|bonus|plus|this|its|his|hers|yes|us|thus|as|is)$/i;
+function traitPhrase(t){
+  let s = String((t && t.trait) || t || "").trim().replace(/^['"‘“]+|['"’”]+$/g, "").replace(/[.!]+$/, "");
+  // A name that is one hyphen-joined run of three or more words is a phrase, not a compound.
+  if (!/\s/.test(s) && (s.match(/-/g) || []).length >= 2) s = s.replace(/-/g, " ");
+  if (/^(I|I'm|I've|I'd|I'll)\b/.test(s)) return s;
+  return s ? s[0].toLowerCase() + s.slice(1) : s;
+}
+function _proseVerbKind(first){
+  if (_PROSE_NOT_VERB.test(first)) return null;
+  if (/^to$/i.test(first)) return "inf";
+  if (/^being$/i.test(first)) return "ger";
+  if (_PROSE_MODAL.test(first)) return "modal";
+  if (_PROSE_PAST.test(first)) return "past";
+  if (_PROSE_BARE.test(first)) return "bare";
+  if (/^(has|does|gets|is)$/i.test(first)) return "pres";
+  if (/^[a-z]+(s)$/i.test(first) && !/(ss|us|is|ous)$/i.test(first) && first.length > 3) return "pres";
+  return null;
+}
+/* A trait as something that can stand where a noun goes: "being someone who keeps a
+   spreadsheet for everything", "the time they watched…", "being the family translator". */
+function asNounPhrase(t){
+  const s = traitPhrase(t);
+  const first = s.split(/\s+/)[0] || "";
+  switch (_proseVerbKind(first)){
+    case "pres": case "modal": return "being someone who " + s;
+    case "past":
+      if (/^(was|were)$/i.test(first)) return "being " + s.replace(/^\S+\s+/, "");
+      // Passive ("Told they were enough", "Blamed for…", "Chosen last") reads as being
+      // done TO them; active ("Taught themselves…") as a thing they did.
+      if (/^(chosen|given|forgotten|abandoned|bullied|ignored|adopted|betrayed|blamed|rejected|shamed|mocked|dismissed|overlooked|replaced|cheated|humiliated|excluded|punished)$/i.test(first)
+          || /^(for|by|they|as|that|last|first|out|into|in|at|and|repeatedly|early|young|often|twice|again)$/i.test((s.split(/\s+/)[1] || "").replace(/[,.]$/, "")))
+        return "being " + s;
+      if (/^had$/i.test(first)) return "having " + s.replace(/^\S+\s+/, "");
+      return "the time they " + s;
+    case "bare": return "trying to " + s;
+    default: return s;
+  }
+}
+/* A trait as an aim: "to get through Friday", "to be looked after", "recognition". */
+function asAim(t){
+  const s = traitPhrase(t);
+  const kind = _proseVerbKind(s.split(/\s+/)[0] || "");
+  if (kind === "bare") return "to " + s;
+  if (kind === "pres" || kind === "modal" || kind === "past") return asNounPhrase(t);
+  return s;
+}
+/* A belief in the character's own words, quoted, so a first-person Lie stays grammatical. */
+function asBelief(t){
+  const s = traitPhrase(t);
+  return `"${s ? s[0].toUpperCase() + s.slice(1) : s}"`;
+}
+/* The same belief reported in the third person: "they have to earn their place daily". */
+function asReportedBelief(t){
+  const s = traitPhrase(t)
+    .replace(/\bI'm\b/g, "they're").replace(/\bI've\b/g, "they've").replace(/\bI'd\b/g, "they'd").replace(/\bI'll\b/g, "they'll")
+    .replace(/\bI am\b/g, "they are").replace(/\bI was\b/g, "they were").replace(/\bI\b/g, "they")
+    .replace(/\bmyself\b/gi, "themselves").replace(/\bmy\b/gi, "their").replace(/\bmine\b/gi, "theirs").replace(/\bme\b/gi, "them")
+    .replace(/\bthey has\b/g, "they have").replace(/\bthey does\b/g, "they do").replace(/\bthey is\b/g, "they are");
+  return s ? s[0].toLowerCase() + s.slice(1) : s;
+}
 function motivationChain(st){
   const want = _profTrait(st, "motivation", /Core Want/i);
   const fear = _profTrait(st, "motivation", /Core Fear/i);
@@ -5919,21 +6317,54 @@ function motivationChain(st){
   if (!want && !need && !wound) return null;
   const links = [];
   const add = (key, text, from) => links.push({key, text, from: from.filter(Boolean).map(t => t.trait)});
-  if (want) add("want", `The conscious goal is ${want.trait}${want.desc ? ` — ${want.desc}` : ``}`, [want]);
-  if (lie && want) add("belief", `They chase it because they believe ${lie.trait}: the want is what that belief makes look like the answer.`, [lie, want]);
-  else if (lie) add("belief", `Underneath, they believe ${lie.trait}.`, [lie]);
-  if (wound) add("origin", `The belief was learned from ${wound.trait}${ghost ? `, and it is still attached to ${ghost.trait}` : ``}.`, [wound, ghost]);
-  if (need) add("need", `What would actually help is ${need.trait}${want ? ` — which the want stands in front of rather than delivering` : ``}.`, [need, want]);
-  if (defence) add("strategy", `The strategy built on top is ${defence.trait}: it keeps the wound covered and keeps the need unmet.`, [defence]);
+  // Phrasing is chosen by a hash of the sheet, never the dice; the fear link opened with
+  // the same sentence on every one of 200 sheets.
+  let _h = 7; Object.keys(st || {}).sort().forEach(k => { if (st[k] && st[k].trait) _h = (_h * 31 + st[k].trait.id) >>> 0; });
+  const pk = (salt, arr) => arr[hashSeedString(_h + "|mc|" + salt) % arr.length];
+  if (want) add("want", `The conscious goal is ${asAim(want)}${want.desc ? ` — ${want.desc}` : ``}`, [want]);
+  if (lie && want) add("belief", `They chase it because they believe ${asBelief(lie)}: the want is what that belief makes look like the answer.`, [lie, want]);
+  else if (lie) add("belief", `Underneath, they believe ${asBelief(lie)}.`, [lie]);
+  if (wound) add("origin", `The belief was learned from ${asNounPhrase(wound)}${ghost ? `, and it is still attached to ${asNounPhrase(ghost)}` : ``}.`, [wound, ghost]);
+  if (need) add("need", `What would actually help is ${asAim(need)}${want ? ` — which the want stands in front of rather than delivering` : ``}.`, [need, want]);
+  if (defence) add("strategy", `The strategy built on top — ${traitPhrase(defence)} — keeps the wound covered and keeps the need unmet.`, [defence]);
   if (stress || values){
-    const s = stress ? STRATEGY_BY_STRESS[stress.category] : null;
+    const s = stress ? STRATEGY_BY_STRESS_THEY[stress.category] : null;
     const v = values ? STRATEGY_BY_VALUES[values.category] : null;
-    add("method", `When the strategy is tested they ${s || "fall back on habit"}${v ? `, and justify it by ${v}` : ``}.`, [stress, values]);
+    add("method", `${pk("m", ["When the strategy is tested they", "Put under load, they", "Tested, they", "The moment it is pushed they"])} ${s || "fall back on habit"}${v ? `, and justify it by ${v}` : ``}.`, [stress, values]);
   }
-  if (fear) add("fear", `The thing they organise their life to avoid is ${fear.trait}${wound ? ` — the wound happening again` : ``}.`, [fear]);
-  if (origin) add("counterweight", `The one place the belief does not hold: ${origin.trait}. ${origin.desc || ""}`.trim(), [origin]);
-  if (aim || price) add("stakes", `${aim ? `Right now it points at ${aim.trait}.` : ``}${price ? ` The cost they are already paying: ${price.trait}.` : ``}`.trim(), [aim, price]);
-  return {want, fear, wound, lie, need, ghost, defence, origin, stress, values, links};
+  if (fear) add("fear", `${pk("f", ["The thing they organise their life to avoid is", "What they are organised around not meeting:", "Underneath the routines sits a fear:", "The alarm that never fully switches off is"])} ${asNounPhrase(fear)}${wound ? pk("fw", [" — the wound happening again", " — the wound, coming round a second time", " — the old injury, repeated"]) : ``}.`, [fear]);
+  if (origin) add("counterweight", `The one place the belief does not hold: ${traitPhrase(origin)}. ${origin.desc || ""}`.trim(), [origin]);
+  if (aim || price) add("stakes", `${aim ? `Right now the aim is ${asAim(aim)}.` : ``}${price ? ` The cost they are already paying: ${traitPhrase(price)}.` : ``}`.trim(), [aim, price]);
+  /* Chain shapes (2026 audit §5b). Every sheet read wound -> belief -> want; the same facts
+     now sometimes lead from elsewhere, chosen by the sheet hash and only where the cards exist:
+       need-led: they know what would help and refuse it;
+       inverted: the belief was once true and outlived its room;
+       origin-led: something went right first, and the belief grew in what it was lost to. */
+  const shapes = ["wound"];
+  if (need && lie) shapes.push("need");
+  if (lie && wound) shapes.push("inverted");
+  if (origin && wound) shapes.push("origin");
+  const shape = shapes.length > 1 && hashSeedString(_h + "|shape") % 5 < 3 ? shapes[1 + hashSeedString(_h + "|shape2") % (shapes.length - 1)] : "wound";
+  const L = k => links.find(l => l.key === k);
+  const place = (key, before) => { const l = L(key), b = L(before); if (!l || !b) return; links.splice(links.indexOf(l), 1); links.splice(links.indexOf(b), 0, l); };
+  if (shape === "need"){
+    const n = L("need"), b = L("belief");
+    n.text = `${pk("nn", ["They already know what would help:", "Somewhere they know what they need:", "The answer is no secret to them:"])} ${asAim(need)}. They do not take it, because ${lie ? `they believe ${asBelief(lie)}` : "of what they believe"}.`;
+    n.from = [need, lie].filter(Boolean).map(t => t.trait);
+    if (b){ b.text = `${pk("nb", ["The belief is why", "What stops them is the belief", "The belief that gets in the way:"])} ${asBelief(lie)}${want ? " — it makes the want look like the safe answer" : ""}.`; b.from = [lie, want].filter(Boolean).map(t => t.trait); place("belief", "want"); }
+    place("need", "want");
+    const w = L("want"); if (w) w.text = `So they chase ${asAim(want)} instead${want && want.desc ? ` — ${want.desc}` : ``}`;
+  } else if (shape === "inverted"){
+    const b = L("belief"), o = L("origin");
+    if (b) b.text = `${asBelief(lie)} was once simply accurate. It was a fair reading of the room they learned it in.`;
+    if (o) o.text = `${pk("iv", ["The room changed and the belief did not", "The room is long gone; the belief outlived it", "They left the room years ago and carried the rule out with them"])}: it came from ${asNounPhrase(wound)}${ghost ? `, and it is still attached to ${asNounPhrase(ghost)}` : ``}.`;
+  } else if (shape === "origin"){
+    const c = L("counterweight");
+    if (c){ c.text = `It started somewhere good: ${traitPhrase(origin)}. ${origin.desc || ""}`.trim(); place("counterweight", links[0].key); }
+    const o = L("origin");
+    if (o) o.text = `The belief grew in what that was lost to: ${asNounPhrase(wound)}${ghost ? `, still tied to ${asNounPhrase(ghost)}` : ``}.`;
+  }
+  return {want, fear, wound, lie, need, ghost, defence, origin, stress, values, links, shape};
 }
 
 /* The pressure sheet had a trigger and an aftermath but no middle: nothing said how the
@@ -5997,7 +6428,13 @@ function structuredContradiction(st, meta){
   const base = contradictionFor(st);
   if (!base) return null;
   const fn = _profTrait(st, "contradiction");
-  const condsOf = t => (t.conditions || []).map(c => CONTEXT_WORDS[c] || c);
+  // Authored conditions first; without them, the contexts the card's own text implies
+  // (derivedContextTags, mechanics.js) — "when" was empty on most sheets otherwise.
+  const condsOf = t => {
+    const own = t.conditions || [];
+    const tags = own.length ? own : (typeof derivedContextTags === 'function' ? derivedContextTags(t) : []);
+    return [...new Set(tags.map(c => CONTEXT_WORDS[c] || c))];
+  };
   const hiWhen = condsOf(base.hi), loWhen = condsOf(base.lo);
   const roles = ["Among Peers","Under Authority","With Dependents"].map(c => _profTrait(st, "contextrole", new RegExp("^" + c + "$"))).filter(Boolean);
   const attach = _profTrait(st, "attachment");
@@ -6483,6 +6920,19 @@ const VOICE_PROMPTS = [
   {id:"askhelp",  label:"Asking for help",   setup:"They cannot do it alone, and the person who can help is right there."},
   {id:"lie",      label:"Lying",             setup:"The truth costs too much, and they have about a second to decide."},
 ];
+/* Length and reading level of a composed line: words, sentences and a Flesch-Kincaid grade.
+   A rough measure (the syllable count is a vowel-group heuristic) but a useful one for
+   "does this character sound like a child, a clerk or a professor". Stage directions in
+   [brackets] are not speech and are left out. */
+function readingStats(text){
+  const speech = String(text || "").replace(/\[[^\]]*\]/g, " ").replace(/\s+/g, " ").trim();
+  const words = speech.match(/[A-Za-z][A-Za-z'’-]*/g) || [];
+  const sentences = Math.max(1, (speech.match(/[.!?…]+(\s|$)/g) || []).length);
+  const syl = w => { const m = w.toLowerCase().replace(/e$/, "").match(/[aeiouy]+/g); return Math.max(1, m ? m.length : 1); };
+  const syllables = words.reduce((n, w) => n + syl(w), 0);
+  const grade = words.length ? Math.max(0, 0.39 * (words.length / sentences) + 11.8 * (syllables / words.length) - 15.59) : 0;
+  return {words: words.length, sentences, grade: Math.round(grade * 10) / 10};
+}
 const VOICE_PROMPT_IDS = VOICE_PROMPTS.map(p => p.id);
 const VOICE_MODES = ["baseline", "pressure"];
 /* AUTHOR PROMPTS. The seven situations are fixed; a project can add its own ("turning
@@ -6531,6 +6981,16 @@ function voiceRules(st){
     open: lean("emo") > 0.2, guarded: lean("emo") < -0.2,
     mannered: lean("man") > 0.2, blunt: lean("man") < -0.2,
     stress: slot("prof_stress_0"), values: slot("prof_values_0"),
+    /* The lines used to be built from verbosity, register, grammar, vocabulary and the
+       axes alone, so two characters with the same speech and different wounds said the
+       same thing. The inner life is read here too — see _innerLine, _VOICE_HUMOR and
+       _stageDirections. */
+    inner: {
+      want: _profTrait(st, "motivation", /Core Want/i), need: _profTrait(st, "motivation", /The Need/i),
+      ghost: _profTrait(st, "motivation", /The Ghost/i), wound: _profTrait(st, "motivation", /Core Wound/i),
+      lie: _profTrait(st, "motivation", /The Lie/i), defence: _profTrait(st, "motivation", /The Defence/i),
+      fear: _profTrait(st, "motivation", /Core Fear/i), humor: _profTrait(st, "humor"),
+    },
   };
 }
 
@@ -6585,17 +7045,31 @@ const VOICE_FRAGMENTS = {
     mid:     [_VF("Something like that.", "no strong lean")],
   },
   tail: {
-    long:    [_VF("I know that's more words than it needed.", "high verbosity"), _VF("And there's a whole other half to it, but you've had enough of me.", "high verbosity")],
+    long:    [_VF("I know that's more words than it needed.", "high verbosity"), _VF("And there's a whole other half to it, but you've had enough of me.", "high verbosity"),
+              _VF("Sorry — I'll stop there. Actually, no, one more thing.", "high verbosity"), _VF("I could go on. I'm choosing not to, which is new.", "high verbosity"),
+              _VF("That's the short version, believe it or not.", "high verbosity"), _VF("Anyway. That's a lot. Ignore most of it.", "high verbosity")],
     terse:   [_VF("", "low verbosity — nothing follows")],
-    warm:    [_VF("We're all right, though. You and me.", "high warmth")],
+    /* One line here meant every warm character ended every line the same way. Eight now,
+       and a warm tail is a habit, not a rule: composeVoiceLine gives it WARM_TAIL_ODDS. */
+    warm:    [_VF("We're all right, though. You and me.", "high warmth"), _VF("I say it kindly.", "high warmth"),
+              _VF("You know I'm on your side.", "high warmth"), _VF("I only say it because I care how it goes.", "high warmth"),
+              _VF("No hard feelings. Truly.", "high warmth"), _VF("Whatever happens, I'm glad it's you I'm telling.", "high warmth"),
+              _VF("Sit down a minute. I'll put the kettle on.", "high warmth"), _VF("That's not a complaint. Come here.", "high warmth")],
     cold:    [_VF("", "low warmth — no softening")],
   },
 };
+const WARM_TAIL_ODDS = 0.4;   // a warm tail closes about two lines in five, not every one
 const PRESSURE_TAIL = {
-  "Fight (attack the threat)": _VF("And if you want to make something of it, make it.", "stress response: fight"),
-  "Flight (remove yourself)":  _VF("I need some air. We'll do this another time.", "stress response: flight"),
-  "Freeze (shut down)":        _VF("...", "stress response: freeze"),
-  "Fawn (appease the threat)": _VF("Whatever's easiest for you. Honestly. Whatever's easiest.", "stress response: fawn"),
+  "Fight (attack the threat)": ["And if you want to make something of it, make it.", "Say that again. Go on.", "Come on, then.",
+    "I'm done being polite about it.", "You wanted it straight. That was straight.", "Step closer and say it to my face."]
+    .map(t => _VF(t, "stress response: fight")),
+  "Flight (remove yourself)": ["I need some air. We'll do this another time.", "I can't do this right now.", "I'm going. Don't follow me.",
+    "Later. Not now. Later.", "I have somewhere to be.", "Let me get my coat."].map(t => _VF(t, "stress response: flight")),
+  "Freeze (shut down)": ["...", "I—", "...I don't know.", "Sorry. Give me a second.", "…", "I can't. I can't find it."]
+    .map(t => _VF(t, "stress response: freeze")),
+  "Fawn (appease the threat)": ["Whatever's easiest for you. Honestly. Whatever's easiest.", "It's fine. Really, it's fine.",
+    "I'm sorry — that's my fault, I should have said.", "Don't worry about me. What do you need?",
+    "Tell me what you'd like me to say.", "Whatever you think is best. I'll do that."].map(t => _VF(t, "stress response: fawn")),
 };
 
 function _pickFrag(list, rng){ return list && list.length ? list[Math.floor(rng() * list.length)] : null; }
@@ -6633,7 +7107,7 @@ function composeVoiceLineFragments(st, promptId, mode, opts){
   take(pick("direct","yielding","slippery","straight","open","guarded","warm","cold","mannered","blunt","terse"));
   if (!underPressure && r.long) take(_pickFrag(VOICE_FRAGMENTS.tail.long, rng));
   if (!underPressure && r.warm) take(_pickFrag(VOICE_FRAGMENTS.tail.warm, rng));
-  if (underPressure && r.stress) take(PRESSURE_TAIL[r.stress.category]);
+  if (underPressure && r.stress) take(_pickFrag(PRESSURE_TAIL[r.stress.category], rng));
   /* A vocabulary trait's own example is the one genuinely authored thing available, so
      it rides along as the character's habitual device rather than being paraphrased. */
   const device = r.vocab.filter(t => t.example)[0] || r.grammar;
@@ -6645,9 +7119,12 @@ function composeVoiceLineFragments(st, promptId, mode, opts){
     device: device ? {label: device.trait, example: device.example || ""} : null,
   };
 }
-function voiceLab(st, mode, reroll){
+function voiceLab(st, mode, reroll, meta){
+  // One `recent` across the seven situations, so the same tail, joke or stage direction
+  // does not turn up in all of them.
+  const recent = [];
   return allVoicePrompts().map((p, index) => {
-    const l = composeVoiceLine(st, p.id, mode, {index, reroll: reroll || 0});
+    const l = composeVoiceLine(st, p.id, mode, {index, reroll: reroll || 0, recent, meta});
     if (l && p.user) l.user = true;
     return l;
   }).filter(Boolean);
@@ -6891,8 +7368,11 @@ function rollSheetShape(){
   let drop = null;
   if (ids.length > 2 && rand() < 0.7){
     const size = id => { const ps = PROFILE_SECTIONS.find(p => p.id === id); return catsOf(ps.section).reduce((n, c) => n + byFilter(ps.section, c).length, 0); };
-    const sorted = ids.slice().sort((a, b) => size(a) - size(b));
-    drop = sorted[Math.floor(rand() * Math.min(2, sorted.length))];
+    // A section the preset itself switched on is what that preset is FOR; the thin-section
+    // drop used to take it a third of the time (the extra sections are all thin).
+    const sorted = ids.filter(id => !archetypeOptsIn(PROFILE_SECTIONS.find(p => p.id === id))).sort((a, b) => size(a) - size(b));
+    const pickAt = Math.floor(rand() * Math.min(2, Math.max(sorted.length, 1)));
+    drop = sorted.length ? sorted[pickAt] : null;
   }
   let r = rand(), wild = 0;
   for (let i = 0; i < SHAPE_WILD_ODDS.length; i++){ r -= SHAPE_WILD_ODDS[i]; if (r <= 0){ wild = i; break; } }
@@ -7048,7 +7528,8 @@ function selectDistinctCandidate(cands, references){
   if (!cands || !cands.length) return null;
   const scored = cands.map((c, i) => {
     const co = c.coherence !== undefined ? c.coherence : ((typeof coherenceScore === 'function' && coherenceScore(c.state)) || {pct:0}).pct;
-    const d = (references && references.length ? diversityScore(c.state, references).score : 0) - TALLY_WEIGHT * tallyOveruse(c.state);
+    const d = (references && references.length ? diversityScore(c.state, references).score : 0) - TALLY_WEIGHT * tallyOveruse(c.state)
+      - RECENT_PICK_WEIGHT * recentOverlapShare(c.state);
     return Object.assign({}, c, {index:i, coherence:co, diversity:d});
   });
   const best = Math.max(...scored.map(c => c.coherence));
@@ -7056,6 +7537,18 @@ function selectDistinctCandidate(cands, references){
   ok.sort((a, b) => (b.diversity - a.diversity) || (a.index - b.index));
   return Object.assign({}, ok[0], {considered: scored.length, floor: best - COHERENCE_FLOOR_DROP,
     scores: scored.map(c => ({index:c.index, diversity:+c.diversity.toFixed(3), coherence:c.coherence}))});
+}
+/* Avoid recent traits lives HERE, in the choice between candidates, not in the draw.
+   The draw runs in replay mode so a printed seed always rebuilds its character; the
+   recent window instead steers which of the three seeded candidates is kept. */
+const RECENT_PICK_WEIGHT = 0.5;
+function recentOverlapShare(st){
+  if (typeof avoidRecentEnabled === 'function' && !avoidRecentEnabled()) return 0;
+  if (!recentTraitIds || !recentTraitIds.length) return 0;
+  const recent = new Set();
+  recentTraitIds.forEach(set => set.forEach(id => recent.add(id)));
+  const ids = Object.values(st || {}).filter(s => s && s.trait).map(s => s.trait.id);
+  return ids.length ? ids.filter(id => recent.has(id)).length / ids.length : 0;
 }
 function explorationReferences(currentState){
   const refs = PROJECT_ARCHIVE.slice(-60);
@@ -7084,23 +7577,76 @@ function backstoryBeats(st, meta){
   if (wound || origin){
     const src = wound || origin;
     add("formative", "Formative event", at(0.25, 5, 14, "in childhood"),
-      wound ? `${pick(["It starts with","Before anything else there was","The first thing that happened to them was"], "f")} ${wound.trait.toLowerCase()}${ghost ? `, and it is still tied to ${ghost.trait.toLowerCase()}` : ``}.${origin ? ` What kept it from being everything: ${origin.trait.toLowerCase()}.` : ``}`
-            : `${pick(["What went right early:","The thing that held:"], "o")} ${origin.trait.toLowerCase()}.`, [src, ghost, wound && origin]);
+      wound ? `${pick(["It starts with","Before anything else came","The first thing that marked them was"], "f")} ${asNounPhrase(wound)}${ghost ? `, and it is still tied to ${asNounPhrase(ghost)}` : ``}.${origin ? ` What kept it from being everything: ${traitPhrase(origin)}.` : ``}`
+            : `${pick(["What went right early:","The thing that held:"], "o")} ${traitPhrase(origin)}.`, [src, ghost, wound && origin]);
+  }
+  /* Beat shapes (audit §5b): not every life starts with an event in childhood. Picked by the
+     sheet hash where the cards exist: a loss late in life, two formative events that disagree,
+     a chronic "nothing happened", or a turning point that turned nothing. */
+  const bshapes = [];
+  if (wound) bshapes.push("late", "chronic");
+  if (wound && origin) bshapes.push("contradict");
+  const bshape = bshapes.length && hashSeedString(h + "|bs") % 5 < 2 ? bshapes[hashSeedString(h + "|bs2") % bshapes.length] : "";
+  const fb = beats.find(b => b.key === "formative");
+  if (fb && bshape === "late"){
+    fb.title = "A loss that came late"; fb.when = at(0.7, 18, 60, "in adulthood");
+    fb.text = `${pick(["It did not start in childhood. It arrived late:", "Nothing marked them early. What did, much later, was"], "bl")} ${asNounPhrase(wound)}${ghost ? `, and it is tied to ${asNounPhrase(ghost)}` : ``}.${origin ? ` Until then: ${traitPhrase(origin)}.` : ``}`;
+  } else if (fb && bshape === "chronic"){
+    fb.title = "A wound with no event"; fb.when = at(0.25, 5, 14, "for years");
+    fb.text = `${pick(["There is no single day. It was slow:", "Nothing in particular happened, which was the problem:"], "bc")} ${asNounPhrase(wound)}${ghost ? `, still tied to ${asNounPhrase(ghost)}` : ``}.`;
+  } else if (fb && bshape === "contradict"){
+    fb.title = "Two formative events"; fb.when = at(0.25, 5, 14, "in childhood");
+    fb.text = `${pick(["Two things shaped them, and they do not agree:", "They carry two origins that contradict:"], "bk")} ${traitPhrase(origin)}, and ${asNounPhrase(wound)}${ghost ? ` (tied to ${asNounPhrase(ghost)})` : ``}.`;
   }
   if (lie) add("lesson", "What they took from it", at(0.4, 8, 20, "in their teens"),
-    `${pick(["They drew the conclusion","They learned, wrongly,","It taught them"], "l")} that ${lie.trait.replace(/^I /, "they ").toLowerCase()}.`, [lie]);
+    `${pick(["They drew the conclusion","They learned, wrongly,","It taught them"], "l")} that ${asReportedBelief(lie)}.`, [lie]);
   if (defence || values || competence){
     const pivot = competence || values || defence;
     add("turning", "Turning point", at(0.6, 14, 40, "in early adulthood"),
-      `${pick(["The turn came when","Everything changed when","The first time it paid off was when"], "t")} ${competence ? `${competence.trait.toLowerCase()} made them useful` : values ? `they chose ${STRATEGY_BY_VALUES[values.category] || values.trait.toLowerCase()} over the easier thing` : `they found the defence would hold`}${defence ? ` — ${defence.trait.toLowerCase()} set, from then on, into how they operate` : ``}.`, [pivot, defence]);
+      `${pick(["The turn came when","Everything changed when","The first time it paid off was when"], "t")} ${competence ? `${asNounPhrase(competence)} made them useful` : values ? `they chose ${STRATEGY_BY_VALUES[values.category] || `their line (${traitPhrase(values)})`} over the easier thing` : `they found the defence would hold`}${defence ? ` — and the defence (${traitPhrase(defence)}) set, from then on, into how they operate` : ``}.`, [pivot, defence]);
+  }
+  if (bshape === "late"){
+    const ls = beats.find(b => b.key === "lesson"), tp = beats.find(b => b.key === "turning");
+    if (ls) ls.when = at(0.78, 19, 70, "soon after"); if (tp) tp.when = at(0.88, 20, 80, "since then");
+  }
+  const tpb = beats.find(b => b.key === "turning");
+  if (tpb && hashSeedString(h + "|ft") % 6 === 0){
+    tpb.title = "A turning point that turned nothing";
+    tpb.text = `${pick(["They believe it changed everything. It changed the surface:", "They tell it as the day things turned. Underneath, nothing did:"], "ft")} ${competence ? asNounPhrase(competence) : values ? (STRATEGY_BY_VALUES[values.category] || traitPhrase(values)) : "the new habit"}${defence ? `, laid over the same defence (${traitPhrase(defence)})` : ``}.`;
   }
   if (stress || vice){
     add("failure", "Most recent failure", age ? "within the last year" : "recently",
-      `${pick(["The latest time it broke:","Most recently it went wrong when"], "r")} under pressure they ${stress ? (STRATEGY_BY_STRESS[stress.category] || stress.trait.toLowerCase()) : "fell back on the old habit"}${vice ? `, and ${vice.trait.toLowerCase()} did the rest` : ``}${price ? ` — the bill was ${price.trait.toLowerCase()}` : need ? ` — which is the opposite of ${need.trait.toLowerCase()}` : ``}.`, [stress, vice, price]);
+      `${pick(["The latest time it broke:","Most recently it went wrong when","The last time it gave way:","It came apart most recently when"], "r")} under pressure they ${stress ? (STRATEGY_BY_STRESS_PAST[stress.category] || `fell back on ${asNounPhrase(stress)}`) : "fell back on the old habit"}${vice ? `, and the old habit (${traitPhrase(vice)}) did the rest` : ``}${price ? ` — the bill was ${traitPhrase(price)}` : need ? ` — the opposite of what they need (${traitPhrase(need)})` : ``}.`, [stress, vice, price]);
   }
   if (want || aim || role) add("now", "Where it stands", "now",
-    `${want ? `They want ${want.trait.toLowerCase()}` : `They are after ${aim.trait.toLowerCase()}`}${aim && want ? `, which right now means ${aim.trait.toLowerCase()}` : ``}${role ? `, and in any room they are the ${role.category.toLowerCase()}` : ``}.`, [want, aim, role]);
-  return beats.length >= 3 ? beats.slice(0, 5) : (beats.length ? beats : null);
+    `${want ? `They want ${asAim(want)}` : `What they are after: ${asAim(aim)}`}${aim && want ? `, which right now means ${/^to /.test(asAim(aim)) ? 'trying ' + asAim(aim) : asAim(aim)}` : ``}${role ? `, and in any room they are the ${role.category.toLowerCase()}` : ``}.`, [want, aim, role]);
+  /* Life-stage lenses reach the beats (audit §6a): a child has no "bill", a dying character's
+     "now" is what is left unsaid. Settings lenses stay in the voice and the draw. */
+  const lensIds = typeof activeLensIds === "function" ? activeLensIds() : [];
+  const fl = beats.find(b => b.key === "failure"), nw = beats.find(b => b.key === "now");
+  if (lensIds.includes("child") || lensIds.includes("adolescent")){
+    if (fl){
+      const home = lensIds.includes("child");
+      fl.text = `${pick(["The last time it went wrong,", "It happened again recently,"], "lc")} ${home ? "at home, where nobody asked why:" : "at school, in front of people:"} they ${stress ? (STRATEGY_BY_STRESS_PAST[stress.category] || `fell back on ${asNounPhrase(stress)}`) : "fell back on the old habit"}.`;
+    }
+  }
+  if (nw && lensIds.includes("dying")){
+    nw.title = "What is left unsaid"; nw.when = "now";
+    nw.text = `${want ? `They still want ${asAim(want)}` : `Still unfinished: ${asAim(aim)}`}${need ? `, and what they have never said is ${asAim(need)}` : ``}. There is not much time to keep not saying it.`;
+  } else if (nw && lensIds.includes("latelife")){
+    nw.text = nw.text.replace(/\.$/, "") + ", and has stopped pretending otherwise at this age.";
+  }
+  const base = beats.length >= 3 ? beats.slice(0, 5) : (beats.length ? beats : null);
+  /* Arcs reach the backstory (audit §6a): every accepted event is a beat after the five. */
+  const evs = (typeof arcEvents !== "undefined" && Array.isArray(arcEvents) ? arcEvents : []).filter(e => (e.changes || []).some(c => c.accepted));
+  if (base && evs.length){
+    evs.slice().sort((a, b) => a.seq - b.seq).slice(0, 4).forEach(e => {
+      const n = (e.changes || []).filter(c => c.accepted).length;
+      base.push({key: "event" + e.seq, title: e.title || "An event", when: "since", from: [],
+        text: `${e.title || "Something happened"}. ${n} thing${n === 1 ? "" : "s"} on the sheet moved because of it, and the earlier beats are what it moved from.`});
+    });
+  }
+  return base;
 }
 
 /* ---------- 1. COMPOSITIONAL VOICE LINES ----------
@@ -7123,7 +7669,7 @@ const VOICE_TOPIC_POOL = {
   person: ["my sister","your father","the landlord","the new one","the foreman","my ex","the neighbour","the priest","the kid from downstairs","the captain","the nurse on nights","my brother-in-law","the old man at the gate","the client","her mother","the driver","my supervisor","the woman at the counter","my cousin","the lodger","the man from the council"],
   place: ["the kitchen","the station","the harbour","the back office","the car park","the chapel","the stairwell","the far field","the hospital","the bar on the corner","the roof","the garage","the waiting room","the market","the ferry","my mother's","the depot","the laundrette"],
   time: ["last night","on Tuesday","all evening","after the funeral","before the storm","this morning","around nine","the whole weekend","after the meeting","before you got here","at the weekend","until close","in the spring"],
-  task: ["carry this","sign for it","talk to them","drive","hold the door","look at the numbers","keep an eye on it","cover for me","tell her","wait with me","make the call","fix it","go back there","lend it"],
+  task: ["carry this","sign for it","talk to them","drive","hold the door","look at the numbers","keep an eye on it","cover the late shift","tell her","wait with them","make the call","fix it","go back there","lend it"],
 };
 const _VT = (templates, rule) => ({templates, rule});
 const VOICE_CLAUSES = {
@@ -7171,20 +7717,22 @@ const VOICE_CLAUSES = {
 const VOICE_ELABORATIONS = ["{person} was there {time}, if you want to check.","It's to do with {thing}, mostly.","And before you say it — yes, I know about {place}.","I've been thinking about it since {time}.","Which is more than {person} ever did."];
 // Pull noun phrases out of the sheet's own vocabulary examples, so the words a
 // character reaches for turn up in what they talk about.
-function _examplePhrases(traits){
+function _examplePhrases(traits, kind){
   const out = [];
   (traits || []).forEach(t => {
     const ex = t && t.example ? String(t.example) : "";
     const re = /\b(the|my|your|his|her|their|our) ([a-z][a-z'-]{2,}(?: [a-z][a-z'-]{2,})?)\b/gi;
-    let m; while ((m = re.exec(ex))) out.push({text: (m[1] + " " + m[2]).toLowerCase().replace(/^the the /, "the "), from: t.trait});
+    let m; while ((m = re.exec(ex))) out.push({text: (m[1] + " " + m[2]).toLowerCase().replace(/^the the /, "the "), from: t.trait, kind: kind || "vocabulary"});
   });
   return out;
 }
-function _exampleSentence(t){
-  if (!t || !t.example) return null;
-  const parts = String(t.example).split(/(?<=[.!?])\s+/).map(s => s.trim()).filter(s => s.split(/\s+/).length >= 3 && s.length <= 60 && !/[()]/.test(s));
-  return parts.length ? parts[0] : null;
+// Every usable sentence of a trait's example, not only the first: the habitual device
+// used to take parts[0], so one vocabulary card always said the same sentence.
+function _exampleSentences(t){
+  if (!t || !t.example) return [];
+  return String(t.example).split(/(?<=[.!?])\s+/).map(s => s.trim()).filter(s => s.split(/\s+/).length >= 3 && s.length <= 60 && !/[()]/.test(s));
 }
+function _exampleSentence(t){ return _exampleSentences(t)[0] || null; }
 const _sentences = s => s.split(/(?<=[.!?])\s+/).filter(Boolean);
 const _cap = s => s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
 const _lowerFirst = s => /^(I\b|I'|[A-Z]{2})/.test(s) ? s : s.charAt(0).toLowerCase() + s.slice(1);
@@ -7194,7 +7742,13 @@ function _topicPools(rng, vocabPhrases){
   const pools = {};
   Object.keys(VOICE_TOPIC_POOL).forEach(k => { pools[k] = VOICE_TOPIC_POOL[k].slice(); });
   activeLenses().forEach(l => Object.entries(l.topics || {}).forEach(([k, arr]) => { if (pools[k]) pools[k] = arr.concat(arr, pools[k]); }));
-  vocabPhrases.forEach(p => { pools.thing.unshift(p.text); pools.thing.unshift(p.text); });
+  // Phrases lifted from the sheet: vocabulary examples, and the goals, jargon, family and
+  // money cards — a character who talks about "my sister" and "the pension" says so.
+  const KIN = /^(my|your|his|her|their|our) (mother|mum|mom|father|dad|sister|brother|wife|husband|son|daughter|aunt|uncle|parents?|kids?|child|ex|boss|partner|friend|neighbour|grandmother|grandfather|gran|nan|family)\b/;
+  vocabPhrases.forEach(p => {
+    const dest = p.kind === "profile" && KIN.test(p.text) ? pools.person : pools.thing;
+    dest.unshift(p.text); dest.unshift(p.text);
+  });
   Object.keys(pools).forEach(k => { pools[k] = pools[k].filter(x => !taboo.some(tb => x.toLowerCase().includes(tb))); });
   return pools;
 }
@@ -7204,9 +7758,126 @@ function _fill(template, pools, rng, used, vocabPhrases){
     if (!arr || !arr.length) return k;
     const v = arr[Math.floor(rng() * arr.length)];
     const vp = vocabPhrases.find(p => p.text === v);
-    if (vp && !used.includes("vocabulary: " + vp.from)) used.push("vocabulary: " + vp.from);
+    const tag = (vp && vp.kind === "profile" ? "profile: " : "vocabulary: ") + (vp && vp.from);
+    if (vp && !used.includes(tag)) used.push(tag);
     return v;
   });
+}
+/* ---------- INNER LIFE IN THE LINES ----------
+   What a character says is shaped by what they are hiding, wanting and defending, how
+   they joke, and what their hands do — none of which the composer read. Four additions,
+   each naming the card it came from in the rules list:
+     concealing circles the Ghost (or the Wound);   lying protects the Want;
+     asking for help is bent by the Defence;        humour adds a remark in its own register;
+     mannerisms add the stage direction the card itself authors.                           */
+// A trait, said by the character about themselves: "a door they left open" -> "a door I left open".
+function _firstPerson(s){
+  return String(s || "")
+    .replace(/\bthey're\b/gi, "I'm").replace(/\bthey've\b/gi, "I've").replace(/\bthey'd\b/gi, "I'd").replace(/\bthey'll\b/gi, "I'll")
+    .replace(/\bthey are\b/gi, "I am").replace(/\bthey were\b/gi, "I was").replace(/\bthey is\b/gi, "I am")
+    .replace(/\bthemselves\b/gi, "myself").replace(/\bthem\b/gi, "me").replace(/\btheirs\b/gi, "mine").replace(/\btheir\b/gi, "my")
+    .replace(/\bthey\b/gi, "I");
+}
+function _spoken(t, opts){
+  if (!t) return null;
+  let s = (opts && opts.noun ? asNounPhrase(t) : traitPhrase(t));
+  if (!/\s/.test(s)) s = s.replace(/-/g, " ");
+  s = _firstPerson(s).replace(/[.!?,;:]+$/, "").trim();
+  if (opts && opts.the) s = s.replace(/^(a|an) /i, "the ");
+  if (!s || s.length > 56) return null;
+  return /^I\b/.test(s) ? s : s[0].toLowerCase() + s.slice(1);
+}
+const _VOICE_INNER = {
+  conceal: [
+    "Ask me anything else. Not {G}.", "Whatever you've heard about {G}, leave it where it is.", "That has nothing to do with {G}. Nothing.",
+    "I'll talk about anything. I won't talk about {G}.", "Don't. Not {G}. Not here."],
+  lie: [
+    "All I want is {W}. Why would I risk that?", "Everything I did, I did for one reason: {W}.",
+    "You know what I want. {Wc}. Why would I throw that away?"],
+  concealShort: ["Not {G}.", "Leave {G} out of it.", "{G}? No."],   // for a character who says almost nothing
+  persuade: ["It comes down to this for me: {W}.", "I'm asking because of one thing: {W}.", "You know what this is for. {Wc}."],
+};
+// How the Defence bends a request for help, read from what the card says it is.
+const _DEFENCE_MODES = [
+  {id:"joke", re:/joke|funn|laugh|humou?r|clown|comic/i, tell:"the ask arrives as a joke",
+   pre:["Funny story — ", "Small joke of a favour — ", "Don't laugh, but "], post:["I'm laughing. I'm also serious."]},
+  {id:"charm", re:/charm|flatter|compliment|likeab|winning/i, tell:"the ask arrives wrapped in charm",
+   post:["You'll say yes. You're always lovely about these things.", "I ask because you're the one who could make this look easy."]},
+  {id:"selfcrit", re:/self-?critic|self-?blame|criticism|self-?punish|apolog/i, tell:"they run themselves down before the ask lands",
+   pre:["I know how this sounds — ", "Sorry. Ridiculous. But — "], post:["I hate that I can't do this myself."]},
+  {id:"question", re:/asks? the questions|interrogat|only ever asks|answers a question|deflect(s|ing)? with question/i, tell:"they answer the need with a question",
+   pre:["Can I ask you something first? "], post:["What would you do, if it were you?", "Is that a terrible thing to ask?"]},
+  {id:"contempt", re:/contempt|scorn|disdain|sneer|dismiss/i, tell:"they sneer at the thing they need",
+   post:["Not that it matters. Not that any of it does.", "Don't make a thing of it."]},
+  {id:"perform", re:/perform|persona|mask|version|act\b/i, tell:"the ask comes in a practised voice that slips",
+   post:["That's — sorry. That's not the voice I usually use for this.", "I had a better way of asking. It's gone."]},
+  {id:"chatter", re:/disclos|overshar|chatter|cheerful|talkat/i, tell:"they bury the ask in cheerful talk",
+   pre:["Long story, but — ", "Anyway, the weather, and also — "], post:["Anyway. That's the whole thing."]},
+  {id:"armour", re:/compet|expert|efficien|control|organis|plan|rules|explain|manag|fix|prepar|precis|armou?r|armor/i, tell:"they frame it as competence, not need",
+   post:["I'd normally handle this myself.", "It's not that I can't. It's that it goes quicker with two.", "This isn't about competence."]},
+  {id:"minimise", re:/silen|withdraw|avoid|distan|busy|motion|leav|hid|quiet|shut|wall|invisib/i, tell:"they shrink the ask until it barely counts",
+   post:["It's nothing, honestly.", "Forget it — it's small.", "Only if you happen to be passing."]},
+  {id:"blunt", re:/honest|blunt|truth|direct|candid|frank/i, tell:"they say it plainly because dressing it up is worse",
+   post:["I'm asking plainly because I don't do this well.", "No dressing it up: I need help."]},
+  {id:"offer", re:/pleas|useful|helper|kind|generous|giv|fawn|agreeab|serv|host/i, tell:"they offer something back before they ask",
+   pre:["I'll do yours first — ", "I'll owe you, and I always pay — "], post:["Only if I can do something for you in return."]},
+];
+function _innerLine(kind, r, rng, underPressure, terse){
+  const inn = r.inner || {};
+  const pick = arr => arr[Math.floor(rng() * arr.length)];
+  if (kind === "conceal"){
+    const src = inn.ghost || inn.wound;
+    const G = src && _spoken(src, {the: !!inn.ghost, noun: !inn.ghost});
+    if (!G) return null;
+    return {text: _cap(pick(terse ? _VOICE_INNER.concealShort : _VOICE_INNER.conceal).replace("{G}", G)), rule: `motivation: ${src.trait} — the line circles what they are not saying`};
+  }
+  if (kind === "lie" || kind === "persuade"){
+    const W = _spoken(inn.want);
+    if (!W) return null;
+    return {text: _cap(pick(_VOICE_INNER[kind]).replace("{W}", W).replace("{Wc}", _cap(W))),
+      rule: `motivation: ${inn.want.trait} — ${kind === "lie" ? "the lie protects the want" : "the ask is about the want"}`};
+  }
+  if (kind === "askhelp" && inn.defence){
+    const mode = _DEFENCE_MODES.find(m => m.re.test(`${inn.defence.trait} ${inn.defence.desc || ""}`));
+    if (!mode) return null;
+    return {mode, rule: `motivation: ${inn.defence.trait} — ${mode.tell}`};
+  }
+  return null;
+}
+/* Humour, by category: what the sense of humour adds to a line. Under pressure most of
+   it goes (see _HUMOR_AT in mechanics.js: the jokes change first), and what is left is
+   the version that shows the strain. */
+const _VOICE_HUMOR = {
+  "Dry & Deadpan": ["Minor detail.", "Not ideal.", "Could be worse. Not by much.", "Noted."],
+  "Self-Deprecating": ["Which, given my record, is optimistic of me.", "Don't take my word for it — I'm the problem here.", "Naturally I'd be the one to say it.", "I'm aware of how that sounds coming from me."],
+  "Cruel & Barbed": ["Try to keep up.", "I'll go slower for you.", "You'd know all about that.", "Do write that down."],
+  "Warm & Playful": ["— you big softie.", "See? Easy. You're welcome.", "Don't look at me like that, you love it.", "I'm only teasing. Mostly."],
+  "Absurd & Chaotic": ["Also, there's a goose in the car park. Unrelated.", "Anyway, the moon's a bit close tonight.", "Has anyone checked on the ferret?", "I've decided it's a Tuesday."],
+  "Intellectual & Wordplay": ["A matter of {thing}, as it were.", "And that, as they say, is the rub.", "Call it a question of syntax.", "There's a pun in there somewhere; I'll spare you."],
+  "Observational": ["Funny how nobody ever says it out loud.", "It's always {thing}, isn't it.", "People do that, don't they."],
+  "Pun-Groaner": ["Sorry. That one wrote itself.", "I'd say more, but I'd be pushing my luck. Or my pun.", "That's the good one and I know it."],
+  "Callback & Running Bit": ["Like {thing}. Again.", "Which is the {thing} business all over again."],
+  "Gallows": ["Well, nobody's died. Yet.", "On the bright side, it can't get worse. Famous last words.", "Put it on my headstone."],
+  "Physical & Slapstick": ["— and then I walked into the door, naturally.", "[nearly trips over nothing and carries on]"],
+  "Teasing as Affection": ["Don't get sentimental on me.", "You're lucky I like you.", "Look at you, being competent."],
+  "Laughs at Own Jokes": ["[laughs at their own line] Sorry — sorry, that got me."],
+};
+const _VOICE_HUMOR_PRESSURE = {
+  "Dry & Deadpan": ["Wonderful.", "That's the day, then."],
+  "Cruel & Barbed": ["Good. Keep going.", "Don't stop now."],
+  "Self-Deprecating": ["Sorry. Obviously it's me.", "Of course it is."],
+  "Warm & Playful": ["[a laugh, a beat too fast]", "Ha. Yes. Very good."],
+  "Gallows": ["Well, it's not like I was using the rest of the day."],
+};
+// The trait's own stage direction — the authored "(taps the table)" that opens its example.
+function _stageDirections(manner){
+  const out = [];
+  (manner || []).forEach(t => {
+    const m = /^\(([^)]{3,64})\)/.exec(String(t.example || "").trim());
+    // A direction is a gesture, not a paragraph: skip the long ones and the multi-sentence ones.
+    if (m && m[1].length <= 52 && !/[.!?] /.test(m[1])) out.push({text: m[1].trim().replace(/[.,;:]+$/, ""), trait: t.trait});
+  });
+  return out;
 }
 function composeVoiceLine(st, promptId, mode, opts){
   const prompt = allVoicePrompts().find(p => p.id === promptId);
@@ -7218,12 +7889,18 @@ function composeVoiceLine(st, promptId, mode, opts){
   Object.values(st || {}).forEach(s => { if (s && s.trait) seed = (seed * 31 + s.trait.id) >>> 0; });
   const idx = Number.isInteger(opts.index) ? opts.index : -1, reroll = Number.isInteger(opts.reroll) ? opts.reroll : 0;
   const take = Number.isInteger(opts.take) ? opts.take : 0;
+  // Tails and devices already spoken in this list of takes (voiceLines shares one array),
+  // so ten takes do not close with the same line.
+  const recent = Array.isArray(opts.recent) ? opts.recent : null;
   const rng = mulberry32(hashSeedString(String(seed) + "|" + promptId + "|" + (mode || "baseline") + "|c2" +
     (idx >= 0 || reroll ? "|" + idx + "|" + reroll : "") + (take ? "|t" + take : "")));
   const kind = prompt.like || promptId;
   const table = VOICE_CLAUSES[kind];
   const used = [];
-  const vocabPhrases = _examplePhrases(r.vocab);
+  // Goals, jargon, family, money and texture cards lend their own phrases to the topic pools.
+  const profMany = id => Object.keys(st || {}).filter(k => k.startsWith("prof_" + id + "_") && st[k] && st[k].trait).map(k => st[k].trait);
+  const vocabPhrases = _examplePhrases(r.vocab).concat(
+    _examplePhrases(["goals", "jargon", "family", "money", "texture"].reduce((a, id) => a.concat(profMany(id)), []), "profile"));
   const pools = _topicPools(rng, vocabPhrases);
   const fill = t => _fill(t, pools, rng, used, vocabPhrases);
   const gcat = r.grammar ? r.grammar.category : null, vcat = r.verbosity ? r.verbosity.category : null;
@@ -7240,12 +7917,50 @@ function composeVoiceLine(st, promptId, mode, opts){
   }
   // Core clause, same lean priority as the fragment composer.
   const order = ["direct","yielding","slippery","straight","open","guarded","warm","cold","mannered","blunt","terse"];
+  /* Leans blend (2026 audit §5b): the first matching lean used to win every line, so every
+     assertive character talked "direct". Each lean that applies is now weighted by how far
+     its axis sits from zero, and the take draws among them — a character who is both
+     direct and guarded speaks both ways, and the commoner lean still wins most takes. */
+  const _LEAN_AX = {direct:"asrt", yielding:"asrt", slippery:"hon", straight:"hon", open:"emo", guarded:"emo", warm:"warm", cold:"warm", mannered:"man", blunt:"man", terse:"vol"};
   let entry = null;
-  for (const k of order){ if (r[k] && table[k]){ entry = table[k]; break; } }
+  const cand = order.filter(k => r[k] && table[k]);
+  if (cand.length > 1){
+    const w = cand.map(k => { const v = Math.abs((r.profile || {})[_LEAN_AX[k]] || 0.3); return v * v + 0.05; });
+    let x = rng() * w.reduce((a, b) => a + b, 0), i = 0;
+    while (i < cand.length - 1 && x >= w[i]){ x -= w[i]; i++; }
+    entry = table[cand[i]];
+  } else if (cand.length) entry = table[cand[0]];
   if (!entry) entry = table.mid || table.straight || Object.values(table)[0];
   used.push(entry.rule);
-  let core = _cap(fill(entry.templates[Math.floor(rng() * entry.templates.length)]));
+  // Within one list of takes, a clause template is not reused until the pool is spent —
+  // a three-template pool used to repeat itself three or four times in ten lines.
+  const tplSrc = (()=>{
+    if (!recent) return entry.templates;
+    let pool = entry.templates.filter(t => !recent.includes(t));
+    if (!pool.length){ entry.templates.forEach(t => { const i = recent.indexOf(t); if (i >= 0) recent.splice(i, 1); }); pool = entry.templates; }
+    return pool;
+  })();
+  const tpl = tplSrc[Math.floor(rng() * tplSrc.length)];
+  if (recent) recent.push(tpl);
+  let core = _cap(fill(tpl));
   const rule = x => { if (!used.includes(x)) used.push(x); };
+  // When every entry has been used the cycle starts over — the list's own entries leave
+  // `recent` — so a pool of six over ten takes repeats each line at most twice, rather
+  // than letting the dice hand one line to half of them.
+  const cycle = (list, textOf) => {
+    if (!recent) return list;
+    let pool = list.filter(f => !recent.includes(textOf(f)));
+    if (!pool.length){
+      list.forEach(f => { const i = recent.indexOf(textOf(f)); if (i >= 0) recent.splice(i, 1); });
+      pool = list;
+    }
+    return pool;
+  };
+  const fresh = list => {
+    const f = _pickFrag(cycle(list, x => x.text), rng);
+    if (f && recent) recent.push(f.text);
+    return f;
+  };
   // Verbosity shapes how much survives.
   if (minimal){ core = _sentences(core)[0]; rule("low verbosity — only one clause survives"); }
   // Hedges go on before the grammar reshapes the clause, so a cut-in stays a cut-in.
@@ -7253,12 +7968,40 @@ function composeVoiceLine(st, promptId, mode, opts){
     core = ["I think ","Maybe ","I mean, ","Sort of — "][Math.floor(rng() * 4)] + _lowerFirst(core); rule("hedged (low assertiveness)");
   }
   const extra = [];
+  /* Inner life. Concealing circles the Ghost (or Wound), lying protects the Want, asking for
+     help is bent by the Defence, persuading is about what they want. Not every line: a
+     character who explained their wound every time would be a case file, not a person. */
+  // A character who says almost nothing still has a wound: concealing gets a clipped version.
+  if ((!minimal || kind === "conceal") && rng() < (underPressure ? 0.4 : 0.65)){
+    const inn = _innerLine(kind, r, rng, underPressure, minimal);
+    if (inn){
+      rule(inn.rule);
+      if (inn.text) extra.unshift(inn.text);
+      else if (inn.mode){
+        const m = inn.mode, pk = arr => arr[Math.floor(rng() * arr.length)];
+        if (m.pre && rng() < 0.5) core = pk(m.pre) + _lowerFirst(core);
+        else if (m.post) extra.unshift(pk(m.post));
+      }
+    }
+  }
+  /* The inner-conflict engine (mechanics.js): under load the LOSING drive leaks into the
+     line — the need under the want, the want under the line they hold, the fear under
+     the role. A slip now and then in a calm line; more often when cornered. */
+  // Since the event: a character who has lived through a logged arc event sometimes dates their silence by it.
+  if (!minimal && (kind === "conceal" || kind === "askhelp") && typeof arcEvents !== "undefined" && arcEvents.some(e => (e.changes || []).some(c => c.accepted)) && rng() < 0.3){
+    const ev = arcEvents.filter(e => (e.changes || []).some(c => c.accepted)).slice(-1)[0];
+    if (ev && ev.title && ev.title.length < 40){ extra.push(`Not since ${_lowerFirst(ev.title.replace(/[.!?]+$/, ""))}.`); rule(`arc: ${ev.title} — the line is dated by the event`); }
+  }
+  if (typeof innerConflictLeak === 'function' && rng() < (underPressure ? (minimal ? 0.45 : 0.6) : (minimal ? 0 : 0.12))){
+    const lk = innerConflictLeak(st, rng, {short: minimal, meta: opts.meta});
+    if (lk){ extra.push(lk.text); rule(lk.rule); }
+  }
   if (!minimal && !underPressure && (r.long || vcat === "High-Volume & Wordy")){
     extra.push(_cap(fill(VOICE_ELABORATIONS[Math.floor(rng() * VOICE_ELABORATIONS.length)])));
-    if (r.long) extra.push(_pickFrag(VOICE_FRAGMENTS.tail.long, rng).text);
+    if (r.long) extra.push(fresh(VOICE_FRAGMENTS.tail.long).text);
     rule("high verbosity");
   }
-  if (!underPressure && r.warm && !minimal){ const w = _pickFrag(VOICE_FRAGMENTS.tail.warm, rng); extra.push(w.text); rule(w.rule); }
+  if (!underPressure && r.warm && !minimal && rng() < WARM_TAIL_ODDS){ const w = fresh(VOICE_FRAGMENTS.tail.warm); extra.push(w.text); rule(w.rule); }
   // Grammar transforms, keyed on the grammar card's category and fed by its example.
   const gName = r.grammar ? r.grammar.trait : "";
   if (gcat === "Spoken Compression"){
@@ -7274,14 +8017,22 @@ function composeVoiceLine(st, promptId, mode, opts){
     const w = core.split(" ")[0];
     core = `${w.replace(/[.,!?]$/, "")} — ${_lowerFirst(core)}`; rule("grammar: " + gName + " — a false start");
   } else if (gcat === "Structural Shifts"){
-    extra.push(_cap(fill(["If {person} lets me.","Probably.","Which it won't be.","Or {time}.","Mostly."][Math.floor(rng() * 5)])));
+    // Only afterthoughts that qualify ANY claim, and seated straight after the core
+    // line — tacked on after the other extras, "Or all evening." landed after "You and me."
+    const AFTER = ["Probably.","Mostly.","Or near enough.","Give or take.","If {person} lets me.","More or less."];
+    extra.unshift(_cap(fill(AFTER[Math.floor(rng() * AFTER.length)])));
     rule("grammar: " + gName + " — an afterthought tacked on");
   } else if (gcat === "Turn-Taking Grammar"){
     core = ["—no, let me finish — ","Before you start — ","Wait — "][Math.floor(rng() * 3)] + _lowerFirst(core); rule("grammar: " + gName + " — cuts in");
   } else if (gcat === "Repetition & Echo Patterns"){
-    const words = core.replace(/[.!?]+$/, "").split(" ");
-    const last = words[words.length - 1].replace(/[,;]/g, "");
-    core = core.replace(/[.!?]+$/, "") + `, ${last}.`; rule("grammar: " + gName + " — echoes itself");
+    /* Echo the head of the line ("I'm not going to answer that. I'm not going to."),
+       not its last word — which was usually a pronoun: "answer that, that." */
+    const first = _sentences(core)[0] || core;
+    const words = first.replace(/[.!?]+$/, "").split(" ").filter(Boolean);
+    const head = words.length <= 3 ? words : words.slice(0, Math.min(4, words.length - 1));
+    const echo = head.join(" ").replace(/[,;:—-]+$/, "").trim();
+    if (echo) core = core.replace(/\s*$/, "") + ` ${_cap(echo)}.`;
+    rule("grammar: " + gName + " — echoes itself");
   }
   // Hedges, ellipsis, tense habits and tag questions.
   if ((r.guarded && rng() < 0.5) || (underPressure && r.stress && /Freeze/.test(r.stress.category))){
@@ -7303,21 +8054,45 @@ function composeVoiceLine(st, promptId, mode, opts){
     rule("tag question (checks the listener is still with them)");
   }
   // Pressure: the stress response closes the line.
-  if (underPressure && r.stress && PRESSURE_TAIL[r.stress.category]){ extra.push(PRESSURE_TAIL[r.stress.category].text); rule(PRESSURE_TAIL[r.stress.category].rule); }
+  if (underPressure && r.stress && PRESSURE_TAIL[r.stress.category]){ const pt = fresh(PRESSURE_TAIL[r.stress.category]); extra.push(pt.text); rule(pt.rule); }
   // The habitual device: a sentence lifted whole from a vocabulary example, now and then.
   const deviceT = r.vocab.filter(t => t.example)[0] || r.grammar;
-  const devSentence = r.vocab.map(_exampleSentence).filter(Boolean)[0];
-  if (devSentence && !minimal && rng() < 0.35){ extra.push(devSentence); rule("vocabulary: " + r.vocab.find(t => _exampleSentence(t) === devSentence).trait); }
+  const devPool = [];
+  r.vocab.forEach(t => _exampleSentences(t).forEach(x => devPool.push({text: x, trait: t.trait})));
+  if (devPool.length && !minimal && rng() < 0.35){
+    const open = cycle(devPool, d => d.text);
+    const dev = open[Math.floor(rng() * open.length)];
+    if (recent) recent.push(dev.text);
+    extra.push(dev.text); rule("vocabulary: " + dev.trait);
+  }
+  // Humour: a remark in the character's own register, at the end of the line.
+  const hum = r.inner && r.inner.humor;
+  if (hum && !minimal){
+    const pool = (underPressure ? _VOICE_HUMOR_PRESSURE : _VOICE_HUMOR)[hum.category];
+    if (pool && rng() < (underPressure ? 0.3 : 0.4)){
+      const h = fresh(pool.map(t => _VF(t, "humour: " + hum.trait + " — a remark in its register")));
+      extra.push(_cap(fill(h.text))); rule(h.rule);
+    }
+  }
   let text = [opener, core].concat(extra).filter(Boolean).join(" ").replace(/\s+/g, " ").trim()
     .replace(/([^.][.!?] )([a-z])/g, (m, a, b) => a + b.toUpperCase());
   // Register: formal speech drops its contractions, casual speech takes them. Not under
   // pressure — the politeness layer is the first thing to go.
   if (!underPressure && r.formal && !r.casual){
     let n = 0; CONTRACT.forEach(([full, short]) => { const re = new RegExp("\\b" + short.replace("'", "'") + "\\b", "g"); text = text.replace(re, () => { n++; return full; }); });
+    text = text.replace(/\b(do|does|did|is|are|was|were|can|could|will|would|should|have|has) not (you|they|we|he|she|it|I)\b/g, (m, v, pr) => `${v} ${pr} not`);
     if (n) rule("formal register — no contractions");
   } else if (!underPressure && r.casual){
     let n = 0; CONTRACT.forEach(([full, short]) => { const re = new RegExp("\\b" + full + "\\b", "g"); text = text.replace(re, () => { n++; return short; }); });
     if (n) rule("casual register — contracts everything");
+  }
+  // Mannerisms: the card's own stage direction, in brackets, before or after the line.
+  // Even a terse character has hands.
+  const dirs = _stageDirections(r.manner);
+  if (dirs.length && text && rng() < 0.5){
+    const d = fresh(dirs.map(x => Object.assign({}, x, {rule: "mannerism: " + x.trait + " — its own stage direction"})));
+    rule(d.rule);
+    text = rng() < 0.5 ? `[${d.text}] ${text}` : `${text} [${d.text}]`;
   }
   return {
     prompt: prompt.label, promptId, setup: prompt.setup, mode: underPressure ? "pressure" : "baseline",
@@ -7328,11 +8103,11 @@ function composeVoiceLine(st, promptId, mode, opts){
 }
 /* The "10 lines" view: ten takes of one prompt from one sheet. Each take is its own
    sub-seed, so the list is stable for a sheet and the same take always reads the same. */
-function voiceLines(st, promptId, mode, n, reroll){
+function voiceLines(st, promptId, mode, n, reroll, meta){
   const index = allVoicePrompts().findIndex(p => p.id === promptId);
-  const out = [];
+  const out = [], recent = [];
   for (let k = 0; k < (n || 10); k++){
-    const l = composeVoiceLine(st, promptId, mode, {index, reroll: reroll || 0, take: k});
+    const l = composeVoiceLine(st, promptId, mode, {index, reroll: reroll || 0, take: k, recent, meta});
     if (l) out.push(l);
   }
   return out;
@@ -7579,8 +8354,8 @@ function refreshConstraintChips(){
   bannedCategories.forEach(c=> h += `<span class="chip chip-ban">never: ${escHTML(c)}${cost(catSize(c))} <b ${actAttr('click', 'removeBan', "cat", c)} title="Remove">&times;</b></span>`);
   categoryTiers.forEach((tier,c)=> h += `<span class="chip ${tierMultiplier(c)>1?'chip-req':'chip-tier'}">${escHTML(tierLabel(tier))}: ${escHTML(c)} <b ${actAttr('click', 'removeTier', c)} title="Remove">&times;</b></span>`);
   requiredCategories.forEach(c=> h += `<span class="chip chip-req">at least one: ${escHTML(c)} <b ${actAttr('click', 'removeRequiredCategory', c)} title="Remove">&times;</b></span>`);
-  bannedTraitIds.forEach(id=>{ const t=byId.get(id); if(t) h += `<span class="chip chip-ban">never: ${escHTML(t.trait)} <b ${actAttr('click', 'removeBan', "trait", "${id}")} title="Remove">&times;</b></span>`; });
-  requiredTraitIds.forEach(id=>{ const t=byId.get(id); if(t) h += `<span class="chip chip-req">always: ${escHTML(t.trait)} <b ${actAttr('click', 'removeReq', "${id}")} title="Remove">&times;</b></span>`; });
+  bannedTraitIds.forEach(id=>{ const t=byId.get(id); if(t) h += `<span class="chip chip-ban">never: ${escHTML(t.trait)} <b ${actAttr('click', 'removeBan', "trait", id)} title="Remove">&times;</b></span>`; });
+  requiredTraitIds.forEach(id=>{ const t=byId.get(id); if(t) h += `<span class="chip chip-req">always: ${escHTML(t.trait)} <b ${actAttr('click', 'removeReq', id)} title="Remove">&times;</b></span>`; });
   exclusivePairs.forEach((pair,i)=>{
     const a = byId.get(pair[0]), b = byId.get(pair[1]);
     if (a && b) h += `<span class="chip chip-tier">never together: ${escHTML(a.trait)} / ${escHTML(b.trait)} <b ${actAttr('click', 'removeExclusivePair', i)} title="Remove">&times;</b></span>`;
@@ -7644,24 +8419,58 @@ function activeRuleChips(){
   }).length;
   if (manual) n('fixed profile types', manual);
   const off = (typeof PROFILE_SECTIONS !== 'undefined' ? PROFILE_SECTIONS : []).filter(ps=>{
-    return !profileSectionEnabled(ps);
+    return !profileSectionChecked(ps);
   }).length;
-  if (off) n('sections off', off);
+  const added = archetypeAddedSections();
+  if (off - added.length) n('sections off', off - added.length);
+  if (added.length) n('archetype adds', added.map(ps => ps.label).join(', '));
   const seedEl = document.getElementById('seedInput');
   if (seedEl && seedEl.value.trim()) n('replaying seed', seedEl.value.trim());
-  else if (divergenceLevel() > 0) n('history-aware exploration', 'on');
+  else if (divergenceLevel() > 0) n('divergence', 'on');
   if (typeof getSuppressedContextTags === 'function' && getSuppressedContextTags().length)
     n('context readings off', getSuppressedContextTags().length);
   return out;
 }
+/* The count each collapsed Advanced panel shows in its heading, so a closed panel says
+   when it is steering the build. Only what differs from the shipped default counts:
+   twelve profile sections ship off, and "12 changed" on a fresh page would be a lie. */
+function panelBadgeCounts(){
+  const budgets = (typeof budgetsActive === 'function' && budgetsActive())
+    ? RTIER_ORDER.filter(t=>rarityCaps[t] != null).length + BUDGET_GROUPS.filter(g=>intensityCaps[g.id] != null).length : 0;
+  const secs = (typeof PROFILE_SECTIONS !== 'undefined' ? PROFILE_SECTIONS : []);
+  const manual = secs.filter(ps=>{
+    const sel = document.getElementById('type_'+ps.id);
+    return sel && sel.value && !(typeof isAutoProfileType === 'function' && isAutoProfileType(ps.id));
+  }).length;
+  const toggled = secs.filter(ps => profileSectionChecked(ps) !== (ps.defaultOn !== false)).length;
+  return {
+    constraints: bannedSections.size + bannedCategories.size + bannedTraitIds.size + requiredTraitIds.length
+      + requiredCategories.length + exclusivePairs.length + categoryTiers.size,
+    budgets,
+    profile: manual + toggled,
+    packs: getDisabledPacks().length,
+  };
+}
+function refreshPanelBadges(){
+  if (typeof document === 'undefined' || !document.querySelectorAll) return;
+  const counts = panelBadgeCounts();
+  document.querySelectorAll('[data-badge]').forEach(el=>{
+    const n = counts[el.getAttribute('data-badge')] || 0;
+    el.hidden = !n;
+    el.textContent = n ? n + ' active' : '';
+    el.setAttribute('aria-label', n ? n + ' setting' + (n === 1 ? '' : 's') + ' in force in this panel' : '');
+  });
+}
 function refreshActiveRuleStrip(){
+  refreshPanelBadges();
   const el = document.getElementById('activeRules');
   if (!el) return;
   const chips = activeRuleChips();
   if (!chips.length){ el.style.display = 'none'; el.innerHTML = ''; return; }
   el.style.display = 'flex';
   el.innerHTML = `<span class="ruleStripLabel">In force:</span>`
-    + chips.map(c=>`<span class="ruleChip">${escHTML(c.k)} <b>${escHTML(String(c.v))}</b></span>`).join('');
+    + chips.map(c=>`<span class="ruleChip">${escHTML(c.k)} <b>${escHTML(String(c.v))}</b></span>`).join('')
+    + `<button type="button" class="ruleReview" ${actAttr('click', 'reviewActiveRules')} title="Open the panels that are changing this roll">Review</button>`;
 }
 function addCategoryBan(){
   const sel = document.getElementById('banCategorySelect');
@@ -7802,6 +8611,22 @@ function detectConstraintConflicts(){
       out.push({kind:'required-vs-ban', ids:[id],
         message: `"${t.trait}" is required, but its ${bannedSections.has(t.section) ? 'section' : 'category'} is banned. Required wins, so the ban does nothing for this trait.`});
     }
+  });
+  // The contradictions a roll could never satisfy: a trait both required and banned, a
+  // required trait in a rarity tier capped at zero, a required category that is banned.
+  requiredTraitIds.forEach(id=>{
+    const t = TRAITS_BY_ID.get(id);
+    if (!t) return;
+    if (bannedTraitIds.has(id)) out.push({kind:'required-vs-banned-trait', ids:[id],
+      message: `"${t.trait}" is both required and banned by name. Remove one of the two.`});
+    if (rarityCaps[rarityTier(t)] === 0) out.push({kind:'required-vs-cap', ids:[id],
+      message: `"${t.trait}" is required, but ${rarityTier(t)} traits are capped at zero in Budgets, and it is one. Raise the cap or drop the requirement.`});
+  });
+  requiredCategories.forEach(cat=>{
+    const section = SECTION_OF_CATEGORY.get(cat);
+    if (bannedCategories.has(cat) || (section && bannedSections.has(section)))
+      out.push({kind:'required-category-banned', cats:[cat],
+        message: `"At least one from ${cat}" is required, but ${bannedCategories.has(cat) ? 'that category' : 'its whole section'} is banned.`});
   });
   requiredCategories.forEach(cat=>{
     const section = SECTION_OF_CATEGORY.get(cat);
