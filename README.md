@@ -217,7 +217,7 @@ button instead of (or as well as) a confirm.
   triangulating. **Against type**, under a preset's tuning, flips its one or two strongest axes.
 * **Seeds carry an engine version.** `v1-…` seeds and links made before the change build exactly what
   they always did; `v2-…` seeds (what a blank roll now prints) use the coverage changes: neutral
-  verbosity draws from four categories, a sheet may omit the Ghost or Defence card, and
+  verbosity draws from four categories, a neutral Register can draw Stylized & Elaborate, a sheet may omit the Ghost or Defence card, and
   distinctive and signature traits are drawn slightly more often. A typed phrase uses the
   engine the link or settings were saved with (old files restore as v1).
 * **History** lists the last twenty rolls: restore one (it is itself undoable) or compare it

@@ -5751,8 +5751,12 @@ function pickRegisterSlot(regLevel, rarityPref){
        deliberate statement about how formally they speak, and how PLAINLY they put
        things and how they SOUND are equally good answers to that. Draw from all three,
        weighted by depth so the widest category still leads. */
+    /* v2: Verbosity > Stylized & Elaborate (123 traits) was reachable only above +0.12 on the
+       Register slider, so at a neutral setting it was never drawn. A lightly ornate way of
+       speaking is as honest a reading of "no deliberate statement" as the other three. */
     const pool = NEUTRAL_REGISTER_CATS
-      .flatMap(c => byFilter("Vocabulary Traits", c));
+      .flatMap(c => byFilter("Vocabulary Traits", c))
+      .concat(ENGINE_V >= 2 ? byFilter(AXES.stylized.section, AXES.stylized.category) : []);
     // 83 traits returning 15, one of them ("Hushed-deliberate") in 28% of all
     // characters, because targetFromMag(18) sits below the pool's floor. See the
     // POOL-FLOOR TARGETS note above.

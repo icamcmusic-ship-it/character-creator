@@ -1160,5 +1160,14 @@ module.exports = function({check, group, assert}){
     assert(G.document.getElementById('engineVersion').value === '1', 'an old link did not restore engine 1');
     assert(G.evalIn("engineVersionFor('v1-abc')") === 1 && G.evalIn("engineVersionFor('v2-abc')") === 2, 'a prefixed seed does not pick its own engine');
   });
+
+  check('SEEDV neutral register reaches Stylized & Elaborate on v2 only', ()=>{
+    const G = fresh(); const hit = pre => { let n = 0;
+      for (let i = 1; i <= 120; i++){ G.gen(pre + (i * 104729).toString(36));
+        if (G.evalIn("(()=>{const r=state.register;return !!(r&&r.trait&&r.trait.category==='Stylized & Elaborate')})()")) n++; }
+      return n; };
+    assert(hit('v1-') === 0, 'v1 neutral register drew Stylized & Elaborate');
+    assert(hit('v2-') >= 5, 'v2 neutral register almost never drew Stylized & Elaborate');
+  });
 };
 module.exports.fresh = fresh;
