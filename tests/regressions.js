@@ -1169,5 +1169,15 @@ module.exports = function({check, group, assert}){
     assert(hit('v1-') === 0, 'v1 neutral register drew Stylized & Elaborate');
     assert(hit('v2-') >= 5, 'v2 neutral register almost never drew Stylized & Elaborate');
   });
+
+  check('SEEDV a neutral v2 sheet sometimes carries one standout personality trait, and v1 never does', ()=>{
+    const G = fresh(); const loud = pre => { let n = 0, sheets = 0;
+      for (let i = 1; i <= 60; i++){ G.gen(pre + (i * 104729).toString(36));
+        const k = G.evalIn("Object.values(state).filter(s=>s&&s.slotId&&/^pers_/.test(s.slotId)&&s.trait&&s.trait.intensity>=4&&s.neutral).length"); n += k; if (k) sheets++; }
+      return {n, sheets}; };
+    const a = loud('v1-'), b = loud('v2-');
+    assert(a.n === 0, 'v1 drew a loud trait at neutral: ' + a.n);
+    assert(b.sheets >= 15, 'v2 produced a standout trait on only ' + b.sheets + ' of 60 sheets');
+  });
 };
 module.exports.fresh = fresh;

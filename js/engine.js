@@ -4056,6 +4056,20 @@ function pickPersonalitySlot(axis, level, rarityPref){
        Still flagged neutral:true, because it is still a neutral reading — that is what
        keeps checkEnsembleBalance from counting it as posture, which would be the wrong
        answer for a character whose slider was never moved. */
+    /* v2: a moderate character used to draw only quiet traits, so the loud end of every
+       axis (intensity 4-5, 70-99% of it never drawn at default settings) was out of reach
+       unless a slider moved. One axis in five now draws a single standout trait from a
+       random pole: a middling sheet with one thing about them that is not middling. It stays
+       flagged neutral, so the radar and the ensemble check do not read it as a posture. */
+    if (ENGINE_V >= 2 && rand() < 0.2){
+      const side = rand() < 0.5 ? axis.pos : axis.neg;
+      const loud = byFilter("Personality Traits", side);
+      if (loud.length){
+        const lt = 3.6 + rand() * 1.2;
+        return {slotId:"pers_"+axis.id, locked:false, label:axis.label, target: lt, neutral:true,
+                trait: withSlotMemory("pers_"+axis.id, ()=>pickInRange(loud, rarityPref, lt, 10, true))};
+      }
+    }
     const quiet = cat => byFilter("Personality Traits", cat).filter(t => traitPos(t) <= NEUTRAL_POLE_CEILING);
     const widened = neutralPool.concat(quiet(axis.pos), quiet(axis.neg));
     const pool = widened.length > neutralPool.length ? widened : neutralPool;
