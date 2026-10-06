@@ -1615,3 +1615,6 @@ kbd { display:inline-block; min-width:1.4em; text-align:center; padding:1px 6px;
 
 .backupReminder { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin:0 0 12px; padding:10px 14px; border:1.5px solid var(--golden-deep, var(--border-strong)); border-radius:var(--radius-sm); background:var(--panel2); font-size:.85rem; }
 .backupReminder[hidden] { display:none; }
+
+/* Roll 5 before any sheet exists: the candidates stand alone, without an empty sheet's chrome. */
+.sheet.batchOnly > :not(#batchTray) { display:none !important; }

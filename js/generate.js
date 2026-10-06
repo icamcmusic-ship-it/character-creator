@@ -460,7 +460,15 @@ function generateBatch(n){
     if (typeof updateStickyBar === 'function') updateStickyBar();
   }
   renderBatchTray();
-  renderSheet();
+  /* With no sheet yet (Roll 5 as the very first action) renderSheet drew the whole character
+     chrome around nothing: a "Your hand" meter, a "mostly distinct to your last generation"
+     banner and eleven "nothing was drawable" stubs. Show the candidates alone instead. */
+  if (Object.keys(state).length) renderSheet();
+  else {
+    const sh = document.getElementById('sheet'), empty = document.getElementById('emptyState');
+    if (sh) sh.classList.add('show', 'batchOnly');
+    if (empty) empty.style.display = 'none';
+  }
   if (batchCandidates.length) srAnnounce(`${batchCandidates.length} candidates ready. Pick one to keep it.`);
 }
 function renderBatchTray(){
@@ -542,9 +550,17 @@ function chooseBatch(i){
   if (pEl) pEl.style.display = pressureState ? "block" : "none";
   renderSheet(); checkConflicts();
   revealSheet();
-  toast(`Kept "${charMeta.name && charMeta.name !== "Unnamed Character" ? charMeta.name : "that one"}". The rest are gone.`);
+  toast(`Kept "${charMeta.name && charMeta.name !== "Unnamed Character" ? charMeta.name : (charMeta.archetypeLabel || "that one")}". The rest are gone.`);
 }
-function dismissBatch(){ batchCandidates = []; renderBatchTray(); }
+function dismissBatch(){
+  batchCandidates = []; renderBatchTray();
+  // Discarding the candidates of a first-ever Roll 5 puts the empty state back.
+  const sh = document.getElementById('sheet');
+  if (sh && sh.classList.contains('batchOnly') && !Object.keys(state).length){
+    sh.classList.remove('show', 'batchOnly');
+    const empty = document.getElementById('emptyState'); if (empty) empty.style.display = '';
+  }
+}
 
 /* ================= PICK THE MOST DIFFERENT =================
    The batch tray asked the user to eyeball five strips. This scores each candidate

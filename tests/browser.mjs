@@ -958,6 +958,46 @@ await step('§5 lens row fits a phone width', async ()=>{
   await page.setViewportSize({width: 1280, height: 900});
   if (over > 1) throw new Error('page scrolls horizontally by ' + over + 'px');
 });
+/* Audit 2026-10 regressions that only a real page can answer. */
+await step('H1 a trait name that is markup shows as text in the conflict box and runs nothing', async ()=>{
+  const r = await page.evaluate(()=>{
+    const mk = (id, name, v) => ({slotId: 's' + id, label: 'x', trait: {id: -id, section: 'Personality Traits', category: 'Friendliness - Warm', trait: name, desc: 'd', example: 'e',
+      intensity: 5, rarity: 'common', pol: {warm: v}}});
+    state = {s1: mk(1, '<img src=x onerror="window.__pwn=1">', 1), s2: mk(2, '<img src=x onerror="window.__pwn=2">', -1)};
+    checkConflicts();
+    const box = document.getElementById('warnBox');
+    return {shown: box.classList.contains('show'), imgs: box.querySelectorAll('img').length, text: box.innerText, pwn: window.__pwn};
+  });
+  if (!r.shown) throw new Error('the two orphan traits raised no conflict, so this check proves nothing');
+  if (r.imgs || r.pwn) throw new Error('markup from a trait name reached the page: ' + JSON.stringify(r));
+  if (!/<img/.test(r.text)) throw new Error('the name was not shown as text: ' + r.text.slice(0, 120));
+});
+await step('M11 Roll 5 as the first action shows the candidates alone, and Discard all brings the empty state back', async ()=>{
+  await page.reload(); await page.waitForTimeout(800);
+  await page.locator('[data-act="generateBatch"]:visible').first().click();
+  await page.waitForSelector('#batchTray .batchGrid', {timeout: 15000});
+  const r = await page.evaluate(()=>({
+    stubs: (document.getElementById('sheet').innerText.match(/Nothing was drawable/g) || []).length,
+    titleShown: !!document.getElementById('sheetTitle').offsetParent,
+    cards: document.querySelectorAll('#batchTray .batchCard').length,
+  }));
+  if (r.stubs || r.titleShown) throw new Error('the empty sheet chrome is showing around the candidates: ' + JSON.stringify(r));
+  if (r.cards < 2) throw new Error('only ' + r.cards + ' candidates');
+  await page.locator('#batchTray').getByText('Discard all').click();
+  const back = await page.evaluate(()=> getComputedStyle(document.getElementById('emptyState')).display !== 'none' && !document.getElementById('sheet').classList.contains('show'));
+  if (!back) throw new Error('the empty state did not return after discarding every candidate');
+});
+await step('M2 Undo puts the seed chip back', async ()=>{
+  await page.reload(); await page.waitForTimeout(800);
+  const r = await page.evaluate(async ()=>{
+    generateCharacter(); await new Promise(r => setTimeout(r, 600)); const a = lastSeedUsed;
+    generateCharacter(); await new Promise(r => setTimeout(r, 600)); const b = lastSeedUsed;
+    undoLast(); await new Promise(r => setTimeout(r, 200));
+    return {a, b, after: lastSeedUsed, chip: document.getElementById('stickySeed').textContent};
+  });
+  if (r.a === r.b) throw new Error('two builds printed the same seed');
+  if (r.after !== r.a || !r.chip.includes(r.a)) throw new Error('after undo the seed reads ' + r.after + ' / chip "' + r.chip + '", expected ' + r.a);
+});
 await b.close();
 if (process.env.CSP) console.log(csp.length ? '\nCSP violations:\n' + csp.slice(0,6).map(v=>'  '+v).join('\n') : '\nNo CSP violations under script-src \'self\'.');
 const real = errs.filter(e => !/favicon|sw\.js|ServiceWorker|Failed to load resource|Content Security Policy/i.test(e)).concat(process.env.CSP ? csp : []);

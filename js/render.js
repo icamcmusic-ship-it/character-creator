@@ -918,7 +918,7 @@ function contextBarHTML(){
 }
 function renderSheet(){
   const sheet = document.getElementById('sheet');
-  sheet.classList.add('show');
+  sheet.classList.add('show'); sheet.classList.remove('batchOnly');
   const empty = document.getElementById('emptyState');
   if (empty) empty.style.display = 'none';
   setText('sheetTitle', charMeta.name || "Character Voice");
