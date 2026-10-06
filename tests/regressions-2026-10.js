@@ -267,4 +267,13 @@ module.exports = function({check, group, assert}){
     assert(!r.examples.length, 'duplicate example lines: ' + r.examples.join(', '));
     assert(!r.insult.length, 'insulting names remain: ' + r.insult.join(', '));
   });
+
+  check('D4 renaming a trait does not move it between presentation variants or tiers (variantPin, tierPin)', ()=>{
+    const G = fresh();
+    const r = G.evalIn(`(()=>{ const get = id => TRAITS.find(t => t.id === id);
+      return {v: [1332, 140377, 140384, 140390, 1316].map(id => get(id).variant), tier: get(1316).tier, pinned: TRAITS.filter(t => t.variantPin || t.tierPin).length}; })()`);
+    assert(r.v.every(v => v === 'b'), 'a renamed trait lost its variant: ' + JSON.stringify(r.v));
+    assert(r.tier === 'secondary', 'a renamed trait lost its tier: ' + r.tier);
+    assert(r.pinned >= 5, 'the pins are not in the data');
+  });
 };

@@ -156,6 +156,10 @@ const PRESENTATION_VARIANTS = {
   TRAITS.forEach(t=>{
     const spec = PRESENTATION_VARIANTS[t.category];
     if (!spec) return;
+    // A trait renamed after its tag was fixed by the old wording keeps that tag: `variantPin` is the
+    // variant the text used to read as, so the rename cannot move it between pools (and change what a
+    // seed built).
+    if (t.variantPin){ t.variant = t.variantPin; return; }
     const txt = (t.trait + " " + t.desc).toLowerCase();
     const mb = spec.b.re.test(txt), ma = spec.a.re.test(txt);
     // null = reads either way, stays eligible under both locks
@@ -192,7 +196,7 @@ let TIER_TAG_STATS = null;
   TRAITS.forEach(t=>{
     if (t.section !== "Personality Traits") return;
     if (secondary.has(t.trait.toLowerCase())){ t.tier = "secondary"; matched++; t.reviewStatus = 'reviewed'; }
-    else t.tier = "core";   // behaviourally core; editorially still whatever reviewStatus says
+    else t.tier = t.tierPin || "core";   // behaviourally core; editorially still whatever reviewStatus says (tierPin: kept across a rename)
   });
   TIER_TAG_STATS = {listed: SECONDARY_TRAIT_NAMES.length, matched};
 })();
