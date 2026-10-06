@@ -1666,3 +1666,20 @@ html[data-onboarded] #onboard { display:none; }
    the reserved height keeps the scrollbar steady. Printing renders every card. */
 #sheetBody .traitCard { content-visibility:auto; contain-intrinsic-size:auto 210px; }
 @media print { #sheetBody .traitCard { content-visibility:visible; } .traitCard .slotBtns, .traitCard .slotToggle { display:none !important; } }
+
+.insightFold > summary { cursor:pointer; list-style:none; padding:2px 0; }
+.insightFold > summary::-webkit-details-marker { display:none; }
+.insightFold > summary::before { content:"▸"; display:inline-block; width:1.1em; color:var(--muted); }
+.insightFold[open] > summary::before { content:"▾"; }
+.insightFold > summary .sub { display:inline; margin:0 0 0 6px; }
+.insightFold[open] > summary { margin-bottom:10px; }
+
+/* Phone: "Your hand", its meter, the kept count and the density select shared one row and each wrapped to a column of
+   words. Title and meter on one line, the count under them, the density select at the end. */
+@media (max-width:720px) {
+  .handHead { display:flex; flex-wrap:wrap; align-items:center; gap:4px 12px; }
+  .handHead > span:first-child { white-space:nowrap; }
+  .handHead .handMeter { flex:1 1 120px; min-width:0; }
+  .handHead .handKept { flex-basis:100%; order:3; }
+  .handHead .handDensity { margin-left:auto; order:2; }
+}

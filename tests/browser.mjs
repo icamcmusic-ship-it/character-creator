@@ -1017,6 +1017,20 @@ await step('fonts come from this origin: no third-party request, and the faces l
   if (outside.length) throw new Error('requests to other origins: ' + outside.slice(0, 3).join(', '));
   if (!loaded.some(f => /Jakarta/.test(f))) throw new Error('the body font did not load: ' + loaded.join(', '));
 });
+await step('E-1 after a build the character leads: the diagnostics are folded, and the first card is within a screen and a half', async ()=>{
+  const pg = await b.newPage({viewport: {width: 1440, height: 900}});
+  await pg.goto(base + '/index.html', {waitUntil: 'load'}); await pg.waitForTimeout(600);
+  await pg.evaluate(async ()=>{ document.getElementById('seedInput').value = 'v2-e1first'; generateCharacter(); await new Promise(r => setTimeout(r, 900)); });
+  const r = await pg.evaluate(()=>{
+    const fold = document.querySelector('#insightPanel details.insightFold');
+    const title = document.getElementById('sheetTitle').getBoundingClientRect().top;
+    const card = document.querySelector('#sheetBody .traitCard').getBoundingClientRect().top;
+    return {fold: !!fold, open: fold && fold.open, gap: Math.round(card - title), vh: innerHeight};
+  });
+  await pg.close();
+  if (!r.fold || r.open) throw new Error('the "Why this character?" fold is missing or open: ' + JSON.stringify(r));
+  if (r.gap > r.vh * 1.5) throw new Error('the first card is ' + r.gap + 'px below the title: ' + JSON.stringify(r));
+});
 await b.close();
 if (process.env.CSP) console.log(csp.length ? '\nCSP violations:\n' + csp.slice(0,6).map(v=>'  '+v).join('\n') : '\nNo CSP violations under script-src \'self\'.');
 const real = errs.filter(e => !/favicon|sw\.js|ServiceWorker|Failed to load resource|Content Security Policy/i.test(e)).concat(process.env.CSP ? csp : []);

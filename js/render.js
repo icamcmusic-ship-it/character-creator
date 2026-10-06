@@ -1202,7 +1202,15 @@ function renderSheet(){
     if (lastDepthUntouched.length){
       h += `<div class="depthNote"><b>Depth-first note:</b> no resolved profile category implies ${lastDepthUntouched.join(", ")}, so ${lastDepthUntouched.length>1?"those sliders were":"that slider was"} left exactly as you set ${lastDepthUntouched.length>1?"them":"it"} rather than being reset to centre.</div>`;
     }
-    insight.innerHTML = h;
+    /* The first screen after a build was this block: a coherence paragraph, a contradiction and an inner conflict, with the
+       name, the voice sample and the first card two or three screens further down. It is one disclosure now, closed on
+       arrival, that keeps whatever state the reader last left it in across rebuilds. */
+    const prevFold = insight.querySelector('details.insightFold');
+    const foldOpen = prevFold ? prevFold.open : false;
+    const headline = co ? `Coherence ${co.pct}%` : 'What this sheet is made of';
+    insight.innerHTML = h
+      ? `<details class="insightFold"${foldOpen ? ' open' : ''}><summary><b>Why this character?</b> <span class="sub">${headline} &middot; the contradictions, the inner conflict and what you asked for</span></summary>${h}</details>`
+      : "";
     insight.style.display = h ? "block" : "none";
   }
 
