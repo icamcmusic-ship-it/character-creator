@@ -94,4 +94,49 @@ module.exports = function({check, group, assert}){
     const v1a = wilds('v1-', true, 1), v1b = wilds('v1-', false, 3);
     assert(JSON.stringify(v1a) === JSON.stringify(v1b), 'the wildcard controls changed what a v1 seed draws');
   });
+
+  check('M2 undo and redo put the seed chip back with the sheet', ()=>{
+    const G = fresh();
+    G.gen('v2-aaa111'); const a = G.evalIn('lastSeedUsed');
+    G.evalIn('snapshotHistory()'); G.gen('v2-bbb222'); const b = G.evalIn('lastSeedUsed');
+    assert(a !== b, 'the two builds printed the same seed');
+    G.evalIn('undoLast()');
+    assert(G.evalIn('lastSeedUsed') === a, 'after undo the seed chip still read ' + G.evalIn('lastSeedUsed') + ', not ' + a);
+    G.evalIn('redoLast()');
+    assert(G.evalIn('lastSeedUsed') === b, 'after redo the seed chip did not return to ' + b);
+  });
+
+  check('M4 M6 a settings or charMeta block of the wrong type is refused before anything is replaced', ()=>{
+    const G = fresh();
+    const bad = {
+      'favouriteTraitIds = 5': {settings: {favouriteTraitIds: 5}},
+      'favouriteTraitIds = ["x"]': {settings: {favouriteTraitIds: ['x']}},
+      'rerollExclusions = {a:5}': {settings: {rerollExclusions: {a: 5}}},
+      'sections.x = null': {settings: {sections: {x: null}}},
+      'disabledPacks = 5': {settings: {disabledPacks: 5}},
+      'constraints.exclusivePairs = 5': {settings: {constraints: {exclusivePairs: 5}}},
+      'constraints.bannedCategories = "abc"': {settings: {constraints: {bannedCategories: 'abc'}}},
+      'rarityCaps = "x"': {settings: {constraints: {rarityCaps: 'x'}}},
+      'charMeta.lenses = "court"': {charMeta: {lenses: 'court'}},
+      'charMeta.name = {a:1}': {charMeta: {name: {a: 1}}},
+    };
+    Object.entries(bad).forEach(([label, patch])=>{
+      let threw = false;
+      try { G.evalIn(`validateSheetPayload(${JSON.stringify(Object.assign({format: 'character-voice-sheet', state: {}}, patch))})`); } catch(e){ threw = true; }
+      assert(threw, 'accepted: ' + label);
+    });
+    let ok = true; try { G.evalIn(`validateSettingsBlock({favouriteTraitIds:[1,2], rerollExclusions:{a:[1]}, constraints:{rarityCaps:{common:null}}, sections:{a:{on:true}}, disabledPacks:['life']})`); } catch(e){ ok = e.message; }
+    assert(ok === true, 'a well-formed settings block was refused: ' + ok);
+    const coerced = G.evalIn(`(()=>{ const p = {format:'character-voice-sheet', state:{}, charMeta:{name:'x', age:42}}; validateSheetPayload(p); return p.charMeta.age; })()`);
+    assert(coerced === '42', 'a numeric age from an older file should be coerced to text, got ' + JSON.stringify(coerced));
+  });
+
+  check('M5 a saved record with no sheet is refused before any global is touched', ()=>{
+    const G = fresh();
+    ['{}', '{"charMeta":{"name":"q"}}', '{"state":"abc"}', '{"state":5}', '{"state":[]}'].forEach(raw=>{
+      let threw = false;
+      try { G.evalIn(`decodeSavedRecord(${raw}, 'x')`); } catch(e){ threw = true; }
+      assert(threw, 'decodeSavedRecord accepted ' + raw);
+    });
+  });
 };

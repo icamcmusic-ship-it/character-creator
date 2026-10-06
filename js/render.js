@@ -1986,6 +1986,81 @@ function exportCharacterJSON(){
    files written by older and newer builds both have to import. */
 const MAX_IMPORT_SLOTS = 4000;      // a real sheet is ~40; this is a sanity bound
 const MAX_IMPORT_NOTE = 20000;
+/* restoreSettings reads a settings block as if it had this build's shape: it spreads lists
+   into Sets, maps over pairs, and reads `.on` off every section entry. A block with one
+   wrong type used to throw in there, after the caller had already replaced the sheet. The
+   character import, the saved-record decoder and the workspace import all run this first,
+   while nothing has been touched. */
+function validateSettingsBlock(settings){
+  const isPlainObject = v => v && typeof v === 'object' && !Array.isArray(v);
+  const isFiniteNum = v => typeof v === 'number' && Number.isFinite(v);
+  if (!isPlainObject(settings)) throw new Error("The `settings` block is not an object.");
+  ['fields','toggles','sections','sliders'].forEach(k=>{
+    if (settings[k] !== undefined && settings[k] !== null && !isPlainObject(settings[k])) throw new Error(`The \`settings.${k}\` block is not an object.`);
+  });
+  if (isPlainObject(settings.sections)){
+    Object.entries(settings.sections).forEach(([id, cfg])=>{
+      if (!isPlainObject(cfg)) throw new Error(`settings.sections.${id} is not an object.`);
+    });
+  }
+  if (settings.favouriteTraitIds !== undefined &&
+      (!Array.isArray(settings.favouriteTraitIds) || settings.favouriteTraitIds.some(x => !isFiniteNum(x))))
+    throw new Error("settings.favouriteTraitIds is not a list of trait ids.");
+  if (settings.lockedSliders !== undefined && !Array.isArray(settings.lockedSliders))
+    throw new Error("settings.lockedSliders is not a list.");
+  if (settings.rerollExclusions !== undefined){
+    if (!isPlainObject(settings.rerollExclusions)) throw new Error("settings.rerollExclusions is not an object.");
+    Object.entries(settings.rerollExclusions).forEach(([k, v])=>{
+      if (!Array.isArray(v)) throw new Error(`settings.rerollExclusions.${k} is not a list.`);
+    });
+  }
+  // The constraint block is handed straight to restoreSettings, which spreads it into
+  // Sets and Maps. `exclusivePairs: 123` used to pass here and throw in there, after
+  // the sheet had already been replaced.
+  const c = settings.constraints;
+  if (c !== undefined && c !== null){
+    if (!isPlainObject(c)) throw new Error("The `settings.constraints` block is not an object.");
+    ['bannedCategories','bannedSections','bannedTraitIds','requiredTraitIds','requiredCategories'].forEach(k=>{
+      if (c[k] !== undefined && !Array.isArray(c[k])) throw new Error(`settings.constraints.${k} is not a list.`);
+    });
+    if (c.exclusivePairs !== undefined){
+      if (!Array.isArray(c.exclusivePairs)) throw new Error("settings.constraints.exclusivePairs is not a list.");
+      c.exclusivePairs.forEach((pair,i)=>{
+        if (!Array.isArray(pair) || pair.length !== 2)
+          throw new Error(`settings.constraints.exclusivePairs[${i}] is not a pair of trait ids.`);
+      });
+    }
+    if (c.categoryTiers !== undefined && !Array.isArray(c.categoryTiers))
+      throw new Error("settings.constraints.categoryTiers is not a list.");
+    ['rarityCaps','intensityCaps'].forEach(k=>{
+      if (c[k] === undefined) return;
+      if (!isPlainObject(c[k])) throw new Error(`settings.constraints.${k} is not an object.`);
+      Object.entries(c[k]).forEach(([g,v])=>{
+        if (v === null) return;
+        if (!isFiniteNum(v) || v < 0) throw new Error(`settings.constraints.${k}.${g} is not a cap.`);
+      });
+    });
+  }
+  if (settings.sliders !== undefined && !isPlainObject(settings.sliders))
+    throw new Error("The `settings.sliders` block is not an object.");
+  if (settings.disabledPacks !== undefined &&
+      (!Array.isArray(settings.disabledPacks) || settings.disabledPacks.some(x=>typeof x !== 'string')))
+    throw new Error("The `settings.disabledPacks` block is not a list of pack ids.");
+}
+
+/* charMeta is copied into the form fields and, for `lenses`, mapped over. A number is
+   tolerated for the text fields (older files), anything else is refused. */
+function validateCharMeta(m){
+  if (m == null) return;
+  ['name','age','context','archetypeLabel','seed'].forEach(k=>{
+    if (m[k] == null || typeof m[k] === 'string') return;
+    if (typeof m[k] === 'number' && Number.isFinite(m[k])) { m[k] = String(m[k]); return; }
+    throw new Error(`charMeta.${k} is not text.`);
+  });
+  if (m.lenses != null && (!Array.isArray(m.lenses) || m.lenses.some(x => typeof x !== 'string')))
+    throw new Error("charMeta.lenses is not a list of lens names.");
+}
+
 function validateSheetPayload(p){
   const isPlainObject = v => v && typeof v === 'object' && !Array.isArray(v);
   const isFiniteNum = v => typeof v === 'number' && Number.isFinite(v);
@@ -2058,38 +2133,8 @@ function validateSheetPayload(p){
       if (v.length > MAX_IMPORT_NOTE) p.traitNotes[k] = v.slice(0, MAX_IMPORT_NOTE);
     });
   }
-  // The constraint block is handed straight to restoreSettings, which spreads it into
-  // Sets and Maps. `exclusivePairs: 123` used to pass here and throw in there, after
-  // the sheet had already been replaced.
-  const c = p.settings && p.settings.constraints;
-  if (c !== undefined && c !== null){
-    if (!isPlainObject(c)) throw new Error("The `settings.constraints` block is not an object.");
-    ['bannedCategories','bannedSections','bannedTraitIds','requiredTraitIds','requiredCategories'].forEach(k=>{
-      if (c[k] !== undefined && !Array.isArray(c[k])) throw new Error(`settings.constraints.${k} is not a list.`);
-    });
-    if (c.exclusivePairs !== undefined){
-      if (!Array.isArray(c.exclusivePairs)) throw new Error("settings.constraints.exclusivePairs is not a list.");
-      c.exclusivePairs.forEach((pair,i)=>{
-        if (!Array.isArray(pair) || pair.length !== 2)
-          throw new Error(`settings.constraints.exclusivePairs[${i}] is not a pair of trait ids.`);
-      });
-    }
-    if (c.categoryTiers !== undefined && !Array.isArray(c.categoryTiers))
-      throw new Error("settings.constraints.categoryTiers is not a list.");
-    ['rarityCaps','intensityCaps'].forEach(k=>{
-      if (c[k] === undefined) return;
-      if (!isPlainObject(c[k])) throw new Error(`settings.constraints.${k} is not an object.`);
-      Object.entries(c[k]).forEach(([g,v])=>{
-        if (v === null) return;
-        if (!isFiniteNum(v) || v < 0) throw new Error(`settings.constraints.${k}.${g} is not a cap.`);
-      });
-    });
-  }
-  if (p.settings && p.settings.sliders !== undefined && !isPlainObject(p.settings.sliders))
-    throw new Error("The `settings.sliders` block is not an object.");
-  if (p.settings && p.settings.disabledPacks !== undefined &&
-      (!Array.isArray(p.settings.disabledPacks) || p.settings.disabledPacks.some(x=>typeof x !== 'string')))
-    throw new Error("The `settings.disabledPacks` block is not a list of pack ids.");
+  if (p.settings != null) validateSettingsBlock(p.settings);
+  validateCharMeta(p.charMeta);
   return p;
 }
 
@@ -2135,8 +2180,13 @@ function importCharacterJSON(fileInput){
       // Resolve ids against the live bank while still staged.
       const nextState = relink(staged.state || {});
       const nextPressure = relink(staged.pressureState || null);
-      // Everything above could throw; nothing below can. Commit.
+      /* Validation now covers every field restoreSettings and the form writers read, but the
+         commit below touches a lot of globals, so it is still guarded: if anything throws, the
+         pre-import workspace is put back and the history entry is dropped, instead of leaving a
+         half-replaced sheet (and, once, an undo stack holding a poisoned snapshot). */
+      const rollback = _snapshotNow();
       snapshotHistory();
+      try {
       state = nextState;
       pressureState = nextPressure;
       charMeta = staged.charMeta || {name:"Imported", age:"", context:"", archetypeLabel:"Imported"};
@@ -2169,6 +2219,11 @@ function importCharacterJSON(fileInput){
         if (typeof renderArc === 'function') renderArc();
       }
       onSliderChange(); renderSheet(); checkConflicts();
+      } catch(commitErr){
+        history.pop();
+        try { _restoreSnapshot(rollback); } catch(e2){ console.error('rollback failed', e2); }
+        throw commitErr;
+      }
       if (!staged.settings) toast("Imported. This file predates full-settings export, so constraints and counts were left as they are.", "warn", 6000);
       else toast("Imported " + (charMeta.name || "character") + " — settings restored too.");
       if (orphans) toast(orphans + " trait(s) in this file no longer exist in the pool; their saved text was kept as-is.", "warn", 6000);

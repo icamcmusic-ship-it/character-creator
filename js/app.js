@@ -294,8 +294,16 @@ async function renameSavedCharacter(name){
 function decodeSavedRecord(parsed, label){
   if (!parsed || typeof parsed !== 'object') throw new Error("that save is not a character record.");
   const rec = Object.assign({}, parsed);
+  /* A record with no `state` (or one that is not an object — expandSlots would turn the string
+     "abc" into a three-slot junk sheet) is refused before anything else. */
+  if (!rec.state || typeof rec.state !== 'object' || Array.isArray(rec.state))
+    throw new Error("that save has no character sheet in it.");
   rec.state = expandSlots(rec.state);
   rec.pressureState = expandSlots(rec.pressureState);
+  /* A record with no `state` (or one that is not an object) used to get as far as the loader
+     assigning `state = undefined` and then throwing, with the globals already overwritten. */
+  if (!rec.state || typeof rec.state !== 'object' || Array.isArray(rec.state))
+    throw new Error("that save has no character sheet in it.");
   // Validate the EXPANDED shape, which is what the render path will dereference —
   // validating the compressed {__id} form fails on every save this build has written.
   validateSheetPayload(rec);
@@ -2770,8 +2778,16 @@ async function importWorkspaceJSON(fileInput){
        toast) restores the constraints and settings this import replaced. */
     const prevSettings = captureSettings();
     if (p.settings){
+      validateSettingsBlock(p.settings);   // before anything is touched
+      const prevHistoryLength = history.length;
       snapshotHistory();
-      restoreSettings(merge ? mergeWorkspaceSettings(prevSettings, p.settings) : p.settings);
+      try { restoreSettings(merge ? mergeWorkspaceSettings(prevSettings, p.settings) : p.settings); }
+      catch(e){
+        // Put the workspace back and drop the history entry this attempt pushed.
+        if (history.length > prevHistoryLength) history.pop();
+        try { restoreSettings(prevSettings); refreshConstraintChips(); } catch(e2){ console.error(e2); }
+        throw e;
+      }
     }
     let saved = 0, skippedSame = [];
     for (const arch of archetypes){

@@ -5655,6 +5655,10 @@ function _snapshotNow(){
       lastReplay: arcLastReplay ? compressSlots(arcLastReplay) : null,
     } : null,
     viewContext: (typeof viewContext !== 'undefined') ? viewContext : null,
+    // The seed chip and the share link belong to the sheet too: after Undo they named the
+    // roll you had just undone away from.
+    seed: (typeof lastSeedUsed !== 'undefined') ? lastSeedUsed : null,
+    metaSeed: (typeof charMetaSeed !== 'undefined') ? charMetaSeed : null,
   };
 }
 function updateUndoButtons(){
@@ -5690,6 +5694,12 @@ function _restoreSnapshot(prev){
   if (prev.viewContext && typeof viewContext !== 'undefined') viewContext = prev.viewContext;
   restoreSliders(prev.sliders);
   lastGeneratedSliders = prev.sliders; // the restored state now corresponds to these again
+  if ('seed' in prev && typeof lastSeedUsed !== 'undefined'){
+    lastSeedUsed = prev.seed; charMetaSeed = prev.metaSeed;
+    const seedOut = document.getElementById('lastSeedReadout');
+    if (seedOut) seedOut.textContent = lastSeedUsed ? "Seed: " + lastSeedUsed : "";
+    if (typeof updateStickyBar === 'function') updateStickyBar();
+  }
   setVal('charName', charMeta.name || "");
   setVal('charAge', charMeta.age || "");
   setVal('charContext', charMeta.context || "");
