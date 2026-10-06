@@ -1654,3 +1654,15 @@ kbd { display:inline-block; min-width:1.4em; text-align:center; padding:1px 6px;
    save-state text reserves its width so the header row does not re-wrap when it fills in. */
 html[data-onboarded] #onboard { display:none; }
 .saveState { display:inline-block; min-width:11em; }
+
+/* Desktop cards: the controls stacked in one column of about ten buttons, which made every card taller than its
+   content (about 370px against 150px of text) and the sheet 28,000px long. Let them wrap into a block beside the text. */
+@media (min-width:721px) {
+  .traitCard .slotBtns { flex-direction:row; flex-wrap:wrap; justify-content:flex-end; align-content:flex-start; width:210px; gap:6px; }
+  .traitCard .slotBtns .pinRow { display:flex; gap:4px; }
+}
+
+/* A built sheet is about 5,000 nodes. Cards that are off screen skip layout and paint until they are scrolled near;
+   the reserved height keeps the scrollbar steady. Printing renders every card. */
+#sheetBody .traitCard { content-visibility:auto; contain-intrinsic-size:auto 210px; }
+@media print { #sheetBody .traitCard { content-visibility:visible; } .traitCard .slotBtns, .traitCard .slotToggle { display:none !important; } }
