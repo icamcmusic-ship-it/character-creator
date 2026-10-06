@@ -7413,6 +7413,15 @@ function rollSheetShape(){
   }
   let r = rand(), wild = 0;
   for (let i = 0; i < SHAPE_WILD_ODDS.length; i++){ r -= SHAPE_WILD_ODDS[i]; if (r <= 0){ wild = i; break; } }
+  /* The outlier checkbox and the "how many" slider were ignored whenever Sheet shape was on,
+     which is the default: the shape's own roll decided. They apply from v2 (a v1 seed has to
+     keep drawing what it always drew). The roll above is still made, so the random stream is
+     the same either way; the controls then override its result. Off means none. A count other
+     than the default of 1 fixes the number; 1 leaves it to the sheet, which varies from 0 to 3. */
+  if (ENGINE_V >= 2){
+    if (!wildcardEnabled()) wild = 0;
+    else { const n = wildcardCount(); if (n !== 1) wild = n; }
+  }
   return {double, drop, wild};
 }
 function shapeSummary(shape){

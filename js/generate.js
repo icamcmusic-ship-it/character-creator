@@ -1031,7 +1031,7 @@ function rerollSlot(slotId){
       // passed on is a disappointment, a trait seated twice on one sheet is a bug.
       if (!duplicate && !firstUnseated) firstUnseated = cand;
     }
-    return firstUnseated || (cand && !seated.has(cand.trait.id) ? cand : null);
+    return firstUnseated || (cand && cand.trait && !seated.has(cand.trait.id) ? cand : null);
   };
   const rawOf = id => intVal(id, 0);
 

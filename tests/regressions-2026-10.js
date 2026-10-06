@@ -66,4 +66,32 @@ module.exports = function({check, group, assert}){
     const bad = G.evalIn("TRAITS.filter(t=>/<\\/?[a-z][^>]*>/i.test([t.trait,t.desc,t.example].join(' '))).map(t=>t.id+': '+(t.example||t.desc)).slice(0,5)");
     assert(!bad.length, bad.length + '+ traits carry markup, e.g. ' + bad[0]);
   });
+
+  check('M3 tossing a card whose category was banned toasts "nothing left" instead of throwing', ()=>{
+    const G = fresh(); G.gen('rr1');
+    const slot = G.evalIn("Object.keys(state).find(k=>/^(manner|vocab)/.test(k) && state[k] && state[k].trait && !state[k].locked)");
+    assert(slot, 'no manner or vocabulary slot to toss');
+    G.evalIn(`bannedCategories.add(state['${slot}'].trait.category)`);
+    let threw = null; try { G.evalIn(`rerollSlot('${slot}')`); } catch(e){ threw = e.message; }
+    assert(!threw, 'rerollSlot threw: ' + threw);
+    assert(G.evalIn('__toasts.length') > 0, 'no toast told the user nothing could be drawn');
+  });
+
+  check('M1 the outlier checkbox and count slider reach the sheet shape on v2, and v1 keeps the shape roll', ()=>{
+    const G = fresh(); const d = G.document;
+    d._set('wildcardToggle', {checked: true}); d._set('wildcardCount', {value: '1'}); d._set('sheetShapeToggle', {checked: true});
+    const wilds = (pre, toggle, count)=>{
+      d.getElementById('wildcardToggle').checked = toggle; d.getElementById('wildcardCount').value = String(count);
+      const out = [];
+      for (let i = 1; i <= 40; i++){ G.gen(pre + (i * 104729).toString(36)); out.push(G.evalIn("Object.keys(state).filter(k=>k.startsWith('wild_')).length")); }
+      return out;
+    };
+    const sum = a => a.reduce((x, y)=>x + y, 0);
+    assert(sum(wilds('v2-', false, 1)) === 0, 'v2 still drew outliers with the checkbox off');
+    assert(wilds('v2-', true, 2).every(n => n === 2), 'v2 count 2 did not fix the number of outliers at 2');
+    assert(wilds('v2-', true, 0).every(n => n === 0), 'v2 count 0 still drew an outlier');
+    const free = wilds('v2-', true, 1); assert(new Set(free).size > 1, 'count 1 should leave the number to the sheet shape');
+    const v1a = wilds('v1-', true, 1), v1b = wilds('v1-', false, 3);
+    assert(JSON.stringify(v1a) === JSON.stringify(v1b), 'the wildcard controls changed what a v1 seed draws');
+  });
 };

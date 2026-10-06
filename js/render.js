@@ -1160,7 +1160,7 @@ function renderSheet(){
     // Voice fingerprint — assembled from the character's own example lines.
     const fp = voiceFingerprint(state, charMeta);
     if (fp){
-      h += `<div class="tensionBlock" style="border-left-color:var(--emerald); margin-top:10px;"><div class="tensionTitle" style="color:var(--emerald);">Voice fingerprint</div><div style="font-style:italic; line-height:1.7;">${escHTML(fp)}</div><div class="sub" style="margin:6px 0 0;">Sample lines drawn from this character's own traits — how they'd actually sound on the page. Stable for this exact character; changes when the traits do.</div></div>`;
+      h += `<div class="tensionBlock" style="border-left-color:var(--emerald); margin-top:10px;"><div class="tensionTitle" style="color:var(--emerald-deep);">Voice fingerprint</div><div style="font-style:italic; line-height:1.7;">${escHTML(fp)}</div><div class="sub" style="margin:6px 0 0;">Sample lines drawn from this character's own traits — how they'd actually sound on the page. Stable for this exact character; changes when the traits do.</div></div>`;
     }
     // Radar — 12-axis realised polarity shape.
     let prof = null;
