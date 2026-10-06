@@ -39,7 +39,6 @@ function setEngineSettings(obj){
   ENGINE_SETTINGS = (obj && typeof obj === 'object') ? Object.assign({}, obj) : null;
   if (typeof invalidateSliderCache === 'function') invalidateSliderCache();
 }
-function getEngineSettings(){ return ENGINE_SETTINGS ? Object.assign({}, ENGINE_SETTINGS) : null; }
 function withEngineSettings(obj, fn){
   const prev = ENGINE_SETTINGS;
   setEngineSettings(obj ? Object.assign({}, prev || {}, obj) : null);
@@ -261,7 +260,6 @@ function variantsFromProtected(slots){
   return {want, conflicts};
 }
 let lastVariantConflicts = [];
-function getVariantConflicts(){ return lastVariantConflicts; }
 /* `required` is a map of category -> variant that this character is already committed
    to (see variantsFromProtected). Those categories are not rolled; the rest are. */
 function rollCharacterVariants(required){
@@ -2201,12 +2199,6 @@ function _pickInRangeInner(pool, rarityPref, target, minCount, flatten){
   return list[list.length-1];
 }
 
-// Kept as a thin shim: a few call sites still think in integer buckets, and this
-// keeps them honest without reintroducing rounding into the main path.
-function computeTargetIntensity(levelAbs){
-  return clamp(Math.round(1 + (levelAbs/2)*4), 1, 5);
-}
-
 // ================= UNIFIED WEIGHT MATRIX =================
 // One data table drives every cross-influence in the app: personality axes -> voice
 // categories, personality axes -> profile-section types, AND resolved profile types ->
@@ -2613,12 +2605,6 @@ function persLevel(id, overrides){
   })();
   return rawToLevel(raw);
 }
-function personalitySignals(overrides){
-  const out = {};
-  PERSONALITY_AXES.forEach(a=> out[a.id] = persLevel(a.id, overrides));
-  return out;
-}
-
 // Walks every active signal (13 personality axes + any already-resolved profile categories)
 // and sums matrix weights into a fragment->strength map for the requested "kind".
 // ---------- Pick provenance ("why did I get this?") ----------------------
@@ -3432,8 +3418,6 @@ function getSuppressedContextTags(){ return [...CONTEXT_SUPPRESSED]; }
 // Matches that were found but NOT applied, with the reason — so "why didn't it read
 // this as military?" has an answer on screen.
 let CONTEXT_REJECTED = [];
-function getRejectedContextTags(){ return CONTEXT_REJECTED.slice(); }
-
 function buildContextBias(contextText, ageText){
   CONTEXT_BIAS = new Map();
   CONTEXT_AXIS_NUDGE = {};
@@ -4996,7 +4980,6 @@ function _coherenceScoreInner(st, OV){
    A default sheet drops from ~38 rangeSelect calls per render to roughly the number of
    distinct pools it actually draws from. */
 const _loudPCache = new Map();
-function _invalidateLoudCache(){ _loudPCache.clear(); }
 function expectedLoudCount(st){
   let expected = 0, variance = 0, measurable = 0;
   Object.values(st || {}).forEach(s=>{
@@ -5846,7 +5829,7 @@ function pickFromCategoryIntensityAware(section, category, boostMap, rarityPref)
 function pickVocabSlots(archetypePref, verbLevel, regLevel, rarityPref, count, profileCats, overrides){
   const boosted = boostedVocabCats(verbLevel, regLevel, profileCats, overrides);
   const pool = archetypePref && archetypePref.length ? archetypePref : VOCAB_CATS;
-  const targetCount = count || 2;
+  const targetCount = Number.isFinite(count) ? Math.max(0, count) : 2;   // a count of 0 means none (it used to become 2)
   const chosenCats = []; const usedCats = new Set();
   // BUG FIX: this loop had no attempt cap, so with an unlucky weighted draw it
   // could spin for a long time; and its `else if` branch was unreachable because
@@ -7132,52 +7115,6 @@ const PRESSURE_TAIL = {
 };
 
 function _pickFrag(list, rng){ return list && list.length ? list[Math.floor(rng() * list.length)] : null; }
-/* The original fragment composer, kept as the backing table's reference reader (and for
-   comparison): composeVoiceLine below is the compositional generator that replaced it. */
-function composeVoiceLineFragments(st, promptId, mode, opts){
-  const prompt = allVoicePrompts().find(p => p.id === promptId);
-  if (!prompt) return null;
-  opts = opts || {};
-  const r = voiceRules(st);
-  const underPressure = mode === "pressure";
-  let seed = 11;
-  Object.values(st || {}).forEach(s => { if (s && s.trait) seed = (seed * 31 + s.trait.id) >>> 0; });
-  /* The seed used to hash the trait ids alone (plus the prompt id), so two prompts with
-     the same fragment table and a sheet with few voice traits read identically, and
-     there was no way to ask for another take. Prompt index and a reroll counter join
-     it; at index/reroll absent the line is what it has always been. */
-  const idx = Number.isInteger(opts.index) ? opts.index : -1, reroll = Number.isInteger(opts.reroll) ? opts.reroll : 0;
-  const rng = mulberry32(hashSeedString(String(seed) + "|" + promptId + "|" + (mode || "baseline") + (idx >= 0 || reroll ? "|" + idx + "|" + reroll : "")));
-  const parts = [], used = [];
-  const take = frag => { if (!frag) return; if (frag.text) parts.push(frag.text); used.push(frag.rule); };
-  const table = VOICE_FRAGMENTS[prompt.like || promptId];
-  /* Pressure strips the politeness layer first — the opener and the manners are the
-     first things to go when someone is holding themselves together. */
-  if (!underPressure){
-    // The mannered openers thank someone for asking, so they only belong where someone
-    // has actually asked — otherwise an apology opens by thanking the injured party.
-    const kind = prompt.like || promptId;
-    const asked = kind === "refuse" || kind === "request" || kind === "askhelp";
-    if (r.mannered && asked) take(_pickFrag(VOICE_FRAGMENTS.opener.mannered, rng));
-    else if (r.formal) take(_pickFrag(VOICE_FRAGMENTS.opener.formal, rng));
-    else if (r.casual) take(_pickFrag(VOICE_FRAGMENTS.opener.casual, rng));
-  }
-  const pick = (...keys) => { for (const k of keys){ if (r[k] && table[k]) return _pickFrag(table[k], rng); } return _pickFrag(table.mid || table.straight || Object.values(table)[0], rng); };
-  take(pick("direct","yielding","slippery","straight","open","guarded","warm","cold","mannered","blunt","terse"));
-  if (!underPressure && r.long) take(_pickFrag(VOICE_FRAGMENTS.tail.long, rng));
-  if (!underPressure && r.warm) take(_pickFrag(VOICE_FRAGMENTS.tail.warm, rng));
-  if (underPressure && r.stress) take(_pickFrag(PRESSURE_TAIL[r.stress.category], rng));
-  /* A vocabulary trait's own example is the one genuinely authored thing available, so
-     it rides along as the character's habitual device rather than being paraphrased. */
-  const device = r.vocab.filter(t => t.example)[0] || r.grammar;
-  const text = parts.join(" ").replace(/\s+/g, " ").trim();
-  return {
-    prompt: prompt.label, promptId, setup: prompt.setup, mode: underPressure ? "pressure" : "baseline",
-    text: text || "(this sheet has no voice traits to compose from)",
-    rules: used.filter(Boolean),
-    device: device ? {label: device.trait, example: device.example || ""} : null,
-  };
-}
 function voiceLab(st, mode, reroll, meta){
   // One `recent` across the seven situations, so the same tail, joke or stage direction
   // does not turn up in all of them.
@@ -7812,7 +7749,6 @@ function _exampleSentences(t){
   if (!t || !t.example) return [];
   return String(t.example).split(/(?<=[.!?])\s+/).map(s => s.trim()).filter(s => s.split(/\s+/).length >= 3 && s.length <= 60 && !/[()]/.test(s));
 }
-function _exampleSentence(t){ return _exampleSentences(t)[0] || null; }
 const _sentences = s => s.split(/(?<=[.!?])\s+/).filter(Boolean);
 const _cap = s => s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
 const _lowerFirst = s => /^(I\b|I'|[A-Z]{2})/.test(s) ? s : s.charAt(0).toLowerCase() + s.slice(1);

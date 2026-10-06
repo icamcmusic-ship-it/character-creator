@@ -1642,3 +1642,10 @@ kbd { display:inline-block; min-width:1.4em; text-align:center; padding:1px 6px;
   .markBtn, .rerollBtn, .lockBtn, .pinBtn, .whyBtn, .slotToggle, .axisTitle { min-height:40px; }
   .markBtn { min-width:40px; }
 }
+
+/* On a phone the sheet is tens of thousands of pixels tall and this row was the only way around it; keep it in reach. */
+@media (max-width:720px) {
+  .sheetNav { position:sticky; top:0; z-index:30; background:var(--bg); padding:6px 0; margin-bottom:8px; flex-wrap:nowrap; overflow-x:auto; scrollbar-width:none; }
+  .sheetNav::-webkit-scrollbar { display:none; }
+  .sheetNav > * { flex-shrink:0; }
+}
