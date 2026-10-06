@@ -60,4 +60,10 @@ module.exports = function({check, group, assert}){
     assert(r.stressRepair, 'stress -> Repair links are still dead in v2');
     assert(r.dropped === 39, 'expected 39 legacy-dropped links, found ' + r.dropped);
   });
+
+  check('H3 no trait example or description carries HTML markup (the renderer escapes it, so it shows as raw tags)', ()=>{
+    const G = fresh();
+    const bad = G.evalIn("TRAITS.filter(t=>/<\\/?[a-z][^>]*>/i.test([t.trait,t.desc,t.example].join(' '))).map(t=>t.id+': '+(t.example||t.desc)).slice(0,5)");
+    assert(!bad.length, bad.length + '+ traits carry markup, e.g. ' + bad[0]);
+  });
 };
