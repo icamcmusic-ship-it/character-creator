@@ -59,7 +59,8 @@ jobs:
           set -eu
           rm -rf _site && mkdir -p _site
           cp index.html sw.js _site/
-          cp -r css js _site/
+          cp -r css js icons _site/
+          cp manifest.json _site/
           cp cast.png mobile.png tinker.png _site/
           touch _site/.nojekyll
           # Fail loudly if anything the page loads did not make it across.
