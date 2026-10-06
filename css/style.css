@@ -1649,3 +1649,8 @@ kbd { display:inline-block; min-width:1.4em; text-align:center; padding:1px 6px;
   .sheetNav::-webkit-scrollbar { display:none; }
   .sheetNav > * { flex-shrink:0; }
 }
+
+/* Layout stability: the first-visit card is part of the first paint unless boot.js has seen it dismissed, and the
+   save-state text reserves its width so the header row does not re-wrap when it fills in. */
+html[data-onboarded] #onboard { display:none; }
+.saveState { display:inline-block; min-width:11em; }

@@ -9,6 +9,7 @@
      share link that got markup into the page therefore cannot run it. tests/browser.mjs runs the
      whole app under the same policy. -->
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: blob:; object-src 'none'; base-uri 'self'; form-action 'none'">
+<script src="js/boot.js"></script>
 <meta name="description" content="Generate rich, consistent character voices with traits, speech patterns, and dialogue examples.">
 <!-- Fonts are served from this origin (css/fonts.css), so the page makes no third-party request, works offline, and no
      slow font host can hold up first paint. The two faces every page uses are preloaded so the swap does not shift the layout. -->
@@ -52,7 +53,7 @@
   </div>
   <!-- First-visit card. It lived inside #emptyState, below every control, so a new
        visitor never saw it without scrolling; it now sits directly under the tabs. -->
-  <div class="onboard" id="onboard" hidden>
+  <div class="onboard" id="onboard">
     <b class="onboardTitle">New here?</b>
     <p>One click gets you a whole character to react to. The short version of the controls is on; you can switch every dial on at any time with Tinker Mode.</p>
     <div class="onboardBtns">

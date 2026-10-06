@@ -998,6 +998,25 @@ await step('M2 Undo puts the seed chip back', async ()=>{
   if (r.a === r.b) throw new Error('two builds printed the same seed');
   if (r.after !== r.a || !r.chip.includes(r.a)) throw new Error('after undo the seed reads ' + r.after + ' / chip "' + r.chip + '", expected ' + r.a);
 });
+await step('B-4 the first screen does not shift after first paint (layout shift under 0.1 at 390, 768 and 1440 wide)', async ()=>{
+  for (const w of [390, 768, 1440]){
+    const pg = await b.newPage({viewport: {width: w, height: 900}});
+    await pg.addInitScript(()=>{ window.__cls = 0; new PerformanceObserver(l => { for (const e of l.getEntries()) if (!e.hadRecentInput) window.__cls += e.value; }).observe({type: 'layout-shift', buffered: true}); });
+    await pg.goto(base + '/index.html', {waitUntil: 'load'}); await pg.waitForTimeout(1200);
+    const cls = await pg.evaluate(()=> window.__cls);
+    await pg.close();
+    if (cls >= 0.1) throw new Error('layout shift ' + cls.toFixed(3) + ' at ' + w + 'px wide');
+  }
+});
+await step('fonts come from this origin: no third-party request, and the faces load', async ()=>{
+  const pg = await b.newPage(); const outside = [];
+  pg.on('request', r => { if (!r.url().startsWith(base)) outside.push(r.url()); });
+  await pg.goto(base + '/index.html', {waitUntil: 'networkidle'});
+  const loaded = await pg.evaluate(async ()=>{ await document.fonts.ready; return [...document.fonts].filter(f => f.status === 'loaded').map(f => f.family); });
+  await pg.close();
+  if (outside.length) throw new Error('requests to other origins: ' + outside.slice(0, 3).join(', '));
+  if (!loaded.some(f => /Jakarta/.test(f))) throw new Error('the body font did not load: ' + loaded.join(', '));
+});
 await b.close();
 if (process.env.CSP) console.log(csp.length ? '\nCSP violations:\n' + csp.slice(0,6).map(v=>'  '+v).join('\n') : '\nNo CSP violations under script-src \'self\'.');
 const real = errs.filter(e => !/favicon|sw\.js|ServiceWorker|Failed to load resource|Content Security Policy/i.test(e)).concat(process.env.CSP ? csp : []);

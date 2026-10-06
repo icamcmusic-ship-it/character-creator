@@ -36,6 +36,7 @@ const ASSETS = [
   './css/fonts/PlusJakartaSans-400-latin-ext.woff2',
   './css/fonts/JetBrainsMono-400-latin.woff2',
   './css/fonts/JetBrainsMono-400-latin-ext.woff2',
+  './js/boot.js',
   './js/data/traits-core.js',
   './js/data/traits-supplement.js',
   './js/data/traits-situational.js',
