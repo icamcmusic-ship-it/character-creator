@@ -779,7 +779,7 @@ function _runGenerationInner(){
   let exploreInfo = null;
   if (!replay && !wantDepthFirst && exploreCandidatesEnabled()){
     const refs = explorationReferences(state);
-    if (refs.length){
+    if (refs.length || getRetiredTraits().length){
       const want0 = variantsFromProtected(state).want;
       const cands = [];
       for (let k = 0; k < EXPLORE_CANDIDATES; k++){

@@ -1428,7 +1428,7 @@ function retireTrait(id){
   if (on) now.add(id); else now.delete(id);
   setRetiredTraits([...now]);
   const kept = _projectFieldSave('retired', [...now]);
-  toast(on ? `"${t.trait}" is retired${kept ? ' for this project' : ' for this session (no project open)'} — rarer in new characters, never banned.`
+  toast(on ? `"${t.trait}" is retired${kept ? ' for this project' : ' for this session (no project open)'} — new builds favour the candidate that uses fewest retired traits; never banned.`
            : `"${t.trait}" is back at full weight.`, "ok", 5000);
   if (typeof withPreservedFocus === 'function') withPreservedFocus(()=>{ renderSheet(); }); else renderSheet();
 }

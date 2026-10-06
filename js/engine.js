@@ -7585,7 +7585,7 @@ function selectDistinctCandidate(cands, references){
   const scored = cands.map((c, i) => {
     const co = c.coherence !== undefined ? c.coherence : ((typeof coherenceScore === 'function' && coherenceScore(c.state)) || {pct:0}).pct;
     const d = (references && references.length ? diversityScore(c.state, references).score : 0) - TALLY_WEIGHT * tallyOveruse(c.state)
-      - RECENT_PICK_WEIGHT * recentOverlapShare(c.state);
+      - RECENT_PICK_WEIGHT * recentOverlapShare(c.state) - RETIRED_PICK_WEIGHT * retiredShare(c.state);
     return Object.assign({}, c, {index:i, coherence:co, diversity:d});
   });
   const best = Math.max(...scored.map(c => c.coherence));
@@ -7598,6 +7598,16 @@ function selectDistinctCandidate(cands, references){
    The draw runs in replay mode so a printed seed always rebuilds its character; the
    recent window instead steers which of the three seeded candidates is kept. */
 const RECENT_PICK_WEIGHT = 0.5;
+/* Retire-for-project lives here too. retirePenalty() above is a per-trait weight, which only
+   acts outside replay mode, and every build is a replay, so retiring a trait changed nothing.
+   A retired trait now costs the candidate that carries it: the build keeps the one of its
+   three that uses the fewest. Never a ban, and a pasted seed (no candidates) still replays. */
+const RETIRED_PICK_WEIGHT = 3;
+function retiredShare(st){
+  if (!RETIRED_IDS.size) return 0;
+  const ids = Object.values(st || {}).filter(s => s && s.trait).map(s => s.trait.id);
+  return ids.length ? ids.filter(id => RETIRED_IDS.has(id)).length / ids.length : 0;
+}
 function recentOverlapShare(st){
   if (typeof avoidRecentEnabled === 'function' && !avoidRecentEnabled()) return 0;
   if (!recentTraitIds || !recentTraitIds.length) return 0;

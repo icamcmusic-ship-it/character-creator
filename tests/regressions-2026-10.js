@@ -161,4 +161,21 @@ module.exports = function({check, group, assert}){
       assert(/^v2-/.test(G.evalIn('lastCastSeed')), 'a fresh cast did not print a v2 seed: ' + G.evalIn('lastCastSeed'));
     } finally { console.info = info; }
   });
+
+  check('M9 a retired trait costs the exploration candidate that carries it (and nothing else changes without retiring)', ()=>{
+    const G = fresh();
+    const r = G.evalIn(`(()=>{
+      const build = seed => { document.getElementById('seedInput').value = seed; _runGeneration(); return JSON.parse(JSON.stringify(compressSlots(state))); };
+      const A = expandSlots(build('m9-a')), B = expandSlots(build('m9-b'));
+      const idsOf = st => Object.values(st).filter(s => s && s.trait).map(s => s.trait.id);
+      const cands = () => [{state: A, coherence: 50}, {state: B, coherence: 50}];
+      setRetiredTraits([]); const none = selectDistinctCandidate(cands(), []).index;
+      setRetiredTraits(idsOf(A)); const retA = selectDistinctCandidate(cands(), []).index;
+      setRetiredTraits(idsOf(B)); const retB = selectDistinctCandidate(cands(), []).index;
+      setRetiredTraits([]);
+      return {none, retA, retB}; })()`);
+    assert(r.retA === 1, 'with A retired the build still kept A (index ' + r.retA + ')');
+    assert(r.retB === 0, 'with B retired the build still kept B (index ' + r.retB + ')');
+    assert(r.none === 0, 'with nothing retired the first candidate should win a tie');
+  });
 };
