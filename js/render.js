@@ -1452,7 +1452,7 @@ function sheetToText(st, meta, pState){
     }
     const icx = (typeof innerConflict === 'function') ? innerConflict(st, meta) : null;
     if (icx){
-      L.push("", `**Inner conflict — ${icx.label}:** ${icx.a.role} “${icx.a.trait.trait}” against ${icx.b.role.toLowerCase()} “${icx.b.trait.trait}”. Day to day ${icx.a.role.toLowerCase()} wins; under load ${icx.flips ? `${icx.winner.role.toLowerCase()} takes over, ${icx.when}` : `it holds, ${icx.when}, at a cost`}. The ${icx.loser.role.toLowerCase()} leaks meanwhile. _${icx.question}_`);
+      L.push("", `**Inner conflict — ${icx.label}:** ${icx.a.role} “${_nm(icx.a.trait)}” against ${icx.b.role.toLowerCase()} “${_nm(icx.b.trait)}”. Day to day ${icx.a.role.toLowerCase()} wins; under load ${icx.flips ? `${icx.winner.role.toLowerCase()} takes over, ${icx.when}` : `it holds, ${icx.when}, at a cost`}. ${/^the /i.test(icx.loser.role) ? _cap(icx.loser.role.toLowerCase()) : 'The ' + icx.loser.role.toLowerCase()} leaks meanwhile. _${icx.question}_`);
     }
     (typeof seatedContradictions === 'function' ? seatedContradictions(st) : []).forEach(sc => {
       L.push("", `**Seated contradiction — ${sc.axisLabel}:** ${sc.face ? sc.face.trait + " and also " : ""}${sc.exception.trait}${sc.fnTrait ? ` (for: ${sc.fnTrait.trait})` : ""}. _${sc.question}_`,

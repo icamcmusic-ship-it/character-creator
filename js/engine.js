@@ -6210,9 +6210,9 @@ function pressureTrigger(st){
   const fear = find(/Core Fear/i), wound = find(/Core Wound/i), lie = find(/The Lie/i);
   if (!fear && !wound) return null;
   let out = fear
-    ? `Anything that looks like <b>${escHTML(fear.trait)}</b>${wound ? ` — especially when it rhymes with <b>${escHTML(wound.trait)}</b>` : ``}.`
-    : `Anything that reopens <b>${escHTML(wound.trait)}</b>.`;
-  if (lie) out += ` Underneath it, they are still working from <b>${escHTML(lie.trait)}</b>.`;
+    ? `Anything that looks like <b>${escHTML(_nm(fear))}</b>${wound ? ` — especially when it rhymes with <b>${escHTML(_nm(wound))}</b>` : ``}.`
+    : `Anything that reopens <b>${escHTML(_nm(wound))}</b>.`;
+  if (lie) out += ` Underneath it, they are still working from <b>${escHTML(_nm(lie))}</b>.`;
   return out;
 }
 
@@ -6288,6 +6288,16 @@ const _PROSE_PAST = /^(was|were|shamed|mocked|dismissed|overlooked|replaced|chea
 const _PROSE_MODAL = /^(can|cannot|can't|could|will|won't|would|never|always|only|rarely|still|mildly|quietly|secretly|slightly)$/i;
 const _PROSE_BARE = /^(live|stay|talk|finally|put|send|bring|teach|lose|give|take|run|hold|look|walk|sleep|quit|get|make|be|keep|find|win|see|have|build|learn|retire|fix|finish|sell|say|leave|clear|go|prove|become|earn|pay|buy|save|stop|start|help|protect|return|move|write|tell|hear|reach|open|close|repair|raise|marry|own|visit|meet|beat|escape|survive|forgive|matter|belong|land|pass|finally)$/i;
 const _PROSE_NOT_VERB = /^(parents|adults|mastery|recognition|belonging|nothing|always|others|debts|less|loss|access|process|success|progress|business|kindness|bus|status|chaos|focus|bonus|plus|this|its|his|hers|yes|us|thus|as|is)$/i;
+/* A trait's name for a place in a sentence that is not a clause slot: a name stored as one
+   hyphen-joined run ("Fear-of-a-specific-person") is a phrase, and printed raw it read as a
+   slug in prose. Capitalisation is kept; use traitPhrase where the name must start lower case. */
+/* Category names carry a parenthetical gloss for the controls ("Core Want (conscious goal)"); in a sentence
+   the gloss reads as a debug dump, so it is dropped. */
+function _plainCat(c){ return String(c || "").replace(/\s*\([^)]*\)\s*$/, ""); }
+function _nm(t){
+  const s = String((t && t.trait) || t || "");
+  return (!/\s/.test(s) && (s.match(/-/g) || []).length >= 2) ? s.replace(/-/g, " ") : s;
+}
 function traitPhrase(t){
   let s = String((t && t.trait) || t || "").trim().replace(/^['"‘“]+|['"’”]+$/g, "").replace(/[.!]+$/, "");
   // A name that is one hyphen-joined run of three or more words is a phrase, not a compound.
@@ -6346,7 +6356,9 @@ function asReportedBelief(t){
     .replace(/\bI am\b/g, "they are").replace(/\bI was\b/g, "they were").replace(/\bI\b/g, "they")
     .replace(/\bmyself\b/gi, "themselves").replace(/\bmy\b/gi, "their").replace(/\bmine\b/gi, "theirs").replace(/\bme\b/gi, "them")
     .replace(/\bthey has\b/g, "they have").replace(/\bthey does\b/g, "they do").replace(/\bthey is\b/g, "they are");
-  return s ? s[0].toLowerCase() + s.slice(1) : s;
+  // A Lie named "That they are the reasonable one" is spliced after "that": drop the doubled word.
+  const u = s.replace(/^that\s+/i, "");
+  return u ? u[0].toLowerCase() + u.slice(1) : u;
 }
 function motivationChain(st){
   const want = _profTrait(st, "motivation", /Core Want/i);
@@ -6419,10 +6431,10 @@ function motivationChain(st){
    shifts happen, or what the repair looks like. Each stage names the base trait it is
    grounded in; a stage with nothing to ground it is omitted rather than invented. */
 const APPRAISAL_BY_ATTACHMENT = {
-  "Secure": "reads it as a problem to solve, not a verdict on them",
-  "Anxious": "reads it as the first sign of being left",
-  "Avoidant": "reads it as a demand, and demands are the thing to get away from",
-  "Disorganized": "reads it two ways at once and acts on whichever arrives first",
+  "Secure": "read it as a problem to solve, not a verdict on them",
+  "Anxious": "read it as the first sign of being left",
+  "Avoidant": "read it as a demand, and demands are the thing to get away from",
+  "Disorganized": "read it two ways at once and act on whichever arrives first",
 };
 const THRESHOLD_BY_VALUES = {
   "Rigid & Principled": "when a rule is broken in front of them",
@@ -6443,15 +6455,15 @@ function pressureChain(st, pst){
   const stages = [];
   const add = (key, title, text, from) => stages.push({key, title, text, from: from.filter(Boolean).map(t => t.trait)});
   if (fear || wound) add("trigger", "Trigger", fear
-    ? `Anything that looks like ${fear.trait}${wound ? `, especially when it rhymes with ${wound.trait}` : ``}.`
-    : `Anything that reopens ${wound.trait}.`, [fear, wound]);
+    ? `Anything that looks like ${traitPhrase(fear)}${wound ? `, especially when it rhymes with ${asNounPhrase(wound)}` : ``}.`
+    : `Anything that reopens ${asNounPhrase(wound)}.`, [fear, wound]);
   if (attach || lie){
     const a = attach ? APPRAISAL_BY_ATTACHMENT[attach.category] : null;
-    add("appraisal", "How they read it", `${a ? `They ${a}` : `They read it through the belief`}${lie ? `, because underneath they still hold that ${lie.trait}` : ``}.`, [attach, lie]);
+    add("appraisal", "How they read it", `${a ? `They ${a}` : `They read it through the belief`}${lie ? `, because underneath they still hold that ${asReportedBelief(lie)}` : ``}.`, [attach, lie]);
   }
   if (stress){
-    const shifted = pst ? Object.values(pst).filter(s => s && s.shifted).map(s => `${s.fromCat} → ${s.toCat}`) : [];
-    add("tactic", "First move", `${stress.trait}: ${stress.desc || STRATEGY_BY_STRESS[stress.category] || ""}${shifted.length ? ` Under load the profile shifts: ${shifted.join("; ")}.` : ``}`.trim(), [stress]);
+    const shifted = pst ? Object.values(pst).filter(s => s && s.shifted).map(s => `${_plainCat(s.fromCat)} becomes ${_plainCat(s.toCat)}`) : [];
+    add("tactic", "First move", `${_nm(stress)}: ${stress.desc || STRATEGY_BY_STRESS[stress.category] || ""}${shifted.length ? ` Under load the profile shifts: ${shifted.join("; ")}.` : ``}`.trim(), [stress]);
   }
   if (values || level !== undefined){
     const v = values ? THRESHOLD_BY_VALUES[values.category] : null;
@@ -6487,10 +6499,10 @@ function structuredContradiction(st, meta){
   const attach = _profTrait(st, "attachment");
   const derived = {
     when: hiWhen.length || loWhen.length
-      ? `${base.hi.trait} ${hiWhen.length ? hiWhen.join(" or ") : "by default"}; ${base.lo.trait} ${loWhen.length ? loWhen.join(" or ") : "the rest of the time"}.`
+      ? `${_nm(base.hi)} ${hiWhen.length ? hiWhen.join(" or ") : "by default"}; ${_nm(base.lo)} ${loWhen.length ? loWhen.join(" or ") : "the rest of the time"}.`
       : null,
-    who: roles.length ? `The context roles give the likely split: ${roles.map(r => `${r.category.toLowerCase()} they are ${r.trait}`).join("; ")}.` : (attach ? `${attach.category} attachment decides who gets which face.` : null),
-    change: `On ${base.axisLabel.toLowerCase()} they move from ${base.hi.trait} to ${base.lo.trait} — a ${base.tier.toLowerCase()} swing.`,
+    who: roles.length ? `The context roles give the likely split: ${roles.map(r => `${r.category.toLowerCase()} they are ${_nm(r)}`).join("; ")}.` : (attach ? `${attach.category} attachment decides who gets which face.` : null),
+    change: `On ${base.axisLabel.toLowerCase()} they move from ${_nm(base.hi)} to ${_nm(base.lo)} — a ${base.tier.toLowerCase()} swing.`,
     cost: fn ? `${fn.trait}: ${fn.desc || ""}`.trim() : null,
     fn,
   };
@@ -6746,10 +6758,10 @@ function edgeDefaults(fromState, toState, roleId){
   const contraB = contradictionFor(toState);
   const woundB = _profTrait(toState, "motivation", /Core Wound/i);
   const sharp = (pa.intel || 0) > 0.2 || (pa.cur || 0) > 0.2;
-  const knows = contraB ? (sharp ? `Has noticed that they are ${contraB.hi.trait} and also ${contraB.lo.trait}.` : `Has not noticed the contradiction the reader can see.`)
+  const knows = contraB ? (sharp ? `Has noticed that they are ${_nm(contraB.hi)} and also ${_nm(contraB.lo)}.` : `Has not noticed the contradiction the reader can see.`)
               : woundB ? (sharp ? `Suspects ${woundB.trait}.` : `Knows nothing of ${woundB.trait}.`) : "";
-  const wants = want ? `${want.trait} — and this person is in the way of it, or the route to it.` : "";
-  const conceals = lie ? `That underneath it they believe ${lie.trait}.` : defence ? `${defence.trait}.` : "";
+  const wants = want ? `${_nm(want)} — and this person is in the way of it, or the route to it.` : "";
+  const conceals = lie ? `That underneath it they believe ${asReportedBelief(lie)}.` : defence ? `${_nm(defence)}.` : "";
   const obligation = role ? ({mentor:"To make them ready and then let go.", protege:"To become worth the time.", confidant:"To keep what they were told.", dependant:"To be there when it counts.", ally:"To hold the line when it costs.", ex:"None that either will admit to.", rival:"Only to fight fair, and only if watched.", antagonist:"None."})[role.id] || "" : "";
   return {trust, dependence, status, obligation, knows, wants, conceals, why};
 }
@@ -6879,7 +6891,7 @@ function proposeArcChanges(st, event, priorEvents){
       const cat = _oppositeCategory(chosen.t, shape.dir);
       const pool = cat ? byFilter(SECTION_OF_CATEGORY.get(cat) || chosen.t.section, cat) : [];
       push(chosen.k, pickInRange(pool, "balanced", clamp((chosen.t.intensity || 3) - 0.5, 1, 5), 3),
-        `${shape.label.toLowerCase()} on ${chosen.t.category.split("—")[0].trim()}: they move from "${chosen.t.trait}" toward the other pole`);
+        `${_cap(shape.label.toLowerCase())} on ${chosen.t.category.split("—")[0].trim()}: they move from "${_nm(chosen.t)}" toward the other pole`);
     }
     // 2. The Lie loosens on growth; the Defence hardens on deterioration.
     const targetCat = shape.dir > 0 ? /The Lie/i : /The Defence/i;
@@ -7523,8 +7535,8 @@ function seatedContradictions(st){
     const who = ghost ? `Around anything that touches ${ghost.trait.toLowerCase()}.`
       : role ? `${role.category}: they are ${role.trait.toLowerCase()} there.`
       : attach ? `With the people their ${attach.category.toLowerCase()} attachment lets close.` : `With strangers, who have no earlier version to compare it to.`;
-    const change = face ? `${face.trait} gives way to ${ex.trait} — ${AXIS_LABELS[c.axis].toLowerCase()} flips.` : `${ex.trait}, against the rest of the sheet on ${AXIS_LABELS[c.axis].toLowerCase()}.`;
-    const cost = fnT ? `${fnT.trait}${fnT.desc ? `: ${fnT.desc}` : ``}${price ? ` And it is paid out of ${price.trait.toLowerCase()}.` : wound ? ` It keeps ${wound.trait.toLowerCase()} covered.` : ``}`
+    const change = face ? `${_nm(face)} gives way to ${_nm(ex)} — ${AXIS_LABELS[c.axis].toLowerCase()} flips.` : `${_nm(ex)}, against the rest of the sheet on ${AXIS_LABELS[c.axis].toLowerCase()}.`;
+    const cost = fnT ? `${_nm(fnT)}${fnT.desc ? `: ${fnT.desc}` : ``}${price ? ` And it is paid out of ${price.trait.toLowerCase()}.` : wound ? ` It keeps ${wound.trait.toLowerCase()} covered.` : ``}`
       : price ? `It is paid out of ${price.trait.toLowerCase()}.` : `Someone eventually sees both faces.`;
     const answers = [
       {key:"for", prompt:"What is it for?", answer:(EXCEPTION_SURVIVES[c.fn] || EXCEPTION_SURVIVES.default).replace(/^it survives because /, ""), from:[fnT && fnT.trait].filter(Boolean)},
@@ -7897,18 +7909,18 @@ function _innerLine(kind, r, rng, underPressure, terse){
     const src = inn.ghost || inn.wound;
     const G = src && _spoken(src, {the: !!inn.ghost, noun: !inn.ghost});
     if (!G) return null;
-    return {text: _cap(pick(terse ? _VOICE_INNER.concealShort : _VOICE_INNER.conceal).replace("{G}", G)), rule: `motivation: ${src.trait} — the line circles what they are not saying`};
+    return {text: _cap(pick(terse ? _VOICE_INNER.concealShort : _VOICE_INNER.conceal).replace("{G}", G)), rule: `motivation: ${_nm(src)} — the line circles what they are not saying`};
   }
   if (kind === "lie" || kind === "persuade"){
     const W = _spoken(inn.want);
     if (!W) return null;
     return {text: _cap(pick(_VOICE_INNER[kind]).replace("{W}", W).replace("{Wc}", _cap(W))),
-      rule: `motivation: ${inn.want.trait} — ${kind === "lie" ? "the lie protects the want" : "the ask is about the want"}`};
+      rule: `motivation: ${_nm(inn.want)} — ${kind === "lie" ? "the lie protects the want" : "the ask is about the want"}`};
   }
   if (kind === "askhelp" && inn.defence){
     const mode = _DEFENCE_MODES.find(m => m.re.test(`${inn.defence.trait} ${inn.defence.desc || ""}`));
     if (!mode) return null;
-    return {mode, rule: `motivation: ${inn.defence.trait} — ${mode.tell}`};
+    return {mode, rule: `motivation: ${_nm(inn.defence)} — ${mode.tell}`};
   }
   return null;
 }
@@ -7924,7 +7936,7 @@ const _VOICE_HUMOR = {
   "Intellectual & Wordplay": ["A matter of {thing}, as it were.", "And that, as they say, is the rub.", "Call it a question of syntax.", "There's a pun in there somewhere; I'll spare you."],
   "Observational": ["Funny how nobody ever says it out loud.", "It's always {thing}, isn't it.", "People do that, don't they."],
   "Pun-Groaner": ["Sorry. That one wrote itself.", "I'd say more, but I'd be pushing my luck. Or my pun.", "That's the good one and I know it."],
-  "Callback & Running Bit": ["Like {thing}. Again.", "Which is the {thing} business all over again."],
+  "Callback & Running Bit": ["Like {thing}. Again.", "Which is {thing} business all over again."],
   "Gallows": ["Well, nobody's died. Yet.", "On the bright side, it can't get worse. Famous last words.", "Put it on my headstone."],
   "Physical & Slapstick": ["— and then I walked into the door, naturally.", "[nearly trips over nothing and carries on]"],
   "Teasing as Affection": ["Don't get sentimental on me.", "You're lucky I like you.", "Look at you, being competent."],
@@ -8143,7 +8155,11 @@ function composeVoiceLine(st, promptId, mode, opts){
     }
   }
   let text = [opener, core].concat(extra).filter(Boolean).join(" ").replace(/\s+/g, " ").trim()
-    .replace(/([^.][.!?] )([a-z])/g, (m, a, b) => a + b.toUpperCase());
+    .replace(/([^.][.!?] )([a-z])/g, (m, a, b) => a + b.toUpperCase())
+    // Two trailing-off devices (a stammer's ellipsis and a freeze's "...I don't know") can land side by
+    // side: "anything... ...I don't know." Keep one; and an article never doubles ("the the").
+    .replace(/(\.\.\.|…)\s*(\.\.\.|…)/g, "...")
+    .replace(/\b(the|a|an) \1\b/gi, "$1");
   // Register: formal speech drops its contractions, casual speech takes them. Not under
   // pressure — the politeness layer is the first thing to go.
   if (!underPressure && r.formal && !r.casual){

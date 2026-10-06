@@ -203,4 +203,30 @@ module.exports = function({check, group, assert}){
     assert(/setDisabledPacks\(\[\]\)/.test(body), 'Reset does not re-enable content packs');
     assert(/input\[id\^="lock_"\]/.test(body), 'Reset does not release slider locks');
   });
+
+  check('T1-T6 generated prose has no "They reads", doubled articles, "that That", leaked category glosses or slug names in the pressure and conflict text', ()=>{
+    const G = fresh(); G.document._set('stressToggle', {checked: true});
+    const bad = {
+      'They reads': /\bThey reads\b/, 'doubled article': /\b(the|a|an) \1\b/i, 'that That': /\bthat That\b/,
+      'category gloss': /\((?:conscious goal|what they built on top)[^)]*\)/, 'slug after "looks like"': /looks like <?b?>?[A-Za-z']+-[A-Za-z']+-[A-Za-z']+/,
+    };
+    const found = {};
+    for (let i = 1; i <= 80; i++){
+      G.gen((i % 2 ? 'v1-' : 'v2-') + (i * 7919).toString(36));
+      const text = G.evalIn("sheetToText(state, charMeta, pressureState)").split('\n').filter(l => !/^\s*- \*/.test(l)).join('\n').replace(/\(from: [^)]*\)/g, '');
+      Object.entries(bad).forEach(([k, re]) => { const m = re.exec(text); if (m && !found[k]) found[k] = '[' + m[0] + '] ' + text.slice(Math.max(0, m.index - 40), m.index + 50).replace(/\n/g, ' '); });
+    }
+    assert(!Object.keys(found).length, 'prose defects: ' + JSON.stringify(found));
+  });
+
+  check('T8 a voice line never has two ellipses side by side or a doubled article', ()=>{
+    const G = fresh(); let n = 0, bad = null;
+    for (let i = 1; i <= 60 && !bad; i++){
+      G.gen('v2-' + (i * 7919).toString(36));
+      const lines = G.evalIn("(()=>{ const out = []; ['baseline','pressure'].forEach(m => voiceLab(state, m, 0, charMeta).forEach(l => out.push(l.text))); return out; })()");
+      lines.forEach(l => { n++; if (/(\.\.\.|…)\s*(\.\.\.|…)/.test(l) || /\b(the|a|an) \1\b/i.test(l)) bad = bad || l; });
+    }
+    assert(n > 300, 'only ' + n + ' voice lines were checked');
+    assert(!bad, 'a voice line has doubled punctuation or a doubled article: ' + bad);
+  });
 };

@@ -646,7 +646,7 @@ function pressureEscalation(st, pst, meta){
   if (vices) brk.signs.push(sig(V("vice", ["What they reach for: {v}.", "The old comfort comes out: {v}.", "The crutch: {v}.", "They fall back on it: {v}."],
     {v: _mxLc(vices.trait)}), [vices]));
   if (humor && _HUMOR_AT.broken[humor.category]) brk.signs.push(sig(V("humB", ["Humour: {h}.", "The humour goes: {h}."], {h: _HUMOR_AT.broken[humor.category]}), [humor]));
-  shifted.slice(0, 2).forEach(s => brk.signs.push(sig(`Where they stand moves: ${s.fromCat} → ${s.toCat}.`, [s.trait])));
+  shifted.slice(0, 2).forEach(s => brk.signs.push(sig(`Where they stand moves: ${_plainCat(s.fromCat)} becomes ${_plainCat(s.toCat)}.`, [s.trait])));
   /* The inner conflict: what wins day to day, what takes the wheel when cornered, and
      what the losing drive does meanwhile. */
   const ic = typeof innerConflict === "function" ? innerConflict(st, meta) : null;
