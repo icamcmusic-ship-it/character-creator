@@ -220,6 +220,14 @@ button instead of (or as well as) a confirm.
   verbosity draws from four categories, a neutral Register can draw Stylized & Elaborate, one personality axis in five draws a standout loud-pole trait, a sheet may omit the Ghost or Defence card, and
   distinctive and signature traits are drawn slightly more often. A typed phrase uses the
   engine the link or settings were saved with (old files restore as v1).
+* **What changed after the October 2026 audit** (`docs/AUDIT-2026-10.md`). The category cross-link table had
+  24 keys written twice, so about 39 links never fired; v2 seeds now use the whole table and v1 seeds keep
+  the old one. The outlier checkbox and count slider reach the sheet shape from v2 (1 leaves it to the
+  sheet, 0, 2 or 3 fixes the number). A fresh cast prints a `v2-` seed, and from v2 the joint optimiser
+  keeps the anti-similarity rule instead of undoing it. A blank seed box always builds with the current
+  engine; only a typed phrase or a `v1-` seed uses an older one. Retire-for-project now costs the candidate
+  that carries the trait when a blank roll picks the best of three (a pasted seed still replays exactly).
+  The page sets a Content-Security-Policy, and the action dispatcher refuses built-in function names.
 * **History** lists the last twenty rolls: restore one (it is itself undoable) or compare it
   with the sheet on screen, trait by trait and slider by slider. **Find on this sheet**
   filters the cards and opens folded sections while you search; which sections you fold is
