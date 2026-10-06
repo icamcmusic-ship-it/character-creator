@@ -3648,7 +3648,7 @@ function inferredPolarity(t){
 let polForConflicts = t => (t.pol && Object.keys(t.pol).length) ? t.pol : inferredPolarity(t);
 const TRAIT_CLASH_PAIRS = [
   [/^(whisper-thin|whispered|whisper-soft|breathy-whisper swell)\b/i, /booming|bellow|thunder/i, "one speaks at the edge of hearing, the other fills the room"],
-  [/^never-apologizes\b/i, /\b(over-apologetic|instant-apologizer|apology-flooding|apology-prefacing|anticipatory apologist|apology-and-repeat|apologetic-funny)/i, "one will not say sorry, the other says it for everything"],
+  [/^never-apologi[sz]es\b/i, /\b(over-apologetic|instant-apologi[sz]er|apology-flooding|apology-prefacing|anticipatory apologist|apology-and-repeat|apologetic-funny)/i, "one will not say sorry, the other says it for everything"],
   [/Minimal & Ultra-Brief$/i, /\b(rambl|monologu|long-winded|holds forth)/i, "one gives a word, the other a speech"],
   [/\bTalks About Family Constantly\b/i, /\bNever Mentions Family\b/i, "one talks about family constantly, the other never mentions it"],
 ];

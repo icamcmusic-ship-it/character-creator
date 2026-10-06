@@ -1053,7 +1053,7 @@ module.exports = function({check, group, assert}){
     const G = fresh();
     const r = G.evalIn(`(()=>{
       const by = n => TRAITS.find(t => t.trait === n);
-      const w = by('Whispered'), b = by('Resonant-booming'), q = by('Never-apologizes'), o = by('Over-apologetic gasp'), x = by('Interruptive');
+      const w = by('Whispered'), b = by('Resonant-booming'), q = by('Never-apologises'), o = by('Over-apologetic gasp'), x = by('Interruptive');
       const st = {a:{trait:w}, b:{trait:b}, c:{trait:q}, d:{trait:o}};
       const calm = {a:{trait:w}, b:{trait:x}};
       return {clash: checkConflictsFor(st).filter(c => /cannot both hold/.test(c.text)).map(c => c.text), calm: checkConflictsFor(calm).filter(c => /cannot both hold/.test(c.text)).length};

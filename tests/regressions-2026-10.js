@@ -276,4 +276,16 @@ module.exports = function({check, group, assert}){
     assert(r.tier === 'secondary', 'a renamed trait lost its tier: ' + r.tier);
     assert(r.pinned >= 5, 'the pins are not in the data');
   });
+
+  check('D7 trait names and descriptions use British spelling (-ise, -our, -ence), so one sheet does not mix both', ()=>{
+    const G = fresh();
+    const bad = G.evalIn(`(()=>{ const KEEP = /(size|sizes|sized|sizing|prize|prizes|seize|seizes|seized|seizing)$/i;
+      const re = /[A-Za-z]+/g, out = [];
+      TRAITS.forEach(t => [t.trait, t.desc].forEach(s => (String(s).match(re) || []).forEach(w => {
+        const l = w.toLowerCase();
+        if (!KEEP.test(l) && (/(iz)(e|es|ed|ing|er|ers|ation|ations)$/.test(l) || /^(humor|color|behavior|favor|honor|labor|rumor|flavor|neighbor|defense|offense|center|traveler|jewelry|gray)/.test(l)) && !/^(humorous|humorously|humorist|humorists|honorific|honorifics|honorary)$/.test(l)) out.push(t.id + ' ' + w);
+      })));
+      return out.slice(0, 8); })()`);
+    assert(!bad.length, 'American spellings remain: ' + bad.join(', '));
+  });
 };
