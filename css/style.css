@@ -1625,3 +1625,20 @@ kbd { display:inline-block; min-width:1.4em; text-align:center; padding:1px 6px;
 /* The small "answer" and label-edit links were 16px tall; give them a touch-sized target without changing how they look. */
 .contraEdit, .labelEdit { position:relative; }
 .contraEdit::after, .labelEdit::after { content:""; position:absolute; inset:-14px -6px; }
+
+/* Print: the page chrome (project chip, theme and Guide buttons, sheet nav, Find box, the first-card tip,
+   the density select, every action button) went to paper with the character: 22 pages for one sheet. */
+@media print {
+  @page { margin:14mm; }
+  .pageHead .headTools, .sheetNav, #sheetFind, .coachMark, .sheetTip, .handHead .handDensity, .sheetToolbar,
+  .ctxModes, .inputsBar, .onboard, #onboard, .helpPanel, .skipLink, .toastHost, .batchTray, .changeList,
+  .sheet button:not(.axisTitle), .sheet select, .sheet input[type=search] { display:none !important; }
+}
+
+/* Touch targets: the small controls on every card were 21-34px tall, and Ban and Retire change future builds, so a
+   mis-tap costs something. 28px is the floor everywhere (WCAG 2.5.8 asks for 24); coarse pointers get 40px on the card actions. */
+.slotToggle, .axisAction, .savedAct, .toggleVoiceTen, .ctxModeBtn, .markBtn { min-height:28px; }
+@media (pointer:coarse) {
+  .markBtn, .rerollBtn, .lockBtn, .pinBtn, .whyBtn, .slotToggle, .axisTitle { min-height:40px; }
+  .markBtn { min-width:40px; }
+}
