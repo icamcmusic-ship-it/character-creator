@@ -1281,7 +1281,13 @@ function dismissDiff(slotId){ delete diffLog[slotId]; renderSlotChange(slotId); 
 
 // A lock is a CSS class and one aria-pressed. It used to rebuild all 37 cards.
 function toggleLock(slotId){
-  if (state[slotId]) { state[slotId].locked = !state[slotId].locked; renderSlotChange(slotId); }
+  if (state[slotId]) {
+    state[slotId].locked = !state[slotId].locked; renderSlotChange(slotId);
+    // Keep and release changed a pink outline and nothing else, on a very long page.
+    const t = state[slotId].trait;
+    if (t && typeof toast === 'function') toast(state[slotId].locked
+      ? `Kept “${t.trait}”: it stays through every rebuild.` : `Released “${t.trait}”: the next build may replace it.`, "ok", 2200);
+  }
 }
 // Bulk lock changes ARE undoable (a single card's lock is not — see the note above).
 function lockAll(){
@@ -1313,6 +1319,8 @@ function togglePin(slotId){
     pinnedTargets[slotId] = clamp((typeof s.target === 'number') ? s.target : traitPos(s.trait), 1, 5);
   }
   renderSlotChange(slotId);
+  if (typeof toast === 'function') toast(pinnedTargets[slotId] !== undefined
+    ? "Pinned how strongly this slot shows; the trait itself can still change on a rebuild." : "Pin removed.", "ok", 2200);
 }
 function adjustPin(slotId, delta){
   if (pinnedTargets[slotId] === undefined) return;

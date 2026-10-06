@@ -5698,17 +5698,21 @@ function _restoreSnapshot(prev){
   if (typeof renderArc === 'function') renderArc();
   updateUndoButtons();
 }
-function undoLast(){
+/* Undo and redo changed the sheet and said nothing, on a page tens of thousands of pixels tall where the card that moved can
+   be off screen. `quiet` is for callers that run several steps and announce once (the history drawer). */
+function undoLast(quiet){
   if (!history.length) return;
   redoStack.push(_snapshotNow());
   if (redoStack.length > HISTORY_MAX) redoStack.shift();
   _restoreSnapshot(history.pop());
+  if (quiet !== true && typeof toast === 'function') toast("Undid the last change" + (lastSeedUsed ? " (seed " + lastSeedUsed + ")." : "."), "ok", 2200);
 }
-function redoLast(){
+function redoLast(quiet){
   if (!redoStack.length) return;
   history.push(_snapshotNow());
   if (history.length > HISTORY_MAX) history.shift();
   _restoreSnapshot(redoStack.pop());
+  if (quiet !== true && typeof toast === 'function') toast("Redid the change" + (lastSeedUsed ? " (seed " + lastSeedUsed + ")." : "."), "ok", 2200);
 }
 
 // Builds one of the sheet's fixed-spine slots, per the empty-slot convention above:

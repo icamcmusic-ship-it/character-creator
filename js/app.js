@@ -4491,9 +4491,9 @@ function toggleHistoryDrawer(){
 function restoreHistoryAt(i){
   if (!(i >= 0 && i < history.length)) return;
   const steps = history.length - i;
-  for (let k = 0; k < steps; k++) undoLast();
+  for (let k = 0; k < steps; k++) undoLast(true);
   renderHistoryDrawer();
-  toastUndo("Restored an earlier roll.", ()=>{ for (let k = 0; k < steps; k++) redoLast(); renderHistoryDrawer(); });
+  toastUndo("Restored an earlier roll.", ()=>{ for (let k = 0; k < steps; k++) redoLast(true); renderHistoryDrawer(); });
 }
 const _SLIDER_NAMES = {verbositySlider: "Verbosity", registerSlider: "Register", composureSlider: "Composure"};
 function sliderDiffHTML(before, after){
