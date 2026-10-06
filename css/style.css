@@ -1618,3 +1618,10 @@ kbd { display:inline-block; min-width:1.4em; text-align:center; padding:1px 6px;
 
 /* Roll 5 before any sheet exists: the candidates stand alone, without an empty sheet's chrome. */
 .sheet.batchOnly > :not(#batchTray) { display:none !important; }
+
+/* A name, context or note typed with no spaces made the page thousands of pixels wide on a phone. */
+#sheetTitle, .summaryName, .charMeta, .traitName, .traitDesc, .exampleLine, .traitNote, .noteText,
+.castCard h3, .savedList span, .edgeCard, .batchCard, .toast { overflow-wrap:anywhere; min-width:0; }
+/* The small "answer" and label-edit links were 16px tall; give them a touch-sized target without changing how they look. */
+.contraEdit, .labelEdit { position:relative; }
+.contraEdit::after, .labelEdit::after { content:""; position:absolute; inset:-14px -6px; }

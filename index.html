@@ -73,7 +73,7 @@
       <p style="margin:0 0 8px;"><b style="color:var(--text);">3 · Continuous intensity.</b> Every trait occupies a fixed, continuous position on a 1–5 intensity scale (its declared level plus a stable per-trait offset, so twelve "intensity 3" traits are twelve distinct points, not one bucket). A slider's magnitude maps to a continuous target on the same scale; only traits inside a window around that target are eligible, and proximity to the target weights the draw. This is why −35 and −45 give measurably different results, and why each card shows an <b>active range</b> — the exact slider span where that trait can ever appear. <b>Slider precision</b> sets the window width: tight = sliders dictate, loose = sliders nudge.</p>
       <p style="margin:0 0 8px;"><b style="color:var(--text);">4 · Trait-level polarity.</b> Beyond categories, most traits carry their own small psychology vector ("this trait leans +honesty, −warmth"). At pick time that vector is scored against your current combined slider posture: agreeing traits get boosted, conflicting ones suppressed, scaled by Boost strength. So two characters can resolve the same category — say, "Core Want" — and still draw systematically different <i>traits</i> from it depending on posture. The why? panel reports this whenever it applied.</p>
       <p style="margin:0;"><b style="color:var(--text);">5 · Order of authority.</b> When systems disagree: <b>lock</b> beats everything; <b>pin</b> beats sliders for that slot's intensity; archetype blends with (never replaces) your sliders; depth-first derives sliders but leaves any axis its resolved categories don't speak to untouched. Reroll always honours the slot's own current target, and remembers what you've rejected. Every one of these decisions is inspectable per-card via why?.</p>
-      <p style="margin:8px 0 0;"><b style="color:var(--text);">6 · Keeping it from going stale.</b> Three controls exist specifically to fight sameness. <b>Avoid recent traits</b> softly penalises anything drawn in your last few characters. <b>Divergence</b> inverts the correlation matrix on a share of category draws, so the system stops optimising toward the most typical member of each cluster — coherence becomes a dial you set rather than a score you're graded on. <b>The one thing that doesn't fit</b> forces a single slot from the far tail of a random category with your slider posture switched off, because real people have exactly one trait that doesn't follow from the others. The sheet also reports <b>distinctiveness</b> against everything you've generated this session, which is a different question from the novelty note (that one only compares you to your last character).</p>
+      <p style="margin:8px 0 0;"><b style="color:var(--text);">6 · Keeping it from going stale.</b> Three controls exist specifically to fight sameness. <b>Avoid recent traits</b> makes a blank-seed roll keep, of the three candidates it draws, the one that repeats the fewest traits from your last few characters. <b>Divergence</b> inverts the correlation matrix on a share of category draws, so the system stops optimising toward the most typical member of each cluster — coherence becomes a dial you set rather than a score you're graded on. <b>The one thing that doesn't fit</b> forces a single slot from the far tail of a random category with your slider posture switched off, because real people have exactly one trait that doesn't follow from the others. The sheet also reports <b>distinctiveness</b> against everything you've generated this session, which is a different question from the novelty note (that one only compares you to your last character).</p>
       <p style="margin:8px 0 0;"><b style="color:var(--text);">Keyboard.</b> <b>Ctrl/&#8984;+Enter</b> generates, <b>Ctrl/&#8984;+Z</b> undoes, <b>Shift+Ctrl/&#8984;+Z</b> (or <b>Ctrl/&#8984;+Y</b>) redoes, <b>R</b> tosses and <b>L</b> keeps the focused card (Tab to a card, or hover it), <b>?</b> opens this panel. The tab strip takes <b>Left/Right</b>, and the trait search boxes take <b>Up/Down</b>, <b>Enter</b> and <b>Escape</b>.</p>
     </div>
   </details>
@@ -172,7 +172,7 @@
           <div class="sub" style="margin:4px 0 0;" id="lastSeedReadout">Seed: —</div>
         </div>
         <div class="field advOnly">
-          <label>&nbsp;</label>
+          <label aria-hidden="true">&nbsp;</label>
           <div class="sub" style="margin:0;">Same seed + same settings = the exact same character, pressure sheet included, shareable as text. Every generation shows the seed it used — paste that seed back in to replay it, including the one the app generates for you when this box is blank. Every build draws against an empty session history, so the seed alone decides the character and it comes out the same in any session. A blank box is <b>exploration</b>: it draws three candidates and keeps the one least like your recent characters and your project archive, so <b>Avoid recent traits</b> steers <i>which</i> candidate is kept rather than the draw itself. The seed printed is the winner's, so pasting it back gives you that character. One deliberate exception either way: rerolls are un-seeded, because a reroll is you overriding the dice.</div>
         </div>
       </div>
@@ -232,7 +232,7 @@
             <button class="btn-secondary" style="margin-top:6px;" data-on="click" data-act="addExclusivePair" data-args="[]">Never both</button>
           </div>
           <div class="field">
-            <label>&nbsp;</label>
+            <label aria-hidden="true">&nbsp;</label>
             <button class="btn-secondary" data-on="click" data-act="clearConstraintsUI" data-args="[]">Clear all constraints</button>
           </div>
         </div>
@@ -283,7 +283,7 @@
 
       <div class="stressToggleRow checkboxRow advOnly" style="flex-wrap:wrap; gap:14px;">
         <span style="font-size:.78rem; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); font-weight:700;">Generate:</span>
-        <label style="margin:0; text-transform:none; font-size:.85rem; color:var(--text); display:flex; align-items:center; gap:5px;"><input type="checkbox" id="genPersonality" checked>Personality</label>
+        <label style="margin:0; text-transform:none; font-size:.85rem; color:var(--text); display:flex; align-items:center; gap:5px;"><input type="checkbox" id="genPersonality" checked data-on="change" data-act="syncPersonalityToggles" data-args="[&quot;gen&quot;]">Personality</label>
         <label style="margin:0; text-transform:none; font-size:.85rem; color:var(--text); display:flex; align-items:center; gap:5px;"><input type="checkbox" id="genSpeech" checked>Speech pattern</label>
         <label style="margin:0; text-transform:none; font-size:.85rem; color:var(--text); display:flex; align-items:center; gap:5px;"><input type="checkbox" id="genVocab" checked>Vocabulary</label>
         <label style="margin:0; text-transform:none; font-size:.85rem; color:var(--text); display:flex; align-items:center; gap:5px;"><input type="checkbox" id="genManner" checked>Mannerisms</label>
@@ -339,7 +339,7 @@
           <div class="sliderVal" id="personalityCountVal">13 of 13 axes</div>
         </div>
         <div class="field advOnly">
-          <label>&nbsp;</label>
+          <label aria-hidden="true">&nbsp;</label>
           <div class="actionRow">
               <button class="btn-secondary" data-on="click" data-act="randomizeSliders" data-args="[&quot;voice&quot;]">🎲 Randomize Voice</button>
             <button class="btn-secondary" data-on="click" data-act="randomizeSliders" data-args="[&quot;personality&quot;]">🎲 Randomize Personality</button>
@@ -360,7 +360,7 @@
         <label style="margin:0; text-transform:none; font-size:.85rem; color:var(--text);" for="stressToggle">Also generate an "Under Pressure" variant (situational mode)</label> <button type="button" class="infoTip" data-on="click" data-act="toggleTip" data-args="[&quot;$el&quot;]" aria-expanded="false" aria-label="What is this?">ⓘ</button><span class="tipText" hidden>Builds a second sheet showing this person under stress: their stress response takes over and some traits shift. The pressure ladder and recovery notes sit under it.</span>
       </div>
       <div class="stressToggleRow checkboxRow advOnly" style="margin-top:8px;">
-        <input type="checkbox" id="personalityToggle" checked data-on="change" data-act="togglePersonalityPanel" data-args="[]">
+        <input type="checkbox" id="personalityToggle" checked data-on="change" data-act="syncPersonalityToggles" data-args="[&quot;panel&quot;]">
         <label style="margin:0; text-transform:none; font-size:.85rem; color:var(--text);" for="personalityToggle">Include personality profile</label>
       </div>
       <div class="stressToggleRow checkboxRow advOnly" style="margin-top:8px;">
@@ -426,7 +426,7 @@
             </select>
           </div>
           <div class="field">
-            <label>&nbsp;</label>
+            <label aria-hidden="true">&nbsp;</label>
             <div class="actionRow">
               <button class="btn-secondary" data-on="click" data-act="randomizeProfileTypes" data-args="[]">🎲 Randomize types</button>
               <button class="btn-secondary" data-on="click" data-act="setAllProfileSections" data-args="[true]">Enable all</button>
@@ -490,7 +490,7 @@
             <input type="text" id="customArchName" placeholder="e.g. Grizzled Mentor">
           </div>
           <div class="field">
-            <label>&nbsp;</label>
+            <label aria-hidden="true">&nbsp;</label>
             <div class="actionRow">
               <button class="btn-secondary" data-on="click" data-act="saveCustomArchetype" data-args="[&quot;$el&quot;]">Save current setup as archetype</button>
               <button class="btn-secondary" data-on="click" data-act="applyArchetypeSetup" data-args="[]">Restore selected archetype's full setup</button>
@@ -515,7 +515,7 @@
             <div class="searchResults" id="whyNotResults" style="display:none;"></div>
           </div>
           <div class="field">
-            <label>&nbsp;</label>
+            <label aria-hidden="true">&nbsp;</label>
             <button class="btn-secondary" data-on="click" data-act="explainWhyNotFromInput" data-args="[]">Explain</button>
           </div>
         </div>
@@ -531,7 +531,7 @@
             <select id="seedTraitSelect" aria-label="Seed trait"></select>
           </div>
           <div class="field">
-            <label>&nbsp;</label>
+            <label aria-hidden="true">&nbsp;</label>
             <div class="actionRow">
               <button class="btn-primary" data-on="click" data-act="generateFromSeed" data-args="[]">Build outward from seed</button>
             </div>
@@ -855,7 +855,7 @@
           <label class="inlineCheck"><input type="checkbox" id="castOptimise" checked> Optimise the cast jointly so members don't share voice devices</label>
         </div>
         <div class="field">
-          <label>&nbsp;</label>
+          <label aria-hidden="true">&nbsp;</label>
           <div class="actionRow">
             <button class="btn-primary" data-on="click" data-act="generateCast" data-args="[]">Build cast</button>
             <button class="btn-secondary" data-on="click" data-act="copyCast" data-args="[&quot;$el&quot;]">Copy Cast</button>
@@ -907,7 +907,7 @@
           <select id="relB"></select>
         </div>
         <div class="field">
-          <label>&nbsp;</label>
+          <label aria-hidden="true">&nbsp;</label>
           <div class="actionRow">
             <button class="btn-primary" data-on="click" data-act="analyseRelationship" data-args="[]">Analyse Relationship</button>
             <button class="btn-secondary" data-on="click" data-act="copyRelationship" data-args="[&quot;$el&quot;]">Copy</button>
@@ -925,7 +925,7 @@
           <select id="relRole"></select>
         </div>
         <div class="field">
-          <label>&nbsp;</label>
+          <label aria-hidden="true">&nbsp;</label>
           <div class="actionRow">
             <button class="btn-secondary" data-on="click" data-act="addRelationshipEdge" data-args="[]" title="Add a directed edge A → B with defaults read from both sheets">Add edge A → B</button>
             <button class="btn-secondary" data-on="click" data-act="generateForRole" data-args="[]" title="Generate a new cast member built to sit in this role opposite A">Generate a member in this role</button>

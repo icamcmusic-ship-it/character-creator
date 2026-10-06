@@ -6,6 +6,8 @@ let _toastTimer = null;
 function toast(message, kind, ms){
   const host = document.getElementById('toastHost');
   if (!host){ console.log(message); return; }
+  // The same message twice is one message: repeated clicks stacked identical toasts.
+  [...host.children].filter(c => c.firstChild && c.firstChild.nodeType === 3 && c.firstChild.textContent === message).forEach(c => c.remove());
   const el = document.createElement('div');
   el.className = 'toast toast-' + (kind || 'ok');
   el.setAttribute('role', kind === 'warn' ? 'alert' : 'status');

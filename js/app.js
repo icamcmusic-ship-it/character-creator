@@ -2136,6 +2136,14 @@ function buildPersonalitySliders(){
     grid.appendChild(wrap);
   });
 }
+/* "Personality" in the Generate row and "Include personality profile" in Advanced were two switches
+   for the same thing (turning either off gave the same sheet). They are kept, because saved settings
+   name both, but they now move together. */
+function syncPersonalityToggles(source){
+  const g = document.getElementById('genPersonality'), p = document.getElementById('personalityToggle');
+  if (g && p){ if (source === 'gen') p.checked = g.checked; else g.checked = p.checked; }
+  togglePersonalityPanel();
+}
 function togglePersonalityPanel(){
   const enabled = boolVal('personalityToggle', true);
   const grid = document.getElementById('personalitySlidersGrid');
@@ -3670,15 +3678,26 @@ function refreshProjectChip(){
 }
 
 async function loadPrefs(){
+  let raw = null;
   try {
     const res = await storage.get(PREF_KEY);
-    if (res && res.value){
-      const data = JSON.parse(res.value);
+    raw = res && res.value;
+    if (raw){
+      const data = JSON.parse(raw);
+      if (typeof validateSettingsBlock === 'function') validateSettingsBlock(data);   // before anything is applied
       PREF_VOLATILE_FIELDS.forEach(id=>{ if (data.fields) delete data.fields[id]; });
       delete data.rerollExclusions;
       restoreSettings(data);
     }
-  } catch(e){ /* no saved prefs, corrupt prefs, or storage unavailable */ }
+  } catch(e){
+    /* No saved prefs and unavailable storage are ordinary. A saved blob that exists but cannot be
+       read is not: the settings were silently dropped. Say so, and keep the unreadable copy under
+       its own key so it can be recovered by hand. */
+    if (raw){
+      try { storage.set(PREF_KEY + ':corrupt', raw); } catch(e2){}
+      try { toast("Your saved settings could not be read, so the defaults are in use. The unreadable copy was kept in browser storage.", "warn", 9000); } catch(e2){}
+    }
+  }
   prefsReady = true;
   try { onSliderChange(); } catch(e){}
   const ex = document.getElementById('examplesToggle');
@@ -4095,7 +4114,9 @@ const SHARE_LINK_VERSION = 1;
 const SEED_CODEC_VERSION = parseInt(String(SEED_PREFIX).replace(/\D/g, ''), 10) || 1;
 function readShareFromHash(hash){
   const m = /(?:^#|&)share=([A-Za-z0-9_-]+)/.exec(hash || "");
-  if (!m) return null;
+  // "#share=" with nothing usable after it (or characters a link never contains) is a damaged
+  // link, not no link: say so instead of showing the ordinary first-run page.
+  if (!m){ if (/(?:^#|&)share=/.test(hash || "")) throw new Error("the link is incomplete or damaged."); return null; }
   const p = JSON.parse(_b64urlDecode(m[1]));
   if (!p || typeof p !== 'object' || typeof p.seed !== 'string' || !p.seed.trim()) throw new Error("the link has no seed.");
   /* Links carry a version and the seed carries the codec's: a link from another build of the app
@@ -4502,7 +4523,12 @@ function compareWithHistory(i){
    each, opening a folded panel on the way. The hint explains keep / pin / toss once. */
 function jumpToPanel(id){
   const el = document.getElementById(id);
-  if (!el || el.style.display === 'none'){ toast("That part is not on the page yet — build a character first, or switch on the pressure sheet.", "warn"); return; }
+  if (!el || el.style.display === 'none'){
+    // A pointer to where to go, not a warning that waits to be dismissed: it used to sit on screen over the
+    // next click's result, which had worked.
+    toast(id === 'pressureSheet' ? "The pressure sheet is off. Switch on “Under pressure” and build to see it." : "Build a character first, then this part appears.", "ok", 4200);
+    return;
+  }
   if (el.tagName === 'DETAILS') el.open = true;
   const reduce = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
   el.scrollIntoView({behavior: reduce ? 'auto' : 'smooth', block: 'start'});

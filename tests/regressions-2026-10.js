@@ -237,4 +237,22 @@ module.exports = function({check, group, assert}){
     assert(/O(&#39;|')Brien/.test(r), 'the apostrophe was lost or escaped with a backslash: ' + r);
     assert(!/[<>"]/.test(r), 'escAttr left markup characters: ' + r);
   });
+
+  check('L6 a damaged share link says so; a hash with no link in it is not an error', ()=>{
+    const G = fresh();
+    const tryHash = h => { try { return {ok: G.evalIn(`readShareFromHash(${JSON.stringify(h)})`)}; } catch(e){ return {err: e.message}; } };
+    assert(tryHash('#share=').err, '"#share=" was treated as no link');
+    assert(tryHash('#share=!!!notbase64').err, 'a link with characters a link never has was treated as no link');
+    assert(tryHash('#something-else').ok === null, 'an unrelated hash was treated as a link');
+    assert(tryHash('').ok === null, 'an empty hash was treated as a link');
+  });
+
+  check('L3 the two personality switches move together', ()=>{
+    const src = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+    assert(/id="genPersonality"[^>]*data-act="syncPersonalityToggles"/.test(src), 'the Generate-row switch is not wired to sync');
+    assert(/id="personalityToggle"[^>]*data-act="syncPersonalityToggles"/.test(src), 'the Advanced switch is not wired to sync');
+    const G = fresh(); G.document._set('genPersonality', {checked: false}); G.document._set('personalityToggle', {checked: true});
+    G.evalIn("syncPersonalityToggles('gen')");
+    assert(G.document.getElementById('personalityToggle').checked === false, 'turning the Generate-row switch off left the Advanced switch on');
+  });
 };
