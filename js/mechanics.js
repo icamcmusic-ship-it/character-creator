@@ -383,7 +383,7 @@ function optimiseCastVoices(entries, seedKey, rebuild, opts){
     let best = null;
     for (let a = 0; a < o.attempts; a++){
       withRng(mulberry32(hashSeedString(seedKey + "|castopt|" + pass + "|" + a)), ()=>{
-        const cand = rebuild(i);
+        const cand = rebuild(i, cur);
         if (!cand || !cand.state) return;
         const trial = cur.map((c, j) => j === i ? Object.assign({}, c, cand) : c);
         const t = total(trial);

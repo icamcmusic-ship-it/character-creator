@@ -139,4 +139,26 @@ module.exports = function({check, group, assert}){
       assert(threw, 'decodeSavedRecord accepted ' + raw);
     });
   });
+
+  check('M8 a v2 cast does not get its duplicate stress + attachment pairs back from the optimiser; a v1 cast still builds as it did', ()=>{
+    const G = fresh(); const d = G.document;
+    d._set('castCount', {value: '5'}); d._set('castSeed', {value: ''}); d._set('castSeedReadout', {});
+    d._set('castOptimise', {checked: true}); d._set('castAnchor', {checked: false}); d._set('castSpread', {value: '0.55'});
+    G.evalIn("refreshRelSelectors = function(){}; renderCast = function(){};");
+    const info = console.info; console.info = () => {};
+    try {
+      const dups = pre => { let n = 0;
+        for (let i = 1; i <= 30; i++){ d.getElementById('castSeed').value = pre + (i * 7919).toString(36);
+          n += G.evalIn(`(()=>{ generateCast(); const keys = castStates.map(c => slotCat(c.state.prof_attachment_0) + '|' + slotCat(c.state.prof_stress_0));
+            let k = 0; for (let a = 0; a < keys.length; a++) for (let b = a + 1; b < keys.length; b++) if (keys[a] === keys[b]) k++;
+            castStates = []; relationshipEdges = []; return k; })()`); }
+        return n / 30; };
+      const v1 = dups('v1-'), v2 = dups('v2-');
+      assert(v2 < 0.1, 'v2 casts still average ' + v2.toFixed(3) + ' duplicate stress + attachment pairs');
+      assert(v1 > v2 * 3, 'the v1 path no longer behaves as before (' + v1.toFixed(3) + ' against v2 ' + v2.toFixed(3) + ')');
+      d.getElementById('castSeed').value = '';
+      G.evalIn("generateCast(); castStates = []; relationshipEdges = [];");
+      assert(/^v2-/.test(G.evalIn('lastCastSeed')), 'a fresh cast did not print a v2 seed: ' + G.evalIn('lastCastSeed'));
+    } finally { console.info = info; }
+  });
 };

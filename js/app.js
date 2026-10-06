@@ -640,6 +640,12 @@ function generateCast(){
   // label used to be `seedNum.toString(36)`, which could not be pasted back.
   const castSeed = resolveSeed(seedInput ? seedInput.value : "");
   const seedNum = castSeed.num;
+  /* A cast always builds with engine 1, so its printed seed was always "v1-". The optimiser used
+     to undo the anti-similarity pass (below); fixing that changes which cast a seed builds, so a
+     fresh cast now prints a "v2-" seed and only a v2 seed gets the fix. Pasted v1 seeds and typed
+     phrases rebuild exactly the casts they always did. */
+  if (!castSeed.explicit) castSeed.label = 'v2-' + (castSeed.num >>> 0).toString(36);
+  const castV2 = /^v2-[0-9a-z]+$/.test(castSeed.label);
   // The cast and its edges are replaced wholesale — keep a way back (Undo toast below).
   const hadCast = castStates.length > 0 || relationshipEdges.length > 0;
   const restoreCast = hadCast ? _castSnapshot() : null;
@@ -707,7 +713,22 @@ function generateCast(){
        sharing the most voice devices with the rest is rerolled until the cast's total
        stops dropping. Seeded off the cast seed, so a replay rebuilds the same cast. */
     if (boolVal('castOptimise', true) && typeof optimiseCastVoices === 'function'){
-      lastCastOptimisation = optimiseCastVoices(drafts, String(lastCastSeed), () => rollOne());
+      /* The optimiser rebuilds the worst member with a bare roll, which skipped the overlap check
+         above and put back duplicate role, values, attachment and stress combinations (duplicate
+         stress + attachment pairs per cast went from 0.017 to 0.333). From v2 a rebuilt member
+         has to clear the same bar against the rest of the cast. */
+      const rebuild = !castV2 ? () => rollOne() : (idx, cur) => {
+        const others = (cur || drafts).filter((_, j) => j !== idx).map(c => c.state);
+        let d = null;
+        for (let attempt = 0; attempt < 6; attempt++){
+          d = rollOne();
+          const worst = others.reduce((w, st) => Math.max(w, KEY_SECTIONS.filter(id => slotCat(d.state['prof_'+id+'_0']) &&
+            slotCat(d.state['prof_'+id+'_0']) === slotCat(st['prof_'+id+'_0'])).length), 0);
+          if (worst <= 1) break;
+        }
+        return d;
+      };
+      lastCastOptimisation = optimiseCastVoices(drafts, String(lastCastSeed), rebuild);
     } else lastCastOptimisation = null;
     drafts.forEach((d, i)=>{
       // Carried on the cast entry rather than left in the global, so a cast member's
@@ -2495,9 +2516,26 @@ function surpriseMe(){
     if (sel) sel.value = "";
     onArchetypeChange(false);
     randomizeSliders('all');
+    /* A free roll sets every slider to a random magnitude (mean about 63), which measured at
+       14.6 strong or jarring conflicts per sheet against 8.2 for a default build. Pull the
+       unlocked ones in so the sheet is surprising rather than self-cancelling. */
+    ['verbositySlider', 'registerSlider', 'composureSlider'].concat(PERSONALITY_AXES.map(ax => 'pers_' + ax.id)).forEach(id=>{
+      const el = document.getElementById(id);
+      if (el && !isSliderLocked(id)) el.value = String(Math.round(intVal(el, 0) * 0.65));
+    });
     said = "Every slider rolled, sections rolled, and the wildcard turned on.";
   }
   randomizeProfileTypes();
+  /* The dice above force a random category into most sections, which overwrote the preset's
+     own hints (hint realisation fell from 56% to 19%). A preset roll is "this archetype,
+     pulled off its sliders", so the sections it hints go back to automatic and the hint
+     steers them again. */
+  if (mode === "preset" && typeof ARCHETYPE_PROFILE_HINTS !== 'undefined' && ARCHETYPE_PROFILE_HINTS[a]){
+    Object.keys(ARCHETYPE_PROFILE_HINTS[a]).forEach(id=>{
+      const tsel = document.getElementById('type_'+id);
+      if (tsel){ tsel.value = ""; if (typeof clearAutoProfileType === 'function') clearAutoProfileType(id); }
+    });
+  }
   // The anti-archetype keeps what drives the preset: its motivation-side hints stay.
   if (mode === "anti" && typeof ARCHETYPE_PROFILE_HINTS !== 'undefined' && ARCHETYPE_PROFILE_HINTS[a]){
     ['values', 'beliefs', 'goals', 'origins', 'motivation', 'contradiction'].forEach(id=>{
@@ -2507,7 +2545,8 @@ function surpriseMe(){
   }
   // divergence is a 0..1 range in steps of 0.05, not a 0..100 slider.
   const div = document.getElementById('divergence');
-  if (div) div.value = (0.35 + Math.round(rand() * 8) * 0.05).toFixed(2);
+  // A preset roll keeps divergence low: at 0.6 and above the preset's hints stop landing.
+  if (div) div.value = (mode === "preset" ? 0.15 + Math.round(rand() * 3) * 0.05 : 0.35 + Math.round(rand() * 8) * 0.05).toFixed(2);
   const wild = document.getElementById('wildcardToggle');
   if (wild) wild.checked = true;
   // Lens dice: none, one, or two — a clashing pair is allowed on purpose.
