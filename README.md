@@ -228,6 +228,12 @@ button instead of (or as well as) a confirm.
   engine; only a typed phrase or a `v1-` seed uses an older one. Retire-for-project now costs the candidate
   that carries the trait when a blank roll picks the best of three (a pasted seed still replays exactly).
   The page sets a Content-Security-Policy, and the action dispatcher refuses built-in function names.
+* **Content edits are checked against old seeds.** `node tools/compat-check.js <git-ref>` loads the bank at that ref and
+  lists every trait whose draw-relevant fields differ (section, category, intensity, rarity, polarity, presentation variant,
+  tier, concept family, world tags). Presentation variants, tiers and some polarity are derived from a trait's wording, so a
+  rename can move a trait between pools; `variantPin` and `tierPin` on a trait keep its old tag across a rename. Trait text
+  uses British spelling. Fonts are served from `css/fonts/`, `js/boot.js` reads the stored first-visit and theme flags before
+  first paint, and `eslint.config.js` (run in CI) guards against duplicated object keys and similar silent mistakes.
 * **History** lists the last twenty rolls: restore one (it is itself undoable) or compare it
   with the sheet on screen, trait by trait and slider by slider. **Find on this sheet**
   filters the cards and opens folded sections while you search; which sections you fold is
