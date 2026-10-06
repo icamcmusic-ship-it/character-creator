@@ -124,7 +124,7 @@ function setDisabledPacks(list){ disabledPacks = new Set(list || []); }
      Emotional Capacity — Guarded & Shallow
         "Guarded" (deep but hidden)         vs  "Shallow" (no depth to hide)
      Intelligence — Instinctive & Unanalytical
-        "Street-smart / Gut-driven" (a competence) vs "Simple-minded" (a deficit)
+        "Street-smart / Gut-driven" (a competence) vs "Cannot see the second step from the first" (a limit)
 
    Rather than split the categories — which would break the bipolar axis model and
    every saved character — each trait is tagged with a variant, and each generated

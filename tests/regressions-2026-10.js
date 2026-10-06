@@ -255,4 +255,16 @@ module.exports = function({check, group, assert}){
     G.evalIn("syncPersonalityToggles('gen')");
     assert(G.document.getElementById('personalityToggle').checked === false, 'turning the Generate-row switch off left the Advanced switch on');
   });
+
+  check('D1 D2 D4 no two traits share a name or an example line, and the intelligence insults are gone', ()=>{
+    const G = fresh();
+    const r = G.evalIn(`(()=>{
+      const norm = s => String(s || '').toLowerCase().replace(/<[^>]*>/g, '').replace(/[^a-z0-9 ]/g, '').replace(/\\s+/g, ' ').trim();
+      const dup = key => { const m = new Map(); TRAITS.forEach(t => { const k = norm(t[key]); if (k) (m.get(k) || m.set(k, []).get(k)).push(t.id); }); return [...m.values()].filter(a => a.length > 1).map(a => a.join('/')); };
+      const insult = TRAITS.filter(t => /simple-minded|dimwit|unhinged/i.test(t.trait)).map(t => t.id + ' ' + t.trait);
+      return {names: dup('trait'), examples: dup('example'), insult}; })()`);
+    assert(!r.names.length, 'duplicate trait names: ' + r.names.join(', '));
+    assert(!r.examples.length, 'duplicate example lines: ' + r.examples.join(', '));
+    assert(!r.insult.length, 'insulting names remain: ' + r.insult.join(', '));
+  });
 };
