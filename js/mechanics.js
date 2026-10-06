@@ -1053,6 +1053,14 @@ function innerConflictLeak(st, rng, opts){
   const f = opts.short ? frames.slice().sort((x, y) => x.length - y.length)[0] : frames[Math.floor(rng() * frames.length)];
   const roleWord = ic.type === "fear-role" ? String(ic.a.trait.category || "one").toLowerCase().replace(/[^a-z ]/g, "").trim() || "one" : "";
   const text = f.replace("{an}", _icNoun(ic.a.trait)).replace("{a}", _ic(ic.a.trait)).replace("{b}", _ic(ic.b.trait)).replace("{aq}", _mxQ(ic.a.trait.trait)).replace("{role}", roleWord);
+  /* The line quoted the Want already (a persuading or concealing line is about it), and the leak
+     says it again: "…to matter to one person completely. And I still want to matter to one person
+     completely." The random draw above is still made, so the stream is unchanged; the leak is dropped. */
+  if (opts.already){
+    const low = String(opts.already).toLowerCase();
+    const said = [ic.a.trait, ic.b.trait].map(t => _ic(t).toLowerCase()).filter(p => p.length > 10);
+    if (said.some(p => low.includes(p))) return null;
+  }
   return {text: text.charAt(0).toUpperCase() + text.slice(1),
     rule: `inner conflict: ${ic.label} — ${ic.loser.role.toLowerCase()} “${ic.loser.trait.trait}” leaks out under load`};
 }

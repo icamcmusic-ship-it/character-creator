@@ -8073,7 +8073,7 @@ function composeVoiceLine(st, promptId, mode, opts){
     if (ev && ev.title && ev.title.length < 40){ extra.push(`Not since ${_lowerFirst(ev.title.replace(/[.!?]+$/, ""))}.`); rule(`arc: ${ev.title} — the line is dated by the event`); }
   }
   if (typeof innerConflictLeak === 'function' && rng() < (underPressure ? (minimal ? 0.45 : 0.6) : (minimal ? 0 : 0.12))){
-    const lk = innerConflictLeak(st, rng, {short: minimal, meta: opts.meta});
+    const lk = innerConflictLeak(st, rng, {short: minimal, meta: opts.meta, already: [opener, core].concat(extra).filter(Boolean).join(" ")});
     if (lk){ extra.push(lk.text); rule(lk.rule); }
   }
   if (!minimal && !underPressure && (r.long || vcat === "High-Volume & Wordy")){
@@ -8411,7 +8411,12 @@ const escHTML = (v) => String(v==null?"":v)
 // survive twice: once as a JS string literal, and then as an HTML attribute. Escape
 // for JS FIRST — the browser HTML-decodes the attribute before parsing it as JS, so
 // escaping in the other order turns O'Brien into a syntax error.
-const escAttr = (v) => escHTML(String(v==null?"":v).replace(/\\/g, "\\\\").replace(/'/g, "\\'"));
+/* Attribute escaping. This used to double backslashes and escape apostrophes as well, which is what an
+   inline `onclick="f('…')"` needs and what an ordinary attribute must not get: a name like O'Brien was
+   shown as O\'Brien, and a saved slider set with an apostrophe could not be loaded or deleted because
+   the option's value no longer matched its name. Nothing here is inline JavaScript any more (actions go
+   through data-act), so it is plain HTML escaping. Kept as a name so call sites need not change. */
+const escAttr = (v) => escHTML(String(v==null?"":v));
 /* Builds the declarative-action attributes for a template. JSON first (so a trait id
    stays a number and an apostrophe in a section title stays an apostrophe), then
    attribute escaping — in that order, because the reverse produces an attribute that

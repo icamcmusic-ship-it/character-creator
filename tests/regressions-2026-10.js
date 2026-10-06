@@ -229,4 +229,12 @@ module.exports = function({check, group, assert}){
     assert(n > 300, 'only ' + n + ' voice lines were checked');
     assert(!bad, 'a voice line has doubled punctuation or a doubled article: ' + bad);
   });
+
+  check('L1 an apostrophe or backslash in a name is shown as typed in an attribute, not with an added backslash', ()=>{
+    const G = fresh();
+    const r = G.evalIn("escAttr(\"O'Brien \\\\ \\\"x\\\" <b>\")");
+    assert((r.match(/\\/g) || []).length === 1, 'escAttr changed the number of backslashes: ' + r);
+    assert(/O(&#39;|')Brien/.test(r), 'the apostrophe was lost or escaped with a backslash: ' + r);
+    assert(!/[<>"]/.test(r), 'escAttr left markup characters: ' + r);
+  });
 };
