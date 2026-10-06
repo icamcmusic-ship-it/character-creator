@@ -28,7 +28,7 @@ if (process.env.CSP){
     const res = await route.fetch();
     const body = await res.text();
     await route.fulfill({ body, headers: Object.assign({}, res.headers(), {
-      'content-security-policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:;"
+      'content-security-policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:;"
     })});
   });
 }

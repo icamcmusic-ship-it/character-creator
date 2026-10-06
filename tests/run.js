@@ -1692,7 +1692,8 @@ check('the service worker precaches exactly what index.html loads', ()=>{
   const listed = [...body[1].matchAll(/['"]([^'"]+)['"]/g)].map(x=>x[1]);
   const missing = wanted.filter(w=>!listed.includes(w));
   // './' and './index.html' are the shell itself and have no tag to match.
-  const extra = listed.filter(l=> l !== './' && l !== './index.html' && !wanted.includes(l));
+  // The font files are not tags in index.html (css/fonts.css names them), but they are precached so the page works offline.
+  const extra = listed.filter(l=> l !== './' && l !== './index.html' && !/^\.\/css\/fonts\/[\w.-]+\.woff2$/.test(l) && !wanted.includes(l));
   assert(!missing.length, 'sw.js does not precache: ' + missing.join(', '));
   assert(!extra.length, 'sw.js precaches files index.html does not load: ' + extra.join(', '));
   return wanted.length + ' scripts/styles precached';
