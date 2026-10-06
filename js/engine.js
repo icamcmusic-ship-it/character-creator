@@ -6277,6 +6277,14 @@ const _PROSE_NOT_VERB = /^(parents|adults|mastery|recognition|belonging|nothing|
 /* Category names carry a parenthetical gloss for the controls ("Core Want (conscious goal)"); in a sentence
    the gloss reads as a debug dump, so it is dropped. */
 function _plainCat(c){ return String(c || "").replace(/\s*\([^)]*\)\s*$/, ""); }
+/* A description pasted after an em-dash continues the sentence, so it starts lower case ("— needs to be first
+   for somebody"), except for "I" and a word that is already capitalised throughout. */
+function _lc1(d){
+  const s = String(d || "");
+  const w = (/^[A-Za-z']+/.exec(s) || [""])[0];
+  if (!w || /^I(['’].*)?$/.test(w) || (w.length > 1 && w === w.toUpperCase())) return s;
+  return s[0].toLowerCase() + s.slice(1);
+}
 function _nm(t){
   const s = String((t && t.trait) || t || "");
   return (!/\s/.test(s) && (s.match(/-/g) || []).length >= 2) ? s.replace(/-/g, " ") : s;
@@ -6363,7 +6371,7 @@ function motivationChain(st){
   // the same sentence on every one of 200 sheets.
   let _h = 7; Object.keys(st || {}).sort().forEach(k => { if (st[k] && st[k].trait) _h = (_h * 31 + st[k].trait.id) >>> 0; });
   const pk = (salt, arr) => arr[hashSeedString(_h + "|mc|" + salt) % arr.length];
-  if (want) add("want", `The conscious goal is ${asAim(want)}${want.desc ? ` — ${want.desc}` : ``}`, [want]);
+  if (want) add("want", `The conscious goal is ${asAim(want)}${want.desc ? ` — ${_lc1(want.desc)}` : ``}`, [want]);
   if (lie && want) add("belief", `They chase it because they believe ${asBelief(lie)}: the want is what that belief makes look like the answer.`, [lie, want]);
   else if (lie) add("belief", `Underneath, they believe ${asBelief(lie)}.`, [lie]);
   if (wound) add("origin", `The belief was learned from ${asNounPhrase(wound)}${ghost ? `, and it is still attached to ${asNounPhrase(ghost)}` : ``}.`, [wound, ghost]);
@@ -6395,7 +6403,7 @@ function motivationChain(st){
     n.from = [need, lie].filter(Boolean).map(t => t.trait);
     if (b){ b.text = `${pk("nb", ["The belief is why", "What stops them is the belief", "The belief that gets in the way:"])} ${asBelief(lie)}${want ? " — it makes the want look like the safe answer" : ""}.`; b.from = [lie, want].filter(Boolean).map(t => t.trait); place("belief", "want"); }
     place("need", "want");
-    const w = L("want"); if (w) w.text = `So they chase ${asAim(want)} instead${want && want.desc ? ` — ${want.desc}` : ``}`;
+    const w = L("want"); if (w) w.text = `So they chase ${asAim(want)} instead${want && want.desc ? ` — ${_lc1(want.desc)}` : ``}`;
   } else if (shape === "inverted"){
     const b = L("belief"), o = L("origin");
     if (b) b.text = `${asBelief(lie)} was once simply accurate. It was a fair reading of the room they learned it in.`;
