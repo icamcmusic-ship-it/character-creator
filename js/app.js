@@ -2360,6 +2360,11 @@ function _runAction(el, ev, suffix){
   const name = el.getAttribute('data-act' + (suffix || ''));
   const fn = name && globalThis[name];
   if (typeof fn !== 'function'){ console.error('[action] no such action:', name); return; }
+  /* data-act is looked up on the global object, so markup that got into the page by any
+     route could otherwise name eval, setTimeout, Function or alert and pass its own
+     arguments. Every real action is a function this app defines; a browser built-in
+     reports "[native code]". Refuse those. */
+  if (/\[native code\]/.test(Function.prototype.toString.call(fn))){ console.error('[action] refused built-in:', name); return; }
   /* Roughly a third of the actions dispatched here are `async`, and a synchronous
      try/catch cannot contain a rejected promise: a save, an import or a cast build
      that threw after its first `await` produced an unhandled rejection in the console

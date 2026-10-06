@@ -1413,7 +1413,7 @@ function checkConflicts(){
     box.classList.add('show');
     const worst = found[0].tier;
     box.innerHTML = `⚠ Trait tension detected <span class="conflictCount">(${found.length}, most severe: ${worst})</span><ul>` +
-      found.map(f=>`<li><span class="conflictTier conflictTier-${f.tier.toLowerCase()}">${f.tier}</span> ${f.text} <span class="conflictNote">${f.tierNote}</span></li>`).join("") +
+      found.map(f=>`<li><span class="conflictTier conflictTier-${escHTML(String(f.tier).toLowerCase())}">${escHTML(f.tier)}</span> ${escHTML(f.text)} <span class="conflictNote">${escHTML(f.tierNote)}</span></li>`).join("") +
       "</ul>";
   } else { box.classList.remove('show'); }
 }

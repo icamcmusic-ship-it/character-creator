@@ -2365,17 +2365,16 @@ const WEIGHT_MATRIX = {
   },
 
   // Resolved profile-section categories feed forward into voice AND other profile sections.
-  "role:Leader": { grammar:{"Turn-Taking Grammar":TIER_MODERATE} },
-  "role:Outsider": { vocab:{"Directness & Literalness":TIER_WEAK}, humor:{"Absurd & Chaotic":TIER_WEAK} },
-  "role:Caretaker": { manner:{"Social & Boundary Mannerisms":TIER_MODERATE} },
+  
+  
+  
   /* Adding stress->humor links (see below) gave four of the seven humor categories a
      cascade inbound at neutral sliders and left three without one, which starved
      Intellectual & Wordplay to 9% of a seven-way split. The three that were missing get
      one here, from sections that resolve before Humor does: a skeptic's humour is
      precision, an outsider's is the wrong shape on purpose, and an idealist's is warm
      even when nothing else is. Every humor category now has somewhere to arrive from. */
-  "role:Skeptic": { vocab:{"Precision & Specificity Level":TIER_MODERATE},
-    humor:{"Intellectual & Wordplay":TIER_MODERATE} },
+  
   "role:Instigator": { humor:{"Absurd & Chaotic":TIER_WEAK} },
   "role:Peacemaker": { humor:{"Warm & Playful":TIER_WEAK} },
 
@@ -2386,30 +2385,28 @@ const WEIGHT_MATRIX = {
      structural thumb on the scale toward damaged characters, on top of the measured
      80/20 insecure split. A category that can be arrived at but never argued from is
      half-wired; these are the missing halves. */
-  "attachment:Secure": { role:{"Leader":TIER_WEAK,"Connector":TIER_WEAK},
-    grammar:{"Turn-Taking Grammar":TIER_WEAK}, humor:{"Warm & Playful":TIER_WEAK} },
+  
   "values:Pragmatic & Flexible": { vocab:{"Pragmatic Focus & Speech Functions":TIER_WEAK},
     role:{"Connector":TIER_WEAK}, stress:{"Flight":TIER_WEAK} },
-  "humor:Self-Deprecating": { manner:{"Emotional Affectations":TIER_WEAK},
-    attachment:{"Anxious":TIER_WEAK} },
+  
   "humor:Humorless & Absent": { manner:{"Eye & Facial Expressions":TIER_WEAK},
     vices:{"Restraint & Discipline":TIER_WEAK} },
 
   "humor:Cruel & Barbed": { vocab:{"Affective & Emotional Intensity":TIER_WEAK} },
-  "humor:Warm & Playful": { vocab:{"Affective & Emotional Intensity":TIER_WEAK} },
+  
   "humor:Dry & Deadpan": { vocab:{"Precision & Specificity Level":TIER_WEAK} },
-  "humor:Absurd & Chaotic": { grammar:{"Structural Shifts":TIER_WEAK} },
+  
 
-  "vices:Compulsion & Ritual": { manner:{"Micro-Physical Tics":TIER_MODERATE} },
-  "vices:Substance & Consumption": { manner:{"Physical Vocalizations & Noises":TIER_MODERATE} },
-  "vices:Risk & Escape": { stress:{"Flight":TIER_WEAK} },
-  "vices:Restraint & Discipline": { values:{"Rigid & Principled":TIER_WEAK} },
+  
+  
+  
+  
 
-  "values:Rigid & Principled": { vocab:{"Register & Formality Spectrum":TIER_WEAK}, grammar:{"Structural Shifts":TIER_WEAK} },
-  "values:Self-Interested": { vocab:{"Pragmatic Focus & Speech Functions":TIER_MODERATE} },
-  "attachment:Anxious": { manner:{"Emotional Affectations":TIER_WEAK}, vocab:{"Temporal Orientation & Tense Usage":TIER_WEAK} },
-  "attachment:Avoidant": { manner:{"Postural & Spatial Dynamics":TIER_WEAK} },
-  "attachment:Disorganized": { grammar:{"Disfluencies & Flow":TIER_MODERATE,"Repetition & Echo Patterns":TIER_WEAK} },
+  
+  
+  
+  
+  
 
   /* "Temporal Orientation & Tense Usage" (50 traits) was used by three archetypes'
      vocabPref but no axis and no resolved category pointed at it — the matrix was the
@@ -2418,49 +2415,46 @@ const WEIGHT_MATRIX = {
      present in the wrong tense; Motivation & Wound would be the most natural driver of
      all, but it is a drawAll section and so never resolves to a single category for
      the cross-link table to key on. These three do. */
-  "values:Loyalty-Bound": { role:{"Caretaker":TIER_WEAK}, vocab:{"Temporal Orientation & Tense Usage":TIER_WEAK} },
+  
 
   // BUG FIX: the 4 newer sub-groups (Connector, Idealistic & Visionary, Intellectual
   // & Wordplay, Avoidance & Procrastination) got PROFILE_CATEGORY_POLARITY entries
   // earlier but were never given resolved-category cross-links here — so once a
   // character actually resolved to one of them, that fact fed nothing forward into
   // vocab/grammar/manner or any other profile section, unlike every original category.
-  "role:Connector": { vocab:{"Pragmatic Focus & Speech Functions":TIER_WEAK}, humor:{"Warm & Playful":TIER_WEAK} },
+  
   "values:Idealistic & Visionary": { vocab:{"Directness & Literalness":TIER_WEAK}, grammar:{"Structural Shifts":TIER_WEAK}, humor:{"Warm & Playful":TIER_WEAK},
                                      goals:{"The Longer Aim":TIER_WEAK} },
   /* ---- Links INTO the §6 sections, so a competence, an origin or a repair style is
      nudged by the facts already resolved rather than rolled blind. Deliberately light
      (mostly WEAK): the point of these sections is to widen who a character can be,
      and a strong cascade would just re-derive the wound from the other side. */
-  "attachment:Secure":        { origins:{"Stable Care":TIER_MODERATE,"Learned Trust":TIER_WEAK}, repair:{"Apology":TIER_WEAK},
-                                texture:{"Preferences & Small Pleasures":TIER_WEAK} },
-  "attachment:Avoidant":      { repair:{"Avoidance & Humour":TIER_MODERATE,"Restitution & Practical Care":TIER_WEAK},
-                                contradiction:{"Exceptions & Detachment":TIER_WEAK} },
-  "attachment:Anxious":       { repair:{"Apology":TIER_MODERATE}, origins:{"Repaired Conflict":TIER_WEAK} },
-  "attachment:Disorganized":  { repair:{"Changed Boundaries & Failed Repair":TIER_MODERATE} },
-  "stress:Fight (attack the threat)":   { repair:{"Changed Boundaries & Failed Repair":TIER_WEAK}, competence:{"Hands & Materials":TIER_WEAK} },
-  "stress:Fawn (appease the threat)":   { repair:{"Apology":TIER_MODERATE,"Restitution & Practical Care":TIER_WEAK},
-                                          contradiction:{"Protective Hypocrisy":TIER_WEAK} },
-  "stress:Flight (remove yourself)":    { repair:{"Avoidance & Humour":TIER_MODERATE} },
-  "stress:Freeze (shut down)":          { repair:{"Avoidance & Humour":TIER_WEAK} },
-  "role:Leader":       { competence:{"Systems & Logistics":TIER_MODERATE,"People & Rooms":TIER_WEAK}, origins:{"Earned Success":TIER_WEAK} },
-  "role:Caretaker":    { competence:{"People & Rooms":TIER_MODERATE}, origins:{"Stable Care":TIER_WEAK}, repair:{"Restitution & Practical Care":TIER_MODERATE} },
-  "role:Skeptic":      { competence:{"Craft & Knowledge":TIER_WEAK}, contradiction:{"Aspirational Values":TIER_WEAK} },
-  "role:Connector":    { competence:{"People & Rooms":TIER_MODERATE} },
-  "role:Outsider":     { competence:{"Craft & Knowledge":TIER_WEAK,"Hands & Materials":TIER_WEAK} },
-  "vices:Restraint & Discipline": { competence:{"Systems & Logistics":TIER_MODERATE}, contradiction:{"Aspirational Values":TIER_WEAK} },
-  "vices:Compulsion & Ritual":    { texture:{"Routines":TIER_MODERATE} },
-  "vices:Avoidance & Procrastination": { repair:{"Avoidance & Humour":TIER_MODERATE}, texture:{"Practised Badly":TIER_WEAK} },
-  "humor:Warm & Playful":         { texture:{"Affiliations":TIER_WEAK}, repair:{"Avoidance & Humour":TIER_WEAK} },
-  "humor:Absurd & Chaotic":       { texture:{"Practised Badly":TIER_WEAK} },
-  "vices:Substance & Consumption": { texture:{"Preferences & Small Pleasures":TIER_WEAK} },
-  "vices:Risk & Escape":          { texture:{"Practised Badly":TIER_WEAK}, origins:{"Earned Success":TIER_WEAK} },
-  "humor:Self-Deprecating":       { repair:{"Avoidance & Humour":TIER_WEAK}, contradiction:{"Aspirational Values":TIER_WEAK} },
-  "values:Loyalty-Bound":         { contradiction:{"Protective Hypocrisy":TIER_MODERATE}, texture:{"Affiliations":TIER_WEAK} },
-  "values:Rigid & Principled":    { contradiction:{"Exceptions & Detachment":TIER_WEAK}, repair:{"Changed Boundaries & Failed Repair":TIER_WEAK} },
-  "values:Self-Interested":       { goals:{"The Price & The Competing Claim":TIER_WEAK} },
+  "attachment:Secure": { role:{"Leader":TIER_WEAK,"Connector":TIER_WEAK}, grammar:{"Turn-Taking Grammar":TIER_WEAK}, humor:{"Warm & Playful":TIER_WEAK}, origins:{"Stable Care":TIER_MODERATE,"Learned Trust":TIER_WEAK}, repair:{"Apology":TIER_WEAK}, texture:{"Preferences & Small Pleasures":TIER_WEAK} },
+  "attachment:Avoidant": { manner:{"Postural & Spatial Dynamics":TIER_WEAK}, repair:{"Avoidance & Humour":TIER_MODERATE,"Restitution & Practical Care":TIER_WEAK}, contradiction:{"Exceptions & Detachment":TIER_WEAK} },
+  "attachment:Anxious": { manner:{"Emotional Affectations":TIER_WEAK}, vocab:{"Temporal Orientation & Tense Usage":TIER_WEAK}, repair:{"Apology":TIER_MODERATE}, origins:{"Repaired Conflict":TIER_WEAK} },
+  "attachment:Disorganized": { grammar:{"Disfluencies & Flow":TIER_MODERATE,"Repetition & Echo Patterns":TIER_WEAK}, repair:{"Changed Boundaries & Failed Repair":TIER_MODERATE} },
+  
+  
+  
+  
+  "role:Leader": { grammar:{"Turn-Taking Grammar":TIER_MODERATE}, competence:{"Systems & Logistics":TIER_MODERATE,"People & Rooms":TIER_WEAK}, origins:{"Earned Success":TIER_WEAK} },
+  "role:Caretaker": { manner:{"Social & Boundary Mannerisms":TIER_MODERATE}, competence:{"People & Rooms":TIER_MODERATE}, origins:{"Stable Care":TIER_WEAK}, repair:{"Restitution & Practical Care":TIER_MODERATE} },
+  "role:Skeptic": { vocab:{"Precision & Specificity Level":TIER_MODERATE}, humor:{"Intellectual & Wordplay":TIER_MODERATE}, competence:{"Craft & Knowledge":TIER_WEAK}, contradiction:{"Aspirational Values":TIER_WEAK} },
+  "role:Connector": { vocab:{"Pragmatic Focus & Speech Functions":TIER_WEAK}, humor:{"Warm & Playful":TIER_WEAK}, competence:{"People & Rooms":TIER_MODERATE} },
+  "role:Outsider": { vocab:{"Directness & Literalness":TIER_WEAK}, humor:{"Absurd & Chaotic":TIER_WEAK}, competence:{"Craft & Knowledge":TIER_WEAK,"Hands & Materials":TIER_WEAK} },
+  "vices:Restraint & Discipline": { values:{"Rigid & Principled":TIER_WEAK}, competence:{"Systems & Logistics":TIER_MODERATE}, contradiction:{"Aspirational Values":TIER_WEAK} },
+  "vices:Compulsion & Ritual": { manner:{"Micro-Physical Tics":TIER_MODERATE}, texture:{"Routines":TIER_MODERATE} },
+  
+  "humor:Warm & Playful": { vocab:{"Affective & Emotional Intensity":TIER_WEAK}, texture:{"Affiliations":TIER_WEAK}, repair:{"Avoidance & Humour":TIER_WEAK} },
+  "humor:Absurd & Chaotic": { grammar:{"Structural Shifts":TIER_WEAK}, texture:{"Practised Badly":TIER_WEAK} },
+  "vices:Substance & Consumption": { manner:{"Physical Vocalizations & Noises":TIER_MODERATE}, texture:{"Preferences & Small Pleasures":TIER_WEAK} },
+  "vices:Risk & Escape": { stress:{"Flight":TIER_WEAK}, texture:{"Practised Badly":TIER_WEAK}, origins:{"Earned Success":TIER_WEAK} },
+  "humor:Self-Deprecating": { manner:{"Emotional Affectations":TIER_WEAK}, attachment:{"Anxious":TIER_WEAK}, repair:{"Avoidance & Humour":TIER_WEAK}, contradiction:{"Aspirational Values":TIER_WEAK} },
+  "values:Loyalty-Bound": { role:{"Caretaker":TIER_WEAK}, vocab:{"Temporal Orientation & Tense Usage":TIER_WEAK}, contradiction:{"Protective Hypocrisy":TIER_MODERATE}, texture:{"Affiliations":TIER_WEAK} },
+  "values:Rigid & Principled": { vocab:{"Register & Formality Spectrum":TIER_WEAK}, grammar:{"Structural Shifts":TIER_WEAK}, contradiction:{"Exceptions & Detachment":TIER_WEAK}, repair:{"Changed Boundaries & Failed Repair":TIER_WEAK} },
+  "values:Self-Interested": { vocab:{"Pragmatic Focus & Speech Functions":TIER_MODERATE}, goals:{"The Price & The Competing Claim":TIER_WEAK} },
   "humor:Intellectual & Wordplay": { vocab:{"Morphological & Structural Lexicon":TIER_WEAK,"Precision & Specificity Level":TIER_WEAK} },
-  "vices:Avoidance & Procrastination": { grammar:{"Disfluencies & Flow":TIER_WEAK}, stress:{"Flight":TIER_WEAK} },
+  "vices:Avoidance & Procrastination": { repair:{"Avoidance & Humour":TIER_MODERATE}, texture:{"Practised Badly":TIER_WEAK}, grammar:{"Disfluencies & Flow":TIER_WEAK}, stress:{"Flight":TIER_WEAK} },
 
   // BUG FIX: these four keys previously read "stress:Fight" / "stress:Flight" / etc, but
   // WEIGHT_MATRIX lookups by resolved category are an EXACT key match (unlike the
@@ -2491,12 +2485,8 @@ const WEIGHT_MATRIX = {
      stress response points somewhere different, because that is the observation — the
      warm one goes barbed, the one who leaves goes quiet, the one who freezes gets very
      dry, the one who appeases turns it on themselves. */
-  "stress:Fight (attack the threat)": { vocab:{"Affective & Emotional Intensity":TIER_WEAK},
-    role:{"Instigator":TIER_STRONG,"Leader":TIER_MODERATE}, values:{"Self-Interested":TIER_WEAK},
-    attachment:{"Secure":TIER_STRONG}, humor:{"Cruel & Barbed":TIER_MODERATE} },
-  "stress:Flight (remove yourself)": { grammar:{"Spoken Compression":TIER_WEAK},
-    role:{"Outsider":TIER_STRONG}, values:{"Pragmatic & Flexible":TIER_WEAK},
-    attachment:{"Avoidant":TIER_STRONG}, humor:{"Humorless & Absent":TIER_MODERATE} },
+  "stress:Fight (attack the threat)": { repair:{"Changed Boundaries & Failed Repair":TIER_WEAK}, competence:{"Hands & Materials":TIER_WEAK}, vocab:{"Affective & Emotional Intensity":TIER_WEAK}, role:{"Instigator":TIER_STRONG,"Leader":TIER_MODERATE}, values:{"Self-Interested":TIER_WEAK}, attachment:{"Secure":TIER_STRONG}, humor:{"Cruel & Barbed":TIER_MODERATE} },
+  "stress:Flight (remove yourself)": { repair:{"Avoidance & Humour":TIER_MODERATE}, grammar:{"Spoken Compression":TIER_WEAK}, role:{"Outsider":TIER_STRONG}, values:{"Pragmatic & Flexible":TIER_WEAK}, attachment:{"Avoidant":TIER_STRONG}, humor:{"Humorless & Absent":TIER_MODERATE} },
   /* Same asymmetry as attachment above, in Social Role. Flight and Freeze BOTH fed
      Outsider while Skeptic and Connector were the target of no stress link at all, so at
      neutral sliders — where stress is the only signal actually firing — Outsider took
@@ -2504,19 +2494,65 @@ const WEIGHT_MATRIX = {
      freeze response is watching and doubting rather than acting, which is what the
      Skeptic role describes) and Fawn gained Connector, social glue being the same
      impulse as appeasement pointed outward. Every role now has some stress inbound. */
-  "stress:Freeze (shut down)": { grammar:{"Disfluencies & Flow":TIER_MODERATE},
-    role:{"Skeptic":TIER_MODERATE}, values:{"Pragmatic & Flexible":TIER_WEAK},
-    attachment:{"Disorganized":TIER_STRONG}, humor:{"Dry & Deadpan":TIER_MODERATE} },
-  "stress:Fawn (appease the threat)": { vocab:{"Pragmatic Focus & Speech Functions":TIER_WEAK},
-    role:{"Peacemaker":TIER_STRONG,"Caretaker":TIER_MODERATE,"Connector":TIER_WEAK}, values:{"Loyalty-Bound":TIER_MODERATE},
-    attachment:{"Anxious":TIER_STRONG}, humor:{"Self-Deprecating":TIER_MODERATE} },
+  "stress:Freeze (shut down)": { repair:{"Avoidance & Humour":TIER_WEAK}, grammar:{"Disfluencies & Flow":TIER_MODERATE}, role:{"Skeptic":TIER_MODERATE}, values:{"Pragmatic & Flexible":TIER_WEAK}, attachment:{"Disorganized":TIER_STRONG}, humor:{"Dry & Deadpan":TIER_MODERATE} },
+  "stress:Fawn (appease the threat)": { repair:{"Apology":TIER_MODERATE,"Restitution & Practical Care":TIER_WEAK}, contradiction:{"Protective Hypocrisy":TIER_WEAK}, vocab:{"Pragmatic Focus & Speech Functions":TIER_WEAK}, role:{"Peacemaker":TIER_STRONG,"Caretaker":TIER_MODERATE,"Connector":TIER_WEAK}, values:{"Loyalty-Bound":TIER_MODERATE}, attachment:{"Anxious":TIER_STRONG}, humor:{"Self-Deprecating":TIER_MODERATE} },
 };
+/* The links a duplicated key used to drop (see WEIGHT_MATRIX_V1 below). 39 links. Generated from the
+   pre-merge literal; a v1 seed has to keep drawing without them. */
+const WEIGHT_MATRIX_LEGACY_DROPPED = {
+  "role:Leader": {grammar:["Turn-Taking Grammar"]},
+  "role:Outsider": {vocab:["Directness & Literalness"], humor:["Absurd & Chaotic"]},
+  "role:Caretaker": {manner:["Social & Boundary Mannerisms"]},
+  "role:Skeptic": {vocab:["Precision & Specificity Level"], humor:["Intellectual & Wordplay"]},
+  "attachment:Secure": {role:["Leader","Connector"], grammar:["Turn-Taking Grammar"], humor:["Warm & Playful"]},
+  "humor:Self-Deprecating": {manner:["Emotional Affectations"], attachment:["Anxious"]},
+  "humor:Warm & Playful": {vocab:["Affective & Emotional Intensity"]},
+  "humor:Absurd & Chaotic": {grammar:["Structural Shifts"]},
+  "vices:Compulsion & Ritual": {manner:["Micro-Physical Tics"]},
+  "vices:Substance & Consumption": {manner:["Physical Vocalizations & Noises"]},
+  "vices:Risk & Escape": {stress:["Flight"]},
+  "vices:Restraint & Discipline": {values:["Rigid & Principled"]},
+  "values:Rigid & Principled": {vocab:["Register & Formality Spectrum"], grammar:["Structural Shifts"]},
+  "values:Self-Interested": {vocab:["Pragmatic Focus & Speech Functions"]},
+  "attachment:Anxious": {manner:["Emotional Affectations"], vocab:["Temporal Orientation & Tense Usage"]},
+  "attachment:Avoidant": {manner:["Postural & Spatial Dynamics"]},
+  "attachment:Disorganized": {grammar:["Disfluencies & Flow","Repetition & Echo Patterns"]},
+  "values:Loyalty-Bound": {role:["Caretaker"], vocab:["Temporal Orientation & Tense Usage"]},
+  "role:Connector": {vocab:["Pragmatic Focus & Speech Functions"], humor:["Warm & Playful"]},
+  "stress:Fight (attack the threat)": {repair:["Changed Boundaries & Failed Repair"], competence:["Hands & Materials"]},
+  "stress:Fawn (appease the threat)": {repair:["Apology","Restitution & Practical Care"], contradiction:["Protective Hypocrisy"]},
+  "stress:Flight (remove yourself)": {repair:["Avoidance & Humour"]},
+  "stress:Freeze (shut down)": {repair:["Avoidance & Humour"]},
+  "vices:Avoidance & Procrastination": {repair:["Avoidance & Humour"], texture:["Practised Badly"]}
+};
+
+/* WEIGHT_MATRIX above is the v2 table. For most of this app's life it was written with 24
+   keys twice, and the second literal silently replaced the first, so the links listed in
+   WEIGHT_MATRIX_LEGACY_DROPPED never fired. v1 seeds and old share links must keep building
+   the characters they always built, so v1 draws from this copy with those links removed;
+   v2 seeds get the table as it was written. weightEntry() picks the right one. */
+const WEIGHT_MATRIX_V1 = (()=>{
+  const out = {};
+  Object.entries(WEIGHT_MATRIX).forEach(([key, kinds])=>{
+    const drop = WEIGHT_MATRIX_LEGACY_DROPPED[key] || {};
+    out[key] = {};
+    Object.entries(kinds).forEach(([kind, frags])=>{
+      const gone = drop[kind] || [];
+      out[key][kind] = {};
+      Object.entries(frags).forEach(([frag, w])=>{ if (!gone.includes(frag)) out[key][kind][frag] = w; });
+    });
+  });
+  return out;
+})();
+function weightEntry(key){ return (ENGINE_V >= 2 ? WEIGHT_MATRIX : WEIGHT_MATRIX_V1)[key]; }
+
 // Inbound links for the §6 gap sections live beside their content (js/data/traits-gaps.js)
 // and are merged here, so a trimmed build without that pack simply has no such links.
+[WEIGHT_MATRIX, WEIGHT_MATRIX_V1].forEach(WM=>{
 if (typeof GAP_WEIGHT_LINKS !== 'undefined'){
   const GAP_TIER = {S:TIER_STRONG, M:TIER_MODERATE, W:TIER_WEAK};
   Object.entries(GAP_WEIGHT_LINKS).forEach(([ax, poles])=>{
-    const e = WEIGHT_MATRIX[ax] = WEIGHT_MATRIX[ax] || {};
+    const e = WM[ax] = WM[ax] || {};
     Object.entries(poles).forEach(([pole, kinds])=>{
       const p = e[pole] = e[pole] || {};
       Object.entries(kinds).forEach(([kind, frags])=>{
@@ -2526,13 +2562,14 @@ if (typeof GAP_WEIGHT_LINKS !== 'undefined'){
     });
   });
   if (typeof GAP_SECTION_LINKS !== 'undefined') Object.entries(GAP_SECTION_LINKS).forEach(([key, kinds])=>{
-    const e = WEIGHT_MATRIX[key] = WEIGHT_MATRIX[key] || {};
+    const e = WM[key] = WM[key] || {};
     Object.entries(kinds).forEach(([kind, frags])=>{
       const k = e[kind] = e[kind] || {};
       Object.entries(frags).forEach(([frag, t])=>{ if (!(frag in k)) k[frag] = GAP_TIER[t] || TIER_WEAK; });
     });
   });
 }
+});
 
 // Guarded: this is called from pickCategoryWeighted, which runs on every category
 // draw, including from code paths that have no DOM at all (tests, and any future
@@ -2598,7 +2635,7 @@ function attributedBoost(kind, profileCats, overrides){
   // VOICE_AXES above. Previously only personality drove this; voice sliders now
   // contribute exactly the same way, through the same matrix.
   SIGNAL_AXES.forEach(a=>{
-    const entry = WEIGHT_MATRIX[a.id];
+    const entry = weightEntry(a.id);
     if (!entry) return;
     const level = axisLevel(a.id, overrides);
     const dirMap = (level >= 0 ? entry.pos : entry.neg) || {};
@@ -2612,7 +2649,7 @@ function attributedBoost(kind, profileCats, overrides){
   if (profileCats){
     Object.entries(profileCats).forEach(([sectionId,cat])=>{
       if (!cat) return;
-      const entry = WEIGHT_MATRIX[sectionId+':'+cat];
+      const entry = weightEntry(sectionId+':'+cat);
       if (!entry) return;
       const kindMap = entry[kind];
       if (!kindMap) return;
@@ -2961,7 +2998,7 @@ function accumulateBoost(kind, profileCats, overrides){
     add(CURRENT_ARCHETYPE_PROFILE[kind], ARCHETYPE_HINT_STRENGTH);
   }
   SIGNAL_AXES.forEach(a=>{
-    const entry = WEIGHT_MATRIX[a.id];
+    const entry = weightEntry(a.id);
     if (!entry) return;
     const level = axisLevel(a.id, overrides);
     const dirMap = (level >= 0 ? entry.pos : entry.neg) || {};
@@ -2987,7 +3024,7 @@ function accumulateBoost(kind, profileCats, overrides){
        what follows rather than dictating it. */
     Object.entries(profileCats).forEach(([sectionId,cat])=>{
       if (!cat) return;
-      const entry = WEIGHT_MATRIX[sectionId+':'+cat];
+      const entry = weightEntry(sectionId+':'+cat);
       if (!entry) return;
       const kindMap = entry[kind];
       if (!kindMap) return;
