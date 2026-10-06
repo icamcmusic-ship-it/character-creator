@@ -60,6 +60,10 @@ function seedNumberFrom(str){
 function engineVersionFor(rawSeed){
   const m = /^v(\d+)-[0-9a-z]+$/.exec(String(rawSeed || '').trim());
   if (m && SUPPORTED_SEED_VERSIONS.includes(+m[1])) return +m[1];
+  /* A blank box is a NEW character, so it gets the current engine whatever an old save or link
+     last wrote into the hidden field (that would otherwise pin every later roll to v1). The
+     field still decides a typed phrase, which has to rebuild what it always built. */
+  if (!String(rawSeed || '').trim()) return DEFAULT_ENGINE_V;
   const el = document.getElementById('engineVersion');
   const v = el ? parseInt(el.value, 10) : DEFAULT_ENGINE_V;
   return SUPPORTED_SEED_VERSIONS.includes(v) ? v : DEFAULT_ENGINE_V;

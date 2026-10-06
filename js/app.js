@@ -1383,7 +1383,7 @@ function copyVoiceLine(promptId, btnEl){
 }
 function copyVoiceLab(btnEl){
   if (!Object.keys(state).length){ toast("Generate a character first.", "warn"); return; }
-  copyText(`# Voice lab — ${charMeta.name || "Unnamed Character"} (${voiceLabMode})\n\n` + voiceLabToMarkdown(state, voiceLabMode), btnEl);
+  copyText(`# Voice lab — ${charMeta.name || "Unnamed Character"} (${voiceLabMode})\n\n` + voiceLabToMarkdown(state, voiceLabMode, voiceLabReroll, charMeta), btnEl);
 }
 function rerollVoiceLab(){
   voiceLabReroll++;
@@ -2216,6 +2216,9 @@ const DEFAULTS = {
     sheetDensity: "standard", wildcardCount: "1", pressureLevel: "100",
     profileWeight: "62", divergence: "0.15", castCount: "3",
     charName: "", charAge: "", charContext: "", archetypeSelect: "", seedInput: "",
+    // Named here because #engineVersion is type=hidden: setting .value rewrites defaultValue, so
+    // once one old save had been loaded, "defaultValue" was "1" and Reset restored engine 1.
+    engineVersion: String(DEFAULT_ENGINE_V),
   },
   toggles: {
     // The anti-staleness pair ships ON. This is the whole point of the table.
@@ -2326,6 +2329,10 @@ async function resetAllToDefaults(){
   PROFILE_SECTIONS.forEach(ps=>{ const el = document.getElementById('pw_'+ps.id); if (el) el.value = ""; });
   clearConstraints();
   clearBudgets(); refreshBudgetUI();
+  // Content packs and slider locks are part of "everything": a pack left off silently changes what
+  // a seed builds, and a ticked lock made Randomize skip a slider that Reset had just centred.
+  if (typeof setDisabledPacks === 'function'){ setDisabledPacks([]); if (typeof refreshPackUI === 'function') refreshPackUI(); }
+  document.querySelectorAll('input[id^="lock_"]').forEach(e => { e.checked = false; });
   forgetRecentTraits(); forgetSessionProfiles(); clearContextBias();
   forgetSlotDraws(); forgetCategoryUse();
   collapsedGroups = {};
@@ -2337,7 +2344,7 @@ async function resetAllToDefaults(){
   onSliderChange();
   prefsReady = wasReady;
   savePrefs();
-  toastUndo("Everything reset to defaults. Your character stays until you build again.", ()=>{ undoLast(); savePrefs(); }, 10000);
+  toastUndo("Everything reset to defaults (content packs back on, slider locks released). Your character, saved traits and cast stay.", ()=>{ undoLast(); savePrefs(); }, 10000);
 }
 
 function randomRawSlider(){

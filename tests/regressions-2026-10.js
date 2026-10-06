@@ -178,4 +178,29 @@ module.exports = function({check, group, assert}){
     assert(r.retB === 0, 'with B retired the build still kept B (index ' + r.retB + ')');
     assert(r.none === 0, 'with nothing retired the first candidate should win a tie');
   });
+
+  check('M10 the voice lab markdown is the take on screen, not take zero', ()=>{
+    const G = fresh(); G.gen('m10-seed');
+    const r = G.evalIn(`(()=>{
+      const shown = voiceLab(state, 'baseline', 3, charMeta).map(l => l.text);
+      const md = voiceLabToMarkdown(state, 'baseline', 3, charMeta), md0 = voiceLabToMarkdown(state, 'baseline');
+      return {inMd: shown.every(t => md.includes(t)), zeroDiffers: md0 !== md}; })()`);
+    assert(r.inMd, 'the exported text is not the take the panel shows');
+    assert(r.zeroDiffers, 'take 3 and take 0 were identical, so this check proves nothing');
+  });
+
+  check('M13 a blank seed box uses the current engine whatever an old save wrote to the hidden field; Reset names the engine', ()=>{
+    const G = fresh(); G.document._set('engineVersion', {value: '1'});
+    const r = G.evalIn("({blank: engineVersionFor(''), typed: engineVersionFor('a typed phrase'), v2: engineVersionFor('v2-abc'), v1: engineVersionFor('v1-abc'), def: DEFAULTS.fields.engineVersion})");
+    assert(r.blank === 2, 'a blank box built with engine ' + r.blank + ' after an old save set the field to 1');
+    assert(r.typed === 1 && r.v1 === 1 && r.v2 === 2, 'typed phrases and prefixed seeds must still pick their own engine: ' + JSON.stringify(r));
+    assert(r.def === '2', 'DEFAULTS.fields has no engineVersion, so Reset reads the (overwritten) defaultValue');
+  });
+
+  check('M12 Reset puts content packs and slider locks back', ()=>{
+    const src = fs.readFileSync(path.join(ROOT, 'js/app.js'), 'utf8');
+    const body = src.slice(src.indexOf('async function resetAllToDefaults'), src.indexOf('function randomRawSlider'));
+    assert(/setDisabledPacks\(\[\]\)/.test(body), 'Reset does not re-enable content packs');
+    assert(/input\[id\^="lock_"\]/.test(body), 'Reset does not release slider locks');
+  });
 };

@@ -7224,8 +7224,10 @@ function voiceCollisionMatrix(members, mode, reroll){
   return {names: list.map(m => (m.meta && m.meta.name) || "Unnamed"), matrix, totals, max, worst,
     shared: shared.map(r => r.map(set => [...set]))};
 }
-function voiceLabToMarkdown(st, mode){
-  return voiceLab(st, mode).map(l =>
+/* `reroll` and `meta` are what the panel itself passes to voiceLab; without them the copy and the
+   export were a different take from the one on screen. */
+function voiceLabToMarkdown(st, mode, reroll, meta){
+  return voiceLab(st, mode, reroll, meta).map(l =>
     `### ${l.prompt}\n\n_${l.setup}_\n\n> ${l.text}\n\n- Rules: ${l.rules.join("; ") || "none"}${l.device ? `\n- Habitual device: ${l.device.label}` : ""}`
   ).join("\n\n");
 }

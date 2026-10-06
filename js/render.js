@@ -1514,7 +1514,8 @@ function sheetToText(st, meta, pState){
   // ---- Voice lab ----
   try {
     if (typeof voiceLabToMarkdown === 'function' && boolVal('voiceLabInExport', false)){
-      L.push("", "## Voice lab", "", voiceLabToMarkdown(st, typeof voiceLabMode !== 'undefined' ? voiceLabMode : 'baseline'));
+      L.push("", "## Voice lab", "", voiceLabToMarkdown(st, typeof voiceLabMode !== 'undefined' ? voiceLabMode : 'baseline',
+        typeof voiceLabReroll !== 'undefined' ? voiceLabReroll : 0, typeof charMeta !== 'undefined' ? charMeta : undefined));
     }
   } catch(e){}
 
