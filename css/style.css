@@ -1683,3 +1683,6 @@ html[data-onboarded] #onboard { display:none; }
   .handHead .handKept { flex-basis:100%; order:3; }
   .handHead .handDensity { margin-left:auto; order:2; }
 }
+
+/* Markup uses data-st="…" instead of style="…" (js/boot.js applies it through the CSSOM). Until then, keep display:none ones hidden. */
+[data-st*="display:none"], [data-st*="display: none"]{ display:none; }

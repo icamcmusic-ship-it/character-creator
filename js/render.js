@@ -61,7 +61,7 @@ function showSkeleton(){
   const body = document.getElementById('sheetBody');
   if (!sheet || !body) return;
   sheet.classList.add('show');
-  const bar = n => `<div class="skelLine" style="width:${n}%"></div>`;
+  const bar = n => `<div class="skelLine" data-st="width:${n}%"></div>`;
   let h = '';
   for (let g = 0; g < 3; g++){
     h += `<div class="axisGroup skelGroup">${bar(28)}` +
@@ -79,7 +79,7 @@ function renderGenerationFailure(err){
   if (body) body.innerHTML =
     `<div class="failCard"><b>That generation didn't complete.</b>
      <div>${escHTML(err && err.message ? err.message : String(err))}</div>
-     <div class="sub" style="margin-top:8px;">Your previous character is still in the undo history. If this repeats, try
+     <div class="sub" data-st="margin-top:8px;">Your previous character is still in the undo history. If this repeats, try
      <b>Reset to Defaults</b> — a constraint combination that leaves a section with no eligible traits is the usual cause.</div></div>`;
   toast("Generation failed — see the sheet for details.", "warn", 6000);
 }
@@ -155,7 +155,7 @@ function bandHTML(t, slot){
      : " · toward the edge of the window");
   return `<div class="bandRow" title="This trait can only be drawn while the driving slider's magnitude sits in this range.">
     <span class="bandLabel">active range</span>
-    <span class="bandTrack"><i style="left:${lo}%; width:${Math.max(2,hi-lo)}%;"></i>${tgt!==null?`<b style="left:${magFromPos(tgt)}%;"></b>`:``}</span>
+    <span class="bandTrack"><i data-st="left:${lo}%; width:${Math.max(2,hi-lo)}%;"></i>${tgt!==null?`<b data-st="left:${magFromPos(tgt)}%;"></b>`:``}</span>
     <span class="bandNums">${lo}–${hi}</span>
     <span class="bandPos">pos ${pos}${fitTxt}</span>
   </div>`;
@@ -417,13 +417,13 @@ function traitCardHTML(id, s, includeControls, showDiff, accent, tagLabel){
   // pool after filtering, a failed reroll), and this function dereferenced it
   // immediately — throwing and blanking the whole sheet. Fail soft on one card.
   if (!s || !s.trait){
-    return `<div class="traitCard"><div class="traitMain"><div class="traitDesc" style="opacity:.6">No trait available for this slot at the current settings — widen the slider precision, ease a constraint, or enable more categories.</div></div></div>`;
+    return `<div class="traitCard"><div class="traitMain"><div class="traitDesc" data-st="opacity:.6">No trait available for this slot at the current settings — widen the slider precision, ease a constraint, or enable more categories.</div></div></div>`;
   }
   const t = s.trait;
   const tier = t.rtier || (typeof rarityTier === 'function' ? rarityTier(t) : t.rarity);
   const lockedClass = s.locked ? "locked" : "";
   const diff = showDiff ? diffLog[id] : null;
-  const style = accent ? ` style="--section-accent:${escHTML(cssColor(accent))}"` : ``;
+  const style = accent ? ` data-st="--section-accent:${escHTML(cssColor(accent))}"` : ``;
   const history = includeControls && rerollHistory[id] && rerollHistory[id].length;
   // Flash slots that a full regeneration actually moved. renderChangeList already knew
   // WHICH slots changed but only reported it in a collapsed list; the highlight was
@@ -453,7 +453,7 @@ function traitCardHTML(id, s, includeControls, showDiff, accent, tagLabel){
           <span class="intensityDots" title="Intensity ${t.intensity}/5 (continuous position ${traitPos(t).toFixed(2)})"><span aria-hidden="true">${intensityDots(t.intensity)}</span><span class="srOnly">intensity ${t.intensity} of 5</span></span>
           ${dimsChipHTML(t)}
           ${s.wildcard ? `<span class="wildBadge" title="Deliberately drawn against the grain — see 'the one thing that doesn't fit'">outlier</span>` : ``}
-          ${s.derived ? `<span class="wildBadge" style="background:var(--emerald-deep);border-color:var(--emerald-deep);" title="Derived from this character's psychology rather than a slider">derived</span>` : ``}
+          ${s.derived ? `<span class="wildBadge" data-st="background:var(--emerald-deep);border-color:var(--emerald-deep);" title="Derived from this character's psychology rather than a slider">derived</span>` : ``}
           ${(()=>{ const lr = includeControls && typeof lensReading === 'function' ? lensReading(t) : null;
              return lr ? `<span class="lensBadge lens-${lr.status}" title="${escAttr(lr.why)}">${lr.status === 'normal' ? 'normal here' : 'deviant here'}</span>` : ``; })()}
           ${s.contradiction ? `<span class="wildBadge contraBadge" title="Seated on purpose: it cuts against the sheet on ${escAttr(AXIS_LABELS[s.contradiction.axis] || '')}">${s.contradiction.role === 'function' ? 'what it is for' : 'contradiction'}</span>` : ``}
@@ -815,8 +815,8 @@ function whyThisCharacterHTML(){
   if (!drivers.length && !profBits.length) return "";
   let h = `<details class="summaryWhy"><summary>Why this character?</summary><div>`;
   if (drivers.length) h += `<div>Strongest signals: ${drivers.join("; ")}.</div>`;
-  if (profBits.length) h += `<div style="margin-top:5px;">Resolved to ${escHTML(profBits.join(" · "))}${chosen.length>profBits.length?", and more below":""}. Each of those then biased the ones after it.</div>`;
-  h += `<div class="sub" style="margin-top:6px;">Every individual card has its own <b>why?</b> button with the full reasoning for that one trait.</div>`;
+  if (profBits.length) h += `<div data-st="margin-top:5px;">Resolved to ${escHTML(profBits.join(" · "))}${chosen.length>profBits.length?", and more below":""}. Each of those then biased the ones after it.</div>`;
+  h += `<div class="sub" data-st="margin-top:6px;">Every individual card has its own <b>why?</b> button with the full reasoning for that one trait.</div>`;
   return h + `</div></details>`;
 }
 
@@ -1046,10 +1046,10 @@ function renderSheet(){
       const barColor = !co.significant ? "var(--muted)" : co.lift>=25?"var(--emerald)":co.lift>=10?"var(--golden)":"var(--bubblegum)";
       const liftTxt = (co.lift>=0?"+":"") + co.lift;
       h += `<div class="coherenceRow">
-        <div class="coherenceLabel">Coherence <b>${co.pct}%</b> <span style="opacity:.7;font-weight:400;">(${liftTxt} vs chance, &plusmn;${co.baseBand})</span></div>
+        <div class="coherenceLabel">Coherence <b>${co.pct}%</b> <span data-st="opacity:.7;font-weight:400;">(${liftTxt} vs chance, &plusmn;${co.baseBand})</span></div>
         <div class="coherenceBar">
-          <span style="width:${co.pct}%; background:${barColor};"></span>
-          <i class="coherenceBaseline" style="left:${co.basePct}%;" title="Chance baseline for these settings: ${co.basePct}%"></i>
+          <span data-st="width:${co.pct}%; background:${barColor};"></span>
+          <i class="coherenceBaseline" data-st="left:${co.basePct}%;" title="Chance baseline for these settings: ${co.basePct}%"></i>
         </div>
       </div><div class="coherenceNote">${coherenceAsking(co)} (${co.reinforced} of ${co.total} picks reinforced. A random character with these same settings would score about ${co.basePct}%, and with only ${co.total} picks that baseline itself carries a &plusmn;${co.baseBand}-point 95% band — so a lift smaller than that isn't a real difference.)</div>`;
     }
@@ -1060,7 +1060,7 @@ function renderSheet(){
        the report above already says what it did about it. */
     const loud = intensityBudgetSet() ? null : loudnessCheck(state);
     if (loud){
-      h += `<div class="tensionBlock" style="border-left-color:var(--bubblegum);"><div class="tensionTitle" style="color:var(--bubblegum);">Loud in ${loud.count} directions</div><div style="margin:6px 0;">${loud.note}</div></div>`;
+      h += `<div class="tensionBlock" data-st="border-left-color:var(--bubblegum);"><div class="tensionTitle" data-st="color:var(--bubblegum);">Loud in ${loud.count} directions</div><div data-st="margin:6px 0;">${loud.note}</div></div>`;
     }
     if (tensions.length){
       h += `<div class="tensionBlock"><div class="tensionTitle">Uncommon combinations — not errors</div><ul>` +
@@ -1074,12 +1074,12 @@ function renderSheet(){
       const fields = (contra.fields || []).map(f => `<div class="contraField"><b>${escHTML(f.prompt)}</b> ${
         f.answer ? `<span class="contraAnswer">${escHTML(f.answer)}</span>` : (f.derived ? `<span class="contraDerived">${escHTML(f.derived)}</span>` : `<span class="sub">unanswered</span>`)
       } <button class="contraEdit" ${actAttr('click', 'answerContradiction', f.key)} title="Write your own answer">${f.answer ? 'edit' : 'answer'}</button>${f.answer ? `<button class="contraEdit" ${actAttr('click', 'answerContradiction', f.key, true)} title="Remove your answer">clear</button>` : ``}</div>`).join("");
-      h += `<div class="tensionBlock" style="border-left-color:var(--golden-deep); margin-top:10px;">
-        <div class="tensionTitle" style="color:var(--golden-deep);">The contradiction &mdash; ${escHTML(contra.axisLabel)}</div>
-        <div style="margin:6px 0;">They are <b>${escHTML(contra.hi.trait)}</b> and also <b>${escHTML(contra.lo.trait)}</b>.</div>
-        <div style="margin:6px 0; font-style:italic;">${escHTML(contra.question)}</div>
+      h += `<div class="tensionBlock" data-st="border-left-color:var(--golden-deep); margin-top:10px;">
+        <div class="tensionTitle" data-st="color:var(--golden-deep);">The contradiction &mdash; ${escHTML(contra.axisLabel)}</div>
+        <div data-st="margin:6px 0;">They are <b>${escHTML(contra.hi.trait)}</b> and also <b>${escHTML(contra.lo.trait)}</b>.</div>
+        <div data-st="margin:6px 0; font-style:italic;">${escHTML(contra.question)}</div>
         ${fields}
-        <div class="sub" style="margin:6px 0 0;">Not an error to fix. A ${escHTML(contra.tier.toLowerCase())} opposition on one axis is where a character stops being a list of traits — answer the question and the rest of the sheet reorganises around it.</div>
+        <div class="sub" data-st="margin:6px 0 0;">Not an error to fix. A ${escHTML(contra.tier.toLowerCase())} opposition on one axis is where a character stops being a list of traits — answer the question and the rest of the sheet reorganises around it.</div>
       </div>`;
     }
     /* The inner conflict: a second tension, between the character's own drives rather
@@ -1088,31 +1088,31 @@ function renderSheet(){
     const ic = (typeof innerConflict === 'function') ? innerConflict(state, charMeta) : null;
     if (ic){
       const qt = t => '“' + escHTML(t.trait) + '”';
-      h += `<div class="tensionBlock innerConflict" style="border-left-color:var(--dusk-blue-mid); margin-top:10px;">
+      h += `<div class="tensionBlock innerConflict" data-st="border-left-color:var(--dusk-blue-mid); margin-top:10px;">
         <div class="tensionTitle">Inner conflict &mdash; ${escHTML(ic.label)}${ic.flipped ? ' <span class="sub">(swapped by you)</span>' : ''}</div>
-        <div style="margin:6px 0;"><b>${escHTML(ic.a.role)}</b> ${qt(ic.a.trait)} against <b>${escHTML(ic.b.role.toLowerCase())}</b> ${qt(ic.b.trait)}.</div>
+        <div data-st="margin:6px 0;"><b>${escHTML(ic.a.role)}</b> ${qt(ic.a.trait)} against <b>${escHTML(ic.b.role.toLowerCase())}</b> ${qt(ic.b.trait)}.</div>
         <div class="icRow"><b>Day to day:</b> ${escHTML(ic.a.role.toLowerCase())} ${qt(ic.a.trait)} wins.</div>
         <div class="icRow"><b>Under load:</b> ${ic.flips
           ? `${escHTML(ic.winner.role.toLowerCase())} ${qt(ic.winner.trait)} takes over, ${escHTML(ic.when)}.`
           : `it holds, ${escHTML(ic.when)} &mdash; at a cost.`}</div>
         <div class="icRow"><b>Leaking meanwhile:</b> ${escHTML(ic.loser.role.toLowerCase())} ${qt(ic.loser.trait)} &mdash; in the voice lab and the pressure ladder.</div>
-        <div style="margin:6px 0; font-style:italic;">${escHTML(ic.question)}</div>
+        <div data-st="margin:6px 0; font-style:italic;">${escHTML(ic.question)}</div>
         <button type="button" class="contraEdit" ${actAttr('click', 'flipInnerConflict')} title="Make the other side win under load">swap who wins under load</button>
-        <div class="sub" style="margin:6px 0 0;">Two characters with the same cards differ on which drive wins. This is the rule the pressure ladder and the voice lab follow.</div>
+        <div class="sub" data-st="margin:6px 0 0;">Two characters with the same cards differ on which drive wins. This is the rule the pressure ladder and the voice lab follow.</div>
       </div>`;
     }
     (typeof seatedContradictions === 'function' ? seatedContradictions(state) : []).forEach(sc => {
       h += `<div class="tensionBlock seatedContra">
         <div class="tensionTitle">Seated contradiction &mdash; ${escHTML(sc.axisLabel)} <span class="sub">(${escHTML(sc.fn)})</span></div>
-        <div style="margin:6px 0;">${sc.face ? `They are <b>${escHTML(sc.face.trait)}</b> and also ` : `They are also `}<b>${escHTML(sc.exception.trait)}</b>${sc.fnTrait ? ` &mdash; <i>${escHTML(sc.fnTrait.trait)}</i>` : ``}.</div>
-        <div style="margin:6px 0; font-style:italic;">${escHTML(sc.question)}</div>
+        <div data-st="margin:6px 0;">${sc.face ? `They are <b>${escHTML(sc.face.trait)}</b> and also ` : `They are also `}<b>${escHTML(sc.exception.trait)}</b>${sc.fnTrait ? ` &mdash; <i>${escHTML(sc.fnTrait.trait)}</i>` : ``}.</div>
+        <div data-st="margin:6px 0; font-style:italic;">${escHTML(sc.question)}</div>
         ${sc.answers.map(a => `<div class="contraField"><b>${escHTML(a.prompt)}</b> <span class="contraDerived">${escHTML(a.answer)}</span>${a.from.length ? ` <span class="chainFrom">← ${escHTML(a.from.join(" · "))}</span>` : ``}</div>`).join("")}
       </div>`;
     });
     const patterns = secondOrderTensions(state);
     if (patterns.length){
-      h += `<div class="tensionBlock" style="border-left-color:var(--dusk-blue);"><div class="tensionTitle" style="color:var(--dusk-blue);">Emergent patterns</div>` +
-           patterns.map(p=>`<div style="margin:6px 0;"><b>${escHTML(p.name)}.</b> ${p.note}</div>`).join("") + `</div>`;
+      h += `<div class="tensionBlock" data-st="border-left-color:var(--dusk-blue);"><div class="tensionTitle" data-st="color:var(--dusk-blue);">Emergent patterns</div>` +
+           patterns.map(p=>`<div data-st="margin:6px 0;"><b>${escHTML(p.name)}.</b> ${p.note}</div>`).join("") + `</div>`;
     }
     // Archetype fidelity meter — only meaningful when an archetype seeded the build.
     if (charMeta.archFidelity !== null && charMeta.archFidelity !== undefined){
@@ -1127,18 +1127,18 @@ function renderSheet(){
       // note in archetypeFidelity. "38% of 9 axes, 4 of them unexpressed" is a reading a
       // user can act on; "38%" on its own was not.
       const coverage = (af.total && af.silent)
-        ? ` <span style="opacity:.7;font-weight:400;">(${af.expressed} of ${af.total} axes expressed)</span>` : ``;
+        ? ` <span data-st="opacity:.7;font-weight:400;">(${af.expressed} of ${af.total} axes expressed)</span>` : ``;
       // Direction and strength are two different readings and are shown as two (see
       // FIDELITY_REF_MAG): one is a clean proportion, the other is relative to how
       // loudly this trait bank expresses an axis at all.
       const strengthRow = (af.strength === null || af.strength === undefined) ? `` :
-        `<div class="coherenceRow" style="margin-top:6px;">
-          <div class="coherenceLabel">…and how loudly <b>${af.strength}%</b> <span style="opacity:.7;font-weight:400;">(of a fully-expressed axis)</span></div>
-          <div class="coherenceBar"><span style="width:${af.strength}%; background:var(--dusk-blue);"></span></div>
+        `<div class="coherenceRow" data-st="margin-top:6px;">
+          <div class="coherenceLabel">…and how loudly <b>${af.strength}%</b> <span data-st="opacity:.7;font-weight:400;">(of a fully-expressed axis)</span></div>
+          <div class="coherenceBar"><span data-st="width:${af.strength}%; background:var(--dusk-blue);"></span></div>
         </div>`;
-      h += `<div class="coherenceRow" style="margin-top:10px;">
+      h += `<div class="coherenceRow" data-st="margin-top:10px;">
         <div class="coherenceLabel">Archetype direction <b>${f}%</b>${coverage}</div>
-        <div class="coherenceBar"><span style="width:${f}%; background:${col};"></span></div>
+        <div class="coherenceBar"><span data-st="width:${f}%; background:${col};"></span></div>
       </div>${strengthRow}<div class="coherenceNote">Of the axes this archetype takes a position on and the sheet actually expresses, ${f}% lean the way the archetype asked. The second bar is how strongly they lean, measured against the strongest expression this trait bank produces — not against the archetype's own numbers, which are in different units. Drift is legitimate: this is a compass reading, not a grade.${(af.total && af.silent) ? ` The sheet says nothing either way on ${af.silent} of the ${af.total} axes this archetype takes a position on; those are excluded rather than scored as disagreement. They are usually silent because their section is switched off, or because the traits drawn there carry no polarity on that axis.` : ``}</div>`;
     }
     /* Internal dimensions — the pairs a single slider conflates, read separately from
@@ -1156,30 +1156,30 @@ function renderSheet(){
         return `<div class="dimRow${split ? ' dimSplit' : ''}"><span>${escHTML(da.label)}: <b>${escHTML(word(da, va))}</b></span><span>${escHTML(db.label)}: <b>${escHTML(word(db, vb))}</b></span>${split ? '<span class="dimFlag" title="These two usually travel together on one slider; here they part company.">split</span>' : ''}</div>`;
       }).filter(Boolean);
       if (rows.length){
-        h += `<div class="tensionBlock" style="border-left-color:var(--accent-violet); margin-top:10px;"><div class="tensionTitle" style="color:var(--accent-violet);">Two things the sliders treat as one</div>${rows.join('')}<div class="sub" style="margin:6px 0 0;">Read from the sheet, not from the controls: self-worth against self-presentation, depth against expression, and so on. A <b>split</b> is where one slider would have lied about this person.</div></div>`;
+        h += `<div class="tensionBlock" data-st="border-left-color:var(--accent-violet); margin-top:10px;"><div class="tensionTitle" data-st="color:var(--accent-violet);">Two things the sliders treat as one</div>${rows.join('')}<div class="sub" data-st="margin:6px 0 0;">Read from the sheet, not from the controls: self-worth against self-presentation, depth against expression, and so on. A <b>split</b> is where one slider would have lied about this person.</div></div>`;
       }
     } catch(e){}
     // Voice fingerprint — assembled from the character's own example lines.
     const fp = voiceFingerprint(state, charMeta);
     if (fp){
-      h += `<div class="tensionBlock" style="border-left-color:var(--emerald); margin-top:10px;"><div class="tensionTitle" style="color:var(--emerald-deep);">Voice fingerprint</div><div style="font-style:italic; line-height:1.7;">${escHTML(fp)}</div><div class="sub" style="margin:6px 0 0;">Sample lines drawn from this character's own traits — how they'd actually sound on the page. Stable for this exact character; changes when the traits do.</div></div>`;
+      h += `<div class="tensionBlock" data-st="border-left-color:var(--emerald); margin-top:10px;"><div class="tensionTitle" data-st="color:var(--emerald-deep);">Voice fingerprint</div><div data-st="font-style:italic; line-height:1.7;">${escHTML(fp)}</div><div class="sub" data-st="margin:6px 0 0;">Sample lines drawn from this character's own traits — how they'd actually sound on the page. Stable for this exact character; changes when the traits do.</div></div>`;
     }
     // Radar — 12-axis realised polarity shape.
     let prof = null;
     try {
       prof = axisProfile(state);
       if (Object.keys(prof).length >= 3){
-        h += `<div style="margin-top:12px;"><div class="tensionTitle" style="color:var(--dusk-blue); margin-bottom:4px;">Axis profile</div>${radarSVG([{label:charMeta.name, color:"var(--cast-1)", prof}])}
-        <div class="sub" style="margin:2px 0 0;">Summed trait polarity per axis. The dashed middle ring is zero; outside it the sheet leans positive on that axis, inside negative. Shape is the signal — which axes dominate — not absolute size.</div></div>`;
+        h += `<div data-st="margin-top:12px;"><div class="tensionTitle" data-st="color:var(--dusk-blue); margin-bottom:4px;">Axis profile</div>${radarSVG([{label:charMeta.name, color:"var(--cast-1)", prof}])}
+        <div class="sub" data-st="margin:2px 0 0;">Summed trait polarity per axis. The dashed middle ring is zero; outside it the sheet leans positive on that axis, inside negative. Shape is the signal — which axes dominate — not absolute size.</div></div>`;
       }
     } catch(e){}
     // Distinctiveness against everything generated this session.
     try {
       const dist = prof ? sessionDistinctiveness(prof) : null;
       if (dist){
-        h += `<div class="coherenceRow" style="margin-top:10px;">
+        h += `<div class="coherenceRow" data-st="margin-top:10px;">
           <div class="coherenceLabel">Distinctiveness <b>${dist.pct}%</b></div>
-          <div class="coherenceBar"><span style="width:${dist.pct}%; background:var(--dusk-blue-mid);"></span></div>
+          <div class="coherenceBar"><span data-st="width:${dist.pct}%; background:var(--dusk-blue-mid);"></span></div>
         </div><div class="coherenceNote">${escHTML(dist.label)} Measured against the centroid of all ${dist.count} characters generated this session — a different question from the novelty note above, which only compares you to the last one.</div>`;
       }
     } catch(e){}
@@ -1190,13 +1190,13 @@ function renderSheet(){
     (function(){
       const rep = recurringTraits(3);
       if (!rep.length) return;
-      h += `<div class="tensionBlock" style="border-left-color:var(--muted); margin-top:10px;">
-        <div class="tensionTitle" style="color:var(--muted);">Recurring this session</div>
+      h += `<div class="tensionBlock" data-st="border-left-color:var(--muted); margin-top:10px;">
+        <div class="tensionTitle" data-st="color:var(--muted);">Recurring this session</div>
         <ul>` + rep.map(r=>
           `<li><b>${escHTML(r.trait.trait)}</b> — ${r.count} of your last ${r.window} characters `
           + `<button class="markBtn" ${actAttr('click', 'banTrait', r.trait.id)} title="Never draw this trait again">🚫 never again</button></li>`
         ).join("") + `</ul>
-        <div class="sub" style="margin:6px 0 0;">These are already being penalised on every draw${avoidRecentEnabled() ? `` : ` — except that <b>Avoid recent traits</b> is currently off, so they are not`}. Banning one is the harder version of the same instruction.</div>
+        <div class="sub" data-st="margin:6px 0 0;">These are already being penalised on every draw${avoidRecentEnabled() ? `` : ` — except that <b>Avoid recent traits</b> is currently off, so they are not`}. Banning one is the harder version of the same instruction.</div>
       </div>`;
     })();
     if (lastDepthUntouched.length){
@@ -1339,9 +1339,9 @@ function diffBodyHTML(d){
   d.changed.slice(0, 40).forEach(c=>{
     h += `<div><span class="changeSlot">${escHTML(titleForSlotId(c.slot))}</span> ${escHTML(c.from)} &rarr; <b>${escHTML(c.to)}</b></div>`;
   });
-  if (d.changed.length > 40) h += `<div class="sub" style="margin-top:4px;">…and ${d.changed.length - 40} more.</div>`;
-  if (d.added.length) h += `<div style="margin-top:6px;"><b>New:</b> ${d.added.slice(0,20).map(escHTML).join(", ")}</div>`;
-  if (d.gone.length) h += `<div style="margin-top:6px;"><b>Dropped:</b> ${d.gone.slice(0,20).map(escHTML).join(", ")}</div>`;
+  if (d.changed.length > 40) h += `<div class="sub" data-st="margin-top:4px;">…and ${d.changed.length - 40} more.</div>`;
+  if (d.added.length) h += `<div data-st="margin-top:6px;"><b>New:</b> ${d.added.slice(0,20).map(escHTML).join(", ")}</div>`;
+  if (d.gone.length) h += `<div data-st="margin-top:6px;"><b>Dropped:</b> ${d.gone.slice(0,20).map(escHTML).join(", ")}</div>`;
   return h + '</div>';
 }
 function renderChangeList(){
@@ -1363,9 +1363,9 @@ function renderChangeList(){
     h += `<details${same ? '' : ' open'}><summary>Against the pinned "${escHTML(pinnedSnapshot.label)}" — ` +
          (same ? 'identical so far' : `${d.changed.length} replaced, ${d.added.length} new, ${d.gone.length} dropped`) +
          `</summary>${same ? '<div class="changeBody sub">Nothing has moved since you pinned it.</div>' : diffBodyHTML(d)}` +
-         `<div style="margin-top:8px;"><button class="btn-secondary" ${actAttr('click', 'clearPinnedVersion')}>Stop comparing</button></div></details>`;
+         `<div data-st="margin-top:8px;"><button class="btn-secondary" ${actAttr('click', 'clearPinnedVersion')}>Stop comparing</button></div></details>`;
   } else if (hasSheet){
-    h += `<div style="margin-top:6px;"><button class="btn-secondary" ${actAttr('click', 'pinCurrentVersion')} title="Keep this version as a fixed point and show what changes against it from now on">📌 Pin this version to compare against</button></div>`;
+    h += `<div data-st="margin-top:6px;"><button class="btn-secondary" ${actAttr('click', 'pinCurrentVersion')} title="Keep this version as a fixed point and show what changes against it from now on">📌 Pin this version to compare against</button></div>`;
   }
 
   const recurring = (typeof recurringTraits === 'function') ? recurringTraits(3) : [];
@@ -1378,7 +1378,7 @@ function renderChangeList(){
       recurring.map(r=>
         `<div><b>${escHTML(r.trait.trait)}</b> <span class="sub">— ${r.count} of the last ${r.window}, ${escHTML(r.trait.category)}</span> ` +
         `<button class="markBtn" ${actAttr('click', 'banTrait', r.trait.id)} title="Never draw this trait again">🚫 never again</button></div>`).join('') +
-      `<div class="sub" style="margin-top:6px;">These are the pools your settings keep landing in. Banning one, or moving the slider that feeds it, is usually faster than rerolling.</div></div></details>`;
+      `<div class="sub" data-st="margin-top:6px;">These are the pools your settings keep landing in. Banning one, or moving the slider that feeds it, is usually faster than rerolling.</div></div></details>`;
   }
 
   if (!h){ box.style.display = 'none'; return; }
@@ -1893,7 +1893,7 @@ function refreshBudgetChips(){
     h += `<span class="chip chip-tier">${escHTML(g.label)} intensity &le; ${intensityCaps[g.id]} <b ${actAttr('click', 'clearOneBudget', "intensity", g.id)} title="Remove">&times;</b></span>`;
   });
   if (h && getBudgetMode() !== 'redraw') h += `<span class="chip chip-ban">over budget: ${getBudgetMode() === 'drop' ? 'drop the loudest' : 'warn only'}</span>`;
-  box.innerHTML = h || '<span class="sub" style="margin:0;">No budgets set — every draw stands as dealt.</span>';
+  box.innerHTML = h || '<span class="sub" data-st="margin:0;">No budgets set — every draw stands as dealt.</span>';
 }
 function clearOneBudget(kind, key){
   if (kind === 'rarity') rarityCaps[key] = null; else delete intensityCaps[key];
@@ -1939,11 +1939,11 @@ function budgetReportHTML(){
     bits.push(`<div>${escHTML(info.label)}: <b>${info.total}</b> of ${info.cap} intensity${info.unmet ? ` — <b>over budget</b>, and nothing quieter was available to redraw into. That is a gap in the trait bank for those categories, not a setting you can fix.` : ``}.</div>`);
   });
   if (r.actions.length){
-    bits.push(`<div style="margin-top:6px;"><b>${r.actions.length} adjustment${r.actions.length===1?'':'s'}:</b></div><ul style="margin:4px 0 0 16px;">` +
-      r.actions.map(a=> `<li>${escHTML(a.from)} &rarr; ${a.to ? escHTML(a.to) : '<i>removed</i>'} <span class="sub" style="display:inline;margin:0;">(${escHTML(a.why)})</span></li>`).join("") + `</ul>`);
+    bits.push(`<div data-st="margin-top:6px;"><b>${r.actions.length} adjustment${r.actions.length===1?'':'s'}:</b></div><ul data-st="margin:4px 0 0 16px;">` +
+      r.actions.map(a=> `<li>${escHTML(a.from)} &rarr; ${a.to ? escHTML(a.to) : '<i>removed</i>'} <span class="sub" data-st="display:inline;margin:0;">(${escHTML(a.why)})</span></li>`).join("") + `</ul>`);
   }
   if (!bits.length) return "";
-  return `<div class="tensionBlock" style="border-left-color:var(--golden); margin-top:10px;"><div class="tensionTitle" style="color:var(--golden-deep);">Budget adjustments</div>${bits.join("")}</div>`;
+  return `<div class="tensionBlock" data-st="border-left-color:var(--golden); margin-top:10px;"><div class="tensionTitle" data-st="color:var(--golden-deep);">Budget adjustments</div>${bits.join("")}</div>`;
 }
 
 /* Print scoping. window.print() is synchronous in every engine that matters, but the
@@ -2349,10 +2349,10 @@ function importArchetypes(fileInput){
 // instead of raw markdown syntax. Structure mirrors sheetToText exactly.
 function sheetToHTML(st, meta, pState){
   const esc = s => String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
-  let h = `<h1 style="font-family:Georgia,serif;margin:0 0 4px;">${esc(meta.name||"Character Voice")}</h1>`;
+  let h = `<h1 data-st="font-family:Georgia,serif;margin:0 0 4px;">${esc(meta.name||"Character Voice")}</h1>`;
   const bits = []; if (meta.age) bits.push("Age "+esc(meta.age)); if (meta.context) bits.push(esc(meta.context));
   if (meta.archetypeLabel) bits.push(esc(meta.archetypeLabel));
-  if (bits.length) h += `<p style="color:#666;margin:0 0 14px;">${bits.join(" · ")}</p>`;
+  if (bits.length) h += `<p data-st="color:#666;margin:0 0 14px;">${bits.join(" · ")}</p>`;
   const groupOf = (obj) => {
     const groups = new Map();
     Object.keys(obj).forEach(id=>{
@@ -2364,23 +2364,23 @@ function sheetToHTML(st, meta, pState){
     return groups;
   };
   groupOf(st).forEach((slots, title)=>{
-    h += `<h2 style="font-family:Georgia,serif;font-size:1.05em;border-bottom:1px solid #ccc;padding-bottom:2px;margin:16px 0 6px;">${esc(title)}</h2>`;
+    h += `<h2 data-st="font-family:Georgia,serif;font-size:1.05em;border-bottom:1px solid #ccc;padding-bottom:2px;margin:16px 0 6px;">${esc(title)}</h2>`;
     slots.forEach(s=>{
       if (!s || !s.trait) return;   // exhausted pool / older save — skip, don't crash the export
-      h += `<p style="margin:6px 0;"><b>${esc(s.trait.trait)}</b> <span style="color:#888;font-size:.85em;">(${esc(s.trait.category)} · intensity ${s.trait.intensity}/5 · ${esc(s.trait.rarity)})</span><br>${esc(s.trait.desc)}<br><i style="color:#555;">"${esc(s.trait.example)}"</i></p>`;
+      h += `<p data-st="margin:6px 0;"><b>${esc(s.trait.trait)}</b> <span data-st="color:#888;font-size:.85em;">(${esc(s.trait.category)} · intensity ${s.trait.intensity}/5 · ${esc(s.trait.rarity)})</span><br>${esc(s.trait.desc)}<br><i data-st="color:#555;">"${esc(s.trait.example)}"</i></p>`;
     });
   });
   if (pState){
-    h += `<h2 style="font-family:Georgia,serif;font-size:1.05em;border-bottom:1px solid #ccc;padding-bottom:2px;margin:16px 0 6px;">Under Pressure</h2>`;
+    h += `<h2 data-st="font-family:Georgia,serif;font-size:1.05em;border-bottom:1px solid #ccc;padding-bottom:2px;margin:16px 0 6px;">Under Pressure</h2>`;
     // The trigger and the aftermath are the two most useful lines on this sheet, and
     // the styled-clipboard export was dropping both.
     const pm = pState.__pressure || {};
-    if (pm.level !== undefined && pm.level < 0.99) h += `<p style="margin:6px 0;color:#555;"><i>Shown at ${Math.round(pm.level*100)}% pressure.</i></p>`;
-    if (pm.trigger) h += `<p style="margin:6px 0;"><b>What sets it off.</b> ${pm.trigger}</p>`;
-    if (pm.recovery) h += `<p style="margin:6px 0;"><b>Afterwards.</b> ${esc(pm.recovery)}</p>`;
+    if (pm.level !== undefined && pm.level < 0.99) h += `<p data-st="margin:6px 0;color:#555;"><i>Shown at ${Math.round(pm.level*100)}% pressure.</i></p>`;
+    if (pm.trigger) h += `<p data-st="margin:6px 0;"><b>What sets it off.</b> ${pm.trigger}</p>`;
+    if (pm.recovery) h += `<p data-st="margin:6px 0;"><b>Afterwards.</b> ${esc(pm.recovery)}</p>`;
     Object.values(pState).forEach(s=>{
       if (!s || !s.trait) return;
-      h += `<p style="margin:6px 0;"><b>${esc(s.trait.trait)}</b><br>${esc(s.trait.desc)}<br><i style="color:#555;">"${esc(s.trait.example)}"</i></p>`;
+      h += `<p data-st="margin:6px 0;"><b>${esc(s.trait.trait)}</b><br>${esc(s.trait.desc)}<br><i data-st="color:#555;">"${esc(s.trait.example)}"</i></p>`;
     });
   }
   return h;

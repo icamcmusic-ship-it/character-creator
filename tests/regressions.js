@@ -378,7 +378,8 @@ module.exports = function({check, group, assert}){
       const off = PROFILE_SECTIONS.filter(p => p.defaultOn === false).map(p => p.id);
       const per = {}; off.forEach(id => per[id] = 0);
       let presetsWithOff = 0;
-      for (const [k, prof] of Object.entries(ARCHETYPE_PROFILE_HINTS)){
+      for (const [k, prof0] of Object.entries(ARCHETYPE_PROFILE_HINTS)){
+        const prof = Object.assign({}, prof0, ARCHETYPE_HINTS_V2[k] || {});
         const mine = Object.keys(prof).filter(s => off.includes(s));
         if (mine.length) presetsWithOff++;
         mine.forEach(s => per[s]++);
@@ -1154,7 +1155,7 @@ module.exports = function({check, group, assert}){
   check('SEEDV a blank-seed roll prints a v2 seed, and restoring an old link sets the engine to 1', ()=>{
     const G = fresh(); G.document._set('engineVersion', {value: '2'});
     G.gen('');
-    assert(/^v2-/.test(G.evalIn('lastSeedUsed')), 'blank roll printed ' + G.evalIn('lastSeedUsed'));
+    assert(/^v3-/.test(G.evalIn('lastSeedUsed')), 'blank roll printed ' + G.evalIn('lastSeedUsed'));
     G.document._set('engineVersion', {value: '2'});
     G.evalIn("restoreSettings({fields: {}})");
     assert(G.document.getElementById('engineVersion').value === '1', 'an old link did not restore engine 1');

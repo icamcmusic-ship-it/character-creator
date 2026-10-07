@@ -1,7 +1,7 @@
 /* ============================================================================
    Helpers shared by the v2 content files (js/data/traits-v2-*.js).
 
-   Everything in those files is stamped `since: 2` through the "v2" pack manifest (traits-v2-manifest.js): a v1 build cannot
+   Everything in those files is stamped `since: 3` through the "v2" pack manifest (traits-v2-manifest.js): a v1 or v2 build cannot
    see it, so every printed v1 seed and old share link still builds exactly what it always did. A blank-seed roll prints a v2
    seed and draws from all of it.
 
@@ -11,6 +11,8 @@
    ========================================================================== */
 /* Slider links for the v2 categories; merged into the v2 weight table only (engine.js), never into the v1 copy. */
 const GAP_V2_LINKS = {};
+/* Extra polarity tags for older, untagged traits ({id: {axis: +1|-1}}), seen only by engine v2: see buildPolOverlay in engine.js. */
+const POL_OVERLAY_V2 = {};
 const V2 = (function(){
   const R = {c:"common", u:"uncommon", d:"distinctive", s:"signature"};
   const slug = s => String(s).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60);

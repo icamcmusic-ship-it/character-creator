@@ -625,6 +625,9 @@ function regenerateMostSimilarMember(){
 }
 let _regenCount = 0;
 function generateCast(){
+  try { return _generateCastInner(); } finally { syncEngineToSheet(); }
+}
+function _generateCastInner(){
   const count = intVal('castCount', 3);
   // BUG FIX: the cast read your Generate-group checkboxes and per-section profile
   // toggles (via buildCharacterState) but hardcoded three mannerisms and a balanced
@@ -644,8 +647,10 @@ function generateCast(){
      to undo the anti-similarity pass (below); fixing that changes which cast a seed builds, so a
      fresh cast now prints a "v2-" seed and only a v2 seed gets the fix. Pasted v1 seeds and typed
      phrases rebuild exactly the casts they always did. */
-  if (!castSeed.explicit) castSeed.label = 'v2-' + (castSeed.num >>> 0).toString(36);
-  const castV2 = /^v2-[0-9a-z]+$/.test(castSeed.label);
+  if (!castSeed.explicit) castSeed.label = 'v' + DEFAULT_ENGINE_V + '-' + (castSeed.num >>> 0).toString(36);
+  const castV2 = /^v[23]-[0-9a-z]+$/.test(castSeed.label);
+  // A v1 or v2 cast keeps drawing from the engine-1 pools it always did; a v3 cast draws from the whole bank.
+  setEngineV(/^v3-[0-9a-z]+$/.test(castSeed.label) ? 3 : 1);
   // The cast and its edges are replaced wholesale — keep a way back (Undo toast below).
   const hadCast = castStates.length > 0 || relationshipEdges.length > 0;
   const restoreCast = hadCast ? _castSnapshot() : null;
@@ -779,8 +784,8 @@ function renderCast(){
     const profiles = castStates.map((c,i)=>({label:c.meta.name, color:CAST_COLORS[i%CAST_COLORS.length], prof:axisProfile(c.state)}))
                                .filter(p=>Object.keys(p.prof).length >= 2);
     if (profiles.length >= 2){
-      let legend = profiles.map(p=>`<span style="display:inline-flex;align-items:center;gap:5px;margin-right:12px;font-size:.75rem;"><i style="width:10px;height:10px;border-radius:2px;background:${cssColor(p.color)};display:inline-block;"></i>${escHTML(p.label)}</span>`).join("");
-      overlay.innerHTML = `<div class="tensionTitle" style="color:var(--dusk-blue);margin-bottom:4px;">Cast overlay — axis profiles</div>${radarSVG(profiles, 360)}<div style="margin-top:6px;">${legend}</div><div class="sub" style="margin:6px 0 0;">All members on one chart. Overlapping shapes = characters pulling the same directions; empty axes = ground nobody in this ensemble covers.</div>`;
+      let legend = profiles.map(p=>`<span data-st="display:inline-flex;align-items:center;gap:5px;margin-right:12px;font-size:.75rem;"><i data-st="width:10px;height:10px;border-radius:2px;background:${cssColor(p.color)};display:inline-block;"></i>${escHTML(p.label)}</span>`).join("");
+      overlay.innerHTML = `<div class="tensionTitle" data-st="color:var(--dusk-blue);margin-bottom:4px;">Cast overlay — axis profiles</div>${radarSVG(profiles, 360)}<div data-st="margin-top:6px;">${legend}</div><div class="sub" data-st="margin:6px 0 0;">All members on one chart. Overlapping shapes = characters pulling the same directions; empty axes = ground nobody in this ensemble covers.</div>`;
       overlay.style.display = "block";
     } else overlay.style.display = "none";
   }
@@ -1366,7 +1371,7 @@ function renderVoiceCompare(){
   renderVoiceHeatmap();
   if (!castStates.length){ host.innerHTML = `<div class="sub">Generate a cast to compare voices.</div>`; return; }
   const cmp = voiceComparison(castStates, strVal('voiceComparePrompt', 'refuse'), voiceLabMode, voiceLabReroll);
-  host.innerHTML = `<div class="sub" style="margin-bottom:8px;">${escHTML(cmp.note)}</div>` + cmp.rows.map(r => `
+  host.innerHTML = `<div class="sub" data-st="margin-bottom:8px;">${escHTML(cmp.note)}</div>` + cmp.rows.map(r => `
     <div class="voiceCard">
       <div class="voiceHead"><b>${escHTML(r.name)}</b></div>
       <blockquote class="voiceLine">${escHTML(r.line.text)}</blockquote>
@@ -1451,12 +1456,12 @@ function renderVoiceHeatmap(){
     if (i === j) return `<td class="hmSelf" aria-label="same character">—</td>`;
     const v = m.matrix[i][j], heat = m.max ? v / m.max : 0;
     const tip = m.shared[i][j].slice(0, 6).join("; ") || "nothing shared";
-    return `<td class="hmCell" style="--heat:${heat.toFixed(2)}" title="${escAttr(tip)}">${v}</td>`;
+    return `<td class="hmCell" data-st="--heat:${heat.toFixed(2)}" title="${escAttr(tip)}">${v}</td>`;
   };
-  host.innerHTML = `<div class="tensionTitle" style="margin:0 0 6px;">Voice collisions across every prompt</div>
+  host.innerHTML = `<div class="tensionTitle" data-st="margin:0 0 6px;">Voice collisions across every prompt</div>
     <div class="hmWrap"><table class="heatmap"><thead><tr><th></th>${m.names.map(n => `<th scope="col">${escHTML(n)}</th>`).join("")}</tr></thead>
     <tbody>${m.names.map((n, i) => `<tr><th scope="row">${escHTML(n)}</th>${m.names.map((_, j) => cell(i, j)).join("")}</tr>`).join("")}</tbody></table></div>
-    <div class="actionRow" style="margin-top:8px;">
+    <div class="actionRow" data-st="margin-top:8px;">
       <button class="btn-secondary" id="deCollideBtn" ${actAttr('click', 'deCollideCast')} ${m.worst < 0 ? 'disabled' : ''}>De-collide${m.worst >= 0 ? ` (reroll ${escHTML(m.names[m.worst])})` : ''}</button>
       <span class="sub">${m.worst >= 0 ? `${escHTML(m.names[m.worst])} shares the most devices (${m.totals[m.worst]}).` : 'No two members share a device.'}</span>
     </div>`;
@@ -1741,11 +1746,11 @@ function renderBackupPreview(){
   const conflicts = preview.projects.conflict.concat(preview.characters.conflict);
   host.style.display = "block";
   host.innerHTML = `<div class="tensionTitle">Before anything is written</div>
-    <div class="sub" style="margin:4px 0 8px;">${escHTML(mergeSummaryLine(preview))}</div>` +
-    (conflicts.length ? `<div class="sub" style="margin-bottom:6px;">These already exist here and differ. Ticked means take the version in the file; unticked keeps what is on this machine.</div>` +
+    <div class="sub" data-st="margin:4px 0 8px;">${escHTML(mergeSummaryLine(preview))}</div>` +
+    (conflicts.length ? `<div class="sub" data-st="margin-bottom:6px;">These already exist here and differ. Ticked means take the version in the file; unticked keeps what is on this machine.</div>` +
       conflicts.map(c => `<label class="packRow"><input type="checkbox" data-conflict="${escAttr(c.key)}"> <b>${escHTML(c.name)}</b> <span class="sub">the file's copy is ${escHTML(c.newer)}</span></label>`).join("")
       : `<div class="sub">Nothing here would be overwritten.</div>`) +
-    `<div class="actionRow" style="margin-top:8px;">
+    `<div class="actionRow" data-st="margin-top:8px;">
       <button class="btn-primary" ${actAttr('click', 'applyBackupImport')}>Import</button>
       <button class="btn-secondary" ${actAttr('click', 'cancelBackupImport')}>Cancel</button>
     </div>`;
@@ -2007,9 +2012,9 @@ function updateHeavyPreview(){
     const {chosen, conf} = predictProfileCategories(true);
     const parts = PROFILE_SECTIONS.filter(ps=>chosen[ps.id]).map(ps=>{
       const pct = Math.round((conf[ps.id]||0)*100);
-      return `${ps.label} → most likely <b>${chosen[ps.id]}</b> <span style="opacity:.65">(~${pct}%)</span>`;
+      return `${ps.label} → most likely <b>${chosen[ps.id]}</b> <span data-st="opacity:.65">(~${pct}%)</span>`;
     });
-    if (parts.length) profLine = `<div style="margin-top:6px; padding-top:6px; border-top:1px dashed var(--border);"><b>Character Profile (predicted):</b><br>${parts.join("<br>")}<div class="sub" style="margin:6px 0 0;">A simplified conditional preview, not the generator's own probabilities: it takes the most likely category at each step and conditions the next on it, and it does not model the divergence dial's mixture or the archetype slider blend. Treat it as "where the settings point", not "how often this comes out".</div></div>`;
+    if (parts.length) profLine = `<div data-st="margin-top:6px; padding-top:6px; border-top:1px dashed var(--border);"><b>Character Profile (predicted):</b><br>${parts.join("<br>")}<div class="sub" data-st="margin:6px 0 0;">A simplified conditional preview, not the generator's own probabilities: it takes the most likely category at each step and conditions the next on it, and it does not model the divergence dial's mixture or the archetype slider blend. Treat it as "where the settings point", not "how often this comes out".</div></div>`;
   } catch(e){}
   setHTML('affinityPreview',
     fmt(gBoost,"Grammar") + fmt(vBoost,"Vocabulary") + fmt(mBoost,"Mannerisms") + profLine);
@@ -2059,7 +2064,7 @@ function updateRangeReadout(){
     rows.push(`<div><b>Profile weight</b> at ${pw.value}: targeting intensity <b>${t.toFixed(2)}</b> `
             + `— roughly "${escHTML(budgetPhraseFor(t))}" across Motivation, Values, Role and the rest.</div>`);
   }
-  rows.push(`<div class="sub" style="margin:6px 0 0;">Window half-width ${half.toFixed(2)} — narrower means the sliders dictate more tightly and results vary less.</div>`);
+  rows.push(`<div class="sub" data-st="margin:6px 0 0;">Window half-width ${half.toFixed(2)} — narrower means the sliders dictate more tightly and results vary less.</div>`);
   box.innerHTML = rows.join("");
 }
 
@@ -3362,12 +3367,12 @@ function _generateFoilInner(seedLabel){
   note.className = "castCard";
   note.innerHTML = `<h3><span>Foil rationale</span></h3>
     <div class="traitDesc"><b>Premise:</b> ${escHTML(premise)}</div>
-    ${sheetPremise ? `<div class="sub" style="margin-top:4px;">Built from: ${escHTML(sheetPremise.from.join(" · "))}</div>` : ``}
-    <div class="traitDesc" style="margin-top:6px;"><b>Opposed on (personality):</b> ${escHTML(opposedNames)}</div>
-    ${profOpposedNames.length ? `<div class="traitDesc" style="margin-top:6px;"><b>Opposed on (profile):</b> ${escHTML(profOpposedNames.join(", "))}</div>` : ``}
-    <div class="traitDesc" style="margin-top:6px;"><b>Shared ground on:</b> ${escHTML(alignedNames||"—")}</div>
-    <div class="traitDesc" style="margin-top:6px;">Opposition on a few axes creates friction; shared ground on one or two keeps them plausibly in the same room — and the premise is what puts them in it. Check the Relationships tab for the full read.</div>
-    <div class="sub" style="margin-top:8px;">Foil seed: <b>${escHTML(seedLabel)}</b> — paste it into the foil seed field to rebuild this exact one.</div>`;
+    ${sheetPremise ? `<div class="sub" data-st="margin-top:4px;">Built from: ${escHTML(sheetPremise.from.join(" · "))}</div>` : ``}
+    <div class="traitDesc" data-st="margin-top:6px;"><b>Opposed on (personality):</b> ${escHTML(opposedNames)}</div>
+    ${profOpposedNames.length ? `<div class="traitDesc" data-st="margin-top:6px;"><b>Opposed on (profile):</b> ${escHTML(profOpposedNames.join(", "))}</div>` : ``}
+    <div class="traitDesc" data-st="margin-top:6px;"><b>Shared ground on:</b> ${escHTML(alignedNames||"—")}</div>
+    <div class="traitDesc" data-st="margin-top:6px;">Opposition on a few axes creates friction; shared ground on one or two keeps them plausibly in the same room — and the premise is what puts them in it. Check the Relationships tab for the full read.</div>
+    <div class="sub" data-st="margin-top:8px;">Foil seed: <b>${escHTML(seedLabel)}</b> — paste it into the foil seed field to rebuild this exact one.</div>`;
   grid.insertBefore(note, grid.firstChild);
   refreshRelSelectors();
 }
@@ -3484,7 +3489,7 @@ function checkEnsembleBalance(){
   // sliders would fill it — which is exactly the arithmetic this tool exists to do.
   if (clustered.length || profClustered.length){
     lastBalanceGaps = {clustered: clustered.map(c=>({id:c.axis.id, dir:c.dir})), profClustered: profClustered.map(c=>({section:c.section, cat:c.cat}))};
-    h += `<div class="actionRow" style="margin-top:14px;">
+    h += `<div class="actionRow" data-st="margin-top:14px;">
       <button class="btn-primary" ${actAttr('click', 'generateGapFiller')}>Generate a member who fills these gaps</button>
     </div>`;
   } else lastBalanceGaps = null;
@@ -3910,11 +3915,11 @@ async function askWhyNotHere(groupTitle){
   const inp = document.getElementById('whyNotSearch');
   if (inp) inp.value = t.trait;
   if (out){
-    out.innerHTML = `<div class="whyNote"><b>${escHTML(t.trait)}</b> — ${escHTML(t.category)}<div style="margin-top:6px;">${explainWhyNot(t)}</div></div>`;
+    out.innerHTML = `<div class="whyNote"><b>${escHTML(t.trait)}</b> — ${escHTML(t.category)}<div data-st="margin-top:6px;">${explainWhyNot(t)}</div></div>`;
     out.style.display = 'block';
   }
   // Show it where it was asked, not two tabs away.
-  toastHTML(`<b>${escHTML(t.trait)}</b> — ${escHTML(t.category)}<div style="margin-top:5px;">${explainWhyNot(t)}</div>`, 14000);
+  toastHTML(`<b>${escHTML(t.trait)}</b> — ${escHTML(t.category)}<div data-st="margin-top:5px;">${explainWhyNot(t)}</div>`, 14000);
 }
 
 function explainWhyNotFromInput(){
@@ -3926,10 +3931,10 @@ function explainWhyNotFromInput(){
   if (t.ambiguous){
     // Ambiguity is useful here rather than an error: show the matches as a shortlist.
     const list = t.ambiguous.slice(0, 8).map(x=>`<li>${escHTML(x.trait)} <span class="sub">— ${escHTML(x.category)}</span></li>`).join("");
-    out.innerHTML = `<div class="whyNote"><b>${t.ambiguous.length} traits match that.</b> Type more of a name to pick one:<ul style="margin:6px 0 0 18px;">${list}</ul></div>`;
+    out.innerHTML = `<div class="whyNote"><b>${t.ambiguous.length} traits match that.</b> Type more of a name to pick one:<ul data-st="margin:6px 0 0 18px;">${list}</ul></div>`;
     out.style.display = 'block'; return;
   }
-  out.innerHTML = `<div class="whyNote"><b>${escHTML(t.trait)}</b> — ${escHTML(t.category)}<div style="margin-top:6px;">${explainWhyNot(t)}</div></div>`;
+  out.innerHTML = `<div class="whyNote"><b>${escHTML(t.trait)}</b> — ${escHTML(t.category)}<div data-st="margin-top:6px;">${explainWhyNot(t)}</div></div>`;
   out.style.display = 'block';
 }
 
@@ -4501,7 +4506,7 @@ function sliderDiffHTML(before, after){
   const ids = [...new Set(Object.keys(before || {}).concat(Object.keys(after || {})))];
   const rows = ids.filter(id => String((before || {})[id]) !== String((after || {})[id]))
     .map(id => `<li><b>${escHTML(name(id))}</b> ${escHTML(String((before || {})[id] ?? "—"))} → ${escHTML(String((after || {})[id] ?? "—"))}</li>`);
-  return `<div class="sub" style="margin:10px 0 4px;"><b>Sliders</b> ${rows.length ? `— ${rows.length} moved` : "— unchanged"}</div>` + (rows.length ? `<ul class="sliderDiff">${rows.join("")}</ul>` : "");
+  return `<div class="sub" data-st="margin:10px 0 4px;"><b>Sliders</b> ${rows.length ? `— ${rows.length} moved` : "— unchanged"}</div>` + (rows.length ? `<ul class="sliderDiff">${rows.join("")}</ul>` : "");
 }
 // Two rolls side by side: the earlier one from the drawer against the sheet on screen.
 function compareWithHistory(i){

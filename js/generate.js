@@ -18,6 +18,7 @@ function mulberry32(a){
   };
 }
 let lastSeedUsed = null;
+let sheetEngineVersion = 1;   // the engine that built the sheet on screen (a typed seed carries no prefix to say so)
 
 /* ================= SEED CODEC =================
    An empty seed field took a NUMERIC entropy seed and displayed `seedNum.toString(36)`.
@@ -31,14 +32,20 @@ let lastSeedUsed = null;
 /* Seed formats are also ENGINE versions. The number a seed decodes to is the same in both,
    but v2 builds with the 2026 coverage changes (the neutral verbosity band draws from more
    than one category, a sheet can omit one of the optional motivation cards, distinctive and
-   signature traits are drawn a little more often). A v1 seed keeps building exactly what it
-   always did, so every old seed and share link replays unchanged. ENGINE_V is set around a
-   single-character build (see _runGeneration) and is 1 everywhere else, so cast and foil
-   builds are unchanged. */
+   signature traits are drawn a little more often); v3 adds the 2026-10 content pack (larger
+   Motivation pools, new Social Role, Values and Habits categories, eight new optional sections,
+   polarity tags on older traits, new presets and prose alternates). A v1 or v2 seed keeps building
+   exactly what it always did, so every old seed and share link replays unchanged. ENGINE_V is set
+   around a single-character or cast build and otherwise follows the sheet on screen (see
+   syncEngineToSheet), so a reroll or pin draws from the bank the sheet was built from. */
 const SEED_PREFIX = 'v1-';            // the oldest format; kept for the codec check in app.js
-const SUPPORTED_SEED_VERSIONS = [1, 2];
-const DEFAULT_ENGINE_V = 2;
+const SUPPORTED_SEED_VERSIONS = [1, 2, 3];
+const DEFAULT_ENGINE_V = 3;
 function encodeSeed(num){ return 'v' + ENGINE_V + '-' + (num >>> 0).toString(36); }
+/* Outside a build the engine version follows the sheet on screen: a reroll, pin, toss, undo or cast built from a v2 sheet must draw from
+   the v2 bank and tables, and a v1 sheet must keep drawing from the v1 ones. Called wherever lastSeedUsed changes. */
+function sheetEngineV(){ const m = /^v(\d+)-[0-9a-z]+$/.exec(String(lastSeedUsed || '')); const v = m ? +m[1] : sheetEngineVersion; return SUPPORTED_SEED_VERSIONS.includes(v) ? v : 1; }
+function syncEngineToSheet(){ setEngineV(sheetEngineV()); }
 function seedNumberFrom(str){
   const t = String(str == null ? '' : str).trim();
   if (!t) return null;
@@ -150,7 +157,7 @@ function radarSVG(profiles, size){
   const title = named.length > 1
     ? `Axis profile overlay — ${named.map(p=>esc(p.label)).join(', ')}`
     : `Axis profile${named.length ? ' — ' + esc(named[0].label) : ''}`;
-  let s = `<svg viewBox="0 0 ${size} ${size}" role="img" aria-label="${title}" style="max-width:${size}px;width:100%;">`;
+  let s = `<svg viewBox="0 0 ${size} ${size}" role="img" aria-label="${title}" data-st="max-width:${size}px;width:100%;">`;
   s += `<title>${title}</title>`;
   // rings: -max, 0 (emphasised), +max
   [0.25, 0.5, 0.75, 1].forEach(f=>{
@@ -413,7 +420,7 @@ function generateBatch(n){
      recorded provenance belonged to a character the user never kept. Capture the whole
      authoritative set in one place instead of a hand-maintained subset. */
   const before = {state, charMeta, pressureState, lastSheetTraits,
-                  lastGeneratedSliders, lastSeedUsed, charMetaSeed,
+                  lastGeneratedSliders, lastSeedUsed, charMetaSeed, sheetEngineVersion,
                   seedReadout: (document.getElementById('lastSeedReadout')||{}).textContent,
                   budgetReport: getBudgetReport(),
                   // The DOM sliders: depth-first moves them per candidate, so each
@@ -453,7 +460,7 @@ function generateBatch(n){
     pressureState = before.pressureState; lastSheetTraits = before.lastSheetTraits;
     lastGeneratedSliders = before.lastGeneratedSliders;
     restoreSliders(before.domSliders);
-    lastSeedUsed = before.lastSeedUsed; charMetaSeed = before.charMetaSeed;
+    lastSeedUsed = before.lastSeedUsed; charMetaSeed = before.charMetaSeed; sheetEngineVersion = before.sheetEngineVersion || 1; syncEngineToSheet();
     const seedOut = document.getElementById('lastSeedReadout');
     if (seedOut && before.seedReadout !== undefined) seedOut.textContent = before.seedReadout;
     if (before.budgetReport && typeof setBudgetReport === 'function') setBudgetReport(before.budgetReport);
@@ -536,7 +543,7 @@ function chooseBatch(i){
      kept character named a different one — and pasting it back reproduced the candidate
      you discarded. Each candidate carries its own seed in its meta; put that on screen. */
   if (pick.meta && pick.meta.seed){
-    lastSeedUsed = charMetaSeed = pick.meta.seed;
+    lastSeedUsed = charMetaSeed = pick.meta.seed; syncEngineToSheet();
     setText('lastSeedReadout', "Seed: " + pick.meta.seed);
     if (typeof updateStickyBar === 'function') updateStickyBar();
   }
@@ -680,8 +687,9 @@ function exploreCandidatesEnabled(){
 }
 function _runGeneration(){
   const si = document.getElementById('seedInput');
-  ENGINE_V = engineVersionFor(si ? si.value : '');
-  try { return _runGenerationInner(); } finally { ENGINE_V = 1; }
+  setEngineV(engineVersionFor(si ? si.value : ''));
+  let ok = false;
+  try { const r = _runGenerationInner(); ok = r !== false; return r; } finally { if (ok) sheetEngineVersion = ENGINE_V; syncEngineToSheet(); }
 }
 function _runGenerationInner(){
   snapshotHistory();

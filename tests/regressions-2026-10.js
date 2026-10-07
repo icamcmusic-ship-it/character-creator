@@ -9,6 +9,70 @@ const {fresh} = require('./regressions');
 module.exports = function({check, group, assert}){
   group('Audit 2026-10 §1 regressions');
 
+  /* Frozen replay vectors, built by the released engine (commit 2fb22e6, before the engine-3 pack) with tools/replay-check.js:
+     one line per seed, a hash of every seated trait id. A v1 or v2 seed and every share link made from one must build exactly
+     the same character for ever; this fails the moment a change reaches a build that is not engine 3. */
+  const FROZEN = [
+      'v1-63z 1b98c523',
+      'v1-c7y 65753390',
+      'v1-ibx 22460db',
+      'v1-ofw daf08c7d',
+      'v1-ujv 27f1212',
+      'v1-10nu 285c5b01',
+      'v1-16rt c2ae64a7',
+      'v1-1cvs 509663ac',
+      'v1-1izr e079181c',
+      'v1-1p3q 37d202fd',
+      'v1-1v7p c9656d3',
+      'v1-21bo bae9c315',
+      'v1-27fn d842552a',
+      'v1-2djm ee9778d2',
+      'v1-2jnl bbdcef9e',
+      'v1-2prk 968338a8',
+      'v2-63z d02b29a5',
+      'v2-c7y 3d3c8d79',
+      'v2-ibx 3ff3fd12',
+      'v2-ofw 3c14e7a',
+      'v2-ujv 8d9c40f3',
+      'v2-10nu c9cc8c19',
+      'v2-16rt bd283575',
+      'v2-1cvs 96a4a114',
+      'v2-1izr 41788e6d',
+      'v2-1p3q eddcf2eb',
+      'v2-1v7p cf0ee279',
+      'v2-21bo 36bf92ed',
+      'v2-27fn 9e82219d',
+      'v2-2djm 93a1860f',
+      'v2-2jnl edb43275',
+      'v2-2prk 1cbd7869'
+  ];
+  check('V3 v1 and v2 seeds still build the characters the released engine built (frozen vectors)', ()=>{
+    const out = require('child_process').execFileSync(process.execPath, [path.join(ROOT, 'tools/replay-check.js'), ROOT, '--n=16', '--v2'], {encoding: 'utf8', maxBuffer: 1 << 24});
+    const got = out.split('\n').filter(Boolean);
+    const want = FROZEN;
+    const wantV1 = want.filter(l => l.startsWith('v1-')), wantV2 = want.filter(l => l.startsWith('v2-'));
+    const gotV1 = got.filter(l => l.startsWith('v1-')).slice(0, 16), gotV2 = got.filter(l => l.startsWith('v2-')).slice(0, 16);
+    const bad = [];
+    wantV1.forEach((l, i) => { if (gotV1[i] !== l) bad.push('v1 ' + l + ' -> ' + gotV1[i]); });
+    wantV2.forEach((l, i) => { if (gotV2[i] !== l) bad.push('v2 ' + l + ' -> ' + gotV2[i]); });
+    assert(!bad.length, bad.length + ' seeds changed, e.g. ' + bad.slice(0, 2).join('; '));
+  });
+
+  check('V3 a v1 or v2 build never sees the engine-3 pack; a v3 build does, and the new sections draw only on v3', ()=>{
+    const G = fresh(); const d = G.document;
+    const newSecs = ['persuasion','feedback','decision','boundaries','emotion','hospitality','greetings','digital'];
+    newSecs.forEach(id => { d._set('sec_' + id, {checked: true}); });
+    const sinceCount = pre => { let n = 0, newSec = 0;
+      for (let i = 1; i <= 25; i++){ G.gen(pre + (i * 7919).toString(36));
+        const r = G.evalIn("(()=>{let a=0,b=0;Object.values(state).forEach(s=>{if(s&&s.trait){if(s.trait.since)a++;if(['Persuasion & Influence','Feedback & Praise','Decision Style','Boundaries & Refusals','Emotion Display Rules','Hospitality & Gifts','Greetings & Farewells','Digital Voice'].includes(s.trait.section))b++;}});return [a,b]})()");
+        n += r[0]; newSec += r[1]; }
+      return {n, newSec}; };
+    const v1 = sinceCount('v1-'), v2 = sinceCount('v2-'), v3 = sinceCount('v3-');
+    assert(v1.n === 0 && v2.n === 0 && v1.newSec === 0 && v2.newSec === 0, 'older engines saw the pack: ' + JSON.stringify({v1, v2}));
+    assert(v3.n >= 40 && v3.newSec >= 20, 'a v3 build drew too little of the pack: ' + JSON.stringify(v3));
+    return JSON.stringify(v3);
+  });
+
   check('H1 a trait name carrying markup cannot reach #warnBox as HTML, and the dispatcher refuses built-ins', ()=>{
     const G = fresh(); const d = G.document;
     d._set('warnBox', {});
@@ -31,6 +95,20 @@ module.exports = function({check, group, assert}){
     assert(m, 'no CSP meta tag');
     const script = (m[1].match(/script-src([^;]*)/) || [])[1] || '';
     assert(script.trim() === "'self'", "script-src is not 'self' only: " + script);
+  });
+
+  check('H1b style-src is self only, and no markup or script writes an inline style="" attribute (js/boot.js applies data-st through the CSSOM)', ()=>{
+    const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+    const m = html.match(/http-equiv="Content-Security-Policy"\s+content="([^"]+)"/);
+    const style = (m[1].match(/style-src([^;]*)/) || [])[1] || '';
+    assert(style.trim() === "'self'", "style-src is not 'self' only: " + style);
+    const bad = [];
+    ['index.html','js/render.js','js/app.js','js/generate.js','js/engine.js','js/mechanics.js'].forEach(f=>{
+      const src = fs.readFileSync(path.join(ROOT, f), 'utf8');
+      const hit = src.match(/\sstyle="[^"]*"/); if (hit) bad.push(f + ': ' + hit[0].slice(0, 60));
+      if (/setAttribute\(\s*['"]style['"]/.test(src)) bad.push(f + ': setAttribute("style")');
+    });
+    assert(!bad.length, bad.join('; '));
   });
 
   check('H2 WEIGHT_MATRIX has no duplicated key, so no later literal can silently replace an earlier one', ()=>{
@@ -158,7 +236,7 @@ module.exports = function({check, group, assert}){
       assert(v1 > v2 * 3, 'the v1 path no longer behaves as before (' + v1.toFixed(3) + ' against v2 ' + v2.toFixed(3) + ')');
       d.getElementById('castSeed').value = '';
       G.evalIn("generateCast(); castStates = []; relationshipEdges = [];");
-      assert(/^v2-/.test(G.evalIn('lastCastSeed')), 'a fresh cast did not print a v2 seed: ' + G.evalIn('lastCastSeed'));
+      assert(/^v3-/.test(G.evalIn('lastCastSeed')), 'a fresh cast did not print a v3 seed: ' + G.evalIn('lastCastSeed'));
     } finally { console.info = info; }
   });
 
@@ -192,7 +270,7 @@ module.exports = function({check, group, assert}){
   check('M13 a blank seed box uses the current engine whatever an old save wrote to the hidden field; Reset names the engine', ()=>{
     const G = fresh(); G.document._set('engineVersion', {value: '1'});
     const r = G.evalIn("({blank: engineVersionFor(''), typed: engineVersionFor('a typed phrase'), v2: engineVersionFor('v2-abc'), v1: engineVersionFor('v1-abc'), def: DEFAULTS.fields.engineVersion})");
-    assert(r.blank === 2, 'a blank box built with engine ' + r.blank + ' after an old save set the field to 1');
+    assert(r.blank === 3, 'a blank box built with engine ' + r.blank + ' after an old save set the field to 1');
     assert(r.typed === 1 && r.v1 === 1 && r.v2 === 2, 'typed phrases and prefixed seeds must still pick their own engine: ' + JSON.stringify(r));
     assert(r.def === '2', 'DEFAULTS.fields has no engineVersion, so Reset reads the (overwritten) defaultValue');
   });

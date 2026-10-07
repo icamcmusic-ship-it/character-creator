@@ -28,7 +28,7 @@ if (process.env.CSP){
     const res = await route.fetch();
     const body = await res.text();
     await route.fulfill({ body, headers: Object.assign({}, res.headers(), {
-      'content-security-policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:;"
+      'content-security-policy': "default-src 'self'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data:;"
     })});
   });
 }
@@ -43,6 +43,12 @@ console.log('Browser checks');
 await step('page loads with a trait bank', async ()=>{
   const n = await page.evaluate(()=> TRAITS.length);
   if (!n || n < 7000) throw new Error('bank size ' + n);
+});
+await step('inline styles were all applied through the CSSOM (no data-st left, no style-src violation)', async ()=>{
+  const left = await page.evaluate(()=> document.querySelectorAll('[data-st]').length);
+  if (left) throw new Error(left + ' elements still carry data-st');
+  const hid = await page.evaluate(()=>{ const el = document.getElementById('suggestNote'); return el ? getComputedStyle(el).display : 'missing'; });
+  if (hid !== 'none') throw new Error('suggestNote should be display:none, got ' + hid);
 });
 await step('no inline on* handlers remain in the DOM', async ()=>{
   const found = await page.evaluate(()=>{

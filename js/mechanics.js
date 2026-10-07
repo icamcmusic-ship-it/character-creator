@@ -918,6 +918,8 @@ const ARC_TEMPLATES = [
     {shape:"deterioration", title:"Got it", belief:"{lie}", choice:"They take {want} and find it empty; they hide how empty.", cost:"The reason they had for getting up."},
     {shape:"cyclical", title:"Back where they started", belief:"{lie}", choice:"They fall back into the old pattern because it is at least familiar.", cost:"The year."}]},
 ];
+// Six more templates from the v2 prose pool (js/data/prose-pools-v2.js); they only produce events, so v1 seeds cannot reach them.
+if (typeof PROSE_POOLS_V2 !== 'undefined' && PROSE_POOLS_V2.arcTemplates) PROSE_POOLS_V2.arcTemplates.forEach(t => { if (!ARC_TEMPLATES.some(x => x.id === t.id)) ARC_TEMPLATES.push(t); });
 function _fillArcText(s, st){
   const t = (id, re) => _mxT(st, id, re);
   const lie = t("motivation", /The Lie/i), want = t("motivation", /Core Want/i), need = t("motivation", /The Need/i);
@@ -1022,7 +1024,7 @@ function innerConflict(st, meta){
     + (flips
       ? `Under load ${pressW.role.toLowerCase()} ${q(pressW.trait)} takes over, ${when}; the other one has been leaking all along.`
       : `Under load it holds, ${when} — and ${loser.role.toLowerCase()} ${q(loser.trait)} leaks out around it instead.`);
-  return {type: pick.type, label: T.label, question: T.question, a: A, b: B, calm: "a", pressure, flips, flipped,
+  return {type: pick.type, label: T.label, question: proseAlt(T.question, _proseAlts('innerConflictQuestions', pick.type), 'ic|' + pick.type + '|' + h), a: A, b: B, calm: "a", pressure, flips, flipped,
     winner: pressW, loser, when, summary, from: [pick.a, pick.b]};
 }
 const _ic = t => (typeof _spoken === "function" ? _spoken(t) : null) || _mxQ(t.trait);
