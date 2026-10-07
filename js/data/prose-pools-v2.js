@@ -197,5 +197,39 @@ const PROSE_POOLS_V2 = {
       {shape: "steadfast", title: "The kinder offer", belief: "{values}", choice: "They turn down the more generous version of the same deal because it carries the same condition.", cost: "{price}"},
       {shape: "steadfast", title: "Right and alone", belief: "{values}", choice: "They stay where they are while the others drift off, and leave the door unlocked behind them.", cost: "The company that had made holding the line feel easy."},
       {shape: "steadfast", title: "Not for show", belief: "{values}", choice: "They keep to it on the day it is finally safe to drop, and tell nobody they are doing so.", cost: "The credit, which would have been theirs for the asking."}]}
-  ]
+  ],
+  // Alternates for the one-line obligation a relationship edge starts with (keyed by relationship role id).
+  edgeObligation: {
+    mentor:     ["To tell them the truth before the world does, and then to stop talking.", "To pass on the thing they wish they had been given, and not to charge for it."],
+    protege:    ["To turn up prepared, and to be worth the next lesson.", "To listen better than they want to, and to use it."],
+    confidant:  ["To say nothing, even when saying something would win an argument.", "To be the one place the other version of them is safe."],
+    dependant:  ["To be reachable at the hour it goes wrong.", "To keep turning up, even on the days it is not noticed."],
+    ally:       ["To stand where they said they would stand when it stops being convenient.", "To take the hit that was meant for the plan, not the person."],
+    ex:         ["To not be the one who tells the story first.", "Nothing written down; a few things neither of them would put in a text."],
+    rival:      ["To win in a way they could describe to the other's face.", "To keep the contest honest, because the other is the only one who would notice if it were not."],
+    antagonist: ["Only to stay out of the way, and to be seen doing it.", "Nothing, and they have decided to be exact about that."]
+  },
+  // Alternates for the recovery sheet's "First hours" and "Who they go to" cells (stress -> attachment -> {first, who}).
+  recoveryCells: {
+    "Fight (attack the threat)": {
+      "Secure":       {first: ["They walk it off, saying out loud that they will be an hour, and mean an hour."], who: ["to the person it happened with, after the walk, to say what the anger was covering"]},
+      "Anxious":      {first: ["They pace with the phone in their hand, furious one minute and drafting an apology the next."], who: ["to whoever will take the side of their anger, and then to whoever will take the side of their worry"]},
+      "Avoidant":     {first: ["They shut the door on all of it and do something loud with their hands until it is safe to be seen."], who: ["to the garage, the road or the sink: anywhere that does not ask a question"]},
+      "Disorganized": {first: ["They go out and come back twice, each time with a different version of what they meant."], who: ["to the person, then out again, then back with something to hold out like a peace offering"]}},
+    "Flight (remove yourself)": {
+      "Secure":       {first: ["They go, but they text where, and they come back when they said they would."], who: ["to the person they left, once they have had their air, to explain"]},
+      "Anxious":      {first: ["They are out of the room before it has finished and spend the whole absence composing what to say."], who: ["to the first person who picks up, to be told they have not ruined everything"]},
+      "Avoidant":     {first: ["They vanish into work, a long drive or a locked door, unavailable in the way they always are, only longer."], who: ["to nobody: the work, the drive, the door"]},
+      "Disorganized": {first: ["They leave wanting to be followed, and are furious and relieved in turn when nobody is."], who: ["to someone, then away from them mid-sentence, then back"]}},
+    "Freeze (shut down)": {
+      "Secure":       {first: ["They go quiet and say so, 'give me a bit', and then do come back."], who: ["to the person they trust most, slowly, and mostly to sit near them"]},
+      "Anxious":      {first: ["They go still and watch everyone's faces, certain the silence has been taken as a verdict."], who: ["to whoever seems calmest, to borrow some of it"]},
+      "Avoidant":     {first: ["They go blank and efficient. Whatever it was has been filed away by the time anyone looks up."], who: ["to a screen, a spreadsheet, a task with edges"]},
+      "Disorganized": {first: ["They go still, then flare, then still again, and cannot say what the flare was for."], who: ["to someone safe, and then flinch away when they are met"]}},
+    "Fawn (appease the threat)": {
+      "Secure":       {first: ["They make tea for everyone, apologise once, and then let themselves sit down."], who: ["to the person who can tell them it is all right, and to be believed"]},
+      "Anxious":      {first: ["They over-apologise to everyone in range and keep asking whether it is all right now."], who: ["to whoever will reassure them, and then to whoever will reassure them again"]},
+      "Avoidant":     {first: ["They smooth everything over with practical help and give nobody a way to ask how they are."], who: ["to a favour for somebody else: useful, and out of sight"]},
+      "Disorganized": {first: ["They agree to everything, retract half of it by evening, and apologise for retracting."], who: ["to the one person they trust, and then to the one person they are scared of, to settle it"]}}
+  }
 };

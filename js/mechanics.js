@@ -289,13 +289,17 @@ const CAST_ROLES = [
   {id:"heart",    label:"Heart",        blurb:"Holds the group together when it matters."},
   {id:"skeptic",  label:"Skeptic",      blurb:"Asks the question nobody wants asked."},
   {id:"wildcard", label:"Wildcard",     blurb:"Nobody is sure which way they will jump."},
+  // Engine 3 seats, filled only after the six above (so a cast of six or fewer is seated exactly as before).
+  {id:"anchor",   label:"Anchor",       blurb:"Keeps the group steady; the others take their pace from them."},
+  {id:"stranger", label:"Stranger",     blurb:"Sees the group from outside, and says what the insiders have stopped noticing."},
+  {id:"mouth",    label:"Mouthpiece",   blurb:"Says out loud what the group is thinking."},
 ];
 function _castRoleScore(st, prof){
   const cat = id => { const t = _mxT(st, id); return t ? t.category : null; };
   const role = cat("role"), humor = cat("humor"), attach = cat("attachment"), vices = cat("vices"), values = cat("values");
   const humorT = _mxT(st, "humor");
   const p = k => prof[k] || 0;
-  const s = {leader:[], comic:[], heart:[], skeptic:[], wildcard:[]};
+  const s = {leader:[], comic:[], heart:[], skeptic:[], wildcard:[], anchor:[], stranger:[], mouth:[]};
   const add = (r, v, why) => { if (v) s[r].push({v, why}); };
   add("leader", role === "Leader" ? 3 : role === "Instigator" ? 1 : 0, `group role ${role}`);
   add("leader", p("asrt") * 2, "assertive"); add("leader", p("ego"), "self-assured");
@@ -307,6 +311,9 @@ function _castRoleScore(st, prof){
   add("skeptic", p("intel"), "analytical"); add("skeptic", values === "Rigid & Principled" ? 0.5 : 0, "principled");
   add("wildcard", attach === "Disorganized" ? 2 : 0, "disorganised attachment"); add("wildcard", role === "Outsider" ? 2 : 0, "outsider");
   add("wildcard", vices === "Risk & Escape" ? 1 : 0, "risk-taking"); add("wildcard", -p("disc"), "undisciplined");
+  add("anchor", attach === "Secure" ? 2 : 0, "secure attachment"); add("anchor", p("disc") * 1.5, "disciplined"); add("anchor", p("mood"), "calm"); add("anchor", vices === "Restraint & Discipline" ? 1 : 0, "restrained");
+  add("stranger", role === "Outsider" ? 3 : 0, "outsider"); add("stranger", role === "Newcomer" ? 3 : 0, "newcomer"); add("stranger", -p("warm"), "cool toward the group"); add("stranger", p("cur"), "curious");
+  add("mouth", p("vol") * 1.5, "talkative"); add("mouth", p("asrt"), "assertive"); add("mouth", p("emo"), "open"); add("mouth", role === "Instigator" ? 2 : 0, "group role Instigator");
   const out = {};
   Object.entries(s).forEach(([r, parts]) => {
     out[r] = {score: parts.reduce((a, b) => a + b.v, 0),
@@ -345,7 +352,12 @@ function assignCastRoles(members){
       return axes.length ? `opposite the leader on ${axes.join(" and ")}` : "furthest from the leader overall";
     });
   }
-  ["comic", "heart", "skeptic", "wildcard"].forEach(r => { if (free.size) take(r, x => x.sc[r].score, whyOf(r)); });
+  ["comic", "heart", "skeptic", "wildcard"].concat(ENGINE_V >= 3 ? ["anchor", "stranger", "mouth"] : []).forEach(r => { if (free.size) take(r, x => x.sc[r].score, whyOf(r)); });
+  // A seat the author named wins over the one read off the sheet; the sheet's reading stays in the tooltip.
+  (members || []).forEach((m, i) => {
+    const custom = m && m.meta && typeof m.meta.seat === "string" ? m.meta.seat.trim().slice(0, 40) : "";
+    if (custom) out[i] = {index: i, id: "custom", label: custom, why: `set by you (the sheet reads as ${out[i].label}: ${out[i].why})`, custom: true};
+  });
   return out;
 }
 /* JOINT OPTIMISATION. Members were rolled independently and then de-duplicated on
@@ -747,7 +759,10 @@ function recoverySheet(st, ctx){
   const V = (salt, frames, vars) => _mxVar(st, salt, frames, vars);
   const d = t => t && t.desc ? ` — ${_mxLc(t.desc)}` : "";
   const row = (key, title, text, from) => { if (text) rows.push({key, title, text, from: (from || []).filter(Boolean).map(t => t.trait)}); };
-  const cell = stress && attach && _RECOVER_CELL[stress.category] ? _RECOVER_CELL[stress.category][attach.category] : null;
+  let cell = stress && attach && _RECOVER_CELL[stress.category] ? _RECOVER_CELL[stress.category][attach.category] : null;
+  // Engine 3: each cell has a second wording, chosen by the sheet's hash.
+  const _alt = cell && typeof PROSE_POOLS_V2 !== "undefined" && PROSE_POOLS_V2.recoveryCells && PROSE_POOLS_V2.recoveryCells[stress.category] ? PROSE_POOLS_V2.recoveryCells[stress.category][attach.category] : null;
+  if (cell && _alt) cell = {first: proseAlt(cell.first, _alt.first, "rcf|" + stress.id + "|" + attach.id), who: proseAlt(cell.who, _alt.who, "rcw|" + stress.id + "|" + attach.id)};
   const lensDying = typeof activeLensIds === "function" && activeLensIds().includes("dying");
   const firstText = cell ? cell.first : stress ? _RECOVER_FIRST[stress.category] : null;
   row("first", "First hours", firstText && lensDying ? "There is less time to waste on it than there used to be. " + firstText : firstText, [stress, attach]);
@@ -762,6 +777,8 @@ function recoverySheet(st, ctx){
   if (cn.makesWorse) row("worse", "Who makes it worse", V("worse", ["Being around {n}. Every old thing comes back at once.", "{n} in the room, whatever {n} says.", "{n}. The history makes it worse."], {n: cn.makesWorse}), []);
   row("repair", "How they repair it", repair ? V("repair", ["{r}{d}.", "The repair they make: {r}{d}."], {r: _mxUnrun(repair.trait), d: d(repair)}) : null, [repair]);
   row("scar", "The story they tell afterwards", lie ? V("scar", ["That it proves {q} — unless someone gets to them first.", "The version that sticks: it proves {q}. Someone has to get to them before that hardens.", "They will file it under {q}, unless someone offers a better story first."], {q: _mxQ(lie.trait)}) : null, [lie]);
+  const scene = typeof settingScene === "function" ? settingScene(st) : null;
+  if (scene && scene.place && scene.person) row("where", "Where it plays out", `The aftermath is around ${scene.place}. ${scene.person[0].toUpperCase() + scene.person.slice(1)} is the one who knows what happened, and what they do with that is part of the recovery.`, []);
   const summary = typeof pressureRecovery === "function" ? pressureRecovery(st) : null;
   return rows.length ? {summary, rows} : null;
 }
@@ -1208,4 +1225,43 @@ function voiceFitCheck(st, text){
   const off = checks.filter(c => c.verdict === "off").length, stretch = checks.filter(c => c.verdict === "stretch").length;
   const summary = off ? `${off} thing${off === 1 ? "" : "s"} here this voice would not do.` : stretch ? "Close: a few places where the line stretches the voice." : "It sounds like them.";
   return {checks, summary, words, grade};
+}
+
+// ================= 13. Two people under the same pressure =================
+/* Relationships feed the pressure ladder. The ladder describes one person; this reads two sheets together: how each one's first move
+   lands on the other, and how each one's attachment reads the other's move. The ten stress pairings are authored; the attachment lines
+   come from the same appraisal table the single-character ladder uses. */
+const _PRESSURE_PAIR = {
+  "Fight|Fight":  "{a} and {b} both go forward. Whatever started it is soon the smaller thing; the argument is now about who stops first.",
+  "Fight|Flight": "{a} pushes and {b} leaves the room, so {a} follows, and the chase becomes the argument.",
+  "Fight|Freeze": "{a} gets louder and {b} gets quieter. {a} reads the silence as contempt; {b} reads the noise as a verdict.",
+  "Fight|Fawn":   "{b} gives way in the first minute, and {a} takes the giving way as permission to keep going.",
+  "Flight|Flight":"Both reach for the door. Nothing is said and nothing is settled, and the next meeting starts on the unsaid thing.",
+  "Flight|Freeze":"{a} leaves; {b} stays exactly where they were, still, long after, waiting to be told what happened.",
+  "Flight|Fawn":  "{b} chases after to smooth it over; {a} takes the chase for pressure and goes further off.",
+  "Freeze|Freeze":"Silence on both sides. It can last for days, and each is sure the other is the one who is angry.",
+  "Freeze|Fawn":  "{b} fills the silence with helpfulness. {a} cannot answer, and {b} takes that for displeasure and does more.",
+  "Fawn|Fawn":    "Each is apologising to the other at once, and neither says what they actually need.",
+};
+function pairUnderPressure(A, B){
+  if (!A || !B || !A.state || !B.state) return null;
+  const nm = m => (m.meta && m.meta.name) || "Unnamed";
+  const sa = _mxT(A.state, "stress"), sb = _mxT(B.state, "stress");
+  if (!sa || !sb) return null;
+  const short = c => c.split(" ")[0];
+  const ka = short(sa.category), kb = short(sb.category);
+  let key = `${ka}|${kb}`, swap = false;
+  if (!_PRESSURE_PAIR[key]){ key = `${kb}|${ka}`; swap = true; }
+  const tpl = _PRESSURE_PAIR[key];
+  if (!tpl) return null;
+  const [x, y] = swap ? [B, A] : [A, B];
+  const lines = [tpl.replace(/\{a\}/g, nm(x)).replace(/\{b\}/g, nm(y))];
+  const aa = _mxT(A.state, "attachment"), ab = _mxT(B.state, "attachment");
+  const APP = typeof APPRAISAL_BY_ATTACHMENT !== "undefined" ? APPRAISAL_BY_ATTACHMENT : {};
+  const third = s => s.replace(/^read /, "reads ").replace(/ and act on /, " and acts on ");
+  if (aa && APP[aa.category]) lines.push(`${nm(A)} ${third(APP[aa.category])}.`);
+  if (ab && APP[ab.category]) lines.push(`${nm(B)} ${third(APP[ab.category])}.`);
+  const na = _mxT(A.state, "motivation", /The Need/i), nb = _mxT(B.state, "motivation", /The Need/i);
+  if (na && nb) lines.push(`What would help is not the same for each: ${nm(A)} needs ${_mxLc(na.trait)}; ${nm(B)} needs ${_mxLc(nb.trait)}.`);
+  return {key, lines};
 }

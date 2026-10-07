@@ -10,29 +10,29 @@ const TRAITS_V2_WANT = (function(){
     ["The title on the door", "Corrects forms, introductions and envelopes that leave out the rank they worked for, and does it with a smile that stays put.", "It's Dr, actually. I did the work. It's on the door.", 4, "c", {ego:1, form:1}],
     ["A seat where it gets decided", "Angles for a place in the room one level up, turning up to the pre-meeting with the figures nobody asked for.", "Who's in on Thursday? Right. I'll just pop in with the numbers.", 3, "u", {asrt:1, ego:1}],
     ["To be head-hunted, not hired", "Refuses to apply for anything and waits for the call to come to them, treating every unsolicited message as a verdict.", "I don't apply. I wait for the phone. It has rung before.", 3, "d", {ego:1, asrt:-1}],
-    ["An invitation to stay a little longer", "Lingers at the end of every evening with the coat on, hoping to be invited on to the next place without having to say so.", "(coat on, not moving) Well. That was lovely. I suppose I should... (looks at the door, then at them)", 2, "d", {emo:1}],
+    ["An invitation to stay a little longer", "Lingers at the door at the end of an evening with the car keys in hand, hoping to be asked on to the next place without having to say so.", "(keys in hand, not moving) Well. That was lovely. I suppose I should... (looks at the door, then at them)", 2, "d", {emo:1}],
     ["To be the famous one", "Rehearses acceptance speeches in the bath, rates every room by how many people in it know who they are, and says outright that it is a when, not an if.", "I'll be famous, you know. The only question is for what.", 5, "c", {ego:1, vol:1, asrt:1}],
-    ["To be someone's name in the box", "Hopes to be written down as the person to call, and says it lightly so that nobody can say no lightly.", "Put me down. Next of kin. I don't mind. I'd just like to be in the box.", 2, "s", {emo:1}],
+    ["To be someone's name in the box", "Volunteers to be the emergency contact on other people's forms, offering it as a favour so that nobody has to ask.", "Put me down. Next of kin. I don't mind. I'd just like to be in the box.", 2, "s", {emo:1, warm:1}],
 
     // Undoing, repairing, restoring
     ["The old van running again", "Spends weekends under the bonnet of a dead person's vehicle, refusing every offer to buy something newer.", "She drove it across Wales. It's got one more trip in it. It just doesn't know yet.", 3, "u", {disc:1, warm:1}],
     ["Taking back the thing said in the car park", "Replays one sentence from a quarrel years ago and drafts the way it should have gone, to deliver if the chance ever comes.", "I've got the whole conversation redone. I only need her to be standing there.", 3, "d", {emo:1, hon:1}],
-    ["The coat returned to its owner", "Still holds a borrowed object from decades back and plans, quietly, to deliver it with the right words.", "I still have the coat. I'm bringing it back. It's a very good coat.", 2, "s", {hon:1}],
+    ["A casserole dish, thirty years overdue", "Has kept a neighbour's casserole dish since 1994 and is quietly composing what to say on the day it is finally handed back.", "It's still got her initials on the bottom. I'm taking it round. I've got a little speech.", 2, "s", {hon:1}],
 
     // Escape
     ["A bus out of town, memorised", "Knows the departure time of the six-ten by heart and speaks of the day they will take it as settled.", "Six-ten. Platform two. Not today. But I know it.", 3, "c", {rebel:1}],
-    ["Somewhere the story hasn't reached", "Imagines a town where nobody has heard what happened and where the story would be mere weather.", "Somewhere they've never heard it. Where it's just... a thing that happened to somebody.", 3, "d", {mood:-1}],
+    ["Somewhere the story hasn't reached", "Pictures one small town where nobody has heard what happened, and browses its rental listings late at night.", "Somewhere they've never heard it. Where it's just... a thing that happened to somebody.", 3, "d", {mood:-1}],
     ["To stop being the sensible one", "Waits for the day when someone else can be the adult, ordering the pudding and the bad idea in one go.", "Let somebody else be the grown-up. I'm having the pudding and a terrible plan.", 3, "u", {rebel:1, disc:-1}],
-    ["The family chat on mute", "Silences the group thread on the way out of every visit, then reads all forty messages in secret in the next room.", "(phone buzzing the thirty-eighth time) Muted. I've muted it. ...What did Dad say?", 2, "c", {warm:-1, mood:-1}],
+    ["The family chat on mute", "Mutes the family thread when leaving a visit, then reads all forty messages in secret in the next room.", "(phone buzzing the thirty-eighth time) Muted. I've muted it. ...What did Dad say?", 2, "c", {warm:-1, emo:-1}],
     ["Out of this town tonight", "Has the bag in the boot and the tank full, and reads every delay as proof that staying one more night means staying for good.", "Bag's in the boot. If I'm here tomorrow, I'm here for life.", 5, "c", {act:1, rebel:1}],
 
     // Belonging
-    ["A stool where they are known", "Returns to the same café every morning, waiting for the order to be started before they reach the counter.", "She'd started it before I got to the till. Did you see that? Before I got there.", 2, "s", {warm:1, emo:1}],
+    ["A usual, started before they reach the till", "Goes to the same café most mornings, hoping the order will be under way before they reach the counter.", "She'd started it before I got to the till. Did you see that? Before I got there.", 2, "s", {warm:1, emo:1}],
     ["The in-joke that includes them", "Hovers at the edge of a friendship, laughing a beat late and wanting the next one to be about them.", "(laughs a beat late) Ha. Right. Who said it first?", 3, "d", {emo:1, ego:-1}],
     ["A badge, a mug, a membership number", "Joins things (the quiz team, the choir, the allotment society) and begins saying 'we' within a week.", "Member two-twelve. We do the quiz on Thursdays. We're second in the league.", 3, "c", {warm:1, ego:-1}],
 
     // Control over one domain
-    ["The kitchen, run their way", "Hands the rest of the house over gladly but guards the one room, relabelling jars and re-sorting others' shelving.", "You do what you like with the rest of it. The kitchen is mine. Labelled, alphabetised, mine.", 3, "c", {asrt:1, disc:1}],
+    ["The kitchen, run their way", "Hands the rest of the house over gladly but guards the one room, relabelling jars and re-sorting whatever others have put away.", "You do what you like with the rest of it. The kitchen is mine. Labelled, alphabetised, mine.", 3, "c", {asrt:1, disc:1}],
     ["A no that stays no", "Rehearses a refusal in the mirror, hoping one day it will be accepted the first time it is said.", "I said no. (pause) I said no. Why are we still talking about it?", 3, "u", {asrt:1}],
     ["Knowing how it works underneath", "Takes things apart until each layer makes sense and will not use a tool they cannot explain from the bottom up.", "I'm not using the app. Show me what's under the app.", 3, "u", {intel:1, cur:1}],
 
@@ -43,7 +43,7 @@ const TRAITS_V2_WANT = (function(){
     ["A night's sleep, the full eight", "Plans the evening backwards from a bedtime and quietly resents anything that crosses it.", "Eight hours. It's not a lot to ask. It's the only thing I ask.", 1, "c", {disc:1, mood:-1}],
 
     // Settling a score, vindication, being proved right
-    ["The matching slight, politely returned", "Remembers a specific snub for years and answers it with a pleasant gift sent at precisely the right moment.", "She left me off the list in 2014. I've been very patient. I sent flowers. I'm not a monster.", 4, "d", {agr:-1, man:1}],
+    ["A snub repaid with flowers", "Remembers a specific snub for years and answers it with a pleasant gift sent at precisely the right moment.", "She left me off the list in 2014. I've been very patient. I sent flowers. I'm not a monster.", 4, "d", {agr:-1, man:1}],
     ["Page fourteen, if anyone looks", "Keeps the dated report that was overruled, and waits for the collapse in order to cite it.", "Page fourteen. I flagged this on page fourteen.", 4, "d", {ego:1, intel:1}],
     ["The three words: you were right", "Holds out for the exact three words from the exact person, and counts anything else as a dodge.", "I'll wait. I've got all night. 'You were right, Dad.' Go on.", 4, "c", {ego:1, asrt:1}],
     ["To win, here, today", "Turns any card game, argument or parking space into a decider and can see only the scoreboard.", "I'll beat you at this. And the next thing. Pick a game, any game.", 5, "c", {asrt:1, act:1}],
@@ -52,9 +52,9 @@ const TRAITS_V2_WANT = (function(){
     ["The cello back out of its wardrobe", "Tunes an instrument given up at twenty-two but stops short of playing, as if the real thing would end the dream.", "It's in the wardrobe. I tune it sometimes. Only the tuning, mind.", 2, "s", {emo:1}],
     ["Two modules short of the degree", "Keeps the reading list and the module codes and answers 'I'm still doing it, sort of' when asked.", "Two modules. Everyone says it's too late. The library's open till ten.", 3, "u", {disc:1, cur:1}],
     ["The novel in the bottom drawer", "Reads page forty for the hundredth time, changes one comma, and puts it away.", "(rereads the first page, changes a comma, shuts it) Still good. That's the annoying part.", 2, "s", {cur:1, ego:-1}],
-    ["The job abroad turned down at thirty", "Asks anyone who moved abroad leading questions, with a flight already half-booked in another tab.", "Did you ever think about Lisbon? Because I've looked at flights. Not that I'm going.", 3, "d", {rebel:1, pos:1}],
+    ["The job abroad turned down at thirty", "Quizzes anyone who emigrated about how it went, with a flight to the city they once refused half-booked in another tab.", "Did you ever think about Lisbon? Because I've looked at flights. Not that I'm going.", 3, "d", {rebel:1, pos:1}],
     ["One more night on the stage", "Hangs around the amateur dramatics, unable to resist a cue, and would take any part going.", "I'd be perfectly happy with the small part. I'd be happy with the donkey.", 3, "d", {emo:1, vol:1}],
-    ["Eleven of forty flying hours", "Keeps a half-filled logbook in the glovebox and mentions the licence as something not yet abandoned.", "Eleven hours logged. Ninety-eight. The book's in the glovebox. It's only paused.", 2, "s", {cur:1}],
+    ["Eleven of forty flying hours", "Keeps a half-filled logbook in the glovebox and mentions the licence as something not yet abandoned.", "Eleven hours logged, twenty-nine to go. The book's in the glovebox. It's only paused.", 2, "s", {cur:1}],
 
     // Pride
     ["Never to be pitied", "Meets sympathy with a joke or a better-sounding version of the truth, and is gone before it can land.", "Oh, it's the best thing that could have happened. New flat, new start. Brilliant.", 4, "d", {ego:1, emo:-1}],
@@ -74,12 +74,12 @@ const TRAITS_V2_WANT = (function(){
     ["To be missed when away", "Takes a day off just to see whether the office notices, then asks around until someone says so.", "Did anyone ask where I was? Anyone at all?", 3, "d", {emo:1, ego:-1}],
 
     // To be left alone
-    ["To be left entirely alone", "Takes the late shift, the far desk and the empty lane, and answers every invitation with a pleasant mention of being busy.", "Lovely idea. I've got a thing. A thing that night. Another time.", 3, "c", {warm:-1, vol:-1}],
+    ["To be left entirely alone", "Takes the late shift, the far desk and the empty lane, and meets invitations with a pleasant mention of being busy.", "Lovely idea. I've got a thing. A thing that night. Another time.", 3, "c", {warm:-1, vol:-1}],
     ["Fewer questions about how they are", "Answers with a bright 'and you?' so quickly that the follow-up has no room to land.", "Oh, you know. Ticking along. What about your lot? Still in the new place?", 2, "c", {vol:-1, mood:-1}],
 
     // Truth, once
     ["To say it once, to the right face", "Rehearses one confession in the car and in the shower, trimming it a little each day and never yet delivering it.", "I've got it down to four sentences. It used to be forty.", 4, "d", {hon:1, emo:1}],
-    ["The sealed file, requested", "Writes to an archive for a record that may name them and is now on the third reminder.", "I filed the request in April. I'm on the third reminder. They'll tire first.", 3, "d", {intel:1, hon:1}],
+    ["The sealed file, requested", "Has written to a records office three times for a case file that may mention them, and logs each reminder in a notebook.", "I filed the request in April. I'm on the third reminder. They'll tire first.", 3, "d", {intel:1, hon:1}],
     ["The real reason, from the person who left", "Waits for the one honest answer and will sit as long as it takes, saying that there is no hurry.", "You don't have to tell me now. But you'll tell me.", 4, "d", {emo:1}],
 
     // Legacy
@@ -109,12 +109,10 @@ const TRAITS_V2_WANT = (function(){
     ["A seat behind the family", "Attends every hearing of a case that has nothing to do with them, so the gallery is not empty.", "Nobody was in the gallery for her. So I'm in the gallery.", 4, "d", {warm:1, hon:1}],
     ["The verdict reversed, eventually", "Files appeal after appeal on a case others have closed and says the filing is the point.", "Eleven years of appeals. Twelve. I'll write till they read it.", 5, "u", {disc:1, hon:1}],
 
-    // Simplicity
-
     // Safety for a dependant
     ["Every decision for one child's stability", "Plans every move around one child's routine and refuses anything that might uproot it.", "We're not moving. Not for a promotion, not for the sea view. She's got her friends.", 4, "c", {warm:1, disc:1}],
     ["Handrails first, then the argument", "Arranges a parent's later years in advance, with rails, forms and pension dates.", "Handrails in the bathroom first. Then we have the argument about the stairs.", 3, "c", {warm:1, disc:1}],
-    ["Keeping the child out of that house", "Treats a single return as the line that will never be crossed, and says so to anyone.", "Over my dead body is he going back. Write that down.", 5, "d", {warm:1, asrt:1}],
+    ["Keeping the child out of that house", "Treats one particular return as the line that will not be crossed, and says so to anyone who will listen.", "Over my dead body is he going back. Write that down.", 5, "d", {warm:1, asrt:1}],
 
     // Protecting a secret
     ["To keep the one year buried", "Steers every conversation away from one specific year and keeps a smooth alternative ready.", "Oh, that was before my time here. Tell me about your trip, though.", 3, "d", {hon:-1, mood:-1}],
@@ -130,7 +128,7 @@ const TRAITS_V2_WANT = (function(){
     ["To be asked about the book", "Hopes someone will ask what they are reading and carries it spine-out to help the chance along.", "(holding the book spine-out, just slightly) Oh, this? Yes. It's rather good, actually.", 1, "s", {emo:1}],
     ["A bit less noise", "Says out loud that a little quiet would do, and keeps the door shut by habit.", "Could we just... turn it down a notch? Not off. A notch.", 1, "u", {mood:1}],
     ["The crossword finished by teatime", "Gives a modest daily goal more quiet attention than anything else and shuts the paper with a small nod.", "Seventeen across. That's the last. Tea.", 1, "c", {disc:1, mood:1}],
-    ["A reply to the email", "Checks the inbox once, politely, and mentions the pending answer in passing.", "Haven't heard back yet. No rush. It'd be nice, that's all.", 1, "c", {mood:1}],
+    ["A word back about the allotment", "Has waited three weeks to hear about a plot on the council allotments and refreshes the page only on Fridays.", "Still nothing from the council. No rush. It'd just be nice to know.", 1, "c", {mood:1, disc:1}],
     ["To see the sea again", "Mentions the coast idly, as something they must get round to, and would go if anyone offered.", "Haven't seen the sea in years. Must get down. Some time.", 1, "u", {mood:1}],
     ["To bring a missing person home", "Posts the flyers, phones the hospitals and refuses to treat any silence as an answer.", "Fourth week. I've got the flyers. I've got the tape. Put one up with me.", 5, "d", {emo:1, act:1}]
   ]);

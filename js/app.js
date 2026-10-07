@@ -805,6 +805,7 @@ function renderCast(){
     let inner = `<h3><span>${escHTML(c.meta.name)}</span>` +
       (seat ? `<span class="castRoleBadge castRole-${escAttr(seat.id)}" title="${escAttr(seat.why)}">${escHTML(seat.label)}</span>` : ``) +
       `<button class="savedAct" ${actAttr('click', 'renameCastMember', idx)}>rename</button>` +
+      `<button class="savedAct" ${actAttr('click', 'setCastSeat', idx)} title="Name this character's seat in the group yourself">seat</button>` +
       `<button class="savedAct savedDel" ${actAttr('click', 'removeCastMember', idx)} ` +
       `aria-label="Remove ${escAttr(c.meta.name)} from the cast" title="Remove this character from the cast">remove</button></h3>`;
     const addAll = (ids)=>{ ids.forEach(id=>{ inner += traitCardHTML(id, c.state[id], false, false, sectionColor(titleForSlotId(id))); }); };
@@ -819,6 +820,15 @@ function renderCast(){
   });
   if (typeof renderVoiceHeatmap === 'function') renderVoiceHeatmap();
   if (typeof renderRelWeb === 'function') renderRelWeb();
+}
+/* A seat of your own: "the one who keeps the books", "the new hire". It replaces the seat read off the sheet and is kept with the member. */
+async function setCastSeat(i){
+  const c = castStates[i];
+  if (!c) return;
+  const next = await askForName("Name this character's seat in the group (a single dash goes back to the seat read off the sheet):", c.meta.seat || "");
+  if (next === null || next === undefined) return;
+  c.meta.seat = String(next).trim() === "-" ? "" : String(next).trim().slice(0, 40);
+  renderCast();
 }
 async function renameCastMember(i){
   const c = castStates[i];
@@ -3149,6 +3159,10 @@ function analyseRelationship(){
     crossed.forEach(c => { h += `<div class="traitCard"><div class="traitMain"><div class="traitDesc">${escHTML(c.text)}</div>
       <div class="sub">${escHTML(c.from)}'s need: ${escHTML(c.need)} · in the way: ${escHTML(c.blocker)}</div></div></div>`; });
     h += `</div>`;
+  }
+  const pp = typeof pairUnderPressure === 'function' ? pairUnderPressure(A, B) : null;
+  if (pp){
+    h += `<div class="axisGroup"><div class="axisTitle">When it gets bad</div>` + pp.lines.map(l => `<div class="traitCard"><div class="traitMain"><div class="traitDesc">${escHTML(l)}</div></div></div>`).join("") + `</div>`;
   }
   if (typeof voiceExchange === 'function'){
     const sel = document.getElementById('relExchangePrompt');

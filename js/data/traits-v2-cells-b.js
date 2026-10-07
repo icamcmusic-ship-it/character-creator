@@ -4,10 +4,10 @@ const TRAITS_V2_CELLS_B = (function(){
 
   // ---- Conflict & Stress Response ----
   V2.block(out, "Conflict & Stress Response", "Fight (attack the threat)", 251000, [
-    ["Concedes three points, then nothing", "Gives ground on small points one after another in a level voice, and the fourth concession never comes, which is how those close know the fight has started.", "Yes. Fair. Yes, that one was mine. (a pause) No.", 1, "s", {asrt:1, mood:1}],
-    ["Washes the same cup again", "Takes refuge in a slow, exact chore while the anger builds, and addresses every remark to the chore.", "(rinsing the cup for the third time) Right. That's clean now. That's properly clean.", 3, "d", {mood:1, disc:1}],
-    ["Answers every complaint with a bigger one", "Meets the first grievance before it has finished by unrolling a longer list of their own, loudly.", "Me? Me? Oh, you want a list? How long have you got?", 4, "c", {asrt:1, agr:-1, vol:1}],
-    ["Digs up the caravan holiday", "Drags an old grievance into an unrelated row at full volume, with the year and the weather.", "And while we're at it — Skegness, 2014! The rain! The ice cream! Don't tell me that's not relevant!", 4, "c", {asrt:1, agr:-1, mood:-1}],
+    ["Concedes three points, then nothing", "Gives ground on three small points in a level voice, and the fourth does not come, which tells those close to them that the fight has begun.", "Yes. Fair. Yes, that one was mine. (a pause) No.", 1, "s", {asrt:1, mood:1}],
+    ["Washes the same cup again", "Takes refuge in a slow, exact chore while the anger builds, and addresses its remarks to the chore.", "(rinsing the cup for the third time) Right. That's clean now. That's properly clean.", 2, "s", {mood:1, disc:1}],
+    ["Answers a complaint with a bigger one", "Meets the first grievance before it has finished by unrolling a longer list of their own, loudly.", "Me? Me? Oh, you want a list? How long have you got?", 4, "c", {asrt:1, agr:-1, vol:1}],
+    ["Digs up the caravan holiday", "Drags an old grievance into an unrelated row at full volume, with the year and the weather.", "And while we're at it — Weston, 2014! The rain! The ice cream! Don't tell me that's not relevant!", 4, "c", {asrt:1, agr:-1, mood:-1}],
   ]);
   V2.block(out, "Conflict & Stress Response", "Flight (remove yourself)", 251020, [
     ["Tidies towards the door", "Starts putting things away as the row heats up, drifting door-ward by way of the washing-up.", "I'll just put these in the kitchen, shall I. And the bin needs doing. Back in a bit.", 2, "s", {asrt:-1, mood:-1}],
@@ -15,7 +15,7 @@ const TRAITS_V2_CELLS_B = (function(){
   ]);
   V2.block(out, "Conflict & Stress Response", "Freeze (shut down)", 251030, [
     ["Courteous half-second delay", "Answers a sharp question a beat too late and perfectly politely, as if a recording is being played back.", "(a beat too long) Thank you for telling me.", 1, "s", {emo:-1, mood:-1}],
-    ["Silence that fills the kitchen", "Goes completely quiet under attack and stays quiet while the room fills with the sound of the fridge.", "(says nothing. The fridge hums. Still nothing.)", 5, "c", {vol:-1, asrt:-1, emo:-1}],
+    ["Goes quiet until the fridge hums", "Goes completely quiet under attack and stays quiet while the room fills with the sound of the fridge.", "(says nothing. The fridge hums. Still nothing.)", 5, "c", {vol:-1, asrt:-1, emo:-1}],
   ]);
   V2.block(out, "Conflict & Stress Response", "Fawn (appease the threat)", 251040, [
     ["Laughs ahead of the criticism", "Lets out a small laugh just before the criticism arrives, to take the sting out in advance.", "(small laugh) Ha — go on, I know what you're going to say.", 2, "s", {agr:1, ego:-1}],
@@ -24,8 +24,8 @@ const TRAITS_V2_CELLS_B = (function(){
 
   // ---- Attachment & Intimacy Style ----
   V2.block(out, "Attachment & Intimacy Style", "Secure", 251060, [
-    ["Lets the quiet after 'love you' stand", "Takes a declaration without rushing to answer it, matching it with a nod and getting on with the tea.", "(a slow nod. Kettle on. Two mugs.)", 1, "s", {emo:1, mood:1}],
-    ["Repairs in passing", "Apologises sideways while doing something else, so the amends are easy to accept without ceremony.", "(passing the salt) Sorry about Thursday, by the way. I was short with you.", 3, "d", {warm:1, hon:1}],
+    ["Lets the quiet after 'love you' stand", "Takes a declaration without rushing to answer it, matching it with a nod and getting on with the washing-up.", "(a slow nod. Then the tea towel, and one plate dried.)", 1, "s", {emo:1, mood:1}],
+    ["Repairs in passing", "Apologises sideways while doing something else, so the amends are easy to accept without ceremony.", "(passing the salt) Sorry about Thursday, by the way. I was short with you.", 2, "s", {warm:1, hon:1}],
     ["Open-armed homecoming", "Greets a partner's return with unguarded delight and keeps no tally of how late it is.", "There you are! Come here — tell me everything. Coat off first.", 4, "c", {warm:1, emo:1}],
     ["Raises the hurt that same evening", "States a sting plainly and at full steam on the day, because it matters more than the mood.", "That stung earlier, and I'd rather say it tonight than carry it round all week.", 4, "c", {hon:1, asrt:1}],
   ]);
@@ -35,44 +35,44 @@ const TRAITS_V2_CELLS_B = (function(){
   ]);
   V2.block(out, "Attachment & Intimacy Style", "Avoidant", 251100, [
     ["'We' only after the other says it", "Uses the plural for shared plans only once the other person has said it first, and a little late.", "(after a pause) ...Yes. We. I suppose we are.", 2, "s", {emo:-1, warm:-1}],
-    ["Weekend off, with footnotes", "Announces a need for space with a flourish and a list of reasons nobody asked for.", "I'm taking the weekend. Phone off. It's not about you — it's me — don't read into it.", 4, "u", {emo:-1, vol:1, asrt:1}],
+    ["Weekend off, with footnotes", "Announces a need for space with a flourish and a list of reasons nobody asked for.", "I'm taking the weekend. Phone off. I'll be in the shed, and that's all it is, and I'd rather you didn't go reading anything into it.", 4, "c", {emo:-1, vol:1, asrt:1}],
   ]);
 
   // ---- Personality Traits ----
   V2.block(out, "Personality Traits", "Agreeableness — Contrarian & Argumentative", 251120, [
-    ["Agrees with the first half", "Concedes the opening clause of a claim and takes issue with the rest, so nobody notices the agreement never arrives.", "Quite right about the budget. And the plan is wrong.", 2, "s", {agr:-1, intel:1}],
+    ["Agrees with the first half", "Concedes the opening clause of a claim and takes issue with the rest, so the agreement is only ever half given.", "Quite right about the budget. And the plan is wrong.", 2, "s", {agr:-1, intel:1}],
     ["'Funny, though'", "Opens objections with a mild remark of surprise that makes dissent sound like a coincidence.", "Funny, though — I'd have said it was the other way round.", 1, "s", {agr:-1, man:1}],
   ]);
   V2.block(out, "Personality Traits", "Agreeableness — Accommodating", 251140, [
     ["'No trouble' before the request", "Spots a favour about to be asked and answers it before the question forms.", "(before anyone asks) No trouble. I'll take the late one.", 1, "s", {agr:1, asrt:-1}],
     ["Volunteers for everything", "Puts a hand up for every task on offer, then adds a few more nobody listed.", "Me! I'll do it. I'll do all of it, honestly, I love it.", 5, "c", {agr:1, vol:1, act:1}],
-    ["Insists you have the better seat", "Performs an elaborate pressing of the window seat, the bigger slice, the better bed on whoever is near.", "No, you take the window. I insist. No — I absolutely insist.", 3, "u", {agr:1, man:1, warm:1}],
+    ["Rebooks the weekend around one friend's shift", "Moves the plans three times to suit one friend's rota and thanks them for putting up with it.", "Thursday doesn't work for you? Fine, Friday. Friday neither? Saturday, then, my day, anything. Honestly, it's no bother.", 4, "c", {agr:1, man:1, warm:1}],
   ]);
   V2.block(out, "Personality Traits", "Assertiveness — Assertive & Direct", 251160, [
     ["Opens with the time they have", "States how long they can stay before the meeting starts, so the agenda bends around it.", "I have until four. Let's start with the one that matters.", 2, "s", {asrt:1, disc:1}],
     ["Requests without cushions", "Strips the 'just' and 'sorry to bother you' out of requests with no change in tone.", "I need the report by Friday.", 1, "s", {asrt:1, ego:1}],
-    ["Takes the room by the collar", "Calls a meeting to order at full voice and sets out how it will go.", "Right, everyone, eyes up. Here's how this goes.", 5, "c", {asrt:1, vol:1}],
+    ["Skips the small talk and names the problem", "Cuts across the weather talk at the start of a meeting to state the problem in one loud sentence.", "Never mind the weather — the problem is the roof, and it's Thursday. Who's fixing it?", 5, "c", {asrt:1, vol:1}],
   ]);
   V2.block(out, "Personality Traits", "Positivity — Optimistic & Upbeat", 251180, [
     ["Tells it as a future anecdote", "Describes a current mess as something that will make a good story by next winter.", "This'll be a great story by Christmas. Give it a month.", 2, "s", {pos:1, mood:1}],
     ["One good thing at the tail of a complaint", "Ends a long complaint with a small good detail, offered without comment.", "...anyway, the bread was lovely.", 1, "s", {pos:1}],
-    ["Morning, morning, MORNING!", "Delivers a greeting to the whole street at a volume that assumes everyone is delighted to hear it.", "Morning, morning, MORNING! Isn't it gorgeous out!", 5, "c", {pos:1, vol:1, act:1}],
+    ["Greets the street at full volume", "Delivers a greeting to the whole street at a volume that assumes everyone is delighted to hear it.", "Morning, morning, MORNING! Isn't it gorgeous out!", 5, "c", {pos:1, vol:1, act:1}],
     ["Cheers from the touchline", "Narrates other people's efforts with loud encouragement they did not ask for.", "Go on, you've got this! Nearly there! Look at you go!", 4, "c", {pos:1, warm:1, vol:1}],
   ]);
   V2.block(out, "Personality Traits", "Rebelliousness — Defiant", 251200, [
-    ["Leaves one box blank", "Completes every form correctly but skips one question, on principle.", "Occupation, address, date. And 'Reason for visit' — I'll pass on that one.", 1, "s", {rebel:1, asrt:1}],
+    ["Leaves one box blank", "Completes a form correctly but skips one question, on principle.", "Occupation, address, date. And 'Reason for visit' — I'll pass on that one.", 1, "s", {rebel:1, asrt:1}],
     ["'We'll see how Tuesday goes'", "Answers an order with a pleasant promise to review it later, which is not agreement.", "Of course. We'll see how Tuesday goes.", 2, "s", {rebel:1, man:1}],
     ["Demands the author of the rule", "Wants to know who made the rule and why, at length, from the front of the queue.", "Who decided that? Name them. I'd like a word.", 4, "c", {rebel:1, asrt:1, vol:1}],
   ]);
   V2.block(out, "Personality Traits", "Activeness — Energetic & Active", 251220, [
     ["Talks faster on the move", "Lets the sentence pick up speed along with the walking pace.", "(pace quickens, and so does the sentence) so if we go left here and then — keep up — straight on...", 1, "s", {act:1, pace:1}],
     ["'Shall we walk it?'", "Suggests moving the conversation outdoors after a spell in a chair.", "Shall we walk it? I think better on my feet.", 2, "s", {act:1, cur:1}],
-    ["Saturday in four stages", "Plans the weekend as a relay of activities with an early start announced in advance.", "Saturday: swim, market, hill, pub. Sunday we start early.", 5, "c", {act:1, pace:1, vol:1}],
+    ["Calls 'Come on, slowcoaches!' up the hill", "Strides ahead of the walking party and shouts encouragement back over their shoulder, whether or not the top is near.", "Come on, slowcoaches! Nearly there! (it is not nearly there) Nearly there!", 5, "c", {act:1, vol:1}],
   ]);
   V2.block(out, "Personality Traits", "Honesty — Truthful & Transparent", 251240, [
     ["Corrects the credit", "Gently moves a compliment to whoever deserved it, even when it costs a little warmth.", "Thanks, but the soup was Dilys's recipe. I only stirred.", 2, "s", {hon:1, ego:-1}],
     ["Won't pretend at volume", "Delivers an unwelcome verdict clearly enough that the next table hears.", "That plan won't work, and I'd be lying if I said otherwise!", 4, "c", {hon:1, vol:1, asrt:1}],
-    ["Owns the slip to the room", "Announces their own small error to the whole office the moment it is spotted.", "Everyone — wrong file sent. My fault. Entirely my fault.", 3, "d", {hon:1, emo:1}],
+    ["Finds the true thing to praise", "Meets a gift they dislike by naming the one thing they can honestly admire in it, and meaning it.", "I'm not sure about the colour. But it's beautifully made, and you chose it with care, and I mean that.", 2, "s", {hon:1, man:1}],
   ]);
   V2.block(out, "Personality Traits", "Discipline — Self-Controlled", 251260, [
     ["Sets the cup down first", "Puts down whatever is in their hands before hearing bad news.", "(sets the cup in its saucer) Go on.", 1, "s", {disc:1, mood:1}],
@@ -83,7 +83,7 @@ const TRAITS_V2_CELLS_B = (function(){
   ]);
   V2.block(out, "Personality Traits", "Confidence — Self-Assured", 251300, [
     ["Carries on past the punchline", "Delivers a joke and keeps talking without glancing round to see if it landed.", "(end of the joke) ...and that's why I never go back. Anyway, the second item.", 1, "s", {ego:1, asrt:1}],
-    ["Orders for the table", "Settles the choice for everyone at the restaurant, with a flat promise they will thank them.", "We're having the lamb. Trust me. Four lamb.", 3, "u", {ego:1, asrt:1, vol:1}],
+    ["Takes the head of the table unprompted", "Pulls out the chair at the head of the table on arrival, as though it had a name card.", "(pulling out the end chair) — I'll take the end. Best view of everyone.", 4, "c", {ego:1, asrt:1}],
   ]);
   V2.block(out, "Personality Traits", "Confidence — Insecure or Egotistical", 251320, [
     ["'Was that all right?' after praise", "Asks for a verdict on a thing everyone has just praised.", "...Was that really alright? You can tell me.", 2, "s", {ego:-1, emo:1}],
@@ -97,14 +97,14 @@ const TRAITS_V2_CELLS_B = (function(){
   ]);
   V2.block(out, "Personality Traits", "Friendliness — Warm & Approachable", 251380, [
     ["Remembers the passer-by's detail", "Holds onto the small news of near-strangers and returns to it months later.", "Did the allotment survive the flood? You were worried at the harvest supper.", 2, "s", {warm:1, cur:1}],
-    ["Greets the whole lift", "Says hello, asks how it's going, and offers a view on the weather to everyone in the lift.", "Morning all! Cold one! Everyone had breakfast? Good, good.", 3, "u", {warm:1, vol:1}],
+    ["Hugs hello and asks after the family by name", "Hugs an arriving friend and runs through their mother, their sister's exams and the dog before they are through the door.", "Come here! Now, how's your mum? And Ellie's exams? Did the dog's leg mend?", 4, "c", {warm:1, vol:1}],
   ]);
   V2.block(out, "Personality Traits", "Friendliness — Cold & Distant", 251400, [
     ["Greeting returned, nothing added", "Hands back the greeting word for word and stops there.", "Morning.", 1, "s", {warm:-1, vol:-1}],
   ]);
   V2.block(out, "Personality Traits", "Manners — Polished & Courteous", 251420, [
     ["'We' for the host's lapse", "Takes a share of the blame for the host's mistake before the host can wince.", "We do seem to have run out of ice — how careless of us.", 2, "s", {man:1, form:1}],
-    ["Thanks in triplicate", "Thanks the person, then the thing, then the effort, with a closing flourish.", "Thank you. Thank you so much. Honestly, thank you — it was above and beyond.", 3, "u", {man:1, warm:1, form:1}],
+    ["Thanks in triplicate", "Thanks the person, then the thing, then the effort, finishing with a flourish.", "Thank you. Thank you so much. Honestly, thank you — it was above and beyond.", 4, "c", {man:1, warm:1, form:1}],
   ]);
 
   // ---- Values & Moral Line ----
@@ -112,15 +112,15 @@ const TRAITS_V2_CELLS_B = (function(){
     ["Walks back with the change", "Returns excess change after leaving the till, a few steps out of the door.", "(coming back in) You gave me a pound too much.", 2, "s", {hon:1, disc:1}],
     ["Waits for the green, alone", "Stands at an empty crossing and waits for the signal, remarking on it to nobody.", "(to the empty road) Wait for the green.", 1, "s", {disc:1, rebel:-1}],
     ["Quotes the clause by number", "Cites the rule by section and paragraph, loudly, to anyone bending it.", "Section four, paragraph two. Read it yourself!", 4, "c", {asrt:1, form:1, vol:1}],
-    ["Polices the queue", "Calls out a queue-jumper at the top of their voice, on everyone's behalf.", "Excuse me! The queue starts back there.", 3, "c", {asrt:1, man:-1, vol:1}],
+    ["Polices the queue", "Calls out a queue-jumper at the top of their voice, on everyone's behalf.", "Excuse me! The queue starts back there.", 4, "c", {asrt:1, man:-1, vol:1}],
   ]);
   V2.block(out, "Values & Moral Line", "Pragmatic & Flexible", 251460, [
-    ["Prices the principle", "Asks what doing it properly would cost before deciding whether it is worth doing.", "What would it cost to do it right, though? Roughly?", 3, "d", {intel:1, hon:-1}],
+    ["Prices the principle", "Asks what doing it properly would cost before deciding whether it is worth doing.", "What would it cost to do it right, though? Roughly?", 2, "s", {intel:1, hon:-1}],
     ["'It's only business!'", "Waves away a dubious deal at full volume with the claim that everyone does it.", "Oh come on, it's just business! Everybody does it!", 4, "c", {vol:1, agr:-1, hon:-1}],
   ]);
   V2.block(out, "Values & Moral Line", "Loyalty-Bound", 251480, [
     ["'Our' about a friend's mess", "Refers to a friend's venture as ours without having been asked in.", "Our little disaster of a shop. We'll sort it.", 1, "s", {warm:1}],
-    ["Defends before the facts", "Rushes to defend an absent friend before learning what was said.", "Whatever they've done, they had a reason. Who's saying this?", 3, "u", {warm:1, asrt:1, vol:1}],
+    ["Defends before the facts", "Rushes to defend an absent friend before learning what was said.", "Whatever they've done, they had a reason. Who's saying this?", 4, "c", {warm:1, asrt:1, vol:1}],
   ]);
   V2.block(out, "Values & Moral Line", "Idealistic & Visionary", 251500, [
     ["Files the failed idea under 'not yet'", "Keeps the clippings of a rejected proposal in a folder labelled for later.", "Not dead. Just early.", 2, "s", {pos:1, disc:1}],
@@ -128,7 +128,7 @@ const TRAITS_V2_CELLS_B = (function(){
   ]);
   V2.block(out, "Values & Moral Line", "Self-Interested", 251520, [
     ["Mentions the favour, lightly", "Tucks a reminder of what they did for someone into an easy-sounding aside.", "(lightly) That's one I'll remember.", 2, "s", {warm:-1, man:1}],
-    ["Haggles at every till", "Bargains out loud over prices with no embarrassment and an audience.", "Forty? For that? Twenty-five and I'll carry it myself.", 5, "c", {asrt:1, vol:1, man:-1}],
+    ["Haggles at the till", "Bargains out loud over prices with no embarrassment and an audience.", "Forty? For that? Twenty-five and I'll carry it myself.", 5, "c", {asrt:1, vol:1, man:-1}],
   ]);
 
   // ---- Vocabulary Traits ----
@@ -153,15 +153,15 @@ const TRAITS_V2_CELLS_B = (function(){
     ["Exact numbers for rough things", "Offers minute-level precision for events no one timed.", "It was forty-seven minutes. Forty-eight, tops.", 4, "c", {intel:1, disc:1}],
   ]);
   V2.block(out, "Vocabulary Traits", "Semantic Density & Modifiers", 251640, [
-    ["The one-word verdict", "Answers a long question with a single carefully chosen word.", "Eventful.", 1, "s", {vol:-1, intel:1}],
-    ["Adjective pile-up", "Stacks three or four near-synonymous adjectives before the noun arrives.", "It was a big, beautiful, gorgeous, enormous cake.", 3, "c", {vol:1, pos:1}],
+    ["The one-word verdict", "Answers a long question about a weekend away with a single carefully chosen word.", "Eventful.", 1, "s", {vol:-1, intel:1}],
+    ["Adjective pile-up", "Stacks three or four near-synonymous adjectives before the noun arrives.", "It was a big, beautiful, gorgeous, enormous, magnificent cake — absolutely enormous!", 4, "c", {vol:1, pos:1}],
   ]);
   V2.block(out, "Vocabulary Traits", "Directness & Literalness", 251660, [
     ["Answers, then asks the real one", "Gives the literal answer and follows it with the question that was actually meant.", "Yes, I've eaten. Have you?", 1, "s", {warm:1, hon:1}],
     ["Flat verdicts on everything", "Hands down judgements in three words or fewer, at a decent volume.", "Don't like it. Too fussy. Next.", 4, "c", {asrt:1, hon:1, vol:1}],
   ]);
   V2.block(out, "Vocabulary Traits", "Conceptual Framework & Loanwords", 251680, [
-    ["Private family word in public", "Uses a household word for an everyday thing, in front of people who cannot know it.", "Mind the glumph — the wet step by the door.", 3, "d", {warm:1}],
+    ["Private family word in public", "Uses a household word for an everyday thing, in front of people who cannot know it.", "Mind the glumph — the wet step by the door.", 2, "s", {warm:1}],
     ["Buzzwords at full speed", "Strings office jargon together at a trot without stopping for the verb.", "Let's circle back and leverage the learnings offline, going forward!", 4, "c", {form:1, vol:1, pace:1}],
   ]);
   V2.block(out, "Vocabulary Traits", "Register & Formality Spectrum", 251700, [
@@ -169,7 +169,7 @@ const TRAITS_V2_CELLS_B = (function(){
     ["Swearing as punctuation", "Peppers every clause with a mild oath that adds no information.", "It's a bloody good plan, is what it is. A bloody good plan.", 4, "c", {man:-1, vol:1, form:-1}],
   ]);
   V2.block(out, "Vocabulary Traits", "Temporal Orientation & Tense Usage", 251720, [
-    ["Counts from a Christmas", "Dates events by the last few Christmases rather than by the calendar.", "That was... two Christmases ago. Maybe three.", 1, "s", {warm:1}],
+    ["Describes the future as already happened", "Talks about a trip that has not started as though it were fondly remembered.", "By Sunday we'll have had a lovely time and eaten all the biscuits.", 1, "s", {pos:1, mood:1}],
     ["Tells it in the present tense", "Narrates a past event in a breathless present, and the volume rises as it goes.", "So I walk in, right, and they're just sat there, and I say—", 4, "c", {vol:1, pace:1}],
   ]);
 
@@ -180,11 +180,11 @@ const TRAITS_V2_CELLS_B = (function(){
   ]);
   V2.block(out, "Dialogue Grammar Traits", "Disfluencies & Flow", 251760, [
     ["Restarts on the same three words", "Begins the sentence again from the same first three words after each stall.", "I think we— I think we should— I think we should wait.", 2, "s", {ego:-1, mood:-1}],
-    ["Trails off mid-thought", "Lets the sentence dissolve into an ellipsis loud enough for a hint.", "It's just that if you were to... well... you know...", 3, "c", {asrt:-1, mood:-1}],
+    ["Trails off mid-thought", "Lets the sentence dissolve into an ellipsis loud enough for a hint, and leaves the listener to finish it.", "It's just that if you were to... well... you know...", 4, "c", {asrt:-1, mood:-1}],
   ]);
   V2.block(out, "Dialogue Grammar Traits", "Spoken Compression", 251780, [
-    ["Verbs without subjects", "Reports a day as a list of bare verbs.", "Arrived. Ate. Slept.", 2, "s", {vol:-1, pace:1}],
-    ["Telegram speech", "Issues directions as stripped nouns and numbers at speed.", "Station. Ten. Bring coat.", 5, "c", {pace:1, asrt:1}],
+    ["Verbs without subjects", "Reports a whole day as a list of bare verbs, with no one in them and no object.", "Arrived. Ate. Slept.", 2, "s", {vol:-1, pace:1}],
+    ["Telegram speech", "Issues directions as stripped nouns and numbers at speed.", "Station. Ten. Bring keys.", 5, "c", {pace:1, asrt:1}],
   ]);
   V2.block(out, "Dialogue Grammar Traits", "Structural Shifts", 251800, [
     ["Question swerves into order", "Starts a polite question and turns it into an instruction mid-clause.", "Would you mind — sit down.", 2, "s", {asrt:1, man:-1}],
@@ -196,7 +196,7 @@ const TRAITS_V2_CELLS_B = (function(){
   ]);
   V2.block(out, "Dialogue Grammar Traits", "Repetition & Echo Patterns", 251840, [
     ["Soft echo of the last word", "Repeats the other person's final word under the breath, once, as they finish.", "Thursday. (softly) Thursday.", 1, "s", {emo:1, mood:-1}],
-    ["Three times for emphasis", "Repeats the key word three times, each louder than the last.", "Never. Never. NEVER.", 5, "c", {vol:1, asrt:1}],
+    ["Repeats the question back at full volume", "Shouts the other person's question back at them word for word before answering it.", "Where were you last night? — WHERE WAS I LAST NIGHT? I was at Dev's, that's where!", 5, "c", {vol:1, asrt:1}],
   ]);
   return out;
 })();

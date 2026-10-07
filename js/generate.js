@@ -868,6 +868,7 @@ function _runGenerationInner(){
        user kept are seated HERE, before budgets, exclusivity and the pressure sheet,
        rather than being merged back in afterwards over the top of everything those
        stages had already decided. */
+    if (arch && arch.counter) enforceCounterAxes(newState0, arch.counter, rarityPref);
     newState = finalizeSheet(newState0, {rarityPref, carryLocked: state});
     // BUG FIX: the pressure sheet used to be built AFTER the RNG was restored, so
     // "same seed + same settings = the exact same character" — which the UI states

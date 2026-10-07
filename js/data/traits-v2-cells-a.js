@@ -12,15 +12,15 @@ const TRAITS_V2_CELLS_A = (function(){
 
   V2.block(out, "Humor Style", "Intellectual & Wordplay", 250020, [
     ["Tries the pun on the kettle first", "Murmurs a pun to an empty kitchen before it ever reaches an audience, and often leaves it there.", "(to the kettle, very quietly) — Stirring performance.", 1, "s", {intel:1, vol:-1}],
-    ["Footnotes their own joke in a murmur", "Adds a half-whispered second meaning to a line only after the room has moved on.", "(under their breath, to the tea) — ...and 'bank', if you think about it.", 2, "s", {intel:1, vol:-1}],
+    ["Murmurs the anagram of the sign", "Mutters a rearrangement of the letters on a sign or a name tag while waiting, and tells nobody.", "(at the bus stop, under their breath) — 'Timetable.' Table time. Hm.", 2, "s", {intel:1, vol:-1}],
     ["Puns in the margin of the shopping list", "Writes small wordplay beside ordinary items, where only the next person to read the list will find it.", "(beside 'eggs', in pencil) — Hen-ceforth.", 1, "s", {intel:1, cur:1}],
     ["Explains the pun to the whole table", "Walks round a pun's two meanings with a finger on the tablecloth long after the laugh has died.", "So 'mussel' is the shellfish and 'muscle' is the — no, stay with me — they sound the same.", 4, "c", {vol:1, intel:1}],
-    ["Calls the crossword answer across the room", "Shouts clue and solution to anyone within earshot, wrong guesses included.", "Seven letters, 'sheepish'! BASHFUL! No — ASHAMED! Hang on, that's eight.", 4, "c", {vol:1, cur:1}]
+    ["Calls the crossword answer across the room", "Shouts clue and solution to anyone within earshot, wrong guesses included.", "Seven letters, 'sheepish'! BASHFUL! No — wait, it has to end in D. ASHAMED! Seven! Yes!", 4, "c", {vol:1, cur:1}]
   ]);
 
   V2.block(out, "Humor Style", "Warm & Playful", 250040, [
     ["Signs the fridge note with a new silly rank", "Ends written notes with a different made-up title each time, for whoever finds them first.", "(on the fridge, in felt tip) — Back by six. Captain Toast, Acting.", 2, "s", {warm:1, pos:1}],
-    ["Keeps one ridiculous voice for one person", "Uses a private silly voice only for a single person, and only when nobody else is listening.", "(very low, to the dog) — Good evening, Sir Biscuit.", 1, "s", {warm:1, emo:1}],
+    ["Keeps one ridiculous voice for one person", "Uses a private silly voice for a single person or dog, and only when nobody else is listening.", "(very low, to the dog) — Good evening, Sir Biscuit.", 1, "s", {warm:1, emo:1}],
     ["Throws a parade for a parked car", "Treats a mundane success as a standing ovation, calling others over to witness it.", "You've parked! Everybody, they've parked it! Look at that — straight between the lines!", 5, "c", {warm:1, pos:1, vol:1}],
     ["Narrates the washing-up as a cooking show", "Gives a running commentary on the chores in a presenter's voice, with a stern guest critic in the sink.", "And here we have the saucepan, a little stubborn, a little proud — let's see what the sponge makes of that.", 4, "c", {warm:1, act:1}]
   ]);
@@ -34,7 +34,7 @@ const TRAITS_V2_CELLS_A = (function(){
 
   V2.block(out, "Humor Style", "Doesn't Get Jokes", 250080, [
     ["Holds the half-smile a second too long", "Watches the teller's mouth for a cue and then offers a smile that arrives late and outstays the moment.", "(half-smile, held) — Right. Yes. Ha.", 1, "s", {agr:1, intel:-1}],
-    ["Corrects the exaggeration with the real figure", "Answers a casual overstatement with the actual number, at volume, and means it kindly.", "A million? It was forty-three people. I counted. Forty-three!", 4, "c", {hon:1, vol:1}]
+    ["Defends against the gentle tease", "Hears a mild tease as a charge and explains at length why it is false, with dates.", "I do not always run late. Last Thursday I was early. Ask Dev. He was there, he saw.", 4, "c", {hon:1, vol:1}]
   ]);
 
   V2.block(out, "Humor Style", "Teasing as Affection", 250100, [
@@ -42,19 +42,19 @@ const TRAITS_V2_CELLS_A = (function(){
   ]);
 
   V2.block(out, "Humor Style", "Cruel & Barbed", 250120, [
-    ["Saves the sharpest line for the one they respect", "Reserves their best barb for the single person in the room they privately rate, and delivers it pleasantly.", "(pleasantly) — Oh, you managed it. I'd have bet on Thursday. Still, good for you.", 3, "d", {asrt:1, warm:-1}]
+    ["Saves the sharpest line for the one they respect", "Reserves their best barb for the single person in the room they privately rate, and delivers it pleasantly.", "(pleasantly) — Oh, you managed it. I'd have bet on Thursday. Still, good for you.", 2, "s", {asrt:1, warm:-1}]
   ]);
 
   V2.block(out, "Humor Style", "Absurd & Chaotic", 250140, [
-    ["Answers a plain question with a hypothetical about geese", "Meets a practical query with an invented scenario involving geese and treats it as an answer.", "Has the post come? — Depends. If geese ran the post, it'd have been here at six.", 3, "u", {intel:1, rebel:1}]
+    ["Blames the geese, deadpan", "Lets a single goose slip into a practical answer, deadpan, and carries straight on.", "Has the post come? — (glancing at the window) Not yet. Geese, I expect.", 2, "s", {intel:1, rebel:1}]
   ]);
 
   V2.block(out, "Social Role in a Group", "Caretaker", 250160, [
     ["Slides the tissue box an inch closer", "Moves the box towards whoever is close to tears, with one finger, and carries on stirring.", "(slides the box across, says nothing, goes on with the soup)", 1, "s", {warm:1, vol:-1}],
-    ["Nudges the thermostat before the coldest guest arrives", "Raises the heating a degree for the person who always feels the draught, then denies it was for them.", "(adjusting the dial) — Oh, I only touched it for the pipes.", 2, "s", {warm:1, disc:1}],
+    ["Nudges the thermostat before the coldest guest arrives", "Raises the heating a degree for the person who feels the draught most, then denies it was for them.", "(adjusting the dial) — Oh, I only touched it for the pipes.", 2, "s", {warm:1, disc:1}],
     ["Sends a one-word check after the long drive", "Texts the person who drove home alone, just to hear they arrived.", "(a text, 11.42pm) — Home x", 1, "s", {warm:1, man:1}],
     ["Presses a second helping on everyone", "Refills every plate by reflex and treats a refusal as a negotiating position.", "You've hardly touched it! Go on — there's loads, there's far too much, I made enough for the street.", 5, "c", {warm:1, asrt:1, vol:1}],
-    ["Runs the coat, scarf and keys inspection at the door", "Checks that each person has a coat, a scarf and a charged phone before anyone is allowed to leave.", "Hat. Hat! It's two degrees. And have you got your keys — show me the keys.", 4, "c", {warm:1, disc:1}]
+    ["Runs the keys, phone and sandwich check at the door", "Makes sure each person has keys, a charged phone and something to eat before anyone is allowed out.", "Phone. Charged? Show me. Keys. And take this sandwich, don't argue with me.", 4, "c", {warm:1, disc:1}]
   ]);
 
   V2.block(out, "Social Role in a Group", "Peacemaker", 250180, [
@@ -63,7 +63,7 @@ const TRAITS_V2_CELLS_A = (function(){
     ["Hums something slow when voices rise", "Starts humming a slow tune from the next room as soon as the shouting begins.", "(from the kitchen, humming a hymn tune, getting slightly louder)", 1, "s", {agr:1, vol:-1}],
     ["Wedges into the argument with open palms", "Steps physically between two people, palms out, repeating the same calming word until one of them sits.", "Okay okay okay okay. Nobody's said anything that can't be unsaid. Breathe. Everyone breathe.", 5, "c", {agr:1, vol:1, act:1}],
     ["Splits the difference before anyone has finished", "Jumps in with a tidy compromise before either side has made its case.", "So Tuesday for you, Thursday for you, and we all eat before seven. Done. Lovely. Shake.", 4, "c", {agr:1, pace:1}],
-    ["Drafts the apology both sides can send", "Writes one joint message that lets each party keep their dignity, and hands it round for approval.", "I've written it. You say 'sorry for the tone', they say 'sorry for the timing'. Nobody says 'sorry for being right'.", 3, "d", {agr:1, intel:1}]
+    ["Slips a joint apology across the table", "Pencils a two-line apology both sides could sign on the back of an envelope and slides it across without a word.", "(slides an envelope across the table) — Read that. If you can both live with it, sign it.", 2, "s", {agr:1, intel:1}]
   ]);
 
   V2.block(out, "Social Role in a Group", "Instigator", 250200, [
@@ -74,10 +74,10 @@ const TRAITS_V2_CELLS_A = (function(){
   ]);
 
   V2.block(out, "Social Role in a Group", "Leader", 250220, [
-    ["Takes the seat in the draught", "Picks the chair with the cold air or the glare behind it so nobody else has to.", "(sitting down) — No, no, I like this one. Sun's in my eyes. Good for me.", 1, "s", {warm:1, ego:1}],
+    ["Writes their own name against the worst job", "Puts their own name next to the cold, early or unpleasant slot on the rota before anyone else has read it.", "(pen on the rota) — Bins, Sunday night. That's me.", 1, "s", {disc:1, ego:1}],
     ["Picks up the heavy end without a word", "Goes silent and starts carrying boxes when the pressure peaks, a signal the group learns to read.", "(takes the other end of the table, nods once, says nothing)", 2, "s", {disc:1, vol:-1}],
     ["Claps twice and says 'right, listen up'", "Opens every gathering with a double clap and a raised voice, to the groans of regulars.", "(two claps) Right! Listen up! Eyes on me, phones away — this won't take long, and I mean it.", 5, "c", {asrt:1, vol:1}],
-    ["Draws the plan on whatever is nearest", "Sketches the plan on a beermat, a hand or a dusty windscreen and expects it to be photographed.", "(on a beermat, marker out) — Here's us, here's the gate, here's the van. Photograph it. Somebody photograph it.", 3, "d", {asrt:1, intel:1}]
+    ["Draws the plan on the nearest napkin", "Grabs a pen and sketches the plan on a napkin or a beermat, announcing every arrow aloud.", "Right! Here's us, here's the gate, here's the van — arrow, arrow — everybody see? Somebody photograph it!", 4, "c", {asrt:1, vol:1}]
   ]);
 
   V2.block(out, "Social Role in a Group", "Outsider", 250240, [
@@ -91,13 +91,13 @@ const TRAITS_V2_CELLS_A = (function(){
     ["Keeps the napkin with the plumber's name", "Writes down a throwaway remark on a napkin and weeks later sends the exact answer it called for.", "(a text) Found the napkin. You said your sister needed a plumber. This is Reggie's number.", 1, "s", {warm:1, disc:1}],
     ["Introduces everyone to everyone at the door", "Greets each arrival with a shout of 'you must meet' and a hand on the shoulder, whether or not anyone is ready.", "Oh, you've got to meet Hana! Hana, this is — what do you do again? Doesn't matter. Chat!", 5, "c", {vol:1, warm:1}],
     ["Starts the group chat before the plans exist", "Creates the group message for an event that has no date, no place and no guest list yet.", "Added you all. Don't mute it. I'll need dates by Friday and everyone's allergies.", 4, "c", {pace:1, asrt:1}],
-    ["Seats people beside the one person they need", "Rearranges place cards so each guest ends up next to the person most useful to them.", "(shifting cards) — You, here, next to Priya. She's hiring. Don't say I said.", 3, "u", {intel:1, warm:1}]
+    ["Swaps two place cards quietly", "Quietly exchanges two place cards at a table so that a job-seeker ends up beside someone who is hiring.", "(swaps two place cards with a fingertip, then straightens the cutlery)", 2, "s", {intel:1, warm:1}]
   ]);
 
   V2.block(out, "Social Role in a Group", "Skeptic", 250280, [
     ["Asks 'where was that, sorry?' with a small smile", "Asks for the source in a friendly murmur and then lets the silence do the questioning.", "(mild, pouring tea) — Oh really? Where was that, sorry?", 1, "s", {intel:1, man:1}],
     ["Demands the name of 'they'", "Meets any casual 'they say' with a full-voice challenge to produce evidence.", "Oh, 'they say'? Who's they? Name one. Name one 'they' and we'll go from there!", 4, "c", {intel:1, asrt:1, vol:1}],
-    ["Repeats the claim back with one detail altered", "Restates what was said with a single fact slightly wrong, to see whether the speaker notices.", "So it opened in nineteen-oh-four. — Nineteen-ten. — Ah. Good, you were listening.", 3, "u", {intel:1, cur:1}]
+    ["Repeats the claim back with one detail altered", "Restates what was said with a single fact slightly wrong, to see whether the speaker notices.", "So it opened in nineteen-oh-four. — Nineteen-ten. — Ah. Good, you were listening.", 2, "s", {intel:1, cur:1}]
   ]);
 
   V2.block(out, "Habits & Vices", "Risk & Escape", 250300, [
@@ -109,8 +109,8 @@ const TRAITS_V2_CELLS_A = (function(){
   ]);
 
   V2.block(out, "Habits & Vices", "Substance & Consumption", 250320, [
-    ["Turns an unlit cigarette through the whole chat", "Holds an unlit cigarette between two fingers for an entire conversation and never raises it.", "(an unlit cigarette turning, never raised) — Not for me. Just nice to have.", 1, "s", {mood:-1, vol:-1}],
-    ["Makes a fresh cup before the last is gone", "Starts another coffee while the first is barely touched and cold.", "(kettle on again) — Mine's gone cold. I'll make another. Do you want one?", 1, "s", {disc:-1}],
+    ["Turns an unlit cigarette through the whole chat", "Holds an unlit cigarette between two fingers for an entire conversation and does not raise it.", "(an unlit cigarette turning, never raised) — Not for me. Just nice to have.", 1, "s", {mood:-1, vol:-1}],
+    ["Turns a beer mat a quarter-turn per drink", "Rotates a beer mat by a quarter-turn after each drink, as a private tally nobody is supposed to read.", "(a quarter-turn of the beer mat; the third one this evening; nothing said)", 1, "s", {disc:1, vol:-1}],
     ["Shuts their eyes for the first sip of the day", "Closes their eyes and breathes out for the first mouthful, a pause the household learns to wait for.", "(eyes closed, a long breath out) — There. Now. Go on then.", 2, "s", {mood:1, vol:-1}],
     ["Orders for the table before anyone has finished", "Calls the next round, and chips, before the first glass has been put down.", "Same again! Same again for everyone, and a pile of chips — put it on mine.", 5, "c", {vol:1, rebel:1}],
     ["Cannot speak before the coffee, and says so repeatedly", "Declares a ban on conversation until a cup has been delivered, and enforces it loudly.", "Do not speak to me. Do not look at me. Coffee, then words. Coffee. Then. Words.", 4, "c", {mood:-1, asrt:1}]
@@ -120,7 +120,7 @@ const TRAITS_V2_CELLS_A = (function(){
     ["Taps the lid twice before opening a parcel", "Gives a box two light taps with a fingertip before the knife goes in.", "(two light taps, then the knife) — Right.", 1, "s", {disc:1, vol:-1}],
     ["Reads the last line first", "Flicks to the back of a book to check how it ends before starting at page one.", "(thumb flicking to the back) — Okay. Good. They're alive. Now we can begin.", 2, "s", {mood:-1, cur:1}],
     ["Raps wood after every hopeful sentence", "Knocks their knuckles on the nearest wooden surface, loud enough to be heard next door, after each optimistic remark.", "Should be fine by Friday — (knock, knock, knock) — touch wood, touch wood, don't say it!", 5, "c", {vol:1, mood:-1}],
-    ["Folds the receipt into a square before pocketing", "Makes three precise folds and a tuck of every receipt, and won't leave the till until it is done.", "(fold, fold, fold, tuck) — Done. Okay. Now we can go.", 3, "u", {disc:1, mood:-1}]
+    ["Folds the receipt into a square before pocketing", "Makes three precise folds and a tuck of a receipt before it goes into a pocket.", "(fold, fold, fold, tuck) — There.", 2, "s", {disc:1, mood:-1}]
   ]);
 
   V2.block(out, "Habits & Vices", "Restraint & Discipline", 250360, [
@@ -137,7 +137,7 @@ const TRAITS_V2_CELLS_A = (function(){
   V2.block(out, "Verbosity Traits", "Stylized & Elaborate", 250400, [
     ["One grand adjective per story", "Allows a single resplendent word into an otherwise plain account, once, then moves on.", "We ate at a tiny, plain, utterly resplendent café.", 1, "s", {form:1, vol:-1}],
     ["Turns a toast into a full speech", "Stretches a toast over three tangents and a digression on cheese.", "Friends, Romans, fellow guests of the lower table — a word, if I may, about cheese.", 4, "c", {vol:1, form:1}],
-    ["Opens a request with 'I put it to you'", "Phrases the smallest request as a formal proposition before the assembled company.", "I put it to you, gentlemen, that the biscuits are finished — and that someone in this room knows how.", 3, "d", {form:1, ego:1}]
+    ["Opens a request with 'I put it to you'", "Phrases the smallest request as a formal proposition to the assembled company.", "I put it to the table that the biscuits are finished — and that someone present knows how.", 2, "s", {form:1, ego:1}]
   ]);
 
   V2.block(out, "Verbosity Traits", "High-Volume & Wordy", 250420, [
@@ -153,7 +153,7 @@ const TRAITS_V2_CELLS_A = (function(){
   V2.block(out, "Verbosity Traits", "Minimal & Ultra-Brief", 250460, [
     ["Answers with the last word of the question", "Hands back the final word of a question, softly, and means yes.", "(a nod) — Dinner.", 1, "s", {vol:-1, agr:1}],
     ["Grunts yes, grunts louder for no", "Gives the table a verdict in grunts, with extra volume for the negative.", "(a grunt) — (a louder, falling grunt) — (a short grunt, lower)", 4, "c", {vol:-1, asrt:1}],
-    ["Replies to a long message with 'noted'", "Sends a single word back to a message of several paragraphs.", "(text) Noted.", 3, "u", {vol:-1, form:1}]
+    ["Replies to a long message with 'Noted.'", "Sends a single word back to a message of several paragraphs, and nothing else.", "(text) Noted.", 2, "s", {vol:-1, form:1}]
   ]);
 
   V2.block(out, "Verbosity Traits", "Pacing & Situation-Driven", 250480, [
@@ -164,7 +164,7 @@ const TRAITS_V2_CELLS_A = (function(){
   V2.block(out, "Mannerisms", "Environmental Interaction Mannerisms", 250500, [
     ["Nudges a picture frame level in passing", "Adjusts a crooked frame with a single fingertip while walking by, without comment.", "(a fingertip nudge at the frame on the way past; nothing said)", 1, "s", {disc:1, vol:-1}],
     ["Opens every window on arrival", "Walks into a room, declares it stuffy and opens each window before sitting down.", "Stuffy! It's like a sock in here. (window one, window two) Better. Who shut these?", 4, "c", {act:1, asrt:1}],
-    ["Plumps the cushions on someone else's sofa", "Rearranges the cushions in a host's living room mid-conversation and expects no objection.", "(plumping the third cushion, the second, the first) — You don't mind. It's better like this.", 3, "d", {asrt:1, man:-1}]
+    ["Squares one cushion on a host's sofa", "Straightens a single cushion on a host's sofa mid-conversation, without looking at it.", "(squaring one cushion, not looking at it) — Sorry. Habit.", 2, "s", {disc:1, man:-1}]
   ]);
 
   V2.block(out, "Mannerisms", "Tactile & Prop Handling", 250520, [

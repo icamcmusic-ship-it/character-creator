@@ -29,7 +29,7 @@ const TRAITS_V2_POLES_F = (function(){
     ["Pulls up the source mid-dispute", "Settles a disagreement by opening the original figures on the nearest screen, and turns it round for everyone to read.", "(thumb already moving) Hang on. Two point one, not twenty-one. Decimal place. Read it yourself.", 4, "c", {intel:1, asrt:1}],
     ["Answers a casual question with a numbered breakdown", "Meets a simple 'what do you think?' with a structured list of factors, each given its own number.", "Right, three things. One, cost. Two, who has to carry it up the stairs. Three, whether anyone will actually use it. Starting with one.", 5, "c", {intel:1, vol:1}],
     ["Plays both sides in two voices", "Argues the case and the counter-case at full length and with different delivery, until someone else picks one.", "(stands left) The case for. (steps right) The case against, which is better. (back left) Which I'd answer by —", 5, "s", {intel:1, vol:1}],
-    ["Dates every claim in the notebook", "Writes the day beside a figure or a belief so they can tell later how old it is.", "(pencilling '7 Oct' beside the number) True in October. Might not be now.", 1, "s", {intel:1, disc:1}],
+    ["Dates a claim in the notebook", "Writes the day beside a figure or a belief so they can tell later how old it is.", "(pencilling '7 Oct' beside the number) True in October. Might not be now.", 1, "s", {intel:1, disc:1}],
     ["Concedes the argument they dislike", "Says out loud that the better case is the one that goes against their preference.", "I don't like it, and it's right. Both of those. I'll live with that.", 2, "s", {intel:1, hon:1}],
     ["Asks over what period", "Wants the time scale pinned down before agreeing that something is good or bad.", "Better over a week, a year or ten? Because it's clearly worse for the first month.", 1, "u", {intel:1}],
     ["Stops the meeting to ask what it decides", "Interrupts a long discussion to ask which decision it is meant to produce, and by when.", "Sorry, can I stop us? What are we deciding today? If nothing, I'd like the hour back.", 4, "d", {intel:1, asrt:1}],
@@ -44,11 +44,11 @@ const TRAITS_V2_POLES_F = (function(){
     ["Rewatches the series instead of starting another", "Reaches for a programme they know by heart each evening, partly because nothing in it can surprise them.", "(thumb over 'Continue watching') Series three again. I know what happens. That's the point.", 2, "u", {cur:-1}],
   ]);
   V2.block(out, "Habits & Vices", "Avoidance & Procrastination", 245150, [
-    ["Leaves the settings unopened", "Uses a phone or a machine exactly as it arrived, and has never looked at the menu behind the first screen.", "(the home screen unchanged since the shop) It does the phone thing. That's the phone thing.", 1, "s", {cur:-1}],
+    ["Leaves the settings unopened", "Uses a phone or a machine exactly as it arrived, and has barely looked at the menu behind the first screen.", "(the home screen unchanged since the shop) It does the phone thing. That's the phone thing.", 1, "s", {cur:-1}],
   ]);
   V2.block(out, "Social Role in a Group", "Historian", 245200, [
     ["Tried it in 'ninety-eight", "Meets a new proposal by naming the year it was already attempted, and what became of it.", "Tried that in the spring of 'ninety-eight. Same slides. Same promises. Let's save everybody the afternoon.", 4, "c", {cur:-1, asrt:1}],
-    ["Treats the past as a finished map", "Answers a 'what if' by describing what always happens, in order, and does not wonder about anything outside it.", "It'll go how it always goes. Rain at the fete, Barry on the raffle, tea urn broken by three. Next.", 2, "s", {cur:-1}],
+    ["Treats the past as a finished map", "Answers a 'what if' by describing what usually happens, in order, and does not wonder about anything outside it.", "It'll go how it always goes. Rain at the fete, Barry on the raffle, tea urn broken by three. Next.", 2, "s", {cur:-1}],
   ]);
   V2.block(out, "Conversation Mechanics", "Turn-Timing", 245300, [
     ["Closes the subject with one flat word", "Ends a topic with a short verdict word and moves to the next thing before anyone adds to it.", "Fine. Done. (a beat) Anyway, parking.", 3, "c", {cur:-1}],
@@ -66,54 +66,68 @@ const TRAITS_V2_POLES_F = (function(){
   ]);
   V2.block(out, "Humor Style", "Humorless & Absent", 245600, [
     ["Laughs at the familiar bit only", "Stays flat through a new sketch, then lights up the moment a line they know comes round.", "(stone-faced through the new sketch, then beaming) Oh, it's the one with the ladder.", 2, "d", {cur:-1}],
-    ["Lets the punchline go past", "Smiles at the shape of a joke without asking what it meant or why it was funny.", "(smiling politely at nothing in particular) Ha. Yes.", 1, "s", {cur:-1}],
+    ["Asks what happened after the punchline", "Treats the punchline as the middle of the story and asks what happened next to the people in it.", "...and the vicar fell in the pond. — And then? Did he get out? Who pulled him?", 1, "s", {cur:-1}],
   ]);
   V2.block(out, "Mannerisms", "Listening & Attention", 245700, [
     ["Gaze drifts to the window at a new subject", "Lets their eyes go to the same spot outside the moment the talk turns to something unfamiliar.", "(eyes drift to the window at the word 'actually')", 2, "c", {cur:-1}],
     ["Nods through the new thing and goes back", "Listens to the end of someone's news with courteous nods, then takes up exactly where they left off.", "(nodding politely to the end) Lovely. Anyway, as I was saying about the gutters.", 3, "d", {cur:-1}],
-    ["Palm up like stopping traffic", "Raises a flat hand when someone starts explaining how something works.", "(palm flat, like stopping traffic) Stop. I don't need to know how it works.", 5, "c", {cur:-1, asrt:1}],
+    ["Palm up like stopping traffic", "Raises a flat hand when someone starts explaining how something works.", "(palm flat, like stopping traffic) Ah-ah. Not the how. Just tell me if it goes.", 5, "c", {cur:-1, asrt:1}],
   ]);
   V2.block(out, "Decision Style", "Fast & Gut", 245800, [
     ["Orders the usual over the waiter's list", "Gives the old order over the top of anyone offering alternatives.", "The usual. — There's a new — The usual.", 4, "c", {cur:-1, pace:1}],
-    ["Sets aside the unfamiliar option", "Chooses from the two or three items they already know and treats the rest as not on offer.", "(ignoring the third column of the menu) Two of those I know. I'll pick one of those.", 3, "d", {cur:-1}],
+    ["Decides after the opening line", "Interrupts a proposal with a verdict after its first sentence, declining to hear options B and C.", "Right, yes, fine. No need for B or C. Yes. Done. Next.", 3, "d", {cur:-1, pace:1}],
   ]);
   V2.block(out, "Hospitality & Gifts", "Being a Guest", 245900, [
-    ["Orders the same dish wherever they are", "Asks for one plain thing at every restaurant, regardless of what the menu is proud of.", "Have you got a plain omelette? Then that. Doesn't matter where.", 3, "c", {cur:-1}],
+    ["Brings their own tea bags", "Carries a small tin of their usual tea to other people's houses and politely declines the herbal selection.", "I've brought my own, I hope you don't mind. I'm not a fruity tea person. Never have been.", 3, "c", {cur:-1}],
     ["Stays in the first room they're shown", "Sits down where the host first points and does not ask about the rest of the house.", "(settling into the hall chair) This is fine, thank you. I don't need the garden.", 2, "u", {cur:-1}],
     ["Won't taste the dish they can't name", "Asks what something is, and when the answer is unfamiliar, moves to the bread.", "What is it? ... Right. No, I'm sure it's lovely. I'll have the bread.", 4, "c", {cur:-1, agr:-1}],
   ]);
   V2.block(out, "Greetings & Farewells", "Opening Lines", 245950, [
     ["Three questions, same order", "Greets arrivals with a fixed set of questions and carries on to the kettle without waiting for more.", "Journey all right? Parking all right? Kettle's on.", 3, "u", {cur:-1}],
-    ["Reports that nothing is new", "Answers 'what's new?' with the same flat report, every time, and does not return the question.", "What's new? Nothing's new. Same as last time.", 2, "c", {cur:-1}],
+    ["Reports that nothing is new", "Answers 'what's new?' with the same flat report in the same words, and does not return the question.", "What's new? Nothing's new. Same as last time.", 2, "c", {cur:-1}],
   ]);
   V2.block(out, "Values & Moral Line", "Pragmatic & Flexible", 245970, [
     ["Picks whoever worked last time", "Chooses the supplier, plan or person that did not fail before, without comparing it to anything else.", "We used Hallam's last time and nobody died. Hallam's.", 3, "u", {cur:-1, disc:1}],
   ]);
   V2.block(out, "Habits & Vices", "Compulsion & Ritual", 246000, [
     ["Trusts the lucky pen", "Signs important things only with one pen and treats the choice as information about how the day will go.", "Not that one. That one's had a bad week. Pass me the blue.", 2, "u", {intel:-1, disc:1}],
-    ["Reads the room before the facts", "Decides what a document means from the mood of the person who handed it over.", "She didn't look at me when she gave me it. Doesn't matter what's on page two.", 3, "d", {intel:-1, emo:1}],
-    ["Won't wait for the second opinion", "Takes the first answer that feels right and gets visibly restless when asked what else was considered.", "I've decided. What else is there to consider?", 3, "c", {intel:-1, pace:1}],
+    ["Walks a lap to decide", "Walks once round the garden or the block before any big decision, touching the gatepost on the way, and goes by how the walk felt.", "(touching the gatepost) Give me a lap. I'll know after the lap. Don't talk to me till I'm back.", 3, "d", {intel:-1}],
+    ["Raps it to see if it's sound", "Knocks a wall, a melon or the roof of a second-hand car with a knuckle and treats the sound as a verdict.", "(knocking the roof twice, ear cocked) Hear that? Solid. We'll take it.", 3, "c", {intel:-1}],
   ]);
   V2.block(out, "Humor Style", "Warm & Playful", 246010, [
-    ["Explains the joke with a story", "Cannot get to the point of a joke without the three scenes that led up to it, and the point arrives as a feeling.", "So you had to be there, right, because Denise had just come in with the, no, the other bag...", 3, "c", {intel:-1, vol:1}],
+    ["Answers calls with a made-up business name", "Picks up the phone to friends with a different invented name for the household each time, and keeps a straight voice for the first line.", "(on the phone) Brenda's Bakery and Tractor Repair! ...Oh, it's you. I'd have been better off with the tractors.", 3, "c", {intel:-1, vol:1}],
     ["Laughs first, works out why later", "Starts laughing at the tone of a line and asks, still laughing, what exactly was funny.", "(laughing already) Wait, what did you say? No, keep going, it was good.", 2, "u", {intel:-1, warm:1}],
   ]);
   V2.block(out, "Vocabulary Traits", "Precision & Specificity Level", 246020, [
-    ["Says 'sort of like' for every comparison", "Reaches for a feel-alike instead of naming the thing, and lets the listener do the matching.", "It's sort of like a Tuesday, but louder. You know the kind.", 2, "c", {intel:-1}],
-    ["Measures in 'a bit' and 'a fair few'", "Gives quantities as impressions and bristles gently when asked for a number.", "A fair few. Enough. A bit more than last time, anyway.", 3, "c", {intel:-1, disc:-1}],
-    ["Describes a route by landmarks that have gone", "Gives directions by the pub that closed and the tree that came down.", "Turn at where the Bell was. You'll feel it when you're there.", 2, "d", {intel:-1}],
+    ["Says 'sort of like' for comparisons", "Reaches for a feel-alike instead of naming the thing, and lets the listener do the matching.", "It's sort of like a Tuesday, but louder. You know the kind.", 2, "c", {intel:-1}],
+    ["Prices things in what they'd buy", "Gives a cost as what it would buy, such as three pints and a pie, instead of naming the figure.", "How much was it? Three pints and a pie. Near enough.", 3, "c", {intel:-1}],
+    ["Names things by colour, not number", "Identifies a bus, a bin or a house by its colour and a dent rather than by the number printed on it.", "Not number nine. The green one. The one with the dent in the lid.", 2, "d", {intel:-1}],
   ]);
   V2.block(out, "Dialogue Grammar Traits", "Structural Shifts", 246030, [
     ["Answers a how with a who", "Responds to a process question by naming the person who did it last, as though that settled the method.", "How's it done? Ask Ravi. Ravi does it. He'll just do it.", 3, "d", {intel:-1, hon:1}],
-    ["Argues by example, never by rule", "Counters a general claim with one remembered case and treats the case as the end of the matter.", "My uncle smoked till ninety. So.", 3, "c", {intel:-1, asrt:1}],
+    ["Argues by example, not by rule", "Counters a general claim with one remembered case and treats the case as the end of the matter.", "My uncle smoked till ninety. So.", 3, "c", {intel:-1, asrt:1}],
   ]);
   V2.block(out, "Mannerisms", "Listening & Attention", 246040, [
-    ["Looks away to feel the answer", "Breaks eye contact before replying to a hard question and answers from a hunch, not a calculation.", "(eyes to the window, a long breath) No. It's not right. I can't tell you why.", 2, "u", {intel:-1, mood:-1}],
-    ["Waves away the figures", "Pushes a spreadsheet back across the table unread and asks how the people are doing.", "(pushing the sheet an inch away) Never mind the columns. Tell me how Ade is.", 3, "d", {intel:-1, warm:1}],
+    ["Looks away to feel the answer", "Breaks eye contact before replying to a hard question and answers from a hunch, not a calculation.", "(eyes to the window, a long breath) No. It's not right. I can't tell you why.", 2, "u", {intel:-1}],
+    ["Listens with the eyes shut", "Closes their eyes while a complicated explanation is given, as though listening for its tune and not its words.", "(eyes closed, nodding slowly) Mm. Yes. I've got the tune of it. Go on.", 3, "d", {intel:-1}],
   ]);
   V2.block(out, "Social Role in a Group", "Connector", 246050, [
     ["Matches people by instinct", "Introduces two strangers on a feeling, with no reason given, and is usually right and mildly annoyed to be asked why.", "You two need to meet. Don't ask me why. Just trust me on it.", 3, "d", {intel:-1, warm:1}],
     ["Reports the mood, not the minutes", "Gives the team a feeling for a meeting instead of what was decided.", "It went fine, I think. Warm enough. Mara was a bit tight in the shoulders.", 2, "u", {intel:-1, emo:1}],
+  ]);
+  V2.block(out, "Vocabulary Traits", "Register & Formality Spectrum", 246100, [
+    ["Calls the committee 'the lot of them'", "Refers to boards, panels and authorities by a shrug of a phrase, however grand the occasion.", "The lot of them can sort it. I'm not writing to a panel.", 3, "u", {form:-1, rebel:1}],
+    ["Says 'cheers, love' to the bank", "Meets a formal counter with first-name warmth and a pet word that nobody there answers in kind.", "Cheers, love, that's me sorted. Ta-ra.", 2, "d", {form:-1, warm:1}],
+    ["Greets the solicitor with 'alright?'", "Opens every formal appointment with a two-syllable street greeting and carries on in the same key.", "Alright? Right, so what's the damage?", 3, "c", {form:-1, man:-1}],
+    ["Swaps 'Dear Sir' for 'Hiya'", "Starts written requests the way they would speak them, and signs off with a kiss or a word like 'laters'.", "Hiya, quick one about my parking permit. Laters.", 2, "u", {form:-1, rebel:1}],
+    ["Shortens every long word", "Clips anything over three syllables to a stub, so the formal word never gets said in full.", "It's a bit of a nightmare, the admin. Totally doable, though.", 4, "c", {form:-1, pace:1}],
+  ]);
+  V2.block(out, "Vocabulary Traits", "Abstractness & Sensory Modality", 246110, [
+    ["Explains it by what it feels like", "Answers a how-does-it-work question with the sensation of using it and nothing about the mechanism.", "It sort of hums when it's happy. You'll just feel it.", 3, "d", {intel:-1}],
+    ["Trusts 'you just know'", "Closes an argument with the claim that the matter is obvious to anyone who has been in the room.", "You just know. After a while, you just know.", 3, "c", {intel:-1, asrt:1}],
+    ["Counts in 'about this much'", "Gives a measurement with the spread of the hands and a noise, and is irritated by a request for a figure.", "About this much. (hands apart) Maybe a bit more. Ish.", 2, "u", {intel:-1}],
+    ["Describes a plan as 'the way it goes'", "Narrates what will happen next as if it were a habit of the world, not a decision to be argued.", "It's the way it goes. You ring them, they say no, you ring again.", 2, "c", {intel:-1, disc:-1}],
+    ["Tells the weather instead of the reason", "Answers why something happened by describing the mood of the day it happened on.", "Oh, it was one of those days. Everything was a bit grey.", 3, "d", {intel:-1, mood:-1}],
   ]);
   return out;
 })();

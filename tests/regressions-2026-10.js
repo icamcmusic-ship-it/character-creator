@@ -144,6 +144,60 @@ module.exports = function({check, group, assert}){
     return `distinct ${v2.distinct} → ${v3.distinct}, overlap ${v2.overlap.toFixed(4)} → ${v3.overlap.toFixed(4)}, gini ${v2.gini.toFixed(3)} → ${v3.gini.toFixed(3)}`;
   });
 
+  check('V3 cast seats: nine seats on v3 for a big cast, six as before otherwise, and a custom seat wins', ()=>{
+    const G = fresh();
+    const r = G.evalIn(`(()=>{
+      const mk = s => ({state: withRng(mulberry32(s), ()=> buildCharacterState({verbLevel:0, regLevel:0, compLevel:0, mannerCount:3, vocabCount:2, rarityPref:'balanced', vocabPref:null, personalityOverrides:{}})), meta:{name:'M'+s}});
+      const ms = [1,2,3,4,5,6,7,8,9].map(i => mk(900 + i));
+      setEngineV(3); const v3 = assignCastRoles(ms).map(x => x.id);
+      setEngineV(1); const v1 = assignCastRoles(ms).map(x => x.id);
+      setEngineV(3); ms[2].meta.seat = 'the one who keeps the books'; const custom = assignCastRoles(ms)[2]; setEngineV(1);
+      return {v3, v1, custom};
+    })()`);
+    assert(new Set(r.v3).size === 9 && r.v3.filter(x => x === 'ensemble').length === 0, 'v3 seats: ' + r.v3.join(','));
+    assert(r.v1.filter(x => x === 'ensemble').length === 3, 'older engines must keep the six seats: ' + r.v1.join(','));
+    assert(r.custom.custom === true && r.custom.label === 'the one who keeps the books' && /sheet reads as/.test(r.custom.why), JSON.stringify(r.custom));
+  });
+
+  check('V3 two people under the same pressure, the setting-lens scene, and the two new chain shapes', ()=>{
+    const G = fresh();
+    G.gen('v3-scene1');
+    const r = G.evalIn(`(()=>{
+      const A = {state, meta:{name:'Asha'}};
+      setEngineV(3); G_lens = null;
+      const pp = pairUnderPressure(A, {state: withRng(mulberry32(5), ()=> buildCharacterState({verbLevel:0, regLevel:0, compLevel:0, mannerCount:3, vocabCount:2, rarityPref:'balanced', vocabPref:null, personalityOverrides:{}})), meta:{name:'Ben'}});
+      const shapes = new Set();
+      for (let s = 1; s <= 80; s++){ const st = withRng(mulberry32(3000 + s), ()=> buildCharacterState({verbLevel:0, regLevel:0, compLevel:0, mannerCount:3, vocabCount:2, rarityPref:'balanced', vocabPref:null, personalityOverrides:{}})); const c = motivationChain(st); if (c) shapes.add(c.shape); }
+      setEngineV(1);
+      const old = new Set();
+      for (let s = 1; s <= 80; s++){ const st = withRng(mulberry32(3000 + s), ()=> buildCharacterState({verbLevel:0, regLevel:0, compLevel:0, mannerCount:3, vocabCount:2, rarityPref:'balanced', vocabPref:null, personalityOverrides:{}})); const c = motivationChain(st); if (c) old.add(c.shape); }
+      return {pp, shapes: [...shapes], old: [...old]};
+    })()`.replace('G_lens = null;', ''));
+    assert(r.pp && r.pp.lines.length >= 2 && r.pp.lines.some(l => /Asha|Ben/.test(l)), 'pair pressure: ' + JSON.stringify(r.pp));
+    assert(r.shapes.includes('fear') && r.shapes.includes('defence'), 'v3 chain shapes: ' + r.shapes.join(','));
+    assert(!r.old.includes('fear') && !r.old.includes('defence'), 'older engines gained chain shapes: ' + r.old.join(','));
+  });
+
+  check('V3 counter axes: a "loud but insecure" preset reads insecure; older engines ignore the counter', ()=>{
+    const G = fresh(); G.document._set('archetypeSelect', {value: 'bluffingLoudmouth', tagName: 'SELECT', options: [{value: ''}, {value: 'bluffingLoudmouth'}]});
+    const mean = pre => { let s = 0; const n = 24; for (let i = 1; i <= n; i++){ G.gen(pre + (i * 7919).toString(36)); s += G.evalIn("axisProfile(state).ego || 0"); } return s / n; };
+    const v3 = mean('v3-'), v2 = mean('v2-');
+    assert(v3 < v2 - 0.15, `confidence under the counter: v3 ${v3.toFixed(2)} against v2 ${v2.toFixed(2)}`);
+    assert(v3 < 0.2, 'the loud-but-insecure preset still reads confident: ' + v3.toFixed(2));
+  });
+
+  check('V3 a setting lens gives the backstory, the pressure trigger and the recovery sheet a place; older engines and no lens do not', ()=>{
+    const G = fresh(); G.document._set('lensSelect', {value: 'court'});
+    G.gen('v3-lens77');
+    const on = G.evalIn(`(()=>{ const b = backstoryBeats(state, charMeta).find(x => x.key === 'failure').text, p = pressureChain(state, null).stages.find(s => s.key === 'trigger').text, r = recoverySheet(state, null).rows.find(x => x.key === 'where'); return {b, p, r: r && r.text}; })()`);
+    assert(/The setting was/.test(on.b) && /In this setting it tends to arrive as/.test(on.p) && /The aftermath is around/.test(on.r || ''), JSON.stringify(on));
+    G.gen('v2-lens77');
+    const old = G.evalIn(`(()=>{ const b = backstoryBeats(state, charMeta).find(x => x.key === 'failure').text, r = recoverySheet(state, null).rows.find(x => x.key === 'where'); return {b, r: !!r}; })()`);
+    assert(!/The setting was/.test(old.b) && !old.r, 'an older engine used the setting scene');
+    G.document._set('lensSelect', {value: ''}); G.gen('v3-lens77');
+    assert(G.evalIn('settingScene(state)') === null, 'a scene without a lens');
+  });
+
   check('H1 a trait name carrying markup cannot reach #warnBox as HTML, and the dispatcher refuses built-ins', ()=>{
     const G = fresh(); const d = G.document;
     d._set('warnBox', {});

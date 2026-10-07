@@ -220,7 +220,7 @@ button instead of (or as well as) a confirm.
   verbosity draws from four categories, a neutral Register can draw Stylized & Elaborate, one personality axis in five draws a standout loud-pole trait, a sheet may omit the Ghost or Defence card, and
   distinctive and signature traits are drawn slightly more often. A typed phrase uses the
   engine the link or settings were saved with (old files restore as v1).
-* **Engine 3 (the October 2026 content pass).** A blank roll prints `v3-…`. Engine 3 draws from the 2,384-trait pack in
+* **Engine 3 (the October 2026 content pass).** A blank roll prints `v3-…`. Engine 3 draws from the 2,368-trait pack in
   `js/data/traits-v2-*.js` (marked `since: 3`, invisible to older engines), the eight new optional sections, the slider links
   for the new categories, the polarity overlay on older untagged traits, the new presets and their hints, prose alternates,
   nine more voice-lab speech acts and a prose-frame memory in best of three; about half of blank rolls also rotate in one

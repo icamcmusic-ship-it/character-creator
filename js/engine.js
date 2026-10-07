@@ -2223,6 +2223,7 @@ function proximityWeights(list, centre, half, flatten){
 // Set for the duration of a single draw when divergence's coin comes up — see the
 // note in pickCategoryWeighted and the affinity inversion below.
 let _divergeThisDraw = false;
+const VOICE_TEXTURE_SECTIONS = new Set(["Vocabulary Traits","Dialogue Grammar Traits","Mannerisms","Verbosity Traits","Humor Style"]);
 function pickInRange(pool, rarityPref, target, minCount, flatten){
   if (!pool || !pool.length) return null;
   const div = divergenceLevel();
@@ -2275,7 +2276,10 @@ function _pickInRangeInner(pool, rarityPref, target, minCount, flatten){
       // affinity untouched, so a diverged category still drew its most
       // posture-agreeable member — half the mechanism, doing a quarter of the work.
       // The same coin now flips the trait-level fit too.
-      if (fit) w *= clamp(1 + aff*fit*(_divergeThisDraw ? -1 : 1), 0.15, 3);
+      // Engine 3: the voice-texture sections answered the personality sliders at r = 0.19 because most of their traits were untagged; with the
+      // overlay tags in place their fit counts double, so a warm character's words, gestures and sentence shapes lean warm.
+      const _k = ENGINE_V >= 3 && VOICE_TEXTURE_SECTIONS.has(t.section) ? 2.2 : 1;
+      if (fit) w *= clamp(1 + aff*_k*fit*(_divergeThisDraw ? -1 : 1), 0.15, 3);
     }
     w *= recentPenalty(t) * slotRepeatPenalty(t) * worldTagMultiplier(t) * favouriteMultiplier(t);
     return w;
@@ -6626,6 +6630,7 @@ function motivationChain(st){
   if (need && lie) shapes.push("need");
   if (lie && wound) shapes.push("inverted");
   if (origin && wound) shapes.push("origin");
+  if (ENGINE_V >= 3){ if (fear) shapes.push("fear"); if (defence && (wound || want)) shapes.push("defence"); }   // engine 3: two more ways to open the chain
   const shape = shapes.length > 1 && hashSeedString(_h + "|shape") % 5 < 3 ? shapes[1 + hashSeedString(_h + "|shape2") % (shapes.length - 1)] : "wound";
   const L = k => links.find(l => l.key === k);
   const place = (key, before) => { const l = L(key), b = L(before); if (!l || !b) return; links.splice(links.indexOf(l), 1); links.splice(links.indexOf(b), 0, l); };
@@ -6640,6 +6645,13 @@ function motivationChain(st){
     const b = L("belief"), o = L("origin");
     if (b) b.text = `${asBelief(lie)} was once simply accurate. It was a fair reading of the room they learned it in.`;
     if (o) o.text = `${pk("iv", ["The room changed and the belief did not", "The room is long gone; the belief outlived it", "They left the room years ago and carried the rule out with them"])}: it came from ${asNounPhrase(wound)}${ghost ? `, and it is still attached to ${asNounPhrase(ghost)}` : ``}.`;
+  } else if (shape === "fear"){
+    const f = L("fear");
+    if (f){ f.text = `${pk("fl", ["It begins with what they refuse to meet:", "Start from the thing they will not stand next to:", "Everything is arranged around one avoidance:"])} ${asNounPhrase(fear)}. The rest is arrangement around it.`; f.from = [fear].map(t => t.trait); place("fear", links[0].key); }
+    const w = L("want"); if (w && want) w.text = `So the want, ${asAim(want)}, is partly a way of staying out of its reach${want.desc ? ` — ${_lc1(want.desc)}` : ``}`;
+  } else if (shape === "defence"){
+    const s = L("strategy");
+    if (s){ s.text = `${pk("dl", ["What the room sees first is the strategy:", "The visible part is the strategy:", "Most of what people meet is a defence:"])} ${traitPhrase(defence)}. It is built over ${wound ? asNounPhrase(wound) : "something older"}${need ? `, and it is why ${asAim(need)} never gets asked for` : ``}.`; s.from = [defence, wound, need].filter(Boolean).map(t => t.trait); place("strategy", links[0].key); }
   } else if (shape === "origin"){
     const c = L("counterweight");
     if (c){ c.text = `It started somewhere good: ${traitPhrase(origin)}. ${origin.desc || ""}`.trim(); place("counterweight", links[0].key); }
@@ -6683,16 +6695,21 @@ function pressureChain(st, pst){
   const level = pst && pst.__pressure ? pst.__pressure.level : 1;
   const stages = [];
   const add = (key, title, text, from) => stages.push({key, title, text, from: from.filter(Boolean).map(t => t.trait)});
-  if (fear || wound) add("trigger", "Trigger", fear
-    ? `Anything that looks like ${traitPhrase(fear)}${wound ? `, especially when it rhymes with ${asNounPhrase(wound)}` : ``}.`
-    : `Anything that reopens ${asNounPhrase(wound)}.`, [fear, wound]);
+  const _ck = (fear ? fear.id : 0) + '|' + (wound ? wound.id : 0) + '|' + (lie ? lie.id : 0);
+  const _scene = typeof settingScene === 'function' ? settingScene(st) : null;
+  if (fear || wound) add("trigger", proseAlt("Trigger", ["What sets it off", "The trigger"], 'pt|' + _ck), (fear
+    ? proseAlt(`Anything that looks like ${traitPhrase(fear)}${wound ? `, especially when it rhymes with ${asNounPhrase(wound)}` : ``}.`,
+        [`What sets it off is ${traitPhrase(fear)}${wound ? `, and more so when it echoes ${asNounPhrase(wound)}` : ``}.`,
+         `The trigger is anything that smells of ${traitPhrase(fear)}${wound ? ` — worse if it brings back ${asNounPhrase(wound)}` : ``}.`], 'ptx|' + _ck)
+    : `Anything that reopens ${asNounPhrase(wound)}.`) + (_scene && _scene.thing ? ` In this setting it tends to arrive as ${_scene.thing}.` : ``), [fear, wound]);
   if (attach || lie){
     const a = attach ? APPRAISAL_BY_ATTACHMENT[attach.category] : null;
-    add("appraisal", "How they read it", `${a ? `They ${a}` : `They read it through the belief`}${lie ? `, because underneath they still hold that ${asReportedBelief(lie)}` : ``}.`, [attach, lie]);
+    add("appraisal", proseAlt("How they read it", ["The reading", "What they think it means"], 'pa|' + _ck),
+      `${a ? `They ${a}` : `They read it through the belief`}${lie ? `${proseAlt(", because underneath they still hold that", [", since under it all they still believe that", ", and the belief they never put down does the reading: that"], 'pal|' + _ck)} ${asReportedBelief(lie)}` : ``}.`, [attach, lie]);
   }
   if (stress){
     const shifted = pst ? Object.values(pst).filter(s => s && s.shifted).map(s => `${_plainCat(s.fromCat)} becomes ${_plainCat(s.toCat)}`) : [];
-    add("tactic", "First move", `${_nm(stress)}: ${stress.desc || STRATEGY_BY_STRESS[stress.category] || ""}${shifted.length ? ` Under load the profile shifts: ${shifted.join("; ")}.` : ``}`.trim(), [stress]);
+    add("tactic", proseAlt("First move", ["What they do first", "The first move"], 'pm|' + _ck), `${_nm(stress)}: ${stress.desc || STRATEGY_BY_STRESS[stress.category] || ""}${shifted.length ? ` Under load the profile shifts: ${shifted.join("; ")}.` : ``}`.trim(), [stress]);
   }
   if (values || level !== undefined){
     const v = values ? THRESHOLD_BY_VALUES[values.category] : null;
@@ -7050,7 +7067,8 @@ function edgeDefaults(fromState, toState, roleId){
               : woundB ? (sharp ? `Suspects ${woundB.trait}.` : `Knows nothing of ${woundB.trait}.`) : "";
   const wants = want ? `${_nm(want)} — and this person is in the way of it, or the route to it.` : "";
   const conceals = lie ? `That underneath it they believe ${asReportedBelief(lie)}.` : defence ? `${_nm(defence)}.` : "";
-  const obligation = role ? ({mentor:"To make them ready and then let go.", protege:"To become worth the time.", confidant:"To keep what they were told.", dependant:"To be there when it counts.", ally:"To hold the line when it costs.", ex:"None that either will admit to.", rival:"Only to fight fair, and only if watched.", antagonist:"None."})[role.id] || "" : "";
+  const obligation0 = role ? ({mentor:"To make them ready and then let go.", protege:"To become worth the time.", confidant:"To keep what they were told.", dependant:"To be there when it counts.", ally:"To hold the line when it costs.", ex:"None that either will admit to.", rival:"Only to fight fair, and only if watched.", antagonist:"None."})[role.id] || "" : "";
+  const obligation = role && obligation0 ? proseAlt(obligation0, _proseAlts('edgeObligation', role.id), 'eo|' + role.id + '|' + (want ? want.id : 0) + '|' + (lie ? lie.id : 0) + '|' + (defence ? defence.id : 0)) : obligation0;
   return {trust, dependence, status, obligation, knows, wants, conceals, why};
 }
 
@@ -7651,6 +7669,17 @@ function lensReading(t, lenses){
   return null;
 }
 function lensTaboos(){ const out = []; activeLenses().forEach(l => (l.taboo || []).forEach(x => out.push(x))); return out; }
+/* SETTING LENS REACH (engine 3). A setting lens used to stay in the voice and the draw; it now also gives the prose a place: the room, the
+   person watching and the thing the trouble arrives as, picked by the sheet's hash from the lens's own topics. Backstory beats, the
+   pressure chain's trigger and the recovery sheet use it. Null on older engines and when no setting lens is on. */
+function settingScene(st){
+  if (ENGINE_V < 3 || typeof activeLenses !== 'function') return null;
+  const ls = activeLenses().filter(l => l && l.kind === 'setting' && l.topics);
+  if (!ls.length) return null;
+  let h = 7; Object.values(st || {}).forEach(s => { if (s && s.trait) h = (h * 31 + s.trait.id) >>> 0; });
+  const l = ls[h % ls.length], pk = (arr, salt) => arr && arr.length ? arr[hashSeedString(h + '|' + salt) % arr.length] : null;
+  return {lens: l.label, place: pk(l.topics.place, 'p'), person: pk(l.topics.person, 'q'), thing: pk(l.topics.thing, 't')};
+}
 
 /* ---------- 3. VARIABLE SHEET SHAPE (the signature budget) ----------
    Every sheet was the same template: one card per profile section, the same outlier
@@ -7949,6 +7978,8 @@ function backstoryBeats(st, meta){
      "now" is what is left unsaid. Settings lenses stay in the voice and the draw. */
   const lensIds = typeof activeLensIds === "function" ? activeLensIds() : [];
   const fl = beats.find(b => b.key === "failure"), nw = beats.find(b => b.key === "now");
+  const scene = settingScene(st);
+  if (fl && scene && scene.place && scene.person) fl.text = fl.text.replace(/\.?$/, "") + `. The setting was ${scene.place}, and ${scene.person} saw it.`;
   if (lensIds.includes("child") || lensIds.includes("adolescent")){
     if (fl){
       const home = lensIds.includes("child");
@@ -9386,6 +9417,32 @@ function resolveRelativeCaps(obj){
    `opts.carryLocked` is the previous sheet whose locked slots survive this build.
    `opts.applyBudgets === false` opts a path out of budgets explicitly — the point is
    that opting out is now a stated decision rather than an omission. */
+/* COUNTER AXES (engine 3). A preset like "loud but insecure" asks for two axes that the rest of the sheet pulls together: the Leader role,
+   the Fight response and the status habits all carry confident tags, so the requested insecurity was swamped (realised +0.18 against a
+   request of -50). After the draw, if a counter axis still reads the wrong way, the loudest trait pushing it that way is swapped for one
+   from its own category that does not, drawn near the same intensity. At most three swaps per axis; deterministic (the seeded stream). */
+function enforceCounterAxes(obj, counters, rarityPref){
+  if (ENGINE_V < 3 || !counters || !counters.length || typeof axisProfile !== 'function') return 0;
+  let swaps = 0;
+  counters.forEach(c => {
+    const code = AXIS_TO_POLCODE[c.axis]; if (!code) return;
+    const sign = c.sign < 0 ? -1 : 1;
+    for (let pass = 0; pass < 3; pass++){
+      if (((axisProfile(obj)[code]) || 0) * sign >= 0.3) break;
+      const seated = new Set(Object.values(obj).filter(s => s && s.trait).map(s => s.trait.id));
+      const bad = Object.keys(obj).filter(id => /^(pers_|prof_)/.test(id) && obj[id] && obj[id].trait && !obj[id].locked && obj[id].trait.pol && Math.sign(obj[id].trait.pol[code] || 0) === -sign)
+        .sort((a, b) => (obj[b].trait.intensity || 3) - (obj[a].trait.intensity || 3))[0];
+      if (!bad) break;
+      const s = obj[bad];
+      const pool = byFilter(s.trait.section, s.trait.category).filter(t => !seated.has(t.id) && Math.sign((t.pol && t.pol[code]) || 0) !== -sign);
+      const pick = pool.length ? pickInRange(pool, rarityPref || 0, s.target || s.trait.intensity || 3, 4, true) : null;
+      if (!pick) break;
+      obj[bad] = Object.assign({}, s, {trait: pick});
+      swaps++;
+    }
+  });
+  return swaps;
+}
 function finalizeSheet(obj, opts){
   opts = opts || {};
   const rarityPref = (opts.rarityPref === undefined) ? 0 : opts.rarityPref;
