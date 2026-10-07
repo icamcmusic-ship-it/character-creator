@@ -3509,7 +3509,7 @@ function generateGapFiller(){
   lastBalanceGaps.profClustered.forEach(pc=>{
     const ps = PROFILE_SECTIONS.find(p=>p.label === pc.section);
     if (!ps) return;
-    const others = catsOf(ps.section).filter(c=>c !== pc.cat);
+    const others = allCatsOf(ps.section).filter(c=>c !== pc.cat);
     if (others.length) forcedProfileCats[ps.id] = others[Math.floor(rand()*others.length)];
   });
   const rarityPref = rarityPrefVal();
@@ -3542,7 +3542,7 @@ function buildProfileSectionUI(){
   if (!grid) return;   // container absent (embedded build, or a trimmed page)
   grid.innerHTML = "";
   PROFILE_SECTIONS.forEach(ps=>{
-    const cats = catsOf(ps.section);
+    const cats = allCatsOf(ps.section);   // the picker shows everything the bank holds, not just what a v1 build can reach
     const div = document.createElement('div');
     div.className = "profCard";
     const typeControl = ps.drawAll

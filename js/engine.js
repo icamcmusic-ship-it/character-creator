@@ -57,6 +57,10 @@ function settingEl(id){
 function entropySeed(){ return ((Date.now() ^ (Math.random()*0x7fffffff)) >>> 0); }
 
 // ---------- Static category maps ----------
+/* The engine version the build in progress runs under: 1 = the original build; 2 = the 2026 coverage changes (see generate.js).
+   Declared first because the pool and category lookups below read it: content tagged `since: 2` (the v2 packs) is invisible to a
+   v1 build, so every printed v1 seed and old share link still builds exactly the character it always did. */
+let ENGINE_V = 1;
 const AXES = {
   verbosityHigh: {section:"Verbosity Traits", category:"High-Volume & Wordy"},
   verbosityLow:  {section:"Verbosity Traits", category:"Minimal & Ultra-Brief"},
@@ -70,6 +74,7 @@ const AXES = {
 const TRAITS_BY_ID = new Map();       // id -> trait (undo/import re-linking)
 const TRAITS_BY_KEY = new Map();      // "section||category" -> trait[]
 const CATS_BY_SECTION = new Map();    // section -> category[] (first-seen order)
+const CATS_V1_BY_SECTION = new Map(); // the same, without categories that exist only in v2 content
 const SECTION_OF_CATEGORY = new Map(); // category -> section (categories are unique to one)
 /* ================= PACK INDEX =================
    TRAIT_PACKS (declared in traits-core.js, one manifest per data file) says which id
@@ -93,6 +98,7 @@ function setDisabledPacks(list){ disabledPacks = new Set(list || []); }
 (function indexTraits(){
   TRAITS.forEach(t=>{
     t.pack = packOfId(t.id);
+    t.since = (PACKS_BY_ID.get(t.pack) || {}).since || 0;
     // The editorial state of an entry. Everything the bank has ever shipped was written
     // and then treated as reviewed by default, which made "core vs secondary" mostly an
     // absence-of-annotation distinction — see the audit's 2.4% figure. Entries are now
@@ -107,6 +113,11 @@ function setDisabledPacks(list){ disabledPacks = new Set(list || []); }
     if (!CATS_BY_SECTION.has(t.section)) CATS_BY_SECTION.set(t.section, []);
     const cats = CATS_BY_SECTION.get(t.section);
     if (!cats.includes(t.category)) cats.push(t.category);
+    if (!t.since){
+      if (!CATS_V1_BY_SECTION.has(t.section)) CATS_V1_BY_SECTION.set(t.section, []);
+      const c1 = CATS_V1_BY_SECTION.get(t.section);
+      if (!c1.includes(t.category)) c1.push(t.category);
+    }
   });
 })();
 /* ================= CONSTRAINT MODE =================
@@ -434,6 +445,7 @@ function byFilter(section, category){
   if (bannedCategories.has(category)) return [];
   if (bannedTraitIds.size) pool = pool.filter(t=>!bannedTraitIds.has(t.id));
   if (disabledPacks.size) pool = pool.filter(t=>!disabledPacks.has(t.pack));
+  if (ENGINE_V < 2) pool = pool.filter(t=>!t.since);   // v2 content is invisible to a v1 build
   // Variant lock (Phase 3): applied here so EVERY path — generation, reroll, pin
   // adjust, cast, foil — respects the character's committed presentation, with no
   // way for a mixed sheet to slip through a specialized pick path.
@@ -441,7 +453,10 @@ function byFilter(section, category){
   if (lock) pool = pool.filter(t => !t.variant || t.variant === lock);
   return pool;
 }
-function catsOf(section){ return CATS_BY_SECTION.get(section) || []; }
+/* The categories a build can draw from: under v1, only those that have v1 content. allCatsOf is for the interface
+   (pickers, validators), which should show everything the bank holds. */
+function catsOf(section){ return (ENGINE_V < 2 ? CATS_V1_BY_SECTION.get(section) : CATS_BY_SECTION.get(section)) || []; }
+function allCatsOf(section){ return CATS_BY_SECTION.get(section) || []; }
 
 /* ================= TRAIT SHAPE ASSERTIONS =================
    TRAITS entries are assumed everywhere to carry {id, section, category, trait, desc,
@@ -5721,7 +5736,6 @@ function mkSlot(slotId, label, target, trait, extra){
   if (!trait) return emptySlot(slotId, label, Object.assign({target}, extra || {}));
   return Object.assign({slotId, locked:false, label, target, trait}, extra || {});
 }
-let ENGINE_V = 1;   // 1 = the original build; 2 = the 2026 coverage changes (see generate.js)
 function pickVerbositySlot(verbLevel, rarityPref){
   // Crossover narrowed from ±0.3 (raw ±15) to ±0.12 (raw ±6): the old dead band
   // meant nearly a third of the slider produced identical pacing-pool draws.

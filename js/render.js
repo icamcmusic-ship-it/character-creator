@@ -853,7 +853,7 @@ function emptyGroupReason(title){
     if (!profileSectionEnabled(ps) && !archetypeAddedSections().includes(ps)) return "Switched off in the Character Profile panel.";
     if (charMeta && charMeta.shape && charMeta.shape.dropped === ps.label) return "Dropped by this sheet's shape — the signature budget spent the space on the sections that define them. Switch \"Vary the sheet's shape\" off to always draw it.";
     if (bannedSections.has(ps.section)) return `The whole "${ps.section}" section is banned in your constraints, so nothing here can ever be drawn.`;
-    const cats = catsOf(ps.section);
+    const cats = allCatsOf(ps.section);
     if (cats.length && cats.every(c => bannedCategories.has(c)))
       return "Every category in this section is banned in your constraints.";
     if (cats.length && cats.every(c => !byFilter(ps.section, c).length))
