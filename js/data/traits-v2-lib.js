@@ -9,6 +9,8 @@
    Write traits as BEHAVIOUR (what the speech or manner does), never as labels or diagnoses, and never about names or
    appearance. IDS: each file owns a block of 1000 (see its header); append only.
    ========================================================================== */
+/* Slider links for the v2 categories; merged into the v2 weight table only (engine.js), never into the v1 copy. */
+const GAP_V2_LINKS = {};
 const V2 = (function(){
   const R = {c:"common", u:"uncommon", d:"distinctive", s:"signature"};
   const slug = s => String(s).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60);
@@ -24,8 +26,7 @@ const V2 = (function(){
   }
   /* link(axis, "pos"|"neg", sectionId, {category: "S"|"M"|"W"}) lets a slider reach a new optional section's categories. */
   function link(axis, pole, secId, cats){
-    if (typeof GAP_WEIGHT_LINKS === 'undefined') return;
-    const L = GAP_WEIGHT_LINKS[axis] = GAP_WEIGHT_LINKS[axis] || {};
+    const L = GAP_V2_LINKS[axis] = GAP_V2_LINKS[axis] || {};
     const P = L[pole] = L[pole] || {};
     P[secId] = Object.assign(P[secId] || {}, cats);
   }

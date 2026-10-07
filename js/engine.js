@@ -235,20 +235,25 @@ let charVariants = {};
    right fix is authoring more of the thin side, and when that happens these weights
    move on their own. */
 const VARIANT_FLOOR = 0.25;   // the thin side never drops below this share
+/* Two tables: v1 counts only the older bank (a v1 seed's coin must not move when v2 content arrives), v2 counts everything. */
 let VARIANT_ODDS = {};
+let VARIANT_ODDS_V2 = {};
 (function computeVariantOdds(){
-  Object.keys(PRESENTATION_VARIANTS).forEach(cat=>{
+  const calc = (into, withNew) => Object.keys(PRESENTATION_VARIANTS).forEach(cat=>{
     let a = 0, b = 0, untagged = 0;
     TRAITS.forEach(t=>{
       if (t.category !== cat) return;
+      if (!withNew && t.since) return;
       if (t.variant === 'a') a++; else if (t.variant === 'b') b++; else untagged++;
     });
     // Untagged traits are eligible under BOTH locks, so they count toward each side's
     // realised pool — which is the quantity the coin should actually be weighing.
     const poolA = a + untagged, poolB = b + untagged;
     const raw = (poolA + poolB) ? poolA / (poolA + poolB) : 0.5;
-    VARIANT_ODDS[cat] = clamp(raw, VARIANT_FLOOR, 1 - VARIANT_FLOOR);
+    into[cat] = clamp(raw, VARIANT_FLOOR, 1 - VARIANT_FLOOR);
   });
+  calc(VARIANT_ODDS, false);
+  calc(VARIANT_ODDS_V2, true);
 })();
 
 /* Which presentation locks a set of protected (locked / required / pinned) slots
@@ -281,7 +286,8 @@ function rollCharacterVariants(required){
   charVariants = {};
   Object.keys(PRESENTATION_VARIANTS).forEach(cat=>{
     if (required && required[cat]){ charVariants[cat] = required[cat]; return; }
-    const pA = VARIANT_ODDS[cat] === undefined ? 0.5 : VARIANT_ODDS[cat];
+    const _odds = ENGINE_V >= 2 ? VARIANT_ODDS_V2 : VARIANT_ODDS;
+    const pA = _odds[cat] === undefined ? 0.5 : _odds[cat];
     charVariants[cat] = rand() < pA ? "a" : "b";
   });
 }
@@ -1610,14 +1616,22 @@ let _bucketRanksBuilt = false;
 const _bucketRank = new Map(); // trait.id -> {rank, size}
 function _buildBucketRanks(){
   const buckets = new Map();
+  // A trait's position must not depend on the engine version, or a v1 seed would move when the bank grew: older traits
+  // are ranked among older traits only, v2 traits among everything.
+  const oldBuckets = new Map();
   TRAITS.forEach(t=>{
     const k = t.section+"||"+t.category+"||"+t.intensity;
     if (!buckets.has(k)) buckets.set(k, []);
     buckets.get(k).push(t);
+    if (!t.since){ if (!oldBuckets.has(k)) oldBuckets.set(k, []); oldBuckets.get(k).push(t); }
   });
-  buckets.forEach(list=>{
+  oldBuckets.forEach(list=>{
     list.sort((a,b)=>a.id-b.id); // stable, deterministic regardless of load order
     list.forEach((t,i)=> _bucketRank.set(t.id, {rank:i, size:list.length}));
+  });
+  buckets.forEach(list=>{
+    list.sort((a,b)=>a.id-b.id);
+    list.forEach((t,i)=>{ if (t.since) _bucketRank.set(t.id, {rank:i, size:list.length}); });
   });
   _bucketRanksBuilt = true;
 }
@@ -2559,6 +2573,21 @@ function weightEntry(key){ return (ENGINE_V >= 2 ? WEIGHT_MATRIX : WEIGHT_MATRIX
 
 // Inbound links for the §6 gap sections live beside their content (js/data/traits-gaps.js)
 // and are merged here, so a trimmed build without that pack simply has no such links.
+/* The v2 pack's links (V2.link in js/data/traits-v2-lib.js) go into the v2 table only: a v1 seed never sees the
+   categories they point at, and keeping them out leaves its boost maps exactly as they were. */
+if (typeof GAP_V2_LINKS !== 'undefined'){
+  const GAP_TIER2 = {S:TIER_STRONG, M:TIER_MODERATE, W:TIER_WEAK};
+  Object.entries(GAP_V2_LINKS).forEach(([ax, poles])=>{
+    const e = WEIGHT_MATRIX[ax] = WEIGHT_MATRIX[ax] || {};
+    Object.entries(poles).forEach(([pole, kinds])=>{
+      const p = e[pole] = e[pole] || {};
+      Object.entries(kinds).forEach(([kind, frags])=>{
+        const k = p[kind] = p[kind] || {};
+        Object.entries(frags).forEach(([frag, t])=>{ if (!(frag in k)) k[frag] = GAP_TIER2[t] || TIER_WEAK; });
+      });
+    });
+  });
+}
 [WEIGHT_MATRIX, WEIGHT_MATRIX_V1].forEach(WM=>{
 if (typeof GAP_WEIGHT_LINKS !== 'undefined'){
   const GAP_TIER = {S:TIER_STRONG, M:TIER_MODERATE, W:TIER_WEAK};
@@ -3694,25 +3723,29 @@ const TRAIT_CLASH_PAIRS = [
    an axis with six times the material on one side stops contributing six times the
    signal for the same character. It is a normalisation, not a correction — when the
    content arrives, the divisors move on their own and the shapes stay right. */
-let POL_COUNTS = {};
+let POL_COUNTS = {};      // older bank only: what a v1 build normalises by
 let POL_NORM = {};
+let POL_COUNTS_V2 = {};   // everything: what a v2 build normalises by
+let POL_NORM_V2 = {};
 (function countPolarity(){
   TRAITS.forEach(t=>{
     if (!t.pol) return;
     Object.entries(t.pol).forEach(([ax, v])=>{
       if (!v) return;
+      if (!POL_COUNTS_V2[ax]) POL_COUNTS_V2[ax] = {pos:0, neg:0};
+      if (v > 0) POL_COUNTS_V2[ax].pos++; else POL_COUNTS_V2[ax].neg++;
+      if (t.since) return;
       if (!POL_COUNTS[ax]) POL_COUNTS[ax] = {pos:0, neg:0};
       if (v > 0) POL_COUNTS[ax].pos++; else POL_COUNTS[ax].neg++;
     });
   });
-  Object.entries(POL_COUNTS).forEach(([ax, c])=>{
-    POL_NORM[ax] = Math.sqrt(c.pos + c.neg) || 1;
-  });
+  Object.entries(POL_COUNTS).forEach(([ax, c])=>{ POL_NORM[ax] = Math.sqrt(c.pos + c.neg) || 1; });
+  Object.entries(POL_COUNTS_V2).forEach(([ax, c])=>{ POL_NORM_V2[ax] = Math.sqrt(c.pos + c.neg) || 1; });
 })();
 // Normalised axis contribution. Sign is preserved exactly; only the magnitude is put
 // on a comparable footing across axes with very different amounts of tagged material.
 function polNormalise(ax, raw){
-  const d = POL_NORM[ax];
+  const d = (ENGINE_V >= 2 ? POL_NORM_V2 : POL_NORM)[ax];
   return d ? raw / d : raw;
 }
 /* The bank's expected value per tagged draw on an axis, in -1..1. This is the "prior"
@@ -3720,7 +3753,7 @@ function polNormalise(ax, raw){
    default rather than in absolute tag counts — see the note there. Calibrated from the
    bank once at load; it is a property of the CONTENT, not of any character. */
 function polarityPrior(ax){
-  const c = POL_COUNTS[ax];
+  const c = (ENGINE_V >= 2 ? POL_COUNTS_V2 : POL_COUNTS)[ax];
   if (!c || !(c.pos + c.neg)) return 0;
   return (c.pos - c.neg) / (c.pos + c.neg);
 }
@@ -4241,6 +4274,25 @@ const PROFILE_SECTIONS = [
    blurb:"How much, and how, family comes into their conversation."},
   {id:"conflictstyle", section:"Conflict Style", label:"Conflict Style", drawAll:false, defaultOn:false,
    blurb:"How they fight: stonewalling, passive-aggression, arguing the record, smoothing, escalating then apologising, sulking, triangulating."},
+  /* ---- Engine-v2 sections (js/data/traits-v2-*.js, since:2) ------------------------
+     Eight more opt-in sections for the behaviours the 2026-10 audit found had no home. Their
+     traits carry since:2, so a v1 seed never draws them even if the section is switched on. */
+  {id:"persuasion", section:"Persuasion & Influence", label:"Persuasion & Influence", drawAll:false, defaultOn:false,
+   blurb:"How they get a yes: the small ask first, the guilt with a smile, the idea planted until it is yours."},
+  {id:"feedback", section:"Feedback & Praise", label:"Feedback & Praise", drawAll:false, defaultOn:false,
+   blurb:"How criticism, praise and compliments are given and taken."},
+  {id:"decision", section:"Decision Style", label:"Decision Style", drawAll:false, defaultOn:false,
+   blurb:"How they choose: consulting then ignoring, deciding in the corridor, waiting for someone else to order."},
+  {id:"boundaries", section:"Boundaries & Refusals", label:"Boundaries & Refusals", drawAll:false, defaultOn:false,
+   blurb:"How a no is said and defended, and how help is asked for and offered."},
+  {id:"emotion", section:"Emotion Display Rules", label:"Emotion Display Rules", drawAll:false, defaultOn:false,
+   blurb:"Which feelings are shown, hidden, performed or swapped for another, and how grief is talked about."},
+  {id:"hospitality", section:"Hospitality & Gifts", label:"Hospitality & Gifts", drawAll:false, defaultOn:false,
+   blurb:"Hosting, being a guest, giving and receiving."},
+  {id:"greetings", section:"Greetings & Farewells", label:"Greetings & Farewells", drawAll:false, defaultOn:false,
+   blurb:"The first line, the last line, and the long goodbye in between."},
+  {id:"digital", section:"Digital Voice", label:"Digital Voice", drawAll:false, defaultOn:false,
+   blurb:"Texts, email, voicemail, video calls, and the wellness register."},
 ];
 
 
@@ -4266,6 +4318,8 @@ function archetypeOptsIn(ps){
   return ps.defaultOn === false && !!CURRENT_ARCHETYPE_PROFILE && !!CURRENT_ARCHETYPE_PROFILE[ps.id] && archetypeSectionsEnabled();
 }
 function profileSectionEnabled(ps){
+  // A section whose every trait is since:2 has nothing a v1 build may draw, and must not take a step of the stream.
+  if (ENGINE_V < 2 && !catsOf(ps.section).length) return false;
   return profileSectionChecked(ps) || archetypeOptsIn(ps);
 }
 // The sections the SELECTED preset switches on that the panel shows as off — for the

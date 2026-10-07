@@ -1,7 +1,107 @@
 /* v2 content: The Lie They Believe. IDS 213000-213999. Rows go in the blocks below; see traits-v2-lib.js for the format. */
 const TRAITS_V2_LIE = (function(){
   const out = [];
-  // V2.block(out, "<Section>", "<Category>", 213000, [ [trait, desc, example, intensity, "c|u|d|s", {pol}], … ]);
+  const S = "Motivation & Wound", C = "The Lie They Believe";
+
+  // Worth, being known, being replaceable, deserving
+  V2.block(out, S, C, 213000, [
+    ["'Enough is a number I haven't reached yet'", "Moves the finish line every time they get near it, convinced worth is a running total that always sits one target further on.", "Eleven hundred pages and it still isn't enough. Ask me again at fifteen hundred.", 4, "d", {disc:1, ego:-1}],
+    ["'Probably they were only being polite'", "Files each compliment under manners and lets it pass without a word, so praise never quite arrives.", "(a small nod, eyes on the table) Kind of you to say.", 1, "s", {ego:-1}],
+    ["'Anyone could do what I do'", "Treats their own skill as a commodity, so they undersell their rate, their hours and their credit on the project.", "Just put the team's name on it. Honestly, anyone with a free weekend could have done it.", 3, "c", {ego:-1}],
+    ["'Being known means being left'", "Hands over closeness in rationed pieces, because anyone who sees the whole picture is expected to quietly pack up.", "You can have the funny stories. The rest isn't on the menu.", 5, "s", {emo:-1, warm:-1}],
+    ["'I'm too much for people'", "Trims their own enthusiasm, grief and questions mid-sentence, so nobody has the chance to tire of them.", "I'll stop. I know I go on. Tell me the second it gets too much.", 4, "c", {ego:-1, vol:-1}],
+    ["'If I take a day off, they'll find out they don't need me'", "Stays on call through holidays and hospital waiting rooms to keep the proof that things run worse without them.", "I'll check the inbox from the car park. If I don't, they might see how smoothly it goes.", 3, "d", {disc:1, ego:-1}],
+    ["'People forget me the minute I leave'", "Plans for being forgotten: brings their own book, expects the invitation to slip, treats a late reply as the norm.", "Don't wait for me, you'll have lost track of me by the time the starters arrive.", 1, "u", {ego:-1}],
+    ["'I'd only slow everyone down'", "Opts out of walks, group projects and lifts before anyone has had the chance to complain about their pace.", "You go on ahead. I'll catch you up. (They won't, and they know it.)", 1, "u", {ego:-1, act:-1}],
+    ["Letting somebody else carry the good seat", "Believes the best chair, the warm room and the last portion belong to someone who needs them more.", "Give it to Dani, her week's been worse than mine. Truly, much worse.", 1, "c", {agr:1, ego:-1}],
+    ["'It's rude to be obviously happy'", "Damps down visible delight, treating open joy as a small show-off move that makes others feel left out.", "(hiding a smile behind the mug) Yes. It's nice. It's... yes. Nice.", 1, "s", {emo:-1, man:1}],
+    ["'Nothing I make is ready to be seen'", "Calls every piece of work a rough draft and keeps it in a drawer until someone else reveals it.", "It's only a first go. Please don't read it yet. Next month, maybe, once it's right.", 2, "s", {ego:-1, disc:1}],
+    ["'Other people's problems are bigger than mine'", "Ranks their own troubles last and apologises for mentioning them at all, even when asked directly.", "Mine's nothing, honestly. Not compared to what you've got on. Go on, you first.", 2, "c", {agr:1, emo:-1}],
+    ["'If I'm not noticed, I can't be rejected'", "Keeps to the edge of rooms and volunteers for nothing, because an unseen person is never turned down.", "Not me, I didn't see a thing. I'm only here for the sandwiches.", 2, "d", {asrt:-1, vol:-1}],
+    ["A thank-you is a debt they can't clear", "Accepts a favour as a loan with interest, and answers each kindness with a bigger one before the week is out.", "You drove me once, so I've done your gutters, and I've left a lasagne. Now we're level.", 3, "u", {disc:1, ego:-1}],
+    ["'I got here by luck, and it's about to be noticed'", "Assumes the job, the place or the partner was a clerical error that someone will correct any day now.", "Wrong place, right time, that's all it was. Give it a few weeks and they'll work it out.", 3, "c", {ego:-1}],
+    ["'Keeping score keeps me safe'", "Tallies every lift, every turn at the washing-up and every unreturned text, so no one gets to take quietly.", "That's the third time I've driven. I'm not saying anything. I'm only noting it's three.", 4, "u", {agr:-1, intel:1}],
+    ["'Good people get what they're owed'", "Behaves impeccably and quietly waits for a payoff, treating the lack of one as an administrative delay.", "I've never cut a corner in eleven years. It'll count when they do the list.", 3, "u", {disc:1, pos:1}],
+    ["'The world owes me for what it did'", "Reads past injuries as credit already banked, and expects the best table, the benefit of the doubt and a bit of grovelling.", "After everything I've been through? I've paid. I'm owed a table by the window.", 5, "d", {ego:1, agr:-1}],
+    ["'If I don't grab it, someone else will'", "Takes the biggest portion, the first slot and the better seat before anyone else has finished deciding.", "Take the large one now, they'll all be gone by the time you've made up your mind.", 4, "c", {pace:1, asrt:1}],
+    ["'Wanting more makes me ungrateful'", "Reads ambition as a slight against what they already have, so a promotion goes unapplied for.", "I've a perfectly good job. It would be greedy to go after a better one.", 2, "s", {ego:-1, pos:1}]
+  ]);
+
+  // Safety, other people's motives, love, asking
+  V2.block(out, S, C, 213100, [
+    ["'If I see it coming, it can't hurt me'", "Rehearses the worst outcome in granular detail, treating foresight as armour that dulls the blow.", "Worst case: she says no, I lose the flat, I'm back at Mum's by Easter. Already packed that in my head.", 3, "c", {intel:1, mood:-1}],
+    ["'Calm just means it hasn't started yet'", "Cannot trust a quiet week, scanning each stretch of peace for the crack that must be coming.", "It's been quiet for days. That's what worries me.", 1, "s", {mood:-1, pos:-1}],
+    ["'I'm safe while I'm the only one who knows how'", "Keeps the passwords, the process and the contacts in their own head and never trains a deputy.", "It's all in my head. Quicker that way. Honestly, don't touch the spreadsheet.", 3, "d", {asrt:1, disc:1}],
+    ["'Good news is the set-up for bad news'", "Hears an unexpected kindness as the wind-up to something worse, and checks the small print before saying thank you.", "A bonus? Why? What do you need me to sign?", 3, "u", {pos:-1, mood:-1}],
+    ["'Everything falls apart the second I look away'", "Cannot leave a pan, a plan or a person unwatched, and returns to check things that were already done.", "Don't move the chairs. Don't touch the thermostat. I know where everything is for a reason.", 5, "d", {disc:1, mood:-1}],
+    ["'The people I love are one phone call from gone'", "Treats every departure as possibly final and tethers loved ones with a stream of check-in requests.", "Text me when you land. Text when you're through the door. Text when your shoes are off.", 5, "u", {warm:1, mood:-1}],
+    ["'If I say sorry first, nobody can be angry'", "Apologises pre-emptively, repeatedly and for things that were nobody's doing, to head off any complaint.", "Sorry. Sorry, was that your foot? Sorry. I'll move. Sorry.", 5, "c", {man:1, ego:-1, vol:1}],
+    ["'If I'm not fighting, I'm losing'", "Takes every disagreement as a war with a single winner and treats any retreat as a surrender.", "Don't you tell me to let it go. That's exactly how they win.", 5, "c", {asrt:1, agr:-1}],
+    ["'Only shouting gets listened to'", "Raises the volume early, because a calm voice has been ignored for good reason before.", "NOBODY heard me the first four times, so excuse me if I'm a bit LOUD about it.", 4, "c", {vol:1, asrt:1, agr:-1}],
+    ["'If I stop talking, the room will empty'", "Fills every silence with one more story, one more question, one more aside, so no one has the moment to leave.", "And another thing, and then you can go, honestly, but first the thing about my cousin.", 5, "c", {vol:1, pace:1}],
+    ["'Warm people are working an angle'", "Treats charm as a sales technique and answers friendliness with a raised eyebrow until the angle shows itself.", "She was so lovely about it. Now I'm waiting for the invoice.", 3, "d", {warm:-1, hon:-1}],
+    ["'Advice is criticism in a nice coat'", "Hears every suggestion as a verdict on how they've been living and answers it with chilly politeness.", "I'm sure you meant it kindly. I didn't ask for notes on my life.", 3, "u", {agr:-1, ego:-1}],
+    ["'They're only kind because they pity me'", "Discounts every invitation as charity and quietly declines the next one to spare everyone the effort.", "You don't have to keep asking me along. I know it's a charity thing.", 3, "d", {ego:-1, pos:-1}],
+    ["'If they go quiet, I've done something'", "Reads a silent colleague or partner as a grievance and works through a list of their own possible offences.", "You've gone quiet. Was it what I said at lunch? It was what I said at lunch.", 4, "c", {mood:-1, ego:-1}],
+    ["'Love means never having to ask'", "Expects the people closest to them to guess what they need and takes each miss as a quiet verdict.", "If I have to say it, it doesn't count. You should just know.", 5, "c", {hon:-1, agr:-1}],
+    ["'I'm only lovable while I'm easy'", "Presents as the low-maintenance one, swallowing every preference, so no one has a reason to leave.", "I'm easy! Wherever you want to eat. Whatever you want to watch. Genuinely easy.", 5, "c", {agr:1, ego:-1}],
+    ["'Every no costs me some of their affection'", "Cannot refuse a request from anyone they want to keep, and reshuffles their own plans to say yes.", "Of course I can do Saturday. No, I'll cancel mine, it was only a dentist.", 4, "c", {agr:1, asrt:-1}],
+    ["'Loving someone means taking their side, always'", "Backs a sibling, friend or partner against the facts and treats any concession as treachery.", "I don't care what the referee said. He's my brother and he was fouled.", 3, "u", {hon:-1, warm:1}],
+    ["'If they wanted to, they would'", "Treats an unanswered message as a clear answer and refuses to chase anyone who has gone quiet.", "If they'd wanted to talk, they'd have rung. I'm not going to chase it.", 3, "c", {asrt:-1, warm:-1}],
+    ["'Asking costs them more than it gives me'", "Prices every favour at its worst, so requests arrive late, tiny and with an exit built in.", "Only if it's no trouble at all. And truly, say no. I'd rather you said no.", 3, "u", {ego:-1, man:1}],
+    ["'Asking a question shows what I don't know'", "Nods through meetings and looks things up afterwards under the table rather than ask for an explanation.", "(nodding) Right. Yes. Mm-hm. (types the word into the search bar)", 3, "c", {cur:-1, ego:-1}],
+    ["'If I ask, the no will be final'", "Does not make the request, apply for the post or knock on the door, because an unasked question can still become a yes.", "No point putting in for the raise. They'd only say no, and then I'd know.", 3, "d", {asrt:-1, pos:-1}]
+  ]);
+
+  // Money, luck, time, competence
+  V2.block(out, S, C, 213200, [
+    ["'Money is the only thing that stays'", "Keeps a stash for the day everything goes, and treats the envelope as the one relationship that cannot leave.", "There's an envelope. Don't ask where. Everything else can go. The envelope stays.", 4, "s", {disc:1, warm:-1}],
+    ["'Paying for everyone makes them stay'", "Grabs the bill, lends without a date to repay and treats generosity as the price of loyalty.", "No, put your card away. I've got it. I always have it.", 5, "c", {warm:1, agr:1}],
+    ["'I'll be skint again any minute'", "Cannot enjoy a good pay packet, and lets the kettle, the tyres and the glasses go on being old.", "I know I got the promotion. It can all be gone by March. Why replace the kettle?", 4, "d", {mood:-1, disc:1}],
+    ["'Cheap is the same as clever'", "Counts savings as proof of intelligence, and will spend an hour on a phone queue to save four pounds.", "Forty minutes on hold, and I got four pounds off. That's what patience is for.", 3, "u", {intel:1, ego:1}],
+    ["'It will all be easy once the money comes'", "Defers every problem to the day of a windfall, as if wealth were a master key for rooms that jam.", "When the book sells, that's when I'll sort the rest. Everything gets easy after that.", 3, "u", {pos:1, disc:-1}],
+    ["'Owing anyone is the start of being owned'", "Repays a favour on the spot, refuses loans and will not accept a lift without paying for the petrol.", "Let me give you the petrol money. Now. Before we've left the car park.", 3, "c", {disc:1, ego:1}],
+    ["'Luck is a ration and I've used mine'", "Counts small strokes of fortune against a private monthly allowance and goes quiet when the good ones come early.", "Don't. That parking space was my luck for the month, and it's only the fourth.", 2, "s", {pos:-1}],
+    ["'Don't say it out loud or it won't happen'", "Keeps hopes unspoken, the interview unmentioned and the news unshared until it is signed and sealed.", "Don't ask about the interview. Not telling anyone until it's in writing.", 1, "s", {pos:-1, vol:-1}],
+    ["'It's too late for me'", "Treats age or a missed window as a locked door on learning, love or a change of career.", "I'd have loved to play piano. At my age I'd only be wasting the teacher's time.", 4, "c", {pos:-1}],
+    ["'The best years are behind me'", "Measures every present event against a single golden period, and finds it light.", "Twenty-six was it, really. Everything since has been footnotes.", 3, "u", {pos:-1, mood:-1}],
+    ["'Real life starts when this bit is over'", "Postpones cooking properly, calling friends and sleeping well until a deadline that is always replaced by another.", "Once the move's done. Once the deadline's gone. Then I'll live properly.", 1, "c", {disc:-1, pos:1}],
+    ["'Problems expire if you leave them'", "Lets a letter, a lump or a quarrel sit unopened, trusting the passage of time to make it vanish.", "Leave it a week. These things have a way of going quiet.", 3, "c", {pace:-1, disc:-1}],
+    ["'If I slow down I'll have to feel it'", "Stays busy as an anaesthetic, and gets restless within minutes of stillness.", "Can't sit. If I sit it all catches up. Pass me the other box.", 3, "d", {act:1, emo:-1}],
+    ["'Tiredness is just lack of willpower'", "Reads their own exhaustion as moral slack and overrides it with more coffee and a longer list.", "I'm not tired, I'm undisciplined. There's a difference, and it's mine to fix.", 3, "u", {disc:1, ego:-1}],
+    ["'Reading the instructions is admitting defeat'", "Attacks the flat-pack, the form and the new software on instinct and treats a manual as an insult.", "I'll work it out. I've never opened the manual, and I'm not starting with a wardrobe.", 5, "c", {ego:1, asrt:1}],
+    ["'You're either good at it or you're not'", "Treats ability as a gift handed out at birth, so a first failure closes the subject for good.", "I'm not a numbers person. Didn't get that gene. No point wasting your evening.", 3, "c", {pos:-1, disc:-1}],
+    ["'If it's hard, I'm doing it wrong'", "Reads the first friction in a task as proof of a bad fit and swaps it for something that comes easily.", "It shouldn't be this difficult. I'll try something that comes naturally.", 3, "u", {disc:-1}],
+    ["'Nobody else will do it properly'", "Redoes other people's work after hours instead of explaining what they got wrong.", "Don't worry, I'll redo the labels tonight. It's quicker than explaining.", 4, "c", {disc:1, agr:-1}],
+    ["'Saying I'm not sure means I don't belong here'", "Bluffs through gaps in knowledge with firm figures and confident deadlines.", "It'll definitely be two weeks. Give or take. Probably two.", 3, "d", {hon:-1, ego:1}],
+    ["'One mistake cancels ten good things'", "Gives a single error more weight than a decade of clean work, and brings it up first in any appraisal.", "Twelve clean months. Then the Hendry account. That's what's in the file.", 3, "d", {ego:-1, disc:1}],
+    ["'Quitting once makes me a quitter forever'", "Pushes through the unwanted book, job or course to avoid the label, long after any reason to.", "Four hundred pages in and I hate it. I'm finishing it.", 3, "u", {disc:1}]
+  ]);
+
+  // Honesty, anger, endings, inheritance, who they may be
+  V2.block(out, S, C, 213300, [
+    ["'A kind lie is still kindness'", "Smooths over a bad meal, a bad poem and a bad draft with warm untruths, and means it as a gift.", "Loved it. Honestly. Wouldn't change a thing.", 4, "c", {hon:-1, agr:1}],
+    ["'Naming it makes it real'", "Refuses to say the word for a symptom, a debt or a failing marriage, using a gentler term for months.", "We're not saying that word. It's a chesty cough. A chesty cough.", 4, "d", {hon:-1, mood:-1}],
+    ["'An apology is a contract'", "Will not put an apology in writing or say it in front of witnesses, in case it is quoted back later.", "I'm not putting that in an email. Sorry's a signature.", 3, "d", {man:-1, hon:-1}],
+    ["'A good person doesn't get angry'", "Swallows irritation and busies their hands, so the dishes get done and the pan is rinsed twice.", "(rinsing the same pan again, humming) It's nothing. Honestly, it's nothing.", 2, "c", {agr:1, emo:-1}],
+    ["'If I get angry, I become my father'", "Keeps their voice low and level at any cost, afraid that one raised sentence unlocks a family inheritance.", "I don't raise my voice. Ever. I know whose road that is.", 3, "d", {disc:1, emo:-1}],
+    ["'Everything good ends badly, so end it first'", "Closes the friendship, the contract or the romance early, on their terms, to dodge the slower, messier version.", "I ended it before it could go wrong. Saved us both a long goodbye.", 5, "s", {asrt:1, warm:-1}],
+    ["'A goodbye is only a longer way to hurt'", "Slips out of parties, jobs and houses without ceremony and calls the omission a courtesy.", "(coat already on) Don't get up. I'll go. See you. (gone before the sentence ends)", 2, "u", {emo:-1, pace:1}],
+    ["'I can't move on until they explain'", "Keeps the door open for an answer or apology that would make the injury make sense, and cannot let the file close.", "Until she tells me why, I can't put it down. I'm not being difficult. I just can't.", 3, "u", {pos:-1}],
+    ["'It runs in the family'", "Treats a family pattern, whether debt, divorce or an early death, as already scheduled for them.", "None of us has made it past sixty. I'm only being practical about it.", 2, "s", {pos:-1, mood:-1}],
+    ["'The chain stops with me'", "Overcorrects against how they were raised, and says the opposite thing six times before breakfast.", "My parents never said it once. My kids hear 'I love you' six times before breakfast.", 5, "d", {warm:1, emo:1}],
+    ["'My parents' sacrifices are mine to repay'", "Steers study, career and holidays by the unspoken total of what the family gave up for them.", "Mum gave up the shop for us. I'm not going to be the one who coasts.", 3, "d", {disc:1, ego:-1}],
+    ["'The funny one isn't allowed to be sad'", "Meets any softness with a bit, since the group depends on them for lightness.", "Sad? Me? Who'd do the toast, then? (grins, reaches for a joke)", 3, "d", {emo:-1, pos:1}],
+    ["'I'm the quiet one, and that's that'", "Holds to an old role as if it were an agreement, so voicing an opinion now would feel like breaking a promise.", "I've always been the quiet one. It'd be odd if I suddenly had views.", 2, "c", {rebel:-1, asrt:-1}],
+    ["'It's wrong to enjoy anything while someone near me suffers'", "Withholds music, desserts and laughter while any friend or relative is in trouble, as if joy were a form of desertion.", "Don't put the music on. Not with Nan still up at the hospital.", 3, "u", {emo:1, pos:-1}],
+    ["'Everyone gets what's coming'", "Trusts that wrongdoers are punished by life itself, so they take no steps to seek redress.", "He'll get his. They always do. I don't need to lift a finger.", 2, "c", {pos:1, act:-1}],
+    ["'Pity is the worst thing anyone can feel for me'", "Hides illness, losses and bad weeks, and turns away any sympathy offered at the door.", "Don't be nice about it. I'd rather you were angry with me than sorry for me.", 4, "d", {ego:1, emo:-1}],
+    ["'There's always a catch somewhere'", "Looks for the hidden clause in a prize, an offer and a lift, and says so quietly, as a joke.", "Free tickets, was it? Hm. There's always a catch somewhere. Go on, find it.", 1, "c", {pos:-1}],
+    ["'Better not get my hopes up'", "Bats away every good prospect with a shrug, so nothing feels too lost if it fails.", "We'll see. Could go either way. No point getting excited.", 1, "c", {pos:-1}],
+    ["'Plans only work out for other people'", "Makes arrangements with a half-smile, expecting the weather, the train or the guest list to prove them right.", "(booking the table) We'll see if it happens. Plans usually don't, with me.", 1, "u", {pos:-1}],
+    ["'I can't accept even a cup of tea'", "Refuses small hospitality, from offers of a lift to someone making a drink, as imposing on the giver.", "No, no, I'll get it myself. You sit down. It's no bother, honestly.", 1, "s", {ego:-1, man:1}]
+  ]);
+
   return out;
 })();
 TRAITS.push(...TRAITS_V2_LIE);
