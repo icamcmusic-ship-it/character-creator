@@ -462,7 +462,7 @@ function traitCardHTML(id, s, includeControls, showDiff, accent, tagLabel){
         <div class="traitCat">${escHTML(t.category)}</div>
         <div class="traitDesc">${escHTML(t.desc)}</div>
         ${includeControls ? bandHTML(t, s) : ``}
-        ${t.example ? `<div class="exampleLine">&ldquo;${escHTML(t.example)}&rdquo;</div>` : ``}
+        ${t.example ? `<div class="exampleLine">&ldquo;${escHTML(t.example)}&rdquo; <button type="button" class="copyMini" ${actAttr('click', 'copyLine', t.example, '$el')} aria-label="Copy this example line" title="Copy this line">copy</button></div>` : ``}
         ${includeControls ? freqBudgetHTML(t) : ``}
         ${s.exceptionWhy ? `<div class="traitNote exceptionNote"><b>Why it's here.</b> ${escHTML(s.exceptionWhy)}</div>` : ``}
         ${ctxNote}
@@ -907,18 +907,37 @@ function restoreContextTag(label){
 let viewContext = 'baseline';
 let CONTEXT_VIEW = null;
 function setViewContext(id){
-  viewContext = CONTEXT_MODE_IDS.includes(id) ? id : 'baseline';
+  viewContext = allContextModes().some(m => m.id === id) ? id : 'baseline';
   charMeta.viewContext = viewContext;
   renderSheet();
 }
 function contextBarHTML(){
   const view = CONTEXT_VIEW;
-  const btns = CONTEXT_MODES.map(m =>
+  const btns = allContextModes().map(m =>
     `<button type="button" class="ctxModeBtn${m.id === viewContext ? ' active' : ''}" role="tab" aria-selected="${m.id === viewContext}" ${actAttr('click', 'setViewContext', m.id)} title="${escAttr(m.blurb)}">${escHTML(m.label)}</button>`).join("");
   const line = view ? `<div class="ctxHeadline">${escHTML(view.headline)}</div>` : ``;
   return `<div class="contextBar" id="contextBar"><div class="ctxModes" role="tablist" aria-label="Context">${btns}</div>${line}</div>`;
 }
+/* The five rooms side by side, under the sheet: how many cards come forward and go quiet in each, and which. contextualViews already builds
+   them all; this only shows them. */
+function contextStripHTML(){
+  if (typeof contextualView !== 'function' || !Object.keys(state).length) return '';
+  const cols = CONTEXT_MODES.filter(m => m.id !== 'baseline').map(m => {
+    const v = contextualView(state, m.id);
+    const names = status => v.slots.filter(s => s.status === status).sort((a, b) => (b.trait.intensity || 3) - (a.trait.intensity || 3)).slice(0, 3).map(s => escHTML(s.trait.trait));
+    const up = names('amplified'), down = names('suppressed');
+    return `<div class="ctxStripCol"><div class="ctxStripHead"><b>${escHTML(m.label)}</b> <span class="sub">${v.counts.amplified} forward · ${v.counts.suppressed} quiet</span></div>
+      <div class="ctxStripList"><span class="ctxUp">forward:</span> ${up.join('; ') || '—'}</div>
+      <div class="ctxStripList"><span class="ctxDown">quiet:</span> ${down.join('; ') || '—'}</div></div>`;
+  }).join('');
+  return `<details class="axisGroup ctxStrip" id="contextStrip"><summary class="axisTitle">Five rooms at a glance</summary><div class="ctxStripRow">${cols}</div></details>`;
+}
 function renderSheet(){
+  _renderSheetInner();
+  const body = document.getElementById('sheetBody');
+  if (body && typeof body.insertAdjacentHTML === 'function') body.insertAdjacentHTML('beforeend', contextStripHTML());
+}
+function _renderSheetInner(){
   const sheet = document.getElementById('sheet');
   sheet.classList.add('show'); sheet.classList.remove('batchOnly');
   const empty = document.getElementById('emptyState');
@@ -1162,7 +1181,7 @@ function renderSheet(){
     // Voice fingerprint — assembled from the character's own example lines.
     const fp = voiceFingerprint(state, charMeta);
     if (fp){
-      h += `<div class="tensionBlock" data-st="border-left-color:var(--emerald); margin-top:10px;"><div class="tensionTitle" data-st="color:var(--emerald-deep);">Voice fingerprint</div><div data-st="font-style:italic; line-height:1.7;">${escHTML(fp)}</div><div class="sub" data-st="margin:6px 0 0;">Sample lines drawn from this character's own traits — how they'd actually sound on the page. Stable for this exact character; changes when the traits do.</div></div>`;
+      h += `<div class="tensionBlock" data-st="border-left-color:var(--emerald); margin-top:10px;"><div class="tensionTitle" data-st="color:var(--emerald-deep);">Voice fingerprint</div><div data-st="font-style:italic; line-height:1.7;">${escHTML(fp)} <button type="button" class="copyMini" ${actAttr('click', 'copyLine', fp, '$el')} aria-label="Copy the voice sample" title="Copy the voice sample">copy</button></div><div class="sub" data-st="margin:6px 0 0;">Sample lines drawn from this character's own traits — how they'd actually sound on the page. Stable for this exact character; changes when the traits do.</div></div>`;
     }
     // Radar — 12-axis realised polarity shape.
     let prof = null;
@@ -1654,7 +1673,7 @@ const SETTING_FIELDS = ['mannerCount','vocabCount','personalityCount','profileDe
 const SETTING_TOGGLES = ['personalityToggle','depthFirstToggle','examplesToggle','stressToggle',
   'genPersonality','genSpeech','genVocab','genManner',
   'avoidRecentToggle','wildcardToggle','foilOpposeComposure','compactToggle','castAnchor',
-  'sheetShapeToggle','seatContradictions','exploreCandidates','archetypeSectionsToggle','favouriteBoostToggle'];
+  'sheetShapeToggle','seatContradictions','exploreCandidates','rotateSection','archetypeSectionsToggle','favouriteBoostToggle'];
 
 function captureSettings(){
   const fields = {}, toggles = {}, sections = {};
@@ -2213,7 +2232,7 @@ function importCharacterJSON(fileInput){
       setVal('charContext', charMeta.context || "");
       setText('archetypeTag', charMeta.archetypeLabel || "Imported");
       document.getElementById('pressureSheet').style.display = pressureState ? "block" : "none";
-      if (typeof viewContext !== 'undefined') viewContext = CONTEXT_MODE_IDS.includes(charMeta.viewContext) ? charMeta.viewContext : 'baseline';
+      if (typeof viewContext !== 'undefined') viewContext = allContextModes().some(m => m.id === charMeta.viewContext) ? charMeta.viewContext : 'baseline';
       /* The arc belongs to the imported sheet. It used to be left over from the character
          open before, so the first arc action rebuilt THAT character over this one. */
       if (typeof resetArc === 'function'){

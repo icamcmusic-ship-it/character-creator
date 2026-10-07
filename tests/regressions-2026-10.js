@@ -73,6 +73,50 @@ module.exports = function({check, group, assert}){
     return JSON.stringify(v3);
   });
 
+  check('V3 voice lab: nine more speech acts on v3 only, an audience that moves the line, and a two-voice exchange', ()=>{
+    const G = fresh();
+    G.gen('v3-vlab1');
+    const r = G.evalIn(`(()=>{
+      const v3 = voiceLab(state, 'baseline', 0, charMeta).map(l => l.promptId);
+      const plain = composeVoiceLine(state, 'refuse', 'baseline', {index: 0, audience: ''}).text;
+      const boss = composeVoiceLine(state, 'refuse', 'baseline', {index: 0, audience: 'authority'});
+      const kid = composeVoiceLine(state, 'refuse', 'baseline', {index: 0, audience: 'child'});
+      const ex = voiceExchange({state, meta:{name:'A'}}, {state, meta:{name:'B'}}, 'request', 'baseline', '');
+      setEngineV(1); const old = voiceLab(state, 'baseline', 0, charMeta).map(l => l.promptId); setEngineV(3);
+      return {v3, old, differs: plain !== boss.text || plain !== kid.text, bossRule: boss.rules.some(x => /audience/.test(x)), turns: ex.turns.map(t => t.who + ':' + t.act), reply: ex.reply};
+    })()`);
+    assert(r.v3.length === 16 && r.old.length === 7, 'speech acts: v3 ' + r.v3.length + ', older ' + r.old.length);
+    assert(r.bossRule && r.differs, 'the audience did not show up in the line or its rules');
+    assert(r.turns.length === 4 && r.turns[0].startsWith('A:') && r.turns[1].startsWith('B:') && r.reply === 'refuse', 'exchange: ' + JSON.stringify(r.turns));
+  });
+
+  check('V3 crossed needs: one character\'s Need against another\'s Defence', ()=>{
+    const G = fresh();
+    const r = G.evalIn(`(()=>{
+      const mk = (cat, trait, desc) => ({trait:{id:1, section:'Motivation & Wound', category:cat, trait, desc, example:'', pol:{}, intensity:3}});
+      const A = {state:{prof_motivation_0: mk('The Need (what would actually help)', 'To be able to ask for help without a price', 'Needs to lean on someone and be allowed to.')}, meta:{name:'Asha'}};
+      const B = {state:{prof_motivation_1: mk('The Defence (what they built on top)', 'Handles it alone, always', 'Never needs anyone and says so.')}, meta:{name:'Ben'}};
+      return {ab: crossedNeeds(A, B), none: crossedNeeds(B, {state:{}, meta:{}})};
+    })()`);
+    assert(r.ab.length === 1 && r.ab[0].theme === 'help' && r.ab[0].from === 'Asha', 'crossed needs: ' + JSON.stringify(r.ab));
+    assert(r.none.length === 0, 'a sheet with no cards crossed something');
+  });
+
+  check('V3 about half of v3 blank rolls rotate one switched-off section in (the same seed the same one); v1 and v2 never do; the box turns it off', ()=>{
+    const off = () => { const G = fresh(); G.evalIn("PROFILE_SECTIONS.filter(p => p.defaultOn === false).map(p => p.id)").forEach(id => G.document._set('sec_' + id, {checked: false})); return G; };
+    const offSecs = "(()=>{const names=new Set(PROFILE_SECTIONS.filter(p=>p.defaultOn===false).map(p=>p.section));return Object.values(state).filter(s=>s&&s.trait&&names.has(s.trait.section)).map(s=>s.trait.section)})()";
+    const run = (G, pre) => { let n = 0; const seen = new Set(); for (let i = 1; i <= 40; i++){ G.gen(pre + (i * 104729).toString(36)); const secs = G.evalIn(offSecs); if (secs.length){ n++; secs.forEach(x => seen.add(x)); } } return {n, kinds: seen.size}; };
+    const G = off();
+    const v1 = run(G, 'v1-'), v2 = run(G, 'v2-'), v3 = run(G, 'v3-');
+    assert(v1.n === 0 && v2.n === 0, 'older engines rotated a section in: ' + JSON.stringify({v1, v2}));
+    assert(v3.n >= 12 && v3.n <= 34 && v3.kinds >= 5, 'v3 rotation off its rate: ' + JSON.stringify(v3));
+    G.gen('v3-' + (3 * 104729).toString(36)); const a = G.sig(); G.gen('v3-' + (3 * 104729).toString(36));
+    assert(G.sig() === a, 'a v3 seed rotated differently on a replay');
+    G.document._set('rotateSection', {checked: false});
+    assert(run(G, 'v3-').n === 0, 'the box did not turn rotation off');
+    return JSON.stringify(v3);
+  });
+
   check('H1 a trait name carrying markup cannot reach #warnBox as HTML, and the dispatcher refuses built-ins', ()=>{
     const G = fresh(); const d = G.document;
     d._set('warnBox', {});
@@ -272,7 +316,7 @@ module.exports = function({check, group, assert}){
     const r = G.evalIn("({blank: engineVersionFor(''), typed: engineVersionFor('a typed phrase'), v2: engineVersionFor('v2-abc'), v1: engineVersionFor('v1-abc'), def: DEFAULTS.fields.engineVersion})");
     assert(r.blank === 3, 'a blank box built with engine ' + r.blank + ' after an old save set the field to 1');
     assert(r.typed === 1 && r.v1 === 1 && r.v2 === 2, 'typed phrases and prefixed seeds must still pick their own engine: ' + JSON.stringify(r));
-    assert(r.def === '2', 'DEFAULTS.fields has no engineVersion, so Reset reads the (overwritten) defaultValue');
+    assert(r.def === '3', 'DEFAULTS.fields has no engineVersion, so Reset reads the (overwritten) defaultValue');
   });
 
   check('M12 Reset puts content packs and slider locks back', ()=>{

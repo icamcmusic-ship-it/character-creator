@@ -467,6 +467,7 @@ function generateBatch(n){
     if (typeof updateStickyBar === 'function') updateStickyBar();
   }
   renderBatchTray();
+  if (typeof showPhoneResultSheet === 'function') showPhoneResultSheet('batch');
   /* With no sheet yet (Roll 5 as the very first action) renderSheet drew the whole character
      chrome around nothing: a "Your hand" meter, a "mostly distinct to your last generation"
      banner and eleven "nothing was drawable" stubs. Show the candidates alone instead. */
@@ -1291,6 +1292,7 @@ function dismissDiff(slotId){ delete diffLog[slotId]; renderSlotChange(slotId); 
 function toggleLock(slotId){
   if (state[slotId]) {
     state[slotId].locked = !state[slotId].locked; renderSlotChange(slotId);
+    if (typeof updateKeptCounter === 'function') updateKeptCounter();
     // Keep and release changed a pink outline and nothing else, on a very long page.
     const t = state[slotId].trait;
     if (t && typeof toast === 'function') toast(state[slotId].locked
@@ -1302,12 +1304,14 @@ function lockAll(){
   snapshotHistory();
   Object.values(state).forEach(s=>{ if (s && s.trait) s.locked = true; });
   withPreservedFocus(()=>{ renderSheet(); });
+  if (typeof updateKeptCounter === 'function') updateKeptCounter();
   toastUndo("Every card is kept.", ()=> undoLast());
 }
 function unlockAll(){
   snapshotHistory();
   Object.values(state).forEach(s=>{ if (s) s.locked = false; });
   withPreservedFocus(()=>{ renderSheet(); });
+  if (typeof updateKeptCounter === 'function') updateKeptCounter();
   toastUndo("Every card is released.", ()=> undoLast());
 }
 

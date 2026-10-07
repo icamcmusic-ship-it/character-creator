@@ -408,6 +408,10 @@
         <input type="checkbox" id="exploreCandidates" checked>
         <label data-st="margin:0; text-transform:none; font-size:.85rem; color:var(--text);" for="exploreCandidates">Best of three — when the seed box is blank, draw three and keep the one least like this project's characters (a pasted seed always replays exactly)</label>
       </div>
+      <div class="stressToggleRow checkboxRow advOnly" data-st="margin-top:8px;">
+        <input type="checkbox" id="rotateSection" checked>
+        <label data-st="margin:0; text-transform:none; font-size:.85rem; color:var(--text);" for="rotateSection">Rotate a switched-off section into about half of new rolls (Persuasion, Digital Voice, Family Talk, Romance…), so the optional sections get met without opening each one</label>
+      </div>
 
       <div class="stressToggleRow checkboxRow advOnly" data-st="margin-top:8px;">
         <input type="checkbox" id="favouriteBoostToggle" data-on="change" data-act="onFavouriteBoostChange" data-args="[]">
@@ -772,6 +776,7 @@
           <input type="checkbox" id="reduceMotionToggle" data-on="change" data-act="toggleReduceMotion" data-args="[]">Reduce motion
         </label>
       </div>
+      <div class="miniHeader" id="miniHeader" hidden><b id="miniName"></b> <span class="sub" id="miniLabel"></span> <button type="button" class="stickySeed" id="miniSeed" data-on="click" data-act="copySeed" data-args="[]" title="Copy the seed that replays this character"></button></div>
       <div id="sheetBody"></div>
 
       <div class="arcPanel" id="voiceLabPanel" data-st="display:none;">
@@ -782,9 +787,18 @@
           <button class="btn-secondary" id="vlMode_pressure" aria-pressed="false" data-on="click" data-act="setVoiceLabMode" data-args="[&quot;pressure&quot;]">Under pressure</button>
           <button class="btn-secondary" id="vlReroll" data-on="click" data-act="rerollVoiceLab" data-args="[]" title="Compose every line again from the same sheet">Another take</button>
           <button class="btn-secondary" data-on="click" data-act="copyVoiceLab" data-args="[&quot;$el&quot;]">Copy</button>
+          <label class="inlineToggle">Said to <select id="voiceAudience" data-on="change" data-act="renderVoiceLab" data-args="[]" aria-label="Who the lines are said to"></select></label>
           <label class="inlineToggle"><input type="checkbox" id="voiceLabInExport"> Include in exports</label>
         </div>
         <div id="voiceLabBody"></div>
+        <div id="voiceAids"></div>
+        <details class="vlAddPrompt" id="voiceFitBox">
+          <summary>Does this line sound like them?</summary>
+          <div class="sub" data-st="margin:6px 0;">Paste a line (yours, or one from a draft). It is checked against this sheet's own rules: length, hedging, register, feeling, warmth, reading level and the words this voice avoids.</div>
+          <textarea id="voiceFitText" rows="3" aria-label="A line to check against this character's voice" placeholder="Paste a line of dialogue here"></textarea>
+          <div class="actionRow" data-st="margin-top:6px;"><button class="btn-secondary" data-on="click" data-act="runVoiceFit" data-args="[]">Check the line</button></div>
+          <div id="voiceFitResult" aria-live="polite"></div>
+        </details>
         <details class="vlAddPrompt" id="vlAddPrompt">
           <summary>Add your own situation</summary>
           <div class="sub" data-st="margin:6px 0;">Saved with the current project. It is composed like the built-in situation you pick, from this sheet's own rules.</div>
@@ -949,6 +963,7 @@
     </div>
     <div class="sheet" id="relSheet">
       <div class="sheetHeader"><h2 id="relTitle">Relationship</h2></div>
+      <div class="actionRow" data-st="margin:0 0 8px;"><label class="inlineToggle">Scene for the exchange <select id="relExchangePrompt" data-on="change" data-act="analyseRelationship" data-args="[]" aria-label="Situation for the two-voice exchange"></select></label></div>
       <div id="relBody"></div>
     </div>
   </div>
@@ -956,6 +971,7 @@
   <div class="stickyBar" id="stickyBar">
     <button class="btn-primary" data-on="click" data-act="generateCharacter" data-args="[]" aria-keyshortcuts="Control+Enter Meta+Enter" title="Build a character (Ctrl/&#8984;+Enter)">✦ Build &amp; Roll</button>
     <button class="btn-secondary" data-on="click" data-act="undoLast" data-args="[]" aria-keyshortcuts="Control+Z Meta+Z" title="Undo (Ctrl/&#8984;+Z)">Undo</button>
+    <button class="btn-secondary keptBtn" id="keptBtn" data-st="display:none;" data-on="click" data-act="unlockAll" data-args="[]" title="Cards you have kept stay through every rebuild. Click to release them all (undoable).">Kept: 0 · Unkeep all</button>
     <button type="button" class="stickyMoreBtn" id="stickyMoreBtn" data-on="click" data-act="toggleStickyMore" data-args="[]" aria-expanded="false" aria-controls="stickyExtra" aria-label="More actions" title="More actions">⋯</button>
     <!-- On a phone these fold behind the ⋯ button; on a wide screen they sit in the row. -->
     <div class="stickyExtra" id="stickyExtra">
@@ -977,6 +993,12 @@
     </div>
     <button type="button" class="stickyHelp" data-on="click" data-act="openShortcuts" data-args="[]" aria-keyshortcuts="Shift+?" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts and help">?</button>
   </div>
+
+  <dialog id="resultSheet" class="nameDialog resultSheet" aria-labelledby="resultSheetTitle">
+    <h2 id="resultSheetTitle" data-st="margin:0 0 10px;">Result</h2>
+    <div id="resultSheetBody"></div>
+    <div class="actionRow" data-st="margin-top:10px;"><button type="button" class="btn-primary" data-on="click" data-act="closeResultSheet" data-args="[]">See the full sheet</button></div>
+  </dialog>
 
   <dialog id="shortcutDialog" class="nameDialog shortcutDialog" aria-labelledby="shortcutTitle">
   <h2 id="shortcutTitle" data-st="margin:0 0 10px;">Keyboard shortcuts</h2>

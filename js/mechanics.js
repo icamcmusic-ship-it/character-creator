@@ -1066,3 +1066,146 @@ function innerConflictLeak(st, rng, opts){
   return {text: text.charAt(0).toUpperCase() + text.slice(1),
     rule: `inner conflict: ${ic.label} — ${ic.loser.role.toLowerCase()} “${ic.loser.trait.trait}” leaks out under load`};
 }
+
+// ================= 11. Pair exchange and crossed needs =================
+/* PAIR EXCHANGE. The voice lab composes one character at a time; two people in a scene need each to answer the other. The first speaks the
+   chosen act, the second answers with the act that naturally follows it (a request meets a refusal, a thank-you a compliment, bad news
+   comfort), then both go round again under pressure. Each line is composed from its own speaker's sheet, so the exchange shows whose
+   voice carries the scene. */
+const VOICE_REPLY_ACT = {refuse:"persuade", persuade:"refuse", request:"refuse", askhelp:"refuse", conceal:"persuade", lie:"conceal", apologise:"refuse",
+  thank:"compliment", congratulate:"compliment", criticise:"apologise", comfort:"thank", compliment:"thank", badnews:"comfort", greet:"greet",
+  farewell:"farewell", confess:"criticise"};
+function voiceExchange(a, b, promptId, mode, audience){
+  if (!a || !b || !a.state || !b.state) return null;
+  const ids = allVoicePrompts().map(p => p.id);
+  if (!ids.includes(promptId)) return null;
+  const like = (allVoicePrompts().find(p => p.id === promptId) || {}).like;
+  const base = VOICE_REPLY_ACT[like || promptId];
+  const reply = base && ids.includes(base) ? base : "refuse";
+  const calm = mode === "pressure" ? "pressure" : "baseline";
+  const nameOf = m => (m.meta && m.meta.name) || "Unnamed";
+  const turn = (who, st, act, md, index, take) => {
+    const l = composeVoiceLine(st, act, md, {index, take, audience});
+    return l ? {who: nameOf(who), act: l.prompt, text: l.text, rules: l.rules} : null;
+  };
+  const turns = [
+    turn(a, a.state, promptId, calm, 0, 0), turn(b, b.state, reply, calm, 1, 0),
+    turn(a, a.state, promptId, "pressure", 2, 1), turn(b, b.state, reply, "pressure", 3, 1),
+  ].filter(Boolean);
+  return {promptId, reply, turns};
+}
+
+/* CROSSED NEEDS. Two characters are rarely in conflict over their sliders; they are in conflict because what one of them needs is
+   exactly what the other's defence, lie, fear or want rules out. Each theme pairs a pattern in someone's Need with a pattern in the
+   other person's inner cards; a match in either direction is a scene. Read from the cards' own text, so it is only as specific as they are. */
+const CROSSED_NEED_THEMES = [
+  {id:"help", need:/\bhelp\b|\blean\b|accept|carried|let (someone|them) in|ask(ed|ing)?\b/i, block:/never needs|self-reliant|on their own|handle it|manage alone|independen|no help|\bstrong\b|\balone\b/i,
+   text:(n, o) => `${n} needs to be able to lean on someone; ${o}'s inner cards treat leaning as a weakness, so ${o} will wave the offer off, or make it cost something.`},
+  {id:"known", need:/\bknown\b|\bseen\b|\bheard\b|understood|witness/i, block:/joke|deflect|humour|change the subject|busy|clinical|logistic|hide|mask|performance/i,
+   text:(n, o) => `${n} needs to be known; ${o} answers a plea to be seen with a joke, a task or a change of subject.`},
+  {id:"enough", need:/\brest\b|\bstop\b|slow|\benough\b|permission|put it down/i, block:/prove|\bbest\b|\bwin\b|\bfirst\b|rank|title|achieve|\bmore\b|earn/i,
+   text:(n, o) => `${n} needs to be told it is enough; ${o} is still keeping score, and says so.`},
+  {id:"truth", need:/\btruth\b|honest|\bstraight\b|plain|told\b/i, block:/smooth|polite|secret|conceal|hide|white lie|keeps from|never says/i,
+   text:(n, o) => `${n} needs the plain truth; ${o} manages people with kind omissions and calls it consideration.`},
+  {id:"space", need:/\bspace\b|left alone|quiet|\balone\b|time to/i, block:/abandon|left behind|silence|leaving|waits|checks on|follow/i,
+   text:(n, o) => `${n} needs room; ${o} hears room as leaving, and moves closer.`},
+  {id:"promise", need:/reassur|promise|certain|\bsure\b|guarantee|told it will/i, block:/won't promise|never promise|vague|hedge|noncommittal|keeps options|can't say/i,
+   text:(n, o) => `${n} needs a promise; ${o} will not give one, and that withholding is the thing ${n} hears.`},
+  {id:"forgive", need:/forgiv|second chance|amends|start again|clean slate/i, block:/grudge|keeps score|never forgive|\bowe\b|\bdebt\b|remembers every/i,
+   text:(n, o) => `${n} needs a second chance; ${o} remembers every first one.`},
+  {id:"trust", need:/\btrust\b|let go|surrender|follow|hand over/i, block:/\bcontrol\b|\bplan\b|manage|order|checks?\b|in charge/i,
+   text:(n, o) => `${n} needs to be trusted with something; ${o} has to be in charge of it.`},
+];
+function crossedNeeds(A, B){
+  if (!A || !B || !A.state || !B.state) return [];
+  const nm = m => (m.meta && m.meta.name) || "Unnamed";
+  const cards = (st, re) => Object.keys(st || {}).filter(k => k.startsWith("prof_motivation_") && st[k] && st[k].trait && re.test(st[k].trait.category)).map(k => st[k].trait);
+  const text = t => (typeof motivationText === "function" ? motivationText(t) : `${t.trait} ${t.desc || ""}`);
+  const out = [];
+  [[A, B], [B, A]].forEach(([from, to]) => {
+    const needs = cards(from.state, /The Need/i);
+    const blockers = cards(to.state, /The Defence|The Lie|Core Fear|Core Want|The Ghost/i);
+    CROSSED_NEED_THEMES.forEach(th => {
+      const n = needs.find(t => th.need.test(text(t))), b = n && blockers.find(t => th.block.test(text(t)));
+      if (n && b) out.push({theme: th.id, from: nm(from), to: nm(to), text: th.text(nm(from), nm(to)), need: n.trait, blocker: b.trait});
+    });
+  });
+  return out.slice(0, 4);
+}
+
+// ================= 12. Hot buttons, lexicon and voice-fit =================
+/* HOT BUTTONS. Three topics that light the character up and three that shut them down, read off the cards that already say it: what they are
+   after, what they are good at, what they enjoy and belong to light them up; the ghost, the wound, the fear, what they will not say about
+   money or family, and what they dread shut them down. Lens taboos exist per lens; this is per person. */
+function hotButtons(st){
+  const many = (id, re) => Object.keys(st || {}).filter(k => k.startsWith("prof_" + id + "_") && st[k] && st[k].trait && (!re || re.test(st[k].trait.category))).map(k => st[k].trait);
+  const rank = list => list.filter((t, i, a) => a.findIndex(x => x.id === t.id) === i)
+    .sort((a, b) => (b.intensity || 3) - (a.intensity || 3) || a.id - b.id);
+  const light = rank([].concat(many("goals", /Immediate|Longer/), many("competence"), many("texture", /Preferences|Affiliations/), many("jargon"), many("beliefs", /Faith Practice|Secular Rituals/), many("family", /Talks About Family/)));
+  const shut = rank([].concat(many("motivation", /The Ghost|Core Wound|Core Fear/), many("money", /Money Taboo/), many("family", /Never Mentions/), many("fears"), many("repair", /Failed Repair/)));
+  const shape = t => ({topic: _mxLc(t.trait), from: `${t.category}`, id: t.id});
+  return {lights: light.slice(0, 3).map(shape), shuts: shut.slice(0, 3).map(shape)};
+}
+
+/* LEXICON. What this voice leans on and what it would not say, both read from the sheet: the phrases come from the examples of the
+   vocabulary, grammar and verbosity cards; the refusals from the lean of the voice. */
+function lexiconFor(st){
+  const r = voiceRules(st);
+  const own = [];
+  (r.vocab || []).concat(r.grammar ? [r.grammar] : [], r.verbosity ? [r.verbosity] : []).forEach(t => {
+    _exampleSentences(t).slice(0, 1).forEach(s => own.push(s.replace(/[.!?]+$/, "")));
+    _examplePhrases([t]).slice(0, 1).forEach(p => own.push(p.text));
+  });
+  const never = [];
+  if (r.formal) never.push("gonna", "no worries", "whatever");
+  if (r.casual) never.push("I beg your pardon", "indeed", "one might say");
+  if (r.terse) never.push("to elaborate further", "let me explain at length");
+  if (r.long) never.push("short answer: no", "that's all there is to it");
+  if (r.direct) never.push("if it's not too much trouble", "I'm probably wrong");
+  if (r.yielding) never.push("because I said so", "do it my way");
+  if (r.cold) never.push("I love you all", "bless you");
+  if (r.warm) never.push("I couldn't care less", "not my problem");
+  if (r.straight) never.push("technically I didn't lie");
+  if (r.slippery) never.push("to be perfectly honest");
+  if (r.mannered) never.push("shut up");
+  if (r.blunt) never.push("if you'd be so kind");
+  const uniq = a => a.filter((x, i) => x && a.indexOf(x) === i);
+  return {overused: uniq(own).slice(0, 5), never: uniq(never).slice(0, 5)};
+}
+
+/* VOICE FIT. A pasted line, checked against the sheet's own rules. Each check says fits, stretch or off, with the reason; nothing is scored
+   out of a hundred because the point is the conversation about the line, not a grade. */
+function voiceFitCheck(st, text){
+  const raw = String(text || "").trim();
+  if (!raw) return {checks: [], summary: "Paste a line the character would say."};
+  const r = voiceRules(st), rs = readingStats(raw);
+  const words = rs.words, sent = rs.sentences, avg = words / Math.max(1, sent);
+  const speech = raw.replace(/\[[^\]]*\]/g, " ");
+  const count = re => (speech.match(re) || []).length;
+  const hedges = count(/\b(maybe|perhaps|sort of|kind of|i think|i guess|i suppose|possibly|a bit|just|if that's|if it's|probably)\b/gi);
+  const hedgeRate = words ? hedges / words : 0;
+  const contractions = count(/\b\w+'(s|re|ve|d|ll|t|m)\b/gi), ellipses = count(/\.{3}|…/g), shouts = count(/!/g), questions = count(/\?/g);
+  const slang = count(/\b(gonna|wanna|kinda|yeah|nope|ain't|innit|mate|dunno|nah)\b/gi), formalWords = count(/\b(moreover|therefore|furthermore|regarding|shall|whom|indeed|kindly|permit)\b/gi);
+  const checks = [], add = (label, verdict, note) => checks.push({label, verdict, note});
+  const fit = (cond, stretchCond) => cond ? "fits" : stretchCond ? "stretch" : "off";
+  if (r.terse) add("Length", fit(words <= 14, words <= 24), `${words} words against a terse voice`);
+  else if (r.long) add("Length", fit(words >= 28, words >= 16), `${words} words against a voice that runs long`);
+  else add("Length", fit(words >= 6 && words <= 45, words <= 70), `${words} words`);
+  if (r.yielding) add("Hedging", fit(hedgeRate >= 0.04, hedges >= 1), `${hedges} hedge${hedges === 1 ? "" : "s"}; a yielding voice softens what it says`);
+  else if (r.direct) add("Hedging", fit(hedgeRate <= 0.02, hedgeRate <= 0.05), `${hedges} hedge${hedges === 1 ? "" : "s"}; a direct voice mostly does not`);
+  if (r.formal) add("Register", fit(slang === 0 && contractions <= Math.max(1, words / 25), slang <= 1), `${contractions} contraction${contractions === 1 ? "" : "s"}, ${slang} slang word${slang === 1 ? "" : "s"} against a formal voice`);
+  else if (r.casual) add("Register", fit(contractions + slang >= 1 && formalWords === 0, formalWords <= 1), `${contractions} contractions, ${formalWords} formal words against a casual voice`);
+  if (r.open) add("Feeling on the page", fit(shouts + ellipses + questions >= 1 || /\b(love|hurt|miss|afraid|sorry|glad)\b/i.test(speech), true), `${shouts} exclamation${shouts === 1 ? "" : "s"}, ${ellipses} ellipsis${ellipses === 1 ? "" : "es"}`);
+  else if (r.guarded) add("Feeling on the page", fit(shouts === 0 && !/\b(love|hurt|miss|afraid)\b/i.test(speech), shouts <= 1), `${shouts} exclamation${shouts === 1 ? "" : "s"}; a guarded voice keeps the feeling off the page`);
+  if (r.warm) add("Warmth", fit(/\b(please|thanks|thank you|glad|love|sorry|together|we)\b/i.test(speech), true), "a warm voice leaves some sign it cares how the line lands");
+  else if (r.cold) add("Warmth", fit(!/\b(love|dear|sweetheart|please)\b/i.test(speech), true), "a cool voice does not decorate the line");
+  const lex = lexiconFor(st);
+  const used = lex.never.filter(p => speech.toLowerCase().includes(p.toLowerCase()));
+  add("Words they would not say", used.length ? "off" : "fits", used.length ? `contains "${used[0]}", which this voice avoids` : "none of the phrases this voice avoids");
+  const p = r.profile || {}, grade = rs.grade;
+  if ((p.intel || 0) > 0.2) add("Reading level", fit(grade >= 7, grade >= 5), `grade ${grade} against an analytical voice`);
+  else if ((p.intel || 0) < -0.2) add("Reading level", fit(grade <= 8, grade <= 11), `grade ${grade} against a plainer voice`);
+  const off = checks.filter(c => c.verdict === "off").length, stretch = checks.filter(c => c.verdict === "stretch").length;
+  const summary = off ? `${off} thing${off === 1 ? "" : "s"} here this voice would not do.` : stretch ? "Close: a few places where the line stretches the voice." : "It sounds like them.";
+  return {checks, summary, words, grade};
+}

@@ -364,7 +364,7 @@ async function loadSavedCharacter(name){
        an older save carrying full embedded trait copies rather than {__id} stubs. Both
        shapes arrive here the same way, so a save written by any build still loads. */
     state = rec.state; charMeta = rec.charMeta || {name, age:"", context:"", archetypeLabel:"Loaded"};
-    if (typeof viewContext !== 'undefined') viewContext = CONTEXT_MODE_IDS.includes(charMeta.viewContext) ? charMeta.viewContext : 'baseline';
+    if (typeof viewContext !== 'undefined') viewContext = allContextModes().some(m => m.id === charMeta.viewContext) ? charMeta.viewContext : 'baseline';
     if (typeof resetArc === 'function'){
       arcEvents = (Array.isArray(rec.arcEvents) ? rec.arcEvents : []).filter(e=>!validateArcEvent(e).length);
       arcBase = rec.arcBase ? expandSlots(rec.arcBase) : JSON.parse(JSON.stringify(state));
@@ -377,6 +377,7 @@ async function loadSavedCharacter(name){
     traitNotes = rec.traitNotes || {};
     diffLog = {}; rerollExclusions = {}; rerollHistory = {}; whyOpen = {}; OPEN_CARD_CONTROLS.clear();
     if (rec.settings) restoreSettings(rec.settings);
+    noteLoadedEngine(rec.seed || (rec.meta && rec.meta.seed), rec.settings);
     /* The file-import path sets this and the load path did not, so a later Undo could
        pair the loaded sheet with the sliders of whatever was generated before it. The
        loaded character's own settings block is the right answer; live controls are the
@@ -1300,6 +1301,8 @@ function renderVoiceLab(){
   const host = document.getElementById('voiceLabBody');
   if (!host) return;
   renderVoicePromptForm();
+  const aud = document.getElementById('voiceAudience');
+  if (aud && !aud.options.length){ aud.innerHTML = VOICE_AUDIENCES.map(x => `<option value="${escHTML(x.id)}">${escHTML(x.label)}</option>`).join(""); }
   const panel = document.getElementById('voiceLabPanel');
   const has = Object.keys(state).length > 0;
   if (panel) panel.style.display = has ? "block" : "none";
@@ -1319,6 +1322,28 @@ function renderVoiceLab(){
       <button class="btn-secondary vlTen" ${actAttr('click', 'toggleVoiceTen', l.promptId)} aria-expanded="${voiceTenOpen === l.promptId ? 'true' : 'false'}">${voiceTenOpen === l.promptId ? 'Hide the 10 lines' : '10 lines'}</button>
       ${voiceTenOpen === l.promptId ? `<ol class="vlTenList">${voiceLines(state, l.promptId, voiceLabMode, 10, voiceLabReroll, charMeta).map(x => `<li>${escHTML(x.text)}</li>`).join("")}</ol>` : ``}
     </div>`).join("");
+  renderVoiceAids();
+}
+/* Hot buttons and lexicon, under the lab's lines. */
+function renderVoiceAids(){
+  const host = document.getElementById('voiceAids');
+  if (!host) return;
+  if (!Object.keys(state).length || typeof hotButtons !== 'function'){ host.innerHTML = ""; return; }
+  const hb = hotButtons(state), lex = lexiconFor(state);
+  const list = items => items.length ? `<ul class="vlAidList">${items.map(x => `<li>${escHTML(x.topic)} <span class="sub">${escHTML(x.from)}</span></li>`).join("")}</ul>` : `<div class="sub">Nothing on the sheet says.</div>`;
+  const words = items => items.length ? `<ul class="vlAidList">${items.map(x => `<li>“${escHTML(x)}”</li>`).join("")}</ul>` : `<div class="sub">Nothing distinctive yet.</div>`;
+  host.innerHTML = `<div class="vlAids">
+    <div class="vlAid"><h3>Lights them up</h3>${list(hb.lights)}</div>
+    <div class="vlAid"><h3>Shuts them down</h3>${list(hb.shuts)}</div>
+    <div class="vlAid"><h3>Words they lean on</h3>${words(lex.overused)}</div>
+    <div class="vlAid"><h3>Words they would not say</h3>${words(lex.never)}</div></div>`;
+}
+function runVoiceFit(){
+  const host = document.getElementById('voiceFitResult');
+  if (!host) return;
+  if (!Object.keys(state).length){ host.innerHTML = `<div class="sub">Generate a character first.</div>`; return; }
+  const res = voiceFitCheck(state, strVal('voiceFitText', ''));
+  host.innerHTML = `<div class="charMeta">${escHTML(res.summary)}</div>` + res.checks.map(c => `<div class="vlFit vlFit-${escAttr(c.verdict)}"><b>${escHTML(c.label)}</b> <span class="vlFitTag">${escHTML(c.verdict)}</span> <span class="sub">${escHTML(c.note)}</span></div>`).join("");
 }
 /* The "10 lines" view (audit §5): ten composed takes of one situation, so the range of
    a voice is visible rather than one sample of it. One prompt open at a time. */
@@ -2589,6 +2614,7 @@ function surpriseMe(){
   invalidateSliderCache();
   onSliderChange();
   runGeneration();
+  showPhoneResultSheet('surprise');
   toast(said + " Everything is still yours to change.");
 }
 
@@ -3116,6 +3142,26 @@ function analyseRelationship(){
     // rule interpolates a category or trait name, this becomes the same hole again.
     notes.forEach(n=>{ h += `<div class="traitCard"><div class="traitMain"><div class="traitDesc">${escHTML(n)}</div></div></div>`; });
     h += `</div>`;
+  }
+  const crossed = typeof crossedNeeds === 'function' ? crossedNeeds(A, B) : [];
+  if (crossed.length){
+    h += `<div class="axisGroup"><div class="axisTitle">Crossed needs</div>`;
+    crossed.forEach(c => { h += `<div class="traitCard"><div class="traitMain"><div class="traitDesc">${escHTML(c.text)}</div>
+      <div class="sub">${escHTML(c.from)}'s need: ${escHTML(c.need)} · in the way: ${escHTML(c.blocker)}</div></div></div>`; });
+    h += `</div>`;
+  }
+  if (typeof voiceExchange === 'function'){
+    const sel = document.getElementById('relExchangePrompt');
+    const prompts = allVoicePrompts();
+    if (sel && sel.options.length !== prompts.length){
+      const keep = sel.value; sel.innerHTML = prompts.map(p => `<option value="${escHTML(p.id)}">${escHTML(p.label)}</option>`).join("");
+      if (prompts.some(p => p.id === keep)) sel.value = keep;
+    }
+    const ex = voiceExchange(A, B, strVal('relExchangePrompt', 'request'), voiceLabMode, strVal('voiceAudience', ''));
+    if (ex && ex.turns.length){
+      h += `<div class="axisGroup"><div class="axisTitle">Hear them talk</div>` + ex.turns.map(t => `<div class="traitCard"><div class="traitMain"><div class="traitName">${escHTML(t.who)} <span class="sub">${escHTML(t.act)}</span></div>
+        <blockquote class="voiceLine">${escHTML(t.text)}</blockquote></div></div>`).join("") + `</div>`;
+    }
   }
   if (!clashes.length && !alignments.length && !notes.length){
     h += `<div class="charMeta">Not enough personality signal to compare — generate both characters with the personality profile enabled.</div>`;
@@ -4161,6 +4207,7 @@ function applyShareFromHash(){
     if (p.settings) restoreSettings(p.settings);
     applyAdvancedMode();
     setVal('seedInput', p.seed);
+    noteLoadedEngine(p.seed, p.settings);
     onSliderChange();
     // Seat the link's kept cards exactly as the sender had them.
     state = p.locked ? p.locked : {};
@@ -4609,7 +4656,62 @@ function watchForUpdates(reg){
 }
 
 // Keeps the sticky action bar honest about what the last generation used.
+/* Kept counter: how many cards are kept, with a one-tap release for all of them (undoable). */
+function updateKeptCounter(){
+  const btn = document.getElementById('keptBtn');
+  if (!btn) return;
+  const n = Object.values(state || {}).filter(s => s && s.trait && s.locked).length;
+  btn.style.display = n ? '' : 'none';
+  btn.textContent = `Kept: ${n} · Unkeep all`;
+}
+/* Mini header: name, label and seed, shown when the sheet's own title has scrolled away. */
+let _miniObserver = null;
+function updateMiniHeader(){
+  const box = document.getElementById('miniHeader');
+  if (!box) return;
+  const has = Object.keys(state || {}).length > 0;
+  const lab = typeof characterLabel === 'function' ? characterLabel(state, charMeta) : null;
+  setText('miniName', (charMeta && charMeta.name) || 'Character');
+  setText('miniLabel', lab ? ' · ' + lab.name : '');
+  setText('miniSeed', lastSeedUsed ? 'seed ' + lastSeedUsed : '');
+  if (!has){ box.hidden = true; return; }
+  const title = document.getElementById('sheetTitle');
+  if (title && typeof IntersectionObserver === 'function' && !_miniObserver){
+    _miniObserver = new IntersectionObserver(entries => { const e = entries[entries.length - 1]; box.hidden = !!(e && e.isIntersecting) || !Object.keys(state || {}).length; }, {threshold: 0});
+    _miniObserver.observe(title);
+  }
+}
+/* Phone result sheet: on a narrow screen Roll 5 and Surprise me show their result in a sheet, not by re-rendering a very long page. */
+function isPhoneWidth(){ try { return window.matchMedia('(max-width: 640px)').matches; } catch (e){ return false; } }
+function openResultSheet(title, html){
+  const dlg = document.getElementById('resultSheet');
+  if (!dlg || typeof dlg.showModal !== 'function') return false;
+  setText('resultSheetTitle', title); setHTML('resultSheetBody', html);
+  if (!dlg.open) dlg.showModal();
+  return true;
+}
+function closeResultSheet(){ const d = document.getElementById('resultSheet'); if (d && d.open) d.close(); }
+function showPhoneResultSheet(kind){
+  if (!isPhoneWidth()) return;
+  if (kind === 'batch'){
+    const tray = document.getElementById('batchTray');
+    if (tray && tray.innerHTML.trim()) openResultSheet('Five to choose from', tray.innerHTML);
+  } else if (typeof summaryCardHTML === 'function' && Object.keys(state || {}).length){
+    openResultSheet('Who you got', summaryCardHTML());
+  }
+}
+(function(){ const d = document.getElementById('resultSheet'); if (d) d.addEventListener('click', e => { if (e.target && e.target.closest && e.target.closest('[data-act]') && !/closeResultSheet/.test(e.target.closest('[data-act]').getAttribute('data-act'))) setTimeout(closeResultSheet, 0); }); })();
+/* Say which engine an old save or link was built with. A v1 or v2 seed replays exactly as it always did; new rolls use the current engine. */
+function noteLoadedEngine(seed, settings){
+  const m = /^v(\d+)-/.exec(String(seed || ''));
+  const v = m ? +m[1] : parseInt(settings && settings.fields && settings.fields.engineVersion, 10) || 1;
+  sheetEngineVersion = SUPPORTED_SEED_VERSIONS.includes(v) ? v : 1; syncEngineToSheet();
+  if (v < DEFAULT_ENGINE_V && typeof toast === 'function')
+    toast(`This one was built with engine ${v}, so it replays exactly as it was. New characters use engine ${DEFAULT_ENGINE_V}.`, "ok", 6000);
+}
+function copyLine(text, btnEl){ copyText(String(text == null ? '' : text), btnEl); }
 function updateStickyBar(){
+  updateKeptCounter(); updateMiniHeader();
   const el = document.getElementById('stickySeed');
   if (el) el.textContent = lastSeedUsed ? ("seed " + lastSeedUsed) : "no character yet";
   if (lastSeedUsed){

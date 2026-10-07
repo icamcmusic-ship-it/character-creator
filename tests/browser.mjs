@@ -32,7 +32,7 @@ if (process.env.CSP){
     })});
   });
 }
-const VOICE_PROMPT_COUNT = 7;   // VOICE_PROMPTS in js/engine.js
+const VOICE_PROMPT_COUNT = 16;   // VOICE_PROMPTS (7) plus VOICE_PROMPTS_V3 (9) in js/engine.js: a blank roll builds with engine 3
 page.on('console', m => { if (/Content Security Policy/i.test(m.text())) csp.push(m.text()); });
 await page.goto(base + '/index.html', {waitUntil:'networkidle'});
 

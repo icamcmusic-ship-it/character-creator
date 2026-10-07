@@ -1821,8 +1821,32 @@ function rememberGeneration(st){
   recentFamilies.push(fams);
   while (recentFamilies.length > RECENT_WINDOW) recentFamilies.shift();
   rememberSlotDraws(st);
+  rememberFrame(st);
 }
-function forgetRecentTraits(){ recentTraitIds = []; recentFamilies = []; }
+function forgetRecentTraits(){ recentTraitIds = []; recentFamilies = []; recentFrames = []; }
+/* PROSE-FRAME MEMORY (engine 3). The recent-traits memory counts single cards; what a reader feels as "the same character again" is the same
+   Motivation cards and the same label. The last five sheets' Motivation card ids and the first two words of their label are kept, and best of
+   three charges a candidate for reusing them. */
+let recentFrames = [];
+function frameTokens(st){
+  const t = new Set();
+  Object.keys(st || {}).forEach(k => { if (k.startsWith('prof_motivation_') && st[k] && st[k].trait) t.add('m:' + st[k].trait.id); });
+  const em = typeof emergentArchetypeName === 'function' ? emergentArchetypeName(st) : null;
+  if (em && em.name) t.add('l:' + em.name.toLowerCase().split(/\s+/).slice(0, 2).join(' '));
+  return t;
+}
+function frameOverlapShare(st){
+  if (ENGINE_V < 3 || !recentFrames.length) return 0;
+  const mine = frameTokens(st); if (!mine.size) return 0;
+  const seen = new Set(); recentFrames.forEach(s => s.forEach(x => seen.add(x)));
+  let n = 0; mine.forEach(x => { if (seen.has(x)) n++; });
+  return n / mine.size;
+}
+function rememberFrame(st){
+  const t = frameTokens(st); if (!t.size) return;
+  recentFrames.push(t); while (recentFrames.length > 5) recentFrames.shift();
+}
+const FRAME_PICK_WEIGHT = 0.6;
 /* Which traits keep coming back across the session's recent window. recentTraitIds has
    held this the whole time and nothing ever showed it to anyone. */
 function recurringTraits(minCount){
@@ -4411,10 +4435,21 @@ function archetypeSectionsEnabled(){
 function archetypeOptsIn(ps){
   return ps.defaultOn === false && !!CURRENT_ARCHETYPE_PROFILE && !!CURRENT_ARCHETYPE_PROFILE[ps.id] && archetypeSectionsEnabled();
 }
+/* ROTATION (engine 3). A blank roll used to draw only the sections that ship on, so thirteen sections (and now eight more) were never
+   met unless someone opened the panel. About half of v3 blank rolls bring one of the switched-off sections in for that roll alone, chosen
+   from the seeded stream, so the same seed always rotates in the same one. Off for presets, and one box turns it off. */
+let ROTATED_SECTION_ID = null;
+function rotatedSectionEnabled(){ const el = settingEl('rotateSection'); return el ? !!el.checked : true; }
+function rollRotatedSection(){
+  if (ENGINE_V < 3 || !rotatedSectionEnabled() || CURRENT_ARCHETYPE_PROFILE) return null;
+  const pool = PROFILE_SECTIONS.filter(ps => ps.defaultOn === false && !profileSectionChecked(ps) && catsOf(ps.section).length);
+  if (!pool.length || rand() >= 0.55) return null;
+  return pool[Math.floor(rand() * pool.length)].id;
+}
 function profileSectionEnabled(ps){
   // A section whose every trait is since:3 has nothing a v1 build may draw, and must not take a step of the stream.
   if (ENGINE_V < 3 && !catsOf(ps.section).length) return false;
-  return profileSectionChecked(ps) || archetypeOptsIn(ps);
+  return profileSectionChecked(ps) || archetypeOptsIn(ps) || ps.id === ROTATED_SECTION_ID;
 }
 // The sections the SELECTED preset switches on that the panel shows as off — for the
 // in-force strip and the "why not" tool, which run outside a build.
@@ -6234,7 +6269,11 @@ function wildcardEnabled(){
 }
 
 const MOTIVATION_SECTION_ID = "motivation";
+/* The rotated section lives only for the build that rolled it (see rollRotatedSection): nothing before or after may see it. */
 function buildCharacterState(opts){
+  try { return _buildCharacterStateInner(opts); } finally { ROTATED_SECTION_ID = null; }
+}
+function _buildCharacterStateInner(opts){
   if (opts && opts.drawContext){
     const inner = Object.assign({}, opts); delete inner.drawContext;
     return withDrawContext(opts.drawContext, () => buildCharacterState(inner));
@@ -6265,6 +6304,7 @@ function buildCharacterState(opts){
     composure: Math.round(clamp(compLevel,-2,2)*50),
   });
   setAffinityVec(fullOverrides);
+  ROTATED_SECTION_ID = rollRotatedSection();
   /* §5 plans, rolled up front on the seeded stream — each only when its own setting is
      on, so a build with both off consumes exactly the draws it always did. */
   CURRENT_SHAPE = sheetShapeEnabled() ? rollSheetShape() : null;
@@ -6765,7 +6805,17 @@ const CONTEXT_MODES = [
   {id:"threat",    label:"Under threat",  tags:["threat","fatigue"],   blurb:"Something has gone wrong. The stress response takes the wheel."},
 ];
 const CONTEXT_MODE_IDS = CONTEXT_MODES.map(m => m.id);
-function contextMode(id){ return CONTEXT_MODES.find(m => m.id === id) || CONTEXT_MODES[0]; }
+/* STATE CONTEXTS. Rooms say who is watching; states say what has happened to the person. Each is a lens exactly like the five above
+   (a few tags, amplify and suppress rules read off section and polarity), kept apart so the five-room strip and the exports stay as they were. */
+const STATE_CONTEXT_MODES = [
+  {id:"exhausted",  label:"Exhausted",       tags:["fatigue"],            blurb:"Days without enough sleep. Effort drops out; the habits and the temper are what is left."},
+  {id:"drunk",      label:"Intoxicated",     tags:["private"],            blurb:"The guard is down and so is the brake. Talk gets louder, looser and more honest."},
+  {id:"bereaved",   label:"Newly bereaved",  tags:["private","home"],     blurb:"A death this week. The wound is the whole room; jokes, plans and small pleasures go quiet."},
+  {id:"inlove",     label:"Newly in love",   tags:["intimacy","private"], blurb:"Everything bends toward one person. Warmth and hope rise; discipline and edge soften."},
+  {id:"online",     label:"Watched online",  tags:["public","stranger"],  blurb:"Performing for a feed. The curated face comes forward; the interior and the lapses stay off camera."},
+];
+function allContextModes(){ return CONTEXT_MODES.concat(STATE_CONTEXT_MODES); }
+function contextMode(id){ return allContextModes().find(m => m.id === id) || CONTEXT_MODES[0]; }
 
 /* Per-context rules on section and polarity. Each entry is {test, status, why}; the
    first matching rule after the authored ones wins, so the order is the priority. */
@@ -6811,6 +6861,53 @@ const CONTEXT_LENS_RULES = {
     {test:(t,d)=> t.pol && t.pol.agr === -1, status:"amplified", why:"the hard edge shows"},
     {test:(t,d)=> d.persistence <= 2 && t.pol && t.pol.warm === 1, status:"suppressed", why:"a passing warmth is the first thing to go"},
     {test:(t,d)=> t.section === "Values & Moral Line", status:"active", why:"what they will and will not do is being tested, not changed"},
+  ],
+  exhausted: [
+    {test:(t,d)=> t.pol && t.pol.mood === -1, status:"amplified", why:"tension and low mood are what tiredness leaves"},
+    {test:(t,d)=> t.pol && t.pol.disc === 1, status:"suppressed", why:"discipline is spent first"},
+    {test:(t,d)=> t.pol && (t.pol.act === 1 || t.pol.pace === 1), status:"suppressed", why:"energy and speed are gone"},
+    {test:(t,d)=> t.pol && (t.pol.pace === -1 || t.pol.act === -1), status:"amplified", why:"slowness shows"},
+    {test:(t,d)=> t.section === "Humor Style" && t.category !== "Dry & Deadpan" && t.category !== "Gallows", status:"suppressed", why:"there is no spare energy for performing a joke"},
+    {test:(t,d)=> t.section === "Habits & Vices", status:"amplified", why:"the vices are how they get through"},
+    {test:(t,d)=> t.section === "Conflict & Stress Response", status:"amplified", why:"the stress response has a lower threshold when tired"},
+    {test:(t,d)=> t.pol && t.pol.intel === 1, status:"suppressed", why:"careful analysis is a rested person's habit"},
+  ],
+  drunk: [
+    {test:(t,d)=> t.pol && t.pol.disc === -1, status:"amplified", why:"the impulse has no brake"},
+    {test:(t,d)=> t.pol && t.pol.disc === 1, status:"suppressed", why:"control is the first thing to slip"},
+    {test:(t,d)=> t.pol && (t.pol.vol === 1 || t.pol.emo === 1), status:"amplified", why:"louder and more open"},
+    {test:(t,d)=> t.pol && (t.pol.man === 1 || t.pol.form === 1), status:"suppressed", why:"manners and formality loosen"},
+    {test:(t,d)=> t.category === "Substance & Consumption", status:"amplified", why:"the habit is in the room"},
+    {test:(t,d)=> _INTERIOR_SECTIONS.has(t.section), status:"amplified", why:"interior material gets said aloud"},
+    {test:(t,d)=> t.category === "Restraint & Discipline" || t.category === "Masking", status:"suppressed", why:"restraint and masking are what drink dissolves"},
+  ],
+  bereaved: [
+    {test:(t,d)=> t.section === "Motivation & Wound" && /Core Wound|The Ghost/.test(t.category), status:"amplified", why:"the loss sits on every old one"},
+    {test:(t,d)=> t.section === "Humor Style" && t.category !== "Gallows", status:"suppressed", why:"jokes stop; only the gallows kind survives grief"},
+    {test:(t,d)=> t.section === "Ordinary Texture" || t.section === "Positive Origins", status:"suppressed", why:"small pleasures and good history are out of reach this week"},
+    {test:(t,d)=> t.pol && t.pol.pos === 1, status:"suppressed", why:"optimism is hard to hold"},
+    {test:(t,d)=> t.pol && t.pol.emo === 1, status:"amplified", why:"feeling is closer to the surface"},
+    {test:(t,d)=> t.pol && t.pol.emo === -1, status:"amplified", why:"a guarded person goes quieter, not louder"},
+    {test:(t,d)=> t.section === "Recovery & Repair", status:"suppressed", why:"nothing is being repaired yet"},
+    {test:(t,d)=> t.section === "Attachment & Intimacy Style", status:"amplified", why:"who they reach for, and who they push off, shows"},
+  ],
+  inlove: [
+    {test:(t,d)=> t.pol && (t.pol.pos === 1 || t.pol.warm === 1 || t.pol.emo === 1), status:"amplified", why:"warmth, hope and openness all rise"},
+    {test:(t,d)=> t.section === "Romance & Desire", status:"amplified", why:"attraction comes out in speech"},
+    {test:(t,d)=> t.pol && t.pol.warm === -1, status:"suppressed", why:"the cool front thaws for one person"},
+    {test:(t,d)=> t.pol && t.pol.disc === 1, status:"suppressed", why:"routine slips under distraction"},
+    {test:(t,d)=> t.section === "Attachment & Intimacy Style", status:"amplified", why:"their attachment style is being tested in earnest"},
+    {test:(t,d)=> t.section === "Humor Style" && /Warm|Teasing/.test(t.category), status:"amplified", why:"play comes easily"},
+    {test:(t,d)=> t.section === "Humor Style" && t.category === "Cruel & Barbed", status:"suppressed", why:"the edge softens"},
+  ],
+  online: [
+    {test:(t,d)=> _SURFACE_SECTIONS.has(t.section), status:"amplified", why:"surface behaviour is the product"},
+    {test:(t,d)=> t.section === "Digital Voice", status:"amplified", why:"this is exactly the room it is for"},
+    {test:(t,d,dim)=> t.pol && t.pol.ego === 1, status:"amplified", why:"the confident face comes forward for an audience"},
+    {test:(t,d)=> _INTERIOR_SECTIONS.has(t.section), status:"suppressed", why:"nobody online sees the interior"},
+    {test:(t,d)=> t.pol && t.pol.hon === -1, status:"amplified", why:"curation is a mild kind of evasion"},
+    {test:(t,d)=> t.pol && (t.pol.emo === 1 || t.pol.mood === -1), status:"suppressed", why:"raw feeling and lapses stay off camera"},
+    {test:(t,d)=> t.section === "Habits & Vices", status:"suppressed", why:"unwatched habits stay unwatched"},
   ],
 };
 
@@ -7728,7 +7825,7 @@ function selectDistinctCandidate(cands, references){
   const scored = cands.map((c, i) => {
     const co = c.coherence !== undefined ? c.coherence : ((typeof coherenceScore === 'function' && coherenceScore(c.state)) || {pct:0}).pct;
     const d = (references && references.length ? diversityScore(c.state, references).score : 0) - TALLY_WEIGHT * tallyOveruse(c.state)
-      - RECENT_PICK_WEIGHT * recentOverlapShare(c.state) - RETIRED_PICK_WEIGHT * retiredShare(c.state);
+      - RECENT_PICK_WEIGHT * recentOverlapShare(c.state) - RETIRED_PICK_WEIGHT * retiredShare(c.state) - FRAME_PICK_WEIGHT * frameOverlapShare(c.state);
     return Object.assign({}, c, {index:i, coherence:co, diversity:d});
   });
   const best = Math.max(...scored.map(c => c.coherence));
@@ -8096,11 +8193,32 @@ function _stageDirections(manner){
   });
   return out;
 }
+/* AUDIENCE. Who the line is said to changes it as much as the situation does: the same refusal is one thing to a boss, another to a child
+   or a stranger, another again to a partner. The audience nudges the character's own leans (never replaces them): a boss makes the
+   register formal and the voice yielding, a child makes it warm and plain, a stranger makes it mannered and guarded, someone close makes
+   it casual and open. Empty means the old behaviour exactly. */
+const VOICE_AUDIENCES = [
+  {id:"",          label:"Whoever (as before)"},
+  {id:"authority", label:"Someone with power over them",  set:{formal:true, casual:false, mannered:true, blunt:false, yielding:true, direct:false}, note:"audience: authority — the register goes formal and the voice yields"},
+  {id:"peer",      label:"A peer they get on with",       set:{casual:true, formal:false, open:true}, note:"audience: a peer — the register relaxes"},
+  {id:"child",     label:"A child",                       set:{warm:true, cold:false, blunt:false, formal:false, mannered:false}, note:"audience: a child — warmer, plainer, no edge"},
+  {id:"stranger",  label:"A stranger",                    set:{mannered:true, guarded:true, open:false, formal:true, casual:false}, note:"audience: a stranger — polite and guarded"},
+  {id:"intimate",  label:"Someone close",                 set:{casual:true, formal:false, open:true, guarded:false, warm:true}, note:"audience: someone close — casual, open, warm"},
+];
+function voiceAudienceRules(r, audienceId){
+  const a = VOICE_AUDIENCES.find(x => x.id === audienceId && x.id);
+  if (!a) return r;
+  const out = Object.assign({}, r, a.set);
+  // Two leans on one axis cannot both stand: the one the audience set wins and its opposite is dropped.
+  out.rules = r.rules.concat([{key:"audience", label:a.label, why:a.note}]);
+  return out;
+}
 function composeVoiceLine(st, promptId, mode, opts){
   const prompt = allVoicePrompts().find(p => p.id === promptId);
   if (!prompt) return null;
   opts = opts || {};
-  const r = voiceRules(st);
+  const audience = opts.audience !== undefined ? opts.audience : strVal('voiceAudience', '');
+  const r = voiceAudienceRules(voiceRules(st), audience);
   const underPressure = mode === "pressure";
   let seed = 11;
   Object.values(st || {}).forEach(s => { if (s && s.trait) seed = (seed * 31 + s.trait.id) >>> 0; });
@@ -8110,10 +8228,11 @@ function composeVoiceLine(st, promptId, mode, opts){
   // so ten takes do not close with the same line.
   const recent = Array.isArray(opts.recent) ? opts.recent : null;
   const rng = mulberry32(hashSeedString(String(seed) + "|" + promptId + "|" + (mode || "baseline") + "|c2" +
-    (idx >= 0 || reroll ? "|" + idx + "|" + reroll : "") + (take ? "|t" + take : "")));
+    (idx >= 0 || reroll ? "|" + idx + "|" + reroll : "") + (take ? "|t" + take : "") + (audience ? "|a:" + audience : "")));
   const kind = prompt.like || promptId;
   const table = VOICE_CLAUSES[kind];
   const used = [];
+  { const aud = VOICE_AUDIENCES.find(x => x.id && x.id === audience); if (aud) used.push(aud.note); }
   // Goals, jargon, family, money and texture cards lend their own phrases to the topic pools.
   const profMany = id => Object.keys(st || {}).filter(k => k.startsWith("prof_" + id + "_") && st[k] && st[k].trait).map(k => st[k].trait);
   const vocabPhrases = _examplePhrases(r.vocab).concat(
