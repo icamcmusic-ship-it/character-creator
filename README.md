@@ -216,14 +216,25 @@ button instead of (or as well as) a confirm.
   passive-aggression, arguing the record, smoothing, escalating then apologising, sulking and
   triangulating. **Against type**, under a preset's tuning, flips its one or two strongest axes.
 * **Seeds carry an engine version.** `v1-…` seeds and links made before the change build exactly what
-  they always did; `v2-…` seeds (what a blank roll now prints) use the coverage changes: neutral
+  they always did; `v2-…` seeds (what a blank roll printed before engine 3) use the coverage changes: neutral
   verbosity draws from four categories, a neutral Register can draw Stylized & Elaborate, one personality axis in five draws a standout loud-pole trait, a sheet may omit the Ghost or Defence card, and
   distinctive and signature traits are drawn slightly more often. A typed phrase uses the
   engine the link or settings were saved with (old files restore as v1).
+* **Engine 3 (the October 2026 content pass).** A blank roll prints `v3-…`. Engine 3 draws from the 2,384-trait pack in
+  `js/data/traits-v2-*.js` (marked `since: 3`, invisible to older engines), the eight new optional sections, the slider links
+  for the new categories, the polarity overlay on older untagged traits, the new presets and their hints, prose alternates,
+  nine more voice-lab speech acts and a prose-frame memory in best of three; about half of blank rolls also rotate in one
+  switched-off section (a box turns that off). `v1-` and `v2-` seeds and every link made from one build exactly what they
+  built before: `node tools/replay-check.js <checkout>` prints one hash per seed, and the frozen vectors in
+  `tests/regressions-2026-10.js` fail the moment an older engine's output moves. Outside a build the engine version follows
+  the sheet on screen, so a reroll, pin or undo draws from the bank that sheet was built from. Other tools: `tools/check-v2.js`
+  (validates a content file), `tools/check-overlay.js` (validates the polarity overlay), `tools/near-dups.js` (near-duplicate
+  traits). The page's policy is `style-src 'self'`: markup carries `data-st="prop:value"` and `js/boot.js` applies it
+  through the CSSOM.
 * **What changed after the October 2026 audit** (`docs/AUDIT-2026-10.md`). The category cross-link table had
   24 keys written twice, so about 39 links never fired; v2 seeds now use the whole table and v1 seeds keep
   the old one. The outlier checkbox and count slider reach the sheet shape from v2 (1 leaves it to the
-  sheet, 0, 2 or 3 fixes the number). A fresh cast prints a `v2-` seed, and from v2 the joint optimiser
+  sheet, 0, 2 or 3 fixes the number). A cast printed `v2-` before engine 3 (it now prints `v3-`), and from v2 the joint optimiser
   keeps the anti-similarity rule instead of undoing it. A blank seed box always builds with the current
   engine; only a typed phrase or a `v1-` seed uses an older one. Retire-for-project now costs the candidate
   that carries the trait when a blank roll picks the best of three (a pasted seed still replays exactly).

@@ -117,6 +117,33 @@ module.exports = function({check, group, assert}){
     return JSON.stringify(v3);
   });
 
+  check('V3 the near-duplicate older traits are out of v3 pools only; v1 and v2 pools are untouched', ()=>{
+    const G = fresh();
+    const r = G.evalIn(`(()=>{
+      const dupes = [4327, 4021, 4219, 110085, 2917, 3985, 3841, 4093, 92261, 4533, 5105, 2823, 4540, 2990];
+      const pools = v => { setEngineV(v); const ids = new Set(); TRAITS.forEach(t => byFilter(t.section, t.category).forEach(x => ids.add(x.id))); return ids; };
+      const p1 = pools(1), p2 = pools(2), p3 = pools(3); setEngineV(1);
+      return {v1: dupes.filter(id => p1.has(id)).length, v2: dupes.filter(id => p2.has(id)).length, v3: dupes.filter(id => p3.has(id)).length, resolves: dupes.every(id => TRAITS_BY_ID.has(id))};
+    })()`);
+    assert(r.v1 === 14 && r.v2 === 14 && r.v3 === 0 && r.resolves, JSON.stringify(r));
+  });
+
+  check('V3 freshness ratchet: 100 blank-style sheets reach more of the bank, overlap less and lean less on a few traits than v2 does', ()=>{
+    const G = fresh();
+    G.evalIn("PROFILE_SECTIONS.filter(p => p.defaultOn === false).map(p => p.id)").forEach(id => G.document._set('sec_' + id, {checked: false}));
+    const run = (pre, n) => { const cnt = new Map(); let slots = 0; const sheets = [];
+      for (let i = 1; i <= n; i++){ G.gen(pre + (i * 104729).toString(36));
+        const ids = G.evalIn("Object.values(state).filter(s=>s&&s.trait).map(s=>s.trait.id)"); sheets.push(new Set(ids)); ids.forEach(id => { cnt.set(id, (cnt.get(id) || 0) + 1); slots++; }); }
+      let sh = 0, pairs = 0; for (let a = 0; a < n; a += 3) for (let b = a + 1; b < n; b += 3){ let k = 0; sheets[a].forEach(x => { if (sheets[b].has(x)) k++; }); sh += k / Math.min(sheets[a].size, sheets[b].size); pairs++; }
+      const vals = [...cnt.values()].sort((x, y) => x - y); let cum = 0, acc = 0; vals.forEach(v => { cum += v; acc += cum; });
+      return {distinct: cnt.size, overlap: sh / pairs, gini: 1 - 2 * (acc / (vals.length * slots)) + 1 / vals.length}; };
+    const v2 = run('v2-', 100), v3 = run('v3-', 100);
+    assert(v3.distinct >= v2.distinct * 1.05, `v3 reached ${v3.distinct} traits against v2's ${v2.distinct}`);
+    assert(v3.overlap <= v2.overlap * 1.15, `v3 sheets overlap clearly more (${v3.overlap.toFixed(4)} against ${v2.overlap.toFixed(4)})`);
+    assert(v3.gini < v2.gini, `v3 draws are more concentrated (gini ${v3.gini.toFixed(3)} against ${v2.gini.toFixed(3)})`);
+    return `distinct ${v2.distinct} → ${v3.distinct}, overlap ${v2.overlap.toFixed(4)} → ${v3.overlap.toFixed(4)}, gini ${v2.gini.toFixed(3)} → ${v3.gini.toFixed(3)}`;
+  });
+
   check('H1 a trait name carrying markup cannot reach #warnBox as HTML, and the dispatcher refuses built-ins', ()=>{
     const G = fresh(); const d = G.document;
     d._set('warnBox', {});

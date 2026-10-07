@@ -3216,12 +3216,12 @@ function suggestVoiceFromPersonality(){
 // spectrum for a 4-6 way category the way Personality axes have one, so these are
 // hand-picked "most narratively opposed" pairs rather than derived from anything).
 const OPPOSED_CATEGORIES = {
-  role: {"Leader":"Outsider","Outsider":"Leader","Peacemaker":"Instigator","Instigator":"Peacemaker","Caretaker":"Skeptic","Skeptic":"Caretaker"},
-  values: {"Rigid & Principled":"Self-Interested","Self-Interested":"Rigid & Principled","Pragmatic & Flexible":"Loyalty-Bound","Loyalty-Bound":"Pragmatic & Flexible"},
+  role: {"Leader":"Outsider","Outsider":"Leader","Peacemaker":"Instigator","Instigator":"Peacemaker","Caretaker":"Skeptic","Skeptic":"Caretaker", "Clown":"Skeptic","Scapegoat":"Leader","Gatekeeper":"Connector","Historian":"Newcomer","Newcomer":"Historian","Martyr":"Instigator","Lieutenant":"Rival","Rival":"Peacemaker"},
+  values: {"Rigid & Principled":"Self-Interested","Self-Interested":"Rigid & Principled","Pragmatic & Flexible":"Loyalty-Bound","Loyalty-Bound":"Pragmatic & Flexible", "Tradition & Rite":"Autonomy & Liberty","Purity & Sanctity":"Pragmatic & Flexible","Autonomy & Liberty":"Tradition & Rite","Fairness":"Self-Interested","Care & Protection":"Self-Interested","Hospitality":"Rigid & Principled"},
   attachment: {"Secure":"Disorganized","Disorganized":"Secure","Anxious":"Avoidant","Avoidant":"Anxious"},
   stress: {"Fight (attack the threat)":"Flight (remove yourself)","Flight (remove yourself)":"Fight (attack the threat)","Freeze (shut down)":"Fawn (appease the threat)","Fawn (appease the threat)":"Freeze (shut down)"},
-  humor: {"Warm & Playful":"Cruel & Barbed","Cruel & Barbed":"Warm & Playful","Dry & Deadpan":"Absurd & Chaotic","Absurd & Chaotic":"Dry & Deadpan"},
-  vices: {"Restraint & Discipline":"Risk & Escape","Risk & Escape":"Restraint & Discipline","Avoidance & Procrastination":"Restraint & Discipline"},
+  humor: {"Warm & Playful":"Cruel & Barbed","Cruel & Barbed":"Warm & Playful","Dry & Deadpan":"Absurd & Chaotic","Absurd & Chaotic":"Dry & Deadpan", "Innuendo & Double Meaning":"Dry & Deadpan"},
+  vices: {"Restraint & Discipline":"Risk & Escape","Risk & Escape":"Restraint & Discipline","Avoidance & Procrastination":"Restraint & Discipline", "Screens & Notifications":"Restraint & Discipline","Work & Busyness":"Avoidance & Procrastination","Keeping & Collecting":"Risk & Escape","Gossip & Information":"Restraint & Discipline"},
 };
 // New sub-groups get one-way opposition entries (asymmetric is fine — lookup is always
 // keyed off the SOURCE character's actual category, never requires the reverse to match).

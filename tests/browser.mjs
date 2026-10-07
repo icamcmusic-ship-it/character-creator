@@ -861,7 +861,16 @@ await step('find on the sheet filters the cards and opens folded sections; folds
   await page.evaluate(()=> { generateCharacter(); });
   await page.waitForTimeout(700);
   const total = await page.locator('#sheetBody .traitCard').count();
-  const word = await page.evaluate(()=> Object.values(state).find(s => s && s.trait).trait.trait.split(' ').find(w => w.length > 3) || 'a');
+  // A word that is on some cards and not all: a trait that starts "Keeps…" would match every card's own Keep button.
+  const word = await page.evaluate(()=> {
+    const cards = [...document.querySelectorAll('#sheetBody .traitCard')].map(c => c.textContent.toLowerCase());
+    for (const s of Object.values(state)){
+      if (!s || !s.trait) continue;
+      const w = s.trait.trait.split(/\s+/).map(x => x.replace(/[^A-Za-z]/g, '').toLowerCase()).find(x => x.length > 4 && cards.some(c => c.includes(x)) && !cards.every(c => c.includes(x)));
+      if (w) return w;
+    }
+    return 'a';
+  });
   await page.fill('#sheetFind', word);
   await page.waitForTimeout(300);
   const shown = await page.locator('#sheetBody .traitCard:not([hidden])').count();

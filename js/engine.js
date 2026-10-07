@@ -445,6 +445,10 @@ let requiredTraitIds = [];          // trait ids force-included on every generat
 let requiredCategories = [];        // categories guaranteed at least one trait
 let exclusivePairs = [];            // [[idA, idB], ...] — never both on one sheet
 
+/* Fourteen older traits that are near-copies of a sibling (TF-IDF cosine 0.70-0.80 within one category). An engine-3 build no longer
+   draws them, so one sheet cannot hold both "Mentor-leader" and "Mentor-first leader"; earlier engines still can, because their seeds
+   depend on the pool as it was. The ids stay in the bank, so a saved sheet that holds one still resolves. */
+const V3_RETIRED_DUPES = new Set([4327, 4021, 4219, 110085, 2917, 3985, 3841, 4093, 92261, 4533, 5105, 2823, 4540, 2990]);
 function byFilter(section, category){
   let pool = TRAITS_BY_KEY.get(section+"||"+category) || [];
   if (bannedSections.has(section)) return [];
@@ -452,6 +456,7 @@ function byFilter(section, category){
   if (bannedTraitIds.size) pool = pool.filter(t=>!bannedTraitIds.has(t.id));
   if (disabledPacks.size) pool = pool.filter(t=>!disabledPacks.has(t.pack));
   if (ENGINE_V < 3) pool = pool.filter(t=>!t.since);   // v3 content is invisible to a v1 or v2 build
+  else if (V3_RETIRED_DUPES.size) pool = pool.filter(t=>!V3_RETIRED_DUPES.has(t.id));   // near-copies of an older trait (tools/near-dups.js); a seated one still resolves by id
   // Variant lock (Phase 3): applied here so EVERY path — generation, reroll, pin
   // adjust, cast, foil — respects the character's committed presentation, with no
   // way for a mixed sheet to slip through a specialized pick path.
@@ -6481,6 +6486,12 @@ const STRATEGY_BY_VALUES = {
   "Loyalty-Bound": "the people they have decided are theirs",
   "Self-Interested": "their own position first",
   "Idealistic & Visionary": "a picture of how it ought to be",
+  "Tradition & Rite": "the way it has always been done",
+  "Purity & Sanctity": "what must be kept apart and what must not be profaned",
+  "Autonomy & Liberty": "nobody else deciding for them",
+  "Fairness": "an even share, counted out loud",
+  "Care & Protection": "whoever in the room is smallest",
+  "Hospitality": "the person at the door",
 };
 /* ---------- TRAIT NAMES INSIDE PROSE ----------
    Trait names are labels, not grammar: "Keeps a spreadsheet for everything",
@@ -6654,6 +6665,12 @@ const THRESHOLD_BY_VALUES = {
   "Loyalty-Bound": "the moment one of their people is touched",
   "Self-Interested": "when it starts to cost them personally",
   "Idealistic & Visionary": "when the picture of how it should be is mocked",
+  "Tradition & Rite": "when the way it has always been done is skipped in front of them",
+  "Purity & Sanctity": "the moment two things they keep apart are allowed to touch",
+  "Autonomy & Liberty": "when a decision of theirs is put to someone else's vote",
+  "Fairness": "when a share is cut unevenly and nobody says so",
+  "Care & Protection": "when someone smaller than the room is spoken to unkindly",
+  "Hospitality": "when a guest is made to feel they are in the way",
 };
 function pressureChain(st, pst){
   const fear = _profTrait(st, "motivation", /Core Fear/i);
@@ -6679,7 +6696,9 @@ function pressureChain(st, pst){
   }
   if (values || level !== undefined){
     const v = values ? THRESHOLD_BY_VALUES[values.category] : null;
-    add("threshold", "Where it tips", `${v ? `It tips ${v}` : `It tips when the pressure passes their composure`}${level < 0.99 ? ` — the sheet shows them at ${Math.round(level*100)}%, short of that` : ` — the sheet shows them past it`}.`, [values]);
+    const _k = 'tip|' + (values ? values.id : 0) + '|' + (stress ? stress.id : 0);
+    const _lead = proseAlt("It tips", ["It gives way", "The tipping point comes", "They turn"], _k);
+    add("threshold", proseAlt("Where it tips", ["The breaking point", "What turns it", "The tipping line"], _k + '|t'), `${v ? `${_lead} ${v}` : `${_lead} when the pressure passes their composure`}${level < 0.99 ? ` — the sheet shows them at ${Math.round(level*100)}%, short of that` : ` — the sheet shows them past it`}.`, [values]);
   }
   const rec = pressureRecovery(st);
   if (rec) add("aftermath", "Afterwards", rec, [stress, attach]);
