@@ -198,6 +198,30 @@ module.exports = function({check, group, assert}){
     assert(G.evalIn('settingScene(state)') === null, 'a scene without a lens');
   });
 
+  check('V3 every slider link the pack adds names a real category, and the v3 table carries them while v2 and v1 do not', ()=>{
+    const G = fresh();
+    const r = G.evalIn(`(()=>{
+      const all = []; CATS_BY_SECTION.forEach(c => all.push(...c));
+      const dead = [];
+      Object.entries(GAP_V2_LINKS).forEach(([ax, poles]) => Object.entries(poles).forEach(([pole, kinds]) => Object.entries(kinds).forEach(([kind, frags]) => Object.keys(frags).forEach(f => {
+        if (!all.some(c => c.toLowerCase().includes(f.toLowerCase()))) dead.push(ax + '/' + pole + '/' + kind + '/' + f); }))));
+      const has = m => !!(m.friendliness && m.friendliness.pos && m.friendliness.pos.vocab && m.friendliness.pos.vocab['Affective & Emotional Intensity']);
+      return {dead, v3: has(WEIGHT_MATRIX_V3), v2: has(WEIGHT_MATRIX), v1: has(WEIGHT_MATRIX_V1)};
+    })()`);
+    assert(!r.dead.length, 'dead v3 links: ' + r.dead.slice(0, 5).join(', '));
+    assert(r.v3 && !r.v2 && !r.v1, JSON.stringify(r));
+  });
+
+  check('V3 humour under strain: every humour category has a line at both rungs on v3, and v2 keeps its gaps', ()=>{
+    const G = fresh();
+    const r = G.evalIn(`(()=>{
+      const cats = CATS_BY_SECTION.get('Humor Style'); const miss = {v2: 0, v3: 0};
+      setEngineV(2); cats.forEach(c => { if (!_humAt('irritated', c, {}) ) miss.v2++; if (!_humAt('broken', c, {})) miss.v2++; });
+      setEngineV(3); cats.forEach(c => { if (!_humAt('irritated', c, {})) miss.v3++; if (!_humAt('broken', c, {})) miss.v3++; });
+      setEngineV(1); return miss; })()`);
+    assert(r.v3 === 0 && r.v2 > 0, JSON.stringify(r));
+  });
+
   check('H1 a trait name carrying markup cannot reach #warnBox as HTML, and the dispatcher refuses built-ins', ()=>{
     const G = fresh(); const d = G.document;
     d._set('warnBox', {});

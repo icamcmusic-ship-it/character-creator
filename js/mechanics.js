@@ -605,6 +605,47 @@ const _HUMOR_AT = {
   broken: {"Warm & Playful":"the humour is gone, which frightens the people who know them", "Dry & Deadpan":"one dry line survives, aimed at themselves", "Cruel & Barbed":"the barbs are the last thing to go, and aimed at whoever is closest",
     "Absurd & Chaotic":"they laugh at the wrong moment and cannot stop", "Self-Deprecating":"the jokes stop being jokes"},
 };
+/* Engine 3: the humour line under strain existed for seven categories at the first rung and five at the last, so a Gallows, Observational,
+   Teasing or Pun-Groaner character got no humour line at all. These cover the rest, and give the original seven (five) a second wording. */
+const _HUMOR_AT_V3 = {
+  irritated: {"Observational":"the observations stop being gentle and start being accurate about the person in front of them",
+    "Pun-Groaner":"the puns come faster, as if a bad joke could hold the room together",
+    "Callback & Running Bit":"the old bits get called back as weapons, with the other person's lines in them",
+    "Gallows":"the gallows jokes get darker and nobody is sure they are jokes",
+    "Physical & Slapstick":"the clowning gets bigger and rougher",
+    "Teasing as Affection":"the teasing loses its warmth and keeps its aim",
+    "Laughs at Own Jokes":"they laugh harder at their own lines, and louder, to cover that nobody else is",
+    "Doesn't Get Jokes":"other people's jokes read as digs, and they answer them as digs",
+    "Innuendo & Double Meaning":"the double meanings stop being playful and start being pointed"},
+  broken: {"Observational":"they stop noticing out loud, which is how people know it is serious",
+    "Pun-Groaner":"even the puns dry up",
+    "Callback & Running Bit":"the running bits go quiet, and the others notice the missing line",
+    "Gallows":"the gallows humour stops; it was only ever for when things could be survived",
+    "Physical & Slapstick":"the clowning stops, and the stillness is the alarming part",
+    "Teasing as Affection":"the teasing stops, and everyone realises how much of the room it was holding up",
+    "Laughs at Own Jokes":"the laugh comes with nothing before it",
+    "Doesn't Get Jokes":"the literal answers go flat and then stop",
+    "Innuendo & Double Meaning":"the double meanings go; everything is said straight, and that is worse",
+    "Humorless & Absent":"the literalness hardens into silence, and the silence is not a rule any more",
+    "Intellectual & Wordplay":"the wordplay drops away and what is left is plain statement, with the cleverness gone"},
+};
+const _HUMOR_AT_ALT = {
+  irritated: {"Warm & Playful":"the jokes lose their warmth but not their speed", "Dry & Deadpan":"the dryness thins to one sentence with an edge on it",
+    "Cruel & Barbed":"the wit starts looking for the soft spot", "Self-Deprecating":"the self-deprecation turns into a request to be contradicted",
+    "Absurd & Chaotic":"the nonsense grows teeth", "Intellectual & Wordplay":"the cleverness gets used to win, not to play",
+    "Humorless & Absent":"they treat the strain as a matter of procedure"},
+  broken: {"Warm & Playful":"the warmth goes out of the jokes first, and then the jokes", "Dry & Deadpan":"the deadpan finally has nothing under it",
+    "Cruel & Barbed":"the barbs turn inward, or stop altogether", "Absurd & Chaotic":"the nonsense runs on with nobody laughing",
+    "Self-Deprecating":"the self-mockery stops being funny even to them"},
+};
+function _humAt(stage, cat, st){
+  const base = _HUMOR_AT[stage][cat];
+  if (ENGINE_V < 3) return base;
+  const v3 = _HUMOR_AT_V3[stage][cat];
+  if (v3) return v3;
+  const alt = _HUMOR_AT_ALT[stage][cat];
+  return base && alt ? proseAlt(base, [alt], "hum|" + stage + "|" + _mxSheetHash(st)) : base;
+}
 const _BROKEN_BY_ATTACH = {"Secure":"they still reach for someone — it is the one thing that does not break", "Anxious":"they cling, and ask the same question until someone answers it the right way",
   "Avoidant":"they disappear — physically if they can, behind a wall if they cannot", "Disorganized":"they reach for someone and push them away in the same breath"};
 /* A sheet-stable pick. The pressure ladder and the recovery sheet used to be one sentence
@@ -639,8 +680,8 @@ function pressureEscalation(st, pst, meta){
   const dsc = t => t && t.desc ? ` — ${_mxLc(t.desc)}` : "";
   if (manners[0]) irr.signs.push(sig(V("tell", ["The first tell: {m}{d}.", "It starts small: {m}{d}.", "Early on the body gives it away — {m}{d}.", "You see it start here: {m}{d}."],
     {m: _mxLc(manners[0].trait), d: dsc(manners[0])}), [manners[0]]));
-  if (humor && _HUMOR_AT.irritated[humor.category]) irr.signs.push(sig(V("humI", ["Humour under strain: {h}.", "What happens to the humour: {h}.", "Their jokes change: {h}.", "As for the jokes: {h}."],
-    {h: _HUMOR_AT.irritated[humor.category]}), [humor]));
+  if (humor && _humAt("irritated", humor.category, st)) irr.signs.push(sig(V("humI", ["Humour under strain: {h}.", "What happens to the humour: {h}.", "Their jokes change: {h}.", "As for the jokes: {h}."],
+    {h: _humAt("irritated", humor.category, st)}), [humor]));
   if (fear) irr.signs.push(sig(V("fear", ["What they are already scanning for: {f}.", "Half their attention is already on this: {f}.", "The alarm underneath, quietly: {f}.", "They are watching for {f}, and it shows."],
     {f: _mxLc(fear.trait)}), [fear]));
   if (stress) cor.signs.push(sig(V("stress", ["{t}: {ss}.", "Their stress response is {t} — under this much pressure they {they}.", "Now the stress response drives: they {they}.", "Cornered, they {they} ({t})."],
@@ -657,7 +698,7 @@ function pressureEscalation(st, pst, meta){
     {x: _BROKEN_BY_ATTACH[attach.category], y: _BROKEN_BY_ATTACH_ALT[attach.category] || _BROKEN_BY_ATTACH[attach.category]}), [attach]));
   if (vices) brk.signs.push(sig(V("vice", ["What they reach for: {v}.", "The old comfort comes out: {v}.", "The crutch: {v}.", "They fall back on it: {v}."],
     {v: _mxLc(vices.trait)}), [vices]));
-  if (humor && _HUMOR_AT.broken[humor.category]) brk.signs.push(sig(V("humB", ["Humour: {h}.", "The humour goes: {h}."], {h: _HUMOR_AT.broken[humor.category]}), [humor]));
+  if (humor && _humAt("broken", humor.category, st)) brk.signs.push(sig(V("humB", ["Humour: {h}.", "The humour goes: {h}."], {h: _humAt("broken", humor.category, st)}), [humor]));
   shifted.slice(0, 2).forEach(s => brk.signs.push(sig(`Where they stand moves: ${_plainCat(s.fromCat)} becomes ${_plainCat(s.toCat)}.`, [s.trait])));
   /* The inner conflict: what wins day to day, what takes the wheel when cornered, and
      what the losing drive does meanwhile. */

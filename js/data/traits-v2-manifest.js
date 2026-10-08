@@ -54,4 +54,20 @@ TRAIT_PACKS.push({id:"v2", label:"2026 growth (engine v3)", version:"1", ids:[21
   L("confidence","pos","conversation",{"Storytelling":"M"}); L("friendliness","pos","conversation",{"Storytelling":"W"});
   L("confidence","neg","conversation",{"Speech Mechanics":"W"}); L("assertiveness","neg","conversation",{"Silence Kinds":"M"});
   L("honesty","neg","conversation",{"Lying Register":"M"}); L("emotionalcapacity","neg","conversation",{"Silence Kinds":"W"});
+  // Voice categories (engine 3): the personality sliders reach the KIND of word, sentence shape and gesture a character draws from, not only
+  // which trait inside it. (Kinds: vocab, grammar, manner.)
+  L("friendliness","pos","vocab",{"Affective & Emotional Intensity":"M"});            L("friendliness","neg","grammar",{"Spoken Compression":"M"});
+  L("friendliness","neg","vocab",{"Precision & Specificity Level":"W"});
+  L("assertiveness","pos","vocab",{"Directness & Literalness":"M"});                  L("assertiveness","neg","vocab",{"Semantic Density & Modifiers":"W"});
+  L("emotionalcapacity","pos","vocab",{"Affective & Emotional Intensity":"S"});       L("emotionalcapacity","pos","grammar",{"Disfluencies & Flow":"W"});
+  L("emotionalcapacity","pos","manner",{"Emotional Affectations":"M"});               L("emotionalcapacity","neg","grammar",{"Spoken Compression":"M"});
+  L("emotionalcapacity","neg","vocab",{"Precision & Specificity Level":"M"});
+  L("intelligence","pos","vocab",{"Conceptual Framework & Loanwords":"M","Precision & Specificity Level":"M","Morphological & Structural Lexicon":"W"});
+  L("intelligence","neg","vocab",{"Abstractness & Sensory Modality":"M"});            L("intelligence","neg","grammar",{"Repetition & Echo Patterns":"W"});
+  L("discipline","neg","grammar",{"Disfluencies & Flow":"M"});                        L("discipline","neg","manner",{"Tactile & Prop Handling":"W"});
+  L("discipline","pos","vocab",{"Precision & Specificity Level":"W"});                L("discipline","pos","manner",{"Postural & Spatial Dynamics":"W"});
+  L("manners","pos","vocab",{"Register & Formality Spectrum":"M"});                   L("manners","neg","vocab",{"Directness & Literalness":"W"});
+  L("confidence","neg","grammar",{"Disfluencies & Flow":"M"});                        L("confidence","pos","grammar",{"Turn-Taking Grammar":"W"});
+  L("activeness","pos","manner",{"Gestural & Kinetic Integration":"M"});
+  L("curiosity","pos","vocab",{"Conceptual Framework & Loanwords":"W"});              L("curiosity","pos","grammar",{"Turn-Taking Grammar":"W"});
 })();
