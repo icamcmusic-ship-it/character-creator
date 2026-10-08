@@ -289,13 +289,17 @@ const CAST_ROLES = [
   {id:"heart",    label:"Heart",        blurb:"Holds the group together when it matters."},
   {id:"skeptic",  label:"Skeptic",      blurb:"Asks the question nobody wants asked."},
   {id:"wildcard", label:"Wildcard",     blurb:"Nobody is sure which way they will jump."},
+  // Engine 3 seats, filled only after the six above (so a cast of six or fewer is seated exactly as before).
+  {id:"anchor",   label:"Anchor",       blurb:"Keeps the group steady; the others take their pace from them."},
+  {id:"stranger", label:"Stranger",     blurb:"Sees the group from outside, and says what the insiders have stopped noticing."},
+  {id:"mouth",    label:"Mouthpiece",   blurb:"Says out loud what the group is thinking."},
 ];
 function _castRoleScore(st, prof){
   const cat = id => { const t = _mxT(st, id); return t ? t.category : null; };
   const role = cat("role"), humor = cat("humor"), attach = cat("attachment"), vices = cat("vices"), values = cat("values");
   const humorT = _mxT(st, "humor");
   const p = k => prof[k] || 0;
-  const s = {leader:[], comic:[], heart:[], skeptic:[], wildcard:[]};
+  const s = {leader:[], comic:[], heart:[], skeptic:[], wildcard:[], anchor:[], stranger:[], mouth:[]};
   const add = (r, v, why) => { if (v) s[r].push({v, why}); };
   add("leader", role === "Leader" ? 3 : role === "Instigator" ? 1 : 0, `group role ${role}`);
   add("leader", p("asrt") * 2, "assertive"); add("leader", p("ego"), "self-assured");
@@ -307,6 +311,9 @@ function _castRoleScore(st, prof){
   add("skeptic", p("intel"), "analytical"); add("skeptic", values === "Rigid & Principled" ? 0.5 : 0, "principled");
   add("wildcard", attach === "Disorganized" ? 2 : 0, "disorganised attachment"); add("wildcard", role === "Outsider" ? 2 : 0, "outsider");
   add("wildcard", vices === "Risk & Escape" ? 1 : 0, "risk-taking"); add("wildcard", -p("disc"), "undisciplined");
+  add("anchor", attach === "Secure" ? 2 : 0, "secure attachment"); add("anchor", p("disc") * 1.5, "disciplined"); add("anchor", p("mood"), "calm"); add("anchor", vices === "Restraint & Discipline" ? 1 : 0, "restrained");
+  add("stranger", role === "Outsider" ? 3 : 0, "outsider"); add("stranger", role === "Newcomer" ? 3 : 0, "newcomer"); add("stranger", -p("warm"), "cool toward the group"); add("stranger", p("cur"), "curious");
+  add("mouth", p("vol") * 1.5, "talkative"); add("mouth", p("asrt"), "assertive"); add("mouth", p("emo"), "open"); add("mouth", role === "Instigator" ? 2 : 0, "group role Instigator");
   const out = {};
   Object.entries(s).forEach(([r, parts]) => {
     out[r] = {score: parts.reduce((a, b) => a + b.v, 0),
@@ -345,7 +352,12 @@ function assignCastRoles(members){
       return axes.length ? `opposite the leader on ${axes.join(" and ")}` : "furthest from the leader overall";
     });
   }
-  ["comic", "heart", "skeptic", "wildcard"].forEach(r => { if (free.size) take(r, x => x.sc[r].score, whyOf(r)); });
+  ["comic", "heart", "skeptic", "wildcard"].concat(ENGINE_V >= 3 ? ["anchor", "stranger", "mouth"] : []).forEach(r => { if (free.size) take(r, x => x.sc[r].score, whyOf(r)); });
+  // A seat the author named wins over the one read off the sheet; the sheet's reading stays in the tooltip.
+  (members || []).forEach((m, i) => {
+    const custom = m && m.meta && typeof m.meta.seat === "string" ? m.meta.seat.trim().slice(0, 40) : "";
+    if (custom) out[i] = {index: i, id: "custom", label: custom, why: `set by you (the sheet reads as ${out[i].label}: ${out[i].why})`, custom: true};
+  });
   return out;
 }
 /* JOINT OPTIMISATION. Members were rolled independently and then de-duplicated on
@@ -383,7 +395,7 @@ function optimiseCastVoices(entries, seedKey, rebuild, opts){
     let best = null;
     for (let a = 0; a < o.attempts; a++){
       withRng(mulberry32(hashSeedString(seedKey + "|castopt|" + pass + "|" + a)), ()=>{
-        const cand = rebuild(i);
+        const cand = rebuild(i, cur);
         if (!cand || !cand.state) return;
         const trial = cur.map((c, j) => j === i ? Object.assign({}, c, cand) : c);
         const t = total(trial);
@@ -593,6 +605,47 @@ const _HUMOR_AT = {
   broken: {"Warm & Playful":"the humour is gone, which frightens the people who know them", "Dry & Deadpan":"one dry line survives, aimed at themselves", "Cruel & Barbed":"the barbs are the last thing to go, and aimed at whoever is closest",
     "Absurd & Chaotic":"they laugh at the wrong moment and cannot stop", "Self-Deprecating":"the jokes stop being jokes"},
 };
+/* Engine 3: the humour line under strain existed for seven categories at the first rung and five at the last, so a Gallows, Observational,
+   Teasing or Pun-Groaner character got no humour line at all. These cover the rest, and give the original seven (five) a second wording. */
+const _HUMOR_AT_V3 = {
+  irritated: {"Observational":"the observations stop being gentle and start being accurate about the person in front of them",
+    "Pun-Groaner":"the puns come faster, as if a bad joke could hold the room together",
+    "Callback & Running Bit":"the old bits get called back as weapons, with the other person's lines in them",
+    "Gallows":"the gallows jokes get darker and nobody is sure they are jokes",
+    "Physical & Slapstick":"the clowning gets bigger and rougher",
+    "Teasing as Affection":"the teasing loses its warmth and keeps its aim",
+    "Laughs at Own Jokes":"they laugh harder at their own lines, and louder, to cover that nobody else is",
+    "Doesn't Get Jokes":"other people's jokes read as digs, and they answer them as digs",
+    "Innuendo & Double Meaning":"the double meanings stop being playful and start being pointed"},
+  broken: {"Observational":"they stop noticing out loud, which is how people know it is serious",
+    "Pun-Groaner":"even the puns dry up",
+    "Callback & Running Bit":"the running bits go quiet, and the others notice the missing line",
+    "Gallows":"the gallows humour stops; it was only ever for when things could be survived",
+    "Physical & Slapstick":"the clowning stops, and the stillness is the alarming part",
+    "Teasing as Affection":"the teasing stops, and everyone realises how much of the room it was holding up",
+    "Laughs at Own Jokes":"the laugh comes with nothing before it",
+    "Doesn't Get Jokes":"the literal answers go flat and then stop",
+    "Innuendo & Double Meaning":"the double meanings go; everything is said straight, and that is worse",
+    "Humorless & Absent":"the literalness hardens into silence, and the silence is not a rule any more",
+    "Intellectual & Wordplay":"the wordplay drops away and what is left is plain statement, with the cleverness gone"},
+};
+const _HUMOR_AT_ALT = {
+  irritated: {"Warm & Playful":"the jokes lose their warmth but not their speed", "Dry & Deadpan":"the dryness thins to one sentence with an edge on it",
+    "Cruel & Barbed":"the wit starts looking for the soft spot", "Self-Deprecating":"the self-deprecation turns into a request to be contradicted",
+    "Absurd & Chaotic":"the nonsense grows teeth", "Intellectual & Wordplay":"the cleverness gets used to win, not to play",
+    "Humorless & Absent":"they treat the strain as a matter of procedure"},
+  broken: {"Warm & Playful":"the warmth goes out of the jokes first, and then the jokes", "Dry & Deadpan":"the deadpan finally has nothing under it",
+    "Cruel & Barbed":"the barbs turn inward, or stop altogether", "Absurd & Chaotic":"the nonsense runs on with nobody laughing",
+    "Self-Deprecating":"the self-mockery stops being funny even to them"},
+};
+function _humAt(stage, cat, st){
+  const base = _HUMOR_AT[stage][cat];
+  if (ENGINE_V < 3) return base;
+  const v3 = _HUMOR_AT_V3[stage][cat];
+  if (v3) return v3;
+  const alt = _HUMOR_AT_ALT[stage][cat];
+  return base && alt ? proseAlt(base, [alt], "hum|" + stage + "|" + _mxSheetHash(st)) : base;
+}
 const _BROKEN_BY_ATTACH = {"Secure":"they still reach for someone — it is the one thing that does not break", "Anxious":"they cling, and ask the same question until someone answers it the right way",
   "Avoidant":"they disappear — physically if they can, behind a wall if they cannot", "Disorganized":"they reach for someone and push them away in the same breath"};
 /* A sheet-stable pick. The pressure ladder and the recovery sheet used to be one sentence
@@ -627,8 +680,8 @@ function pressureEscalation(st, pst, meta){
   const dsc = t => t && t.desc ? ` — ${_mxLc(t.desc)}` : "";
   if (manners[0]) irr.signs.push(sig(V("tell", ["The first tell: {m}{d}.", "It starts small: {m}{d}.", "Early on the body gives it away — {m}{d}.", "You see it start here: {m}{d}."],
     {m: _mxLc(manners[0].trait), d: dsc(manners[0])}), [manners[0]]));
-  if (humor && _HUMOR_AT.irritated[humor.category]) irr.signs.push(sig(V("humI", ["Humour under strain: {h}.", "What happens to the humour: {h}.", "Their jokes change: {h}.", "As for the jokes: {h}."],
-    {h: _HUMOR_AT.irritated[humor.category]}), [humor]));
+  if (humor && _humAt("irritated", humor.category, st)) irr.signs.push(sig(V("humI", ["Humour under strain: {h}.", "What happens to the humour: {h}.", "Their jokes change: {h}.", "As for the jokes: {h}."],
+    {h: _humAt("irritated", humor.category, st)}), [humor]));
   if (fear) irr.signs.push(sig(V("fear", ["What they are already scanning for: {f}.", "Half their attention is already on this: {f}.", "The alarm underneath, quietly: {f}.", "They are watching for {f}, and it shows."],
     {f: _mxLc(fear.trait)}), [fear]));
   if (stress) cor.signs.push(sig(V("stress", ["{t}: {ss}.", "Their stress response is {t} — under this much pressure they {they}.", "Now the stress response drives: they {they}.", "Cornered, they {they} ({t})."],
@@ -645,8 +698,8 @@ function pressureEscalation(st, pst, meta){
     {x: _BROKEN_BY_ATTACH[attach.category], y: _BROKEN_BY_ATTACH_ALT[attach.category] || _BROKEN_BY_ATTACH[attach.category]}), [attach]));
   if (vices) brk.signs.push(sig(V("vice", ["What they reach for: {v}.", "The old comfort comes out: {v}.", "The crutch: {v}.", "They fall back on it: {v}."],
     {v: _mxLc(vices.trait)}), [vices]));
-  if (humor && _HUMOR_AT.broken[humor.category]) brk.signs.push(sig(V("humB", ["Humour: {h}.", "The humour goes: {h}."], {h: _HUMOR_AT.broken[humor.category]}), [humor]));
-  shifted.slice(0, 2).forEach(s => brk.signs.push(sig(`Where they stand moves: ${s.fromCat} → ${s.toCat}.`, [s.trait])));
+  if (humor && _humAt("broken", humor.category, st)) brk.signs.push(sig(V("humB", ["Humour: {h}.", "The humour goes: {h}."], {h: _humAt("broken", humor.category, st)}), [humor]));
+  shifted.slice(0, 2).forEach(s => brk.signs.push(sig(`Where they stand moves: ${_plainCat(s.fromCat)} becomes ${_plainCat(s.toCat)}.`, [s.trait])));
   /* The inner conflict: what wins day to day, what takes the wheel when cornered, and
      what the losing drive does meanwhile. */
   const ic = typeof innerConflict === "function" ? innerConflict(st, meta) : null;
@@ -747,7 +800,10 @@ function recoverySheet(st, ctx){
   const V = (salt, frames, vars) => _mxVar(st, salt, frames, vars);
   const d = t => t && t.desc ? ` — ${_mxLc(t.desc)}` : "";
   const row = (key, title, text, from) => { if (text) rows.push({key, title, text, from: (from || []).filter(Boolean).map(t => t.trait)}); };
-  const cell = stress && attach && _RECOVER_CELL[stress.category] ? _RECOVER_CELL[stress.category][attach.category] : null;
+  let cell = stress && attach && _RECOVER_CELL[stress.category] ? _RECOVER_CELL[stress.category][attach.category] : null;
+  // Engine 3: each cell has a second wording, chosen by the sheet's hash.
+  const _alt = cell && typeof PROSE_POOLS_V2 !== "undefined" && PROSE_POOLS_V2.recoveryCells && PROSE_POOLS_V2.recoveryCells[stress.category] ? PROSE_POOLS_V2.recoveryCells[stress.category][attach.category] : null;
+  if (cell && _alt) cell = {first: proseAlt(cell.first, _alt.first, "rcf|" + stress.id + "|" + attach.id), who: proseAlt(cell.who, _alt.who, "rcw|" + stress.id + "|" + attach.id)};
   const lensDying = typeof activeLensIds === "function" && activeLensIds().includes("dying");
   const firstText = cell ? cell.first : stress ? _RECOVER_FIRST[stress.category] : null;
   row("first", "First hours", firstText && lensDying ? "There is less time to waste on it than there used to be. " + firstText : firstText, [stress, attach]);
@@ -762,6 +818,8 @@ function recoverySheet(st, ctx){
   if (cn.makesWorse) row("worse", "Who makes it worse", V("worse", ["Being around {n}. Every old thing comes back at once.", "{n} in the room, whatever {n} says.", "{n}. The history makes it worse."], {n: cn.makesWorse}), []);
   row("repair", "How they repair it", repair ? V("repair", ["{r}{d}.", "The repair they make: {r}{d}."], {r: _mxUnrun(repair.trait), d: d(repair)}) : null, [repair]);
   row("scar", "The story they tell afterwards", lie ? V("scar", ["That it proves {q} — unless someone gets to them first.", "The version that sticks: it proves {q}. Someone has to get to them before that hardens.", "They will file it under {q}, unless someone offers a better story first."], {q: _mxQ(lie.trait)}) : null, [lie]);
+  const scene = typeof settingScene === "function" ? settingScene(st) : null;
+  if (scene && scene.place && scene.person) row("where", "Where it plays out", `The aftermath is around ${scene.place}. ${scene.person[0].toUpperCase() + scene.person.slice(1)} is the one who knows what happened, and what they do with that is part of the recovery.`, []);
   const summary = typeof pressureRecovery === "function" ? pressureRecovery(st) : null;
   return rows.length ? {summary, rows} : null;
 }
@@ -918,6 +976,8 @@ const ARC_TEMPLATES = [
     {shape:"deterioration", title:"Got it", belief:"{lie}", choice:"They take {want} and find it empty; they hide how empty.", cost:"The reason they had for getting up."},
     {shape:"cyclical", title:"Back where they started", belief:"{lie}", choice:"They fall back into the old pattern because it is at least familiar.", cost:"The year."}]},
 ];
+// Six more templates from the v2 prose pool (js/data/prose-pools-v2.js); they only produce events, so v1 seeds cannot reach them.
+if (typeof PROSE_POOLS_V2 !== 'undefined' && PROSE_POOLS_V2.arcTemplates) PROSE_POOLS_V2.arcTemplates.forEach(t => { if (!ARC_TEMPLATES.some(x => x.id === t.id)) ARC_TEMPLATES.push(t); });
 function _fillArcText(s, st){
   const t = (id, re) => _mxT(st, id, re);
   const lie = t("motivation", /The Lie/i), want = t("motivation", /Core Want/i), need = t("motivation", /The Need/i);
@@ -1022,7 +1082,7 @@ function innerConflict(st, meta){
     + (flips
       ? `Under load ${pressW.role.toLowerCase()} ${q(pressW.trait)} takes over, ${when}; the other one has been leaking all along.`
       : `Under load it holds, ${when} — and ${loser.role.toLowerCase()} ${q(loser.trait)} leaks out around it instead.`);
-  return {type: pick.type, label: T.label, question: T.question, a: A, b: B, calm: "a", pressure, flips, flipped,
+  return {type: pick.type, label: T.label, question: proseAlt(T.question, _proseAlts('innerConflictQuestions', pick.type), 'ic|' + pick.type + '|' + h), a: A, b: B, calm: "a", pressure, flips, flipped,
     winner: pressW, loser, when, summary, from: [pick.a, pick.b]};
 }
 const _ic = t => (typeof _spoken === "function" ? _spoken(t) : null) || _mxQ(t.trait);
@@ -1053,6 +1113,196 @@ function innerConflictLeak(st, rng, opts){
   const f = opts.short ? frames.slice().sort((x, y) => x.length - y.length)[0] : frames[Math.floor(rng() * frames.length)];
   const roleWord = ic.type === "fear-role" ? String(ic.a.trait.category || "one").toLowerCase().replace(/[^a-z ]/g, "").trim() || "one" : "";
   const text = f.replace("{an}", _icNoun(ic.a.trait)).replace("{a}", _ic(ic.a.trait)).replace("{b}", _ic(ic.b.trait)).replace("{aq}", _mxQ(ic.a.trait.trait)).replace("{role}", roleWord);
+  /* The line quoted the Want already (a persuading or concealing line is about it), and the leak
+     says it again: "…to matter to one person completely. And I still want to matter to one person
+     completely." The random draw above is still made, so the stream is unchanged; the leak is dropped. */
+  if (opts.already){
+    const low = String(opts.already).toLowerCase();
+    const said = [ic.a.trait, ic.b.trait].map(t => _ic(t).toLowerCase()).filter(p => p.length > 10);
+    if (said.some(p => low.includes(p))) return null;
+  }
   return {text: text.charAt(0).toUpperCase() + text.slice(1),
     rule: `inner conflict: ${ic.label} — ${ic.loser.role.toLowerCase()} “${ic.loser.trait.trait}” leaks out under load`};
+}
+
+// ================= 11. Pair exchange and crossed needs =================
+/* PAIR EXCHANGE. The voice lab composes one character at a time; two people in a scene need each to answer the other. The first speaks the
+   chosen act, the second answers with the act that naturally follows it (a request meets a refusal, a thank-you a compliment, bad news
+   comfort), then both go round again under pressure. Each line is composed from its own speaker's sheet, so the exchange shows whose
+   voice carries the scene. */
+const VOICE_REPLY_ACT = {refuse:"persuade", persuade:"refuse", request:"refuse", askhelp:"refuse", conceal:"persuade", lie:"conceal", apologise:"refuse",
+  thank:"compliment", congratulate:"compliment", criticise:"apologise", comfort:"thank", compliment:"thank", badnews:"comfort", greet:"greet",
+  farewell:"farewell", confess:"criticise"};
+function voiceExchange(a, b, promptId, mode, audience){
+  if (!a || !b || !a.state || !b.state) return null;
+  const ids = allVoicePrompts().map(p => p.id);
+  if (!ids.includes(promptId)) return null;
+  const like = (allVoicePrompts().find(p => p.id === promptId) || {}).like;
+  const base = VOICE_REPLY_ACT[like || promptId];
+  const reply = base && ids.includes(base) ? base : "refuse";
+  const calm = mode === "pressure" ? "pressure" : "baseline";
+  const nameOf = m => (m.meta && m.meta.name) || "Unnamed";
+  const turn = (who, st, act, md, index, take) => {
+    const l = composeVoiceLine(st, act, md, {index, take, audience});
+    return l ? {who: nameOf(who), act: l.prompt, text: l.text, rules: l.rules} : null;
+  };
+  const turns = [
+    turn(a, a.state, promptId, calm, 0, 0), turn(b, b.state, reply, calm, 1, 0),
+    turn(a, a.state, promptId, "pressure", 2, 1), turn(b, b.state, reply, "pressure", 3, 1),
+  ].filter(Boolean);
+  return {promptId, reply, turns};
+}
+
+/* CROSSED NEEDS. Two characters are rarely in conflict over their sliders; they are in conflict because what one of them needs is
+   exactly what the other's defence, lie, fear or want rules out. Each theme pairs a pattern in someone's Need with a pattern in the
+   other person's inner cards; a match in either direction is a scene. Read from the cards' own text, so it is only as specific as they are. */
+const CROSSED_NEED_THEMES = [
+  {id:"help", need:/\bhelp\b|\blean\b|accept|carried|let (someone|them) in|ask(ed|ing)?\b/i, block:/never needs|self-reliant|on their own|handle it|manage alone|independen|no help|\bstrong\b|\balone\b/i,
+   text:(n, o) => `${n} needs to be able to lean on someone; ${o}'s inner cards treat leaning as a weakness, so ${o} will wave the offer off, or make it cost something.`},
+  {id:"known", need:/\bknown\b|\bseen\b|\bheard\b|understood|witness/i, block:/joke|deflect|humour|change the subject|busy|clinical|logistic|hide|mask|performance/i,
+   text:(n, o) => `${n} needs to be known; ${o} answers a plea to be seen with a joke, a task or a change of subject.`},
+  {id:"enough", need:/\brest\b|\bstop\b|slow|\benough\b|permission|put it down/i, block:/prove|\bbest\b|\bwin\b|\bfirst\b|rank|title|achieve|\bmore\b|earn/i,
+   text:(n, o) => `${n} needs to be told it is enough; ${o} is still keeping score, and says so.`},
+  {id:"truth", need:/\btruth\b|honest|\bstraight\b|plain|told\b/i, block:/smooth|polite|secret|conceal|hide|white lie|keeps from|never says/i,
+   text:(n, o) => `${n} needs the plain truth; ${o} manages people with kind omissions and calls it consideration.`},
+  {id:"space", need:/\bspace\b|left alone|quiet|\balone\b|time to/i, block:/abandon|left behind|silence|leaving|waits|checks on|follow/i,
+   text:(n, o) => `${n} needs room; ${o} hears room as leaving, and moves closer.`},
+  {id:"promise", need:/reassur|promise|certain|\bsure\b|guarantee|told it will/i, block:/won't promise|never promise|vague|hedge|noncommittal|keeps options|can't say/i,
+   text:(n, o) => `${n} needs a promise; ${o} will not give one, and that withholding is the thing ${n} hears.`},
+  {id:"forgive", need:/forgiv|second chance|amends|start again|clean slate/i, block:/grudge|keeps score|never forgive|\bowe\b|\bdebt\b|remembers every/i,
+   text:(n, o) => `${n} needs a second chance; ${o} remembers every first one.`},
+  {id:"trust", need:/\btrust\b|let go|surrender|follow|hand over/i, block:/\bcontrol\b|\bplan\b|manage|order|checks?\b|in charge/i,
+   text:(n, o) => `${n} needs to be trusted with something; ${o} has to be in charge of it.`},
+];
+function crossedNeeds(A, B){
+  if (!A || !B || !A.state || !B.state) return [];
+  const nm = m => (m.meta && m.meta.name) || "Unnamed";
+  const cards = (st, re) => Object.keys(st || {}).filter(k => k.startsWith("prof_motivation_") && st[k] && st[k].trait && re.test(st[k].trait.category)).map(k => st[k].trait);
+  const text = t => (typeof motivationText === "function" ? motivationText(t) : `${t.trait} ${t.desc || ""}`);
+  const out = [];
+  [[A, B], [B, A]].forEach(([from, to]) => {
+    const needs = cards(from.state, /The Need/i);
+    const blockers = cards(to.state, /The Defence|The Lie|Core Fear|Core Want|The Ghost/i);
+    CROSSED_NEED_THEMES.forEach(th => {
+      const n = needs.find(t => th.need.test(text(t))), b = n && blockers.find(t => th.block.test(text(t)));
+      if (n && b) out.push({theme: th.id, from: nm(from), to: nm(to), text: th.text(nm(from), nm(to)), need: n.trait, blocker: b.trait});
+    });
+  });
+  return out.slice(0, 4);
+}
+
+// ================= 12. Hot buttons, lexicon and voice-fit =================
+/* HOT BUTTONS. Three topics that light the character up and three that shut them down, read off the cards that already say it: what they are
+   after, what they are good at, what they enjoy and belong to light them up; the ghost, the wound, the fear, what they will not say about
+   money or family, and what they dread shut them down. Lens taboos exist per lens; this is per person. */
+function hotButtons(st){
+  const many = (id, re) => Object.keys(st || {}).filter(k => k.startsWith("prof_" + id + "_") && st[k] && st[k].trait && (!re || re.test(st[k].trait.category))).map(k => st[k].trait);
+  const rank = list => list.filter((t, i, a) => a.findIndex(x => x.id === t.id) === i)
+    .sort((a, b) => (b.intensity || 3) - (a.intensity || 3) || a.id - b.id);
+  const light = rank([].concat(many("goals", /Immediate|Longer/), many("competence"), many("texture", /Preferences|Affiliations/), many("jargon"), many("beliefs", /Faith Practice|Secular Rituals/), many("family", /Talks About Family/)));
+  const shut = rank([].concat(many("motivation", /The Ghost|Core Wound|Core Fear/), many("money", /Money Taboo/), many("family", /Never Mentions/), many("fears"), many("repair", /Failed Repair/)));
+  const shape = t => ({topic: _mxLc(t.trait), from: `${t.category}`, id: t.id});
+  return {lights: light.slice(0, 3).map(shape), shuts: shut.slice(0, 3).map(shape)};
+}
+
+/* LEXICON. What this voice leans on and what it would not say, both read from the sheet: the phrases come from the examples of the
+   vocabulary, grammar and verbosity cards; the refusals from the lean of the voice. */
+function lexiconFor(st){
+  const r = voiceRules(st);
+  const own = [];
+  (r.vocab || []).concat(r.grammar ? [r.grammar] : [], r.verbosity ? [r.verbosity] : []).forEach(t => {
+    _exampleSentences(t).slice(0, 1).forEach(s => own.push(s.replace(/[.!?]+$/, "")));
+    _examplePhrases([t]).slice(0, 1).forEach(p => own.push(p.text));
+  });
+  const never = [];
+  if (r.formal) never.push("gonna", "no worries", "whatever");
+  if (r.casual) never.push("I beg your pardon", "indeed", "one might say");
+  if (r.terse) never.push("to elaborate further", "let me explain at length");
+  if (r.long) never.push("short answer: no", "that's all there is to it");
+  if (r.direct) never.push("if it's not too much trouble", "I'm probably wrong");
+  if (r.yielding) never.push("because I said so", "do it my way");
+  if (r.cold) never.push("I love you all", "bless you");
+  if (r.warm) never.push("I couldn't care less", "not my problem");
+  if (r.straight) never.push("technically I didn't lie");
+  if (r.slippery) never.push("to be perfectly honest");
+  if (r.mannered) never.push("shut up");
+  if (r.blunt) never.push("if you'd be so kind");
+  const uniq = a => a.filter((x, i) => x && a.indexOf(x) === i);
+  return {overused: uniq(own).slice(0, 5), never: uniq(never).slice(0, 5)};
+}
+
+/* VOICE FIT. A pasted line, checked against the sheet's own rules. Each check says fits, stretch or off, with the reason; nothing is scored
+   out of a hundred because the point is the conversation about the line, not a grade. */
+function voiceFitCheck(st, text){
+  const raw = String(text || "").trim();
+  if (!raw) return {checks: [], summary: "Paste a line the character would say."};
+  const r = voiceRules(st), rs = readingStats(raw);
+  const words = rs.words, sent = rs.sentences, avg = words / Math.max(1, sent);
+  const speech = raw.replace(/\[[^\]]*\]/g, " ");
+  const count = re => (speech.match(re) || []).length;
+  const hedges = count(/\b(maybe|perhaps|sort of|kind of|i think|i guess|i suppose|possibly|a bit|just|if that's|if it's|probably)\b/gi);
+  const hedgeRate = words ? hedges / words : 0;
+  const contractions = count(/\b\w+'(s|re|ve|d|ll|t|m)\b/gi), ellipses = count(/\.{3}|…/g), shouts = count(/!/g), questions = count(/\?/g);
+  const slang = count(/\b(gonna|wanna|kinda|yeah|nope|ain't|innit|mate|dunno|nah)\b/gi), formalWords = count(/\b(moreover|therefore|furthermore|regarding|shall|whom|indeed|kindly|permit)\b/gi);
+  const checks = [], add = (label, verdict, note) => checks.push({label, verdict, note});
+  const fit = (cond, stretchCond) => cond ? "fits" : stretchCond ? "stretch" : "off";
+  if (r.terse) add("Length", fit(words <= 14, words <= 24), `${words} words against a terse voice`);
+  else if (r.long) add("Length", fit(words >= 28, words >= 16), `${words} words against a voice that runs long`);
+  else add("Length", fit(words >= 6 && words <= 45, words <= 70), `${words} words`);
+  if (r.yielding) add("Hedging", fit(hedgeRate >= 0.04, hedges >= 1), `${hedges} hedge${hedges === 1 ? "" : "s"}; a yielding voice softens what it says`);
+  else if (r.direct) add("Hedging", fit(hedgeRate <= 0.02, hedgeRate <= 0.05), `${hedges} hedge${hedges === 1 ? "" : "s"}; a direct voice mostly does not`);
+  if (r.formal) add("Register", fit(slang === 0 && contractions <= Math.max(1, words / 25), slang <= 1), `${contractions} contraction${contractions === 1 ? "" : "s"}, ${slang} slang word${slang === 1 ? "" : "s"} against a formal voice`);
+  else if (r.casual) add("Register", fit(contractions + slang >= 1 && formalWords === 0, formalWords <= 1), `${contractions} contractions, ${formalWords} formal words against a casual voice`);
+  if (r.open) add("Feeling on the page", fit(shouts + ellipses + questions >= 1 || /\b(love|hurt|miss|afraid|sorry|glad)\b/i.test(speech), true), `${shouts} exclamation${shouts === 1 ? "" : "s"}, ${ellipses} ellipsis${ellipses === 1 ? "" : "es"}`);
+  else if (r.guarded) add("Feeling on the page", fit(shouts === 0 && !/\b(love|hurt|miss|afraid)\b/i.test(speech), shouts <= 1), `${shouts} exclamation${shouts === 1 ? "" : "s"}; a guarded voice keeps the feeling off the page`);
+  if (r.warm) add("Warmth", fit(/\b(please|thanks|thank you|glad|love|sorry|together|we)\b/i.test(speech), true), "a warm voice leaves some sign it cares how the line lands");
+  else if (r.cold) add("Warmth", fit(!/\b(love|dear|sweetheart|please)\b/i.test(speech), true), "a cool voice does not decorate the line");
+  const lex = lexiconFor(st);
+  const used = lex.never.filter(p => speech.toLowerCase().includes(p.toLowerCase()));
+  add("Words they would not say", used.length ? "off" : "fits", used.length ? `contains "${used[0]}", which this voice avoids` : "none of the phrases this voice avoids");
+  const p = r.profile || {}, grade = rs.grade;
+  if ((p.intel || 0) > 0.2) add("Reading level", fit(grade >= 7, grade >= 5), `grade ${grade} against an analytical voice`);
+  else if ((p.intel || 0) < -0.2) add("Reading level", fit(grade <= 8, grade <= 11), `grade ${grade} against a plainer voice`);
+  const off = checks.filter(c => c.verdict === "off").length, stretch = checks.filter(c => c.verdict === "stretch").length;
+  const summary = off ? `${off} thing${off === 1 ? "" : "s"} here this voice would not do.` : stretch ? "Close: a few places where the line stretches the voice." : "It sounds like them.";
+  return {checks, summary, words, grade};
+}
+
+// ================= 13. Two people under the same pressure =================
+/* Relationships feed the pressure ladder. The ladder describes one person; this reads two sheets together: how each one's first move
+   lands on the other, and how each one's attachment reads the other's move. The ten stress pairings are authored; the attachment lines
+   come from the same appraisal table the single-character ladder uses. */
+const _PRESSURE_PAIR = {
+  "Fight|Fight":  "{a} and {b} both go forward. Whatever started it is soon the smaller thing; the argument is now about who stops first.",
+  "Fight|Flight": "{a} pushes and {b} leaves the room, so {a} follows, and the chase becomes the argument.",
+  "Fight|Freeze": "{a} gets louder and {b} gets quieter. {a} reads the silence as contempt; {b} reads the noise as a verdict.",
+  "Fight|Fawn":   "{b} gives way in the first minute, and {a} takes the giving way as permission to keep going.",
+  "Flight|Flight":"Both reach for the door. Nothing is said and nothing is settled, and the next meeting starts on the unsaid thing.",
+  "Flight|Freeze":"{a} leaves; {b} stays exactly where they were, still, long after, waiting to be told what happened.",
+  "Flight|Fawn":  "{b} chases after to smooth it over; {a} takes the chase for pressure and goes further off.",
+  "Freeze|Freeze":"Silence on both sides. It can last for days, and each is sure the other is the one who is angry.",
+  "Freeze|Fawn":  "{b} fills the silence with helpfulness. {a} cannot answer, and {b} takes that for displeasure and does more.",
+  "Fawn|Fawn":    "Each is apologising to the other at once, and neither says what they actually need.",
+};
+function pairUnderPressure(A, B){
+  if (!A || !B || !A.state || !B.state) return null;
+  const nm = m => (m.meta && m.meta.name) || "Unnamed";
+  const sa = _mxT(A.state, "stress"), sb = _mxT(B.state, "stress");
+  if (!sa || !sb) return null;
+  const short = c => c.split(" ")[0];
+  const ka = short(sa.category), kb = short(sb.category);
+  let key = `${ka}|${kb}`, swap = false;
+  if (!_PRESSURE_PAIR[key]){ key = `${kb}|${ka}`; swap = true; }
+  const tpl = _PRESSURE_PAIR[key];
+  if (!tpl) return null;
+  const [x, y] = swap ? [B, A] : [A, B];
+  const lines = [tpl.replace(/\{a\}/g, nm(x)).replace(/\{b\}/g, nm(y))];
+  const aa = _mxT(A.state, "attachment"), ab = _mxT(B.state, "attachment");
+  const APP = typeof APPRAISAL_BY_ATTACHMENT !== "undefined" ? APPRAISAL_BY_ATTACHMENT : {};
+  const third = s => s.replace(/^read /, "reads ").replace(/ and act on /, " and acts on ");
+  if (aa && APP[aa.category]) lines.push(`${nm(A)} ${third(APP[aa.category])}.`);
+  if (ab && APP[ab.category]) lines.push(`${nm(B)} ${third(APP[ab.category])}.`);
+  const na = _mxT(A.state, "motivation", /The Need/i), nb = _mxT(B.state, "motivation", /The Need/i);
+  if (na && nb) lines.push(`What would help is not the same for each: ${nm(A)} needs ${_mxLc(na.trait)}; ${nm(B)} needs ${_mxLc(nb.trait)}.`);
+  return {key, lines};
 }

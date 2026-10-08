@@ -26,7 +26,7 @@ const TRAITS_GROWTH_C = (function(){
   block(BEL, "Conspiracy-Adjacent", 194000, [
     ["Wakes you up to what's really going on","Delivers theories with the zeal of a recruiter and takes disagreement as proof.","Everyone's asleep. You think the prices just happen? Wake up!",5,"c",{vol:1,asrt:1,hon:-1,agr:-1}],
     ["Everything is a distraction from something","Treats each news story as cover for a bigger unnamed one.","Why are they telling us about that today? What are they burying?",4,"c",{pos:-1,rebel:1}],
-    ["Quietly keeps one file","Mentions a private folder of clippings once, never again, and never argues the point.","<i>(shrugs)</i> I keep a folder. It's fine. Forget I said.",1,"s",{vol:-1,disc:-1,asrt:-1}],
+    ["Quietly keeps one file","Mentions a private folder of clippings once, never again, and never argues the point.","(shrugs) I keep a folder. It's fine. Forget I said.",1,"s",{vol:-1,disc:-1,asrt:-1}],
     ["Patterns in numbers","Finds dates and digits that line up and offers them gently as evidence.","Seventeen, again. Third time this week. Just noting it.",2,"d",{vol:-1}],
     ["'They don't want you to know'","Frames ordinary information as suppressed, including things printed on the label.","They don't put that on the front. Funny, that.",3,"c",{rebel:1,hon:-1}],
     ["Cheerful about the coverup","Treats the grand conspiracy as a fun hobby and invites everyone to join in.","Oh, it's all rigged, mate, it's brilliant. Pass the crisps.",3,"u",{mood:1,hon:-1,form:-1}],
@@ -37,8 +37,8 @@ const TRAITS_GROWTH_C = (function(){
   block(BEL, "Secular Rituals", 194100, [
     ["Sunday roast as sacrament","Treats the weekly family meal as non-negotiable and slightly solemn.","Sunday, one o'clock. I don't care who's engaged to whom.",4,"c",{cur:-1}],
     ["Loud annual tradition keeper","Runs the yearly holiday with a fixed script and announces each step.","Right, everyone, it's the lights ceremony! Positions! Same as last year!",5,"c",{vol:1}],
-    ["Taps the doorframe leaving","Performs a tiny private gesture on every departure and doesn't explain it.","<i>(touches the frame twice, says nothing)</i> Right. Off we go.",1,"s",{vol:-1,disc:1}],
-    ["Lights a candle on the quiet days","Marks small private anniversaries with a candle and no announcement.","<i>(lights one) </i>Just the one tonight. It's fine.",2,"d",{emo:1,vol:-1}],
+    ["Taps the doorframe leaving","Performs a tiny private gesture on every departure and doesn't explain it.","(touches the frame twice, says nothing) Right. Off we go.",1,"s",{vol:-1,disc:1}],
+    ["Lights a candle on the quiet days","Marks small private anniversaries with a candle and no announcement.","(lights one) Just the one tonight. It's fine.",2,"d",{emo:1,vol:-1}],
     ["Seasonal cleaning rite","Treats the spring clear-out or autumn reset as a ceremony with a fixed order.","Windows first, then the cupboards. You can't do the cupboards first.",3,"u",{disc:1,cur:-1}],
     ["Mug and chair stays the same","Insists on the same cup and seat for the daily start and calls it centring.","That's my cup. The day doesn't start without that cup.",3,"c",{disc:1,pos:1,cur:-1}],
     ["Improvises rituals on the spot","Invents a ceremony for any occasion and gets everyone to join.","We need a moment! Everybody hands in. One, two — okay, that counts.",3,"u",{rebel:1,disc:-1}],
@@ -46,7 +46,7 @@ const TRAITS_GROWTH_C = (function(){
   ]);
 
   block(BEL, "Lapsed Faith", 194200, [
-    ["Still says the grace under their breath","Mutters the old words before eating and pretends it's a cough.","<i>(murmurs, then clears throat)</i> Right. Dig in.",1,"s",{vol:-1,asrt:-1}],
+    ["Still says the grace under their breath","Mutters the old words before eating and pretends it's a cough.","(murmurs, then clears throat) Right. Dig in.",1,"s",{vol:-1,asrt:-1}],
     ["Knows the hymn words by heart","Surprised to find the verses come up unbidden, and moves on briskly.","Don't look at me. It just comes out. Forty years of Sundays.",2,"d",{emo:1,vol:-1}],
     ["Loud ex-believer","Holds forth about everything that was wrong with the old community.","Don't get me started. Thirty years of guilt and bake sales!",5,"c",{vol:1,rebel:1,asrt:1}],
     ["Argues theology for sport","Enjoys picking apart doctrine with practised ease and no malice.","Ah, but who decides which book counts? Go on, answer that one.",3,"c",{intel:1,agr:-1}],
@@ -57,9 +57,9 @@ const TRAITS_GROWTH_C = (function(){
 
   block(BEL, "Superstition", 194300, [
     ["Loud about bad luck","Calls out jinxes the moment anyone speaks tempting fate.","Don't say that! Knock on wood, knock on wood, everyone!",5,"c",{vol:1,asrt:1}],
-    ["Lucky object in every pocket","Carries a coin or token and checks it before important moments.","<i>(pats pocket)</i> Got it. Okay. Now we can go in.",3,"c",{disc:1,intel:-1}],
+    ["Lucky object in every pocket","Carries a coin or token and checks it before important moments.","(pats pocket) Got it. Okay. Now we can go in.",3,"c",{disc:1,intel:-1}],
     ["Won't say the name of the thing","Avoids naming a feared outcome and uses a code word instead.","If the, you know, if it doesn't go well. The other thing.",2,"d",{vol:-1,emo:1,asrt:-1}],
-    ["Reads small signs","Notices magpies, spilled salt and cracked mirrors and says nothing till asked.","<i>(glances at the salt, steps over it)</i> Mm.",1,"s",{vol:-1,intel:-1}],
+    ["Reads small signs","Notices magpies, spilled salt and cracked mirrors and says nothing till asked.","(glances at the salt, steps over it) Mm.",1,"s",{vol:-1,intel:-1}],
     ["Cheerful about it all","Treats every charm as a joke while keeping each one scrupulously.","Totally silly. Anyway, left shoe first, always.",2,"u",{mood:1,hon:-1}],
     ["Orders the day by numbers","Chooses times, seats and floors by lucky or unlucky digits.","Not the thirteenth. Make it the fourteenth, I'll sleep better.",3,"u",{asrt:1,intel:-1}],
   ]);
@@ -101,7 +101,7 @@ const TRAITS_GROWTH_C = (function(){
     ["'No problem at all'","Answers every request, including rude ones, with a stock reassurance.","No problem at all! Absolutely no trouble. Of course.",4,"c",{agr:1,asrt:-1}],
     ["Upsells friends","Adds optional extras and offers to every offhand favour.","Want fries with that? Go on, make it a large. Best value.",4,"c",{asrt:1}],
     ["'Let me see what I can do'","Offers help in a way that commits to nothing.","Let me just see what I can do for you. Bear with me.",3,"u",{man:1,agr:1,hon:-1}],
-    ["Reads the room's mood by the table","Notices a stranger's mood at a glance and adjusts quietly.","<i>(lowers voice, slows down)</i> Take all the time you need.",1,"s",{vol:-1,emo:1}],
+    ["Reads the room's mood by the table","Notices a stranger's mood at a glance and adjusts quietly.","(lowers voice, slows down) Take all the time you need.",1,"s",{vol:-1,emo:1}],
     ["Apologises for the system","Says 'I'm so sorry, that's just how the system works' and means it.","I'm so sorry, it's the system. I'd change it if I could.",3,"u",{agr:1,asrt:-1}],
     ["Announces every handover","Narrates each step of a simple task as if on a till.","Okay, I've got the keys, I'm handing you the keys, there you go.",2,"d",{pace:-1,form:1}],
     ["Customer-first catchphrases","Closes ordinary talk with 'is there anything else I can help with today'.","Right, that's sorted. Anything else I can help you with today?",3,"c",{form:1}],
@@ -112,7 +112,7 @@ const TRAITS_GROWTH_C = (function(){
     ["Scores everything out of ten","Asks for a pain score on trivial discomforts.","Where's the boredom at, on a scale of one to ten?",4,"c",{mood:1}],
     ["Triages the to-do list","Sorts tasks into immediate, urgent and can-wait.","That's a red. That's amber. The email can wait.",3,"u",{disc:1,asrt:1}],
     ["Unflappable bedside voice","Keeps the same flat calm while delivering shocking news.","Right. That's quite a lot of blood. Let's sit down, shall we.",2,"d",{vol:-1,emo:-1,pace:-1,warm:-1}],
-    ["Washes in and out of rooms","Sanitises hands at every threshold and mentions it.","<i>(sanitises)</i> Habit. I can't walk through a door without.",1,"s",{disc:1}],
+    ["Washes in and out of rooms","Sanitises hands at every threshold and mentions it.","(sanitises) Habit. I can't walk through a door without.",1,"s",{disc:1}],
     ["Loud handover","Delivers a full recap in a rapid, practised sweep.","Okay, so: sixty-two, fell, thinks it's nothing, I think it's something.",4,"c",{pace:1,vol:1,asrt:1}],
     ["'Any allergies?' at social events","Asks screening questions out of reflex at parties.","Before you eat that: any allergies? Medications? Lovely.",3,"c",{disc:1,warm:-1}],
     ["Dark humour about the body","Jokes bluntly about illness among peers.","It's not the cough that gets you. It's the paperwork.",3,"u",{mood:-1,hon:1,man:-1,emo:-1}],
@@ -123,7 +123,7 @@ const TRAITS_GROWTH_C = (function(){
     ["Plans in phases","Describes errands as phased operations with a start line.","Phase one, the shop. Phase two, the post office. Rendezvous at fourteen hundred.",4,"c",{disc:1,asrt:1}],
     ["Quotes the twenty-four-hour clock","Gives times only in twenty-four-hour format, however casual.","Dinner's at nineteen thirty. Don't be late.",2,"d",{form:1,disc:1}],
     ["Debrief after everything","Insists on a quick what-went-well-what-didn't after any event.","Right, hot wash. What worked? What didn't?",3,"u",{disc:1}],
-    ["Reads exits on entering","Notes the doors and sightlines silently as soon as they sit.","<i>(takes the seat facing the door)</i> This one's fine.",1,"s",{vol:-1}],
+    ["Reads exits on entering","Notes the doors and sightlines silently as soon as they sit.","(takes the seat facing the door) This one's fine.",1,"s",{vol:-1}],
     ["'Hurry up and wait' as philosophy","Treats delays as normal and meets them with dry calm.","Always the way. Rush to get here, sit for three hours.",3,"u",{mood:-1,pace:-1}],
     ["Acronyms for the dinner table","Abbreviates chores into letters nobody else knows.","SITREP on the bins? Any FOD in the hall?",3,"c",{form:1}],
   ]);
@@ -133,18 +133,18 @@ const TRAITS_GROWTH_C = (function(){
     ["'Yes, chef' to anyone","Answers instructions with kitchen-brigade acknowledgement.","Yes, chef. Two minutes. Yes, chef.",4,"c",{agr:1,asrt:-1}],
     ["Mise en place for life","Lays out everything before beginning any task and sets it in order.","Everything in its place first. Then we start. Not before.",3,"u",{disc:1,pace:-1}],
     ["Measures twice, says so","Repeats the measure-twice rule over any small job.","Measure twice, cut once. Every time. Every single time.",3,"c",{disc:1}],
-    ["Tastes before speaking","Pauses to sample and adjusts a verdict by a pinch.","<i>(tastes)</i> Needs acid. A bit of acid. There.",1,"s",{vol:-1,pace:-1}],
+    ["Tastes before speaking","Pauses to sample and adjusts a verdict by a pinch.","(tastes) Needs acid. A bit of acid. There.",1,"s",{vol:-1,pace:-1}],
     ["'Service!' for any finish","Calls an end to tasks as though plating up.","Service! Done. Hands off, it's ready.",3,"u",{asrt:1,vol:1}],
     ["Rates jobs by how long they'll take","Gives times as bench estimates and hates rounding them up.","Forty minutes. Not an hour. Forty. Go on, watch me.",2,"d",{ego:1}],
   ]);
 
   block(MON, "Money Taboo", 195100, [
-    ["Hushed when money enters","Drops volume to a murmur at any mention of cost.","<i>(lowers voice)</i> It was... a fair bit. I'd rather not say.",2,"d",{vol:-1,asrt:-1}],
+    ["Hushed when money enters","Drops volume to a murmur at any mention of cost.","(lowers voice) It was... a fair bit. I'd rather not say.",2,"d",{vol:-1,asrt:-1}],
     ["Loudly says it's none of your business","Shuts down questions about pay with a flat, public refusal.","Nobody asks that! What I earn is my business!",4,"c",{vol:1,asrt:1,man:-1,warm:-1}],
     ["Changes the subject at the bill","Deflects when payment comes up, with a joke or a topic swerve.","Anyway! Who saw the match? Right, anyone want coffee?",3,"c",{man:1,hon:-1,emo:-1}],
     ["Insists money is vulgar","Frames talk of cost as crass regardless of who raises it.","One doesn't discuss it. Not at table, not ever.",3,"u",{form:1,rebel:-1,cur:-1}],
     ["Open with everything","Names salary, rent and debts to anyone, cheerfully.","I make forty-two. Rent's nine hundred. What about you?",3,"u",{hon:1,disc:-1,mood:1,form:-1}],
-    ["Pays in secret","Settles a bill privately so no number is ever spoken.","<i>(slips away from the table; returns)</i> Sorted. Don't ask.",1,"s",{man:1,vol:-1}],
+    ["Pays in secret","Settles a bill privately so no number is ever spoken.","(slips away from the table; returns) Sorted. Don't ask.",1,"s",{man:1,vol:-1}],
     ["Treats a gift price tag as private","Removes any trace of cost from gifts.","I took the price off. It's the thought that counts.",2,"d",{emo:-1}],
   ]);
 
@@ -159,10 +159,10 @@ const TRAITS_GROWTH_C = (function(){
 
   block(MON, "Class-Mobility Tells", 195300, [
     ["Scarcity habits kept in affluence","Eats leftovers, hoards carrier bags and rations treats long after money loosened.","I know I can afford it. I still can't throw away the end of the loaf.",3,"c",{mood:-1}],
-    ["Corrects own old accent mid-word","Catches and repairs a vowel and moves on a half-beat later.","I was going to say — <i>(pause)</i> — I'll go there.",2,"d",{vol:-1,disc:1,ego:-1}],
+    ["Corrects own old accent mid-word","Catches and repairs a vowel and moves on a half-beat later.","I was going to say — (pause) — I'll go there.",2,"d",{vol:-1,disc:1,ego:-1}],
     ["Loud about how far they've come","Retells the rise from nothing as a victory lap.","I started with nothing! Nothing! And look at me now!",5,"c",{vol:1,ego:1}],
-    ["Reads every menu from the right","Checks the price column first before even looking at the dishes.","<i>(scans right-hand side)</i> The soup's good. I'll have the soup.",2,"s",{vol:-1,disc:1}],
-    ["Carries two registers","Switches vocabulary between old friends and new colleagues, and is aware of it.","<i>(to colleague)</i> Wonderful. <i>(to old friend)</i> Mate, wonderful.",3,"u",{man:1}],
+    ["Reads every menu from the right","Checks the price column first before even looking at the dishes.","(scans right-hand side) The soup's good. I'll have the soup.",2,"s",{vol:-1,disc:1}],
+    ["Carries two registers","Switches vocabulary between old friends and new colleagues, and is aware of it.","(to colleague) Wonderful. (to old friend) Mate, wonderful.",3,"u",{man:1}],
     ["Overpays and over-tips","Tips grandly to shake off a past of being the one waiting.","Keep it. No, keep it. I've been on that side.",3,"d",{ego:1}],
   ]);
 

@@ -294,8 +294,16 @@ async function renameSavedCharacter(name){
 function decodeSavedRecord(parsed, label){
   if (!parsed || typeof parsed !== 'object') throw new Error("that save is not a character record.");
   const rec = Object.assign({}, parsed);
+  /* A record with no `state` (or one that is not an object — expandSlots would turn the string
+     "abc" into a three-slot junk sheet) is refused before anything else. */
+  if (!rec.state || typeof rec.state !== 'object' || Array.isArray(rec.state))
+    throw new Error("that save has no character sheet in it.");
   rec.state = expandSlots(rec.state);
   rec.pressureState = expandSlots(rec.pressureState);
+  /* A record with no `state` (or one that is not an object) used to get as far as the loader
+     assigning `state = undefined` and then throwing, with the globals already overwritten. */
+  if (!rec.state || typeof rec.state !== 'object' || Array.isArray(rec.state))
+    throw new Error("that save has no character sheet in it.");
   // Validate the EXPANDED shape, which is what the render path will dereference —
   // validating the compressed {__id} form fails on every save this build has written.
   validateSheetPayload(rec);
@@ -356,7 +364,7 @@ async function loadSavedCharacter(name){
        an older save carrying full embedded trait copies rather than {__id} stubs. Both
        shapes arrive here the same way, so a save written by any build still loads. */
     state = rec.state; charMeta = rec.charMeta || {name, age:"", context:"", archetypeLabel:"Loaded"};
-    if (typeof viewContext !== 'undefined') viewContext = CONTEXT_MODE_IDS.includes(charMeta.viewContext) ? charMeta.viewContext : 'baseline';
+    if (typeof viewContext !== 'undefined') viewContext = allContextModes().some(m => m.id === charMeta.viewContext) ? charMeta.viewContext : 'baseline';
     if (typeof resetArc === 'function'){
       arcEvents = (Array.isArray(rec.arcEvents) ? rec.arcEvents : []).filter(e=>!validateArcEvent(e).length);
       arcBase = rec.arcBase ? expandSlots(rec.arcBase) : JSON.parse(JSON.stringify(state));
@@ -369,6 +377,7 @@ async function loadSavedCharacter(name){
     traitNotes = rec.traitNotes || {};
     diffLog = {}; rerollExclusions = {}; rerollHistory = {}; whyOpen = {}; OPEN_CARD_CONTROLS.clear();
     if (rec.settings) restoreSettings(rec.settings);
+    noteLoadedEngine(rec.seed || (rec.meta && rec.meta.seed), rec.settings);
     /* The file-import path sets this and the load path did not, so a later Undo could
        pair the loaded sheet with the sliders of whatever was generated before it. The
        loaded character's own settings block is the right answer; live controls are the
@@ -617,6 +626,9 @@ function regenerateMostSimilarMember(){
 }
 let _regenCount = 0;
 function generateCast(){
+  try { return _generateCastInner(); } finally { syncEngineToSheet(); }
+}
+function _generateCastInner(){
   const count = intVal('castCount', 3);
   // BUG FIX: the cast read your Generate-group checkboxes and per-section profile
   // toggles (via buildCharacterState) but hardcoded three mannerisms and a balanced
@@ -632,6 +644,14 @@ function generateCast(){
   // label used to be `seedNum.toString(36)`, which could not be pasted back.
   const castSeed = resolveSeed(seedInput ? seedInput.value : "");
   const seedNum = castSeed.num;
+  /* A cast always builds with engine 1, so its printed seed was always "v1-". The optimiser used
+     to undo the anti-similarity pass (below); fixing that changes which cast a seed builds, so a
+     fresh cast now prints a "v2-" seed and only a v2 seed gets the fix. Pasted v1 seeds and typed
+     phrases rebuild exactly the casts they always did. */
+  if (!castSeed.explicit) castSeed.label = 'v' + DEFAULT_ENGINE_V + '-' + (castSeed.num >>> 0).toString(36);
+  const castV2 = /^v[23]-[0-9a-z]+$/.test(castSeed.label);
+  // A v1 or v2 cast keeps drawing from the engine-1 pools it always did; a v3 cast draws from the whole bank.
+  setEngineV(/^v3-[0-9a-z]+$/.test(castSeed.label) ? 3 : 1);
   // The cast and its edges are replaced wholesale — keep a way back (Undo toast below).
   const hadCast = castStates.length > 0 || relationshipEdges.length > 0;
   const restoreCast = hadCast ? _castSnapshot() : null;
@@ -699,7 +719,22 @@ function generateCast(){
        sharing the most voice devices with the rest is rerolled until the cast's total
        stops dropping. Seeded off the cast seed, so a replay rebuilds the same cast. */
     if (boolVal('castOptimise', true) && typeof optimiseCastVoices === 'function'){
-      lastCastOptimisation = optimiseCastVoices(drafts, String(lastCastSeed), () => rollOne());
+      /* The optimiser rebuilds the worst member with a bare roll, which skipped the overlap check
+         above and put back duplicate role, values, attachment and stress combinations (duplicate
+         stress + attachment pairs per cast went from 0.017 to 0.333). From v2 a rebuilt member
+         has to clear the same bar against the rest of the cast. */
+      const rebuild = !castV2 ? () => rollOne() : (idx, cur) => {
+        const others = (cur || drafts).filter((_, j) => j !== idx).map(c => c.state);
+        let d = null;
+        for (let attempt = 0; attempt < 6; attempt++){
+          d = rollOne();
+          const worst = others.reduce((w, st) => Math.max(w, KEY_SECTIONS.filter(id => slotCat(d.state['prof_'+id+'_0']) &&
+            slotCat(d.state['prof_'+id+'_0']) === slotCat(st['prof_'+id+'_0'])).length), 0);
+          if (worst <= 1) break;
+        }
+        return d;
+      };
+      lastCastOptimisation = optimiseCastVoices(drafts, String(lastCastSeed), rebuild);
     } else lastCastOptimisation = null;
     drafts.forEach((d, i)=>{
       // Carried on the cast entry rather than left in the global, so a cast member's
@@ -750,8 +785,8 @@ function renderCast(){
     const profiles = castStates.map((c,i)=>({label:c.meta.name, color:CAST_COLORS[i%CAST_COLORS.length], prof:axisProfile(c.state)}))
                                .filter(p=>Object.keys(p.prof).length >= 2);
     if (profiles.length >= 2){
-      let legend = profiles.map(p=>`<span style="display:inline-flex;align-items:center;gap:5px;margin-right:12px;font-size:.75rem;"><i style="width:10px;height:10px;border-radius:2px;background:${cssColor(p.color)};display:inline-block;"></i>${escHTML(p.label)}</span>`).join("");
-      overlay.innerHTML = `<div class="tensionTitle" style="color:var(--dusk-blue);margin-bottom:4px;">Cast overlay — axis profiles</div>${radarSVG(profiles, 360)}<div style="margin-top:6px;">${legend}</div><div class="sub" style="margin:6px 0 0;">All members on one chart. Overlapping shapes = characters pulling the same directions; empty axes = ground nobody in this ensemble covers.</div>`;
+      let legend = profiles.map(p=>`<span data-st="display:inline-flex;align-items:center;gap:5px;margin-right:12px;font-size:.75rem;"><i data-st="width:10px;height:10px;border-radius:2px;background:${cssColor(p.color)};display:inline-block;"></i>${escHTML(p.label)}</span>`).join("");
+      overlay.innerHTML = `<div class="tensionTitle" data-st="color:var(--dusk-blue);margin-bottom:4px;">Cast overlay — axis profiles</div>${radarSVG(profiles, 360)}<div data-st="margin-top:6px;">${legend}</div><div class="sub" data-st="margin:6px 0 0;">All members on one chart. Overlapping shapes = characters pulling the same directions; empty axes = ground nobody in this ensemble covers.</div>`;
       overlay.style.display = "block";
     } else overlay.style.display = "none";
   }
@@ -770,6 +805,7 @@ function renderCast(){
     let inner = `<h3><span>${escHTML(c.meta.name)}</span>` +
       (seat ? `<span class="castRoleBadge castRole-${escAttr(seat.id)}" title="${escAttr(seat.why)}">${escHTML(seat.label)}</span>` : ``) +
       `<button class="savedAct" ${actAttr('click', 'renameCastMember', idx)}>rename</button>` +
+      `<button class="savedAct" ${actAttr('click', 'setCastSeat', idx)} title="Name this character's seat in the group yourself">seat</button>` +
       `<button class="savedAct savedDel" ${actAttr('click', 'removeCastMember', idx)} ` +
       `aria-label="Remove ${escAttr(c.meta.name)} from the cast" title="Remove this character from the cast">remove</button></h3>`;
     const addAll = (ids)=>{ ids.forEach(id=>{ inner += traitCardHTML(id, c.state[id], false, false, sectionColor(titleForSlotId(id))); }); };
@@ -784,6 +820,15 @@ function renderCast(){
   });
   if (typeof renderVoiceHeatmap === 'function') renderVoiceHeatmap();
   if (typeof renderRelWeb === 'function') renderRelWeb();
+}
+/* A seat of your own: "the one who keeps the books", "the new hire". It replaces the seat read off the sheet and is kept with the member. */
+async function setCastSeat(i){
+  const c = castStates[i];
+  if (!c) return;
+  const next = await askForName("Name this character's seat in the group (a single dash goes back to the seat read off the sheet):", c.meta.seat || "");
+  if (next === null || next === undefined) return;
+  c.meta.seat = String(next).trim() === "-" ? "" : String(next).trim().slice(0, 40);
+  renderCast();
 }
 async function renameCastMember(i){
   const c = castStates[i];
@@ -1266,6 +1311,8 @@ function renderVoiceLab(){
   const host = document.getElementById('voiceLabBody');
   if (!host) return;
   renderVoicePromptForm();
+  const aud = document.getElementById('voiceAudience');
+  if (aud && !aud.options.length){ aud.innerHTML = VOICE_AUDIENCES.map(x => `<option value="${escHTML(x.id)}">${escHTML(x.label)}</option>`).join(""); }
   const panel = document.getElementById('voiceLabPanel');
   const has = Object.keys(state).length > 0;
   if (panel) panel.style.display = has ? "block" : "none";
@@ -1285,6 +1332,28 @@ function renderVoiceLab(){
       <button class="btn-secondary vlTen" ${actAttr('click', 'toggleVoiceTen', l.promptId)} aria-expanded="${voiceTenOpen === l.promptId ? 'true' : 'false'}">${voiceTenOpen === l.promptId ? 'Hide the 10 lines' : '10 lines'}</button>
       ${voiceTenOpen === l.promptId ? `<ol class="vlTenList">${voiceLines(state, l.promptId, voiceLabMode, 10, voiceLabReroll, charMeta).map(x => `<li>${escHTML(x.text)}</li>`).join("")}</ol>` : ``}
     </div>`).join("");
+  renderVoiceAids();
+}
+/* Hot buttons and lexicon, under the lab's lines. */
+function renderVoiceAids(){
+  const host = document.getElementById('voiceAids');
+  if (!host) return;
+  if (!Object.keys(state).length || typeof hotButtons !== 'function'){ host.innerHTML = ""; return; }
+  const hb = hotButtons(state), lex = lexiconFor(state);
+  const list = items => items.length ? `<ul class="vlAidList">${items.map(x => `<li>${escHTML(x.topic)} <span class="sub">${escHTML(x.from)}</span></li>`).join("")}</ul>` : `<div class="sub">Nothing on the sheet says.</div>`;
+  const words = items => items.length ? `<ul class="vlAidList">${items.map(x => `<li>“${escHTML(x)}”</li>`).join("")}</ul>` : `<div class="sub">Nothing distinctive yet.</div>`;
+  host.innerHTML = `<div class="vlAids">
+    <div class="vlAid"><h3>Lights them up</h3>${list(hb.lights)}</div>
+    <div class="vlAid"><h3>Shuts them down</h3>${list(hb.shuts)}</div>
+    <div class="vlAid"><h3>Words they lean on</h3>${words(lex.overused)}</div>
+    <div class="vlAid"><h3>Words they would not say</h3>${words(lex.never)}</div></div>`;
+}
+function runVoiceFit(){
+  const host = document.getElementById('voiceFitResult');
+  if (!host) return;
+  if (!Object.keys(state).length){ host.innerHTML = `<div class="sub">Generate a character first.</div>`; return; }
+  const res = voiceFitCheck(state, strVal('voiceFitText', ''));
+  host.innerHTML = `<div class="charMeta">${escHTML(res.summary)}</div>` + res.checks.map(c => `<div class="vlFit vlFit-${escAttr(c.verdict)}"><b>${escHTML(c.label)}</b> <span class="vlFitTag">${escHTML(c.verdict)}</span> <span class="sub">${escHTML(c.note)}</span></div>`).join("");
 }
 /* The "10 lines" view (audit §5): ten composed takes of one situation, so the range of
    a voice is visible rather than one sample of it. One prompt open at a time. */
@@ -1337,7 +1406,7 @@ function renderVoiceCompare(){
   renderVoiceHeatmap();
   if (!castStates.length){ host.innerHTML = `<div class="sub">Generate a cast to compare voices.</div>`; return; }
   const cmp = voiceComparison(castStates, strVal('voiceComparePrompt', 'refuse'), voiceLabMode, voiceLabReroll);
-  host.innerHTML = `<div class="sub" style="margin-bottom:8px;">${escHTML(cmp.note)}</div>` + cmp.rows.map(r => `
+  host.innerHTML = `<div class="sub" data-st="margin-bottom:8px;">${escHTML(cmp.note)}</div>` + cmp.rows.map(r => `
     <div class="voiceCard">
       <div class="voiceHead"><b>${escHTML(r.name)}</b></div>
       <blockquote class="voiceLine">${escHTML(r.line.text)}</blockquote>
@@ -1354,7 +1423,7 @@ function copyVoiceLine(promptId, btnEl){
 }
 function copyVoiceLab(btnEl){
   if (!Object.keys(state).length){ toast("Generate a character first.", "warn"); return; }
-  copyText(`# Voice lab — ${charMeta.name || "Unnamed Character"} (${voiceLabMode})\n\n` + voiceLabToMarkdown(state, voiceLabMode), btnEl);
+  copyText(`# Voice lab — ${charMeta.name || "Unnamed Character"} (${voiceLabMode})\n\n` + voiceLabToMarkdown(state, voiceLabMode, voiceLabReroll, charMeta), btnEl);
 }
 function rerollVoiceLab(){
   voiceLabReroll++;
@@ -1399,7 +1468,7 @@ function retireTrait(id){
   if (on) now.add(id); else now.delete(id);
   setRetiredTraits([...now]);
   const kept = _projectFieldSave('retired', [...now]);
-  toast(on ? `"${t.trait}" is retired${kept ? ' for this project' : ' for this session (no project open)'} — rarer in new characters, never banned.`
+  toast(on ? `"${t.trait}" is retired${kept ? ' for this project' : ' for this session (no project open)'} — new builds favour the candidate that uses fewest retired traits; never banned.`
            : `"${t.trait}" is back at full weight.`, "ok", 5000);
   if (typeof withPreservedFocus === 'function') withPreservedFocus(()=>{ renderSheet(); }); else renderSheet();
 }
@@ -1422,12 +1491,12 @@ function renderVoiceHeatmap(){
     if (i === j) return `<td class="hmSelf" aria-label="same character">—</td>`;
     const v = m.matrix[i][j], heat = m.max ? v / m.max : 0;
     const tip = m.shared[i][j].slice(0, 6).join("; ") || "nothing shared";
-    return `<td class="hmCell" style="--heat:${heat.toFixed(2)}" title="${escAttr(tip)}">${v}</td>`;
+    return `<td class="hmCell" data-st="--heat:${heat.toFixed(2)}" title="${escAttr(tip)}">${v}</td>`;
   };
-  host.innerHTML = `<div class="tensionTitle" style="margin:0 0 6px;">Voice collisions across every prompt</div>
+  host.innerHTML = `<div class="tensionTitle" data-st="margin:0 0 6px;">Voice collisions across every prompt</div>
     <div class="hmWrap"><table class="heatmap"><thead><tr><th></th>${m.names.map(n => `<th scope="col">${escHTML(n)}</th>`).join("")}</tr></thead>
     <tbody>${m.names.map((n, i) => `<tr><th scope="row">${escHTML(n)}</th>${m.names.map((_, j) => cell(i, j)).join("")}</tr>`).join("")}</tbody></table></div>
-    <div class="actionRow" style="margin-top:8px;">
+    <div class="actionRow" data-st="margin-top:8px;">
       <button class="btn-secondary" id="deCollideBtn" ${actAttr('click', 'deCollideCast')} ${m.worst < 0 ? 'disabled' : ''}>De-collide${m.worst >= 0 ? ` (reroll ${escHTML(m.names[m.worst])})` : ''}</button>
       <span class="sub">${m.worst >= 0 ? `${escHTML(m.names[m.worst])} shares the most devices (${m.totals[m.worst]}).` : 'No two members share a device.'}</span>
     </div>`;
@@ -1712,11 +1781,11 @@ function renderBackupPreview(){
   const conflicts = preview.projects.conflict.concat(preview.characters.conflict);
   host.style.display = "block";
   host.innerHTML = `<div class="tensionTitle">Before anything is written</div>
-    <div class="sub" style="margin:4px 0 8px;">${escHTML(mergeSummaryLine(preview))}</div>` +
-    (conflicts.length ? `<div class="sub" style="margin-bottom:6px;">These already exist here and differ. Ticked means take the version in the file; unticked keeps what is on this machine.</div>` +
+    <div class="sub" data-st="margin:4px 0 8px;">${escHTML(mergeSummaryLine(preview))}</div>` +
+    (conflicts.length ? `<div class="sub" data-st="margin-bottom:6px;">These already exist here and differ. Ticked means take the version in the file; unticked keeps what is on this machine.</div>` +
       conflicts.map(c => `<label class="packRow"><input type="checkbox" data-conflict="${escAttr(c.key)}"> <b>${escHTML(c.name)}</b> <span class="sub">the file's copy is ${escHTML(c.newer)}</span></label>`).join("")
       : `<div class="sub">Nothing here would be overwritten.</div>`) +
-    `<div class="actionRow" style="margin-top:8px;">
+    `<div class="actionRow" data-st="margin-top:8px;">
       <button class="btn-primary" ${actAttr('click', 'applyBackupImport')}>Import</button>
       <button class="btn-secondary" ${actAttr('click', 'cancelBackupImport')}>Cancel</button>
     </div>`;
@@ -1978,9 +2047,9 @@ function updateHeavyPreview(){
     const {chosen, conf} = predictProfileCategories(true);
     const parts = PROFILE_SECTIONS.filter(ps=>chosen[ps.id]).map(ps=>{
       const pct = Math.round((conf[ps.id]||0)*100);
-      return `${ps.label} → most likely <b>${chosen[ps.id]}</b> <span style="opacity:.65">(~${pct}%)</span>`;
+      return `${ps.label} → most likely <b>${chosen[ps.id]}</b> <span data-st="opacity:.65">(~${pct}%)</span>`;
     });
-    if (parts.length) profLine = `<div style="margin-top:6px; padding-top:6px; border-top:1px dashed var(--border);"><b>Character Profile (predicted):</b><br>${parts.join("<br>")}<div class="sub" style="margin:6px 0 0;">A simplified conditional preview, not the generator's own probabilities: it takes the most likely category at each step and conditions the next on it, and it does not model the divergence dial's mixture or the archetype slider blend. Treat it as "where the settings point", not "how often this comes out".</div></div>`;
+    if (parts.length) profLine = `<div data-st="margin-top:6px; padding-top:6px; border-top:1px dashed var(--border);"><b>Character Profile (predicted):</b><br>${parts.join("<br>")}<div class="sub" data-st="margin:6px 0 0;">A simplified conditional preview, not the generator's own probabilities: it takes the most likely category at each step and conditions the next on it, and it does not model the divergence dial's mixture or the archetype slider blend. Treat it as "where the settings point", not "how often this comes out".</div></div>`;
   } catch(e){}
   setHTML('affinityPreview',
     fmt(gBoost,"Grammar") + fmt(vBoost,"Vocabulary") + fmt(mBoost,"Mannerisms") + profLine);
@@ -2030,7 +2099,7 @@ function updateRangeReadout(){
     rows.push(`<div><b>Profile weight</b> at ${pw.value}: targeting intensity <b>${t.toFixed(2)}</b> `
             + `— roughly "${escHTML(budgetPhraseFor(t))}" across Motivation, Values, Role and the rest.</div>`);
   }
-  rows.push(`<div class="sub" style="margin:6px 0 0;">Window half-width ${half.toFixed(2)} — narrower means the sliders dictate more tightly and results vary less.</div>`);
+  rows.push(`<div class="sub" data-st="margin:6px 0 0;">Window half-width ${half.toFixed(2)} — narrower means the sliders dictate more tightly and results vary less.</div>`);
   box.innerHTML = rows.join("");
 }
 
@@ -2106,6 +2175,14 @@ function buildPersonalitySliders(){
     wrap.appendChild(inner);
     grid.appendChild(wrap);
   });
+}
+/* "Personality" in the Generate row and "Include personality profile" in Advanced were two switches
+   for the same thing (turning either off gave the same sheet). They are kept, because saved settings
+   name both, but they now move together. */
+function syncPersonalityToggles(source){
+  const g = document.getElementById('genPersonality'), p = document.getElementById('personalityToggle');
+  if (g && p){ if (source === 'gen') p.checked = g.checked; else g.checked = p.checked; }
+  togglePersonalityPanel();
 }
 function togglePersonalityPanel(){
   const enabled = boolVal('personalityToggle', true);
@@ -2187,6 +2264,9 @@ const DEFAULTS = {
     sheetDensity: "standard", wildcardCount: "1", pressureLevel: "100",
     profileWeight: "62", divergence: "0.15", castCount: "3",
     charName: "", charAge: "", charContext: "", archetypeSelect: "", seedInput: "",
+    // Named here because #engineVersion is type=hidden: setting .value rewrites defaultValue, so
+    // once one old save had been loaded, "defaultValue" was "1" and Reset restored engine 1.
+    engineVersion: String(DEFAULT_ENGINE_V),
   },
   toggles: {
     // The anti-staleness pair ships ON. This is the whole point of the table.
@@ -2297,6 +2377,10 @@ async function resetAllToDefaults(){
   PROFILE_SECTIONS.forEach(ps=>{ const el = document.getElementById('pw_'+ps.id); if (el) el.value = ""; });
   clearConstraints();
   clearBudgets(); refreshBudgetUI();
+  // Content packs and slider locks are part of "everything": a pack left off silently changes what
+  // a seed builds, and a ticked lock made Randomize skip a slider that Reset had just centred.
+  if (typeof setDisabledPacks === 'function'){ setDisabledPacks([]); if (typeof refreshPackUI === 'function') refreshPackUI(); }
+  document.querySelectorAll('input[id^="lock_"]').forEach(e => { e.checked = false; });
   forgetRecentTraits(); forgetSessionProfiles(); clearContextBias();
   forgetSlotDraws(); forgetCategoryUse();
   collapsedGroups = {};
@@ -2308,7 +2392,7 @@ async function resetAllToDefaults(){
   onSliderChange();
   prefsReady = wasReady;
   savePrefs();
-  toastUndo("Everything reset to defaults. Your character stays until you build again.", ()=>{ undoLast(); savePrefs(); }, 10000);
+  toastUndo("Everything reset to defaults (content packs back on, slider locks released). Your character, saved traits and cast stay.", ()=>{ undoLast(); savePrefs(); }, 10000);
 }
 
 function randomRawSlider(){
@@ -2360,6 +2444,11 @@ function _runAction(el, ev, suffix){
   const name = el.getAttribute('data-act' + (suffix || ''));
   const fn = name && globalThis[name];
   if (typeof fn !== 'function'){ console.error('[action] no such action:', name); return; }
+  /* data-act is looked up on the global object, so markup that got into the page by any
+     route could otherwise name eval, setTimeout, Function or alert and pass its own
+     arguments. Every real action is a function this app defines; a browser built-in
+     reports "[native code]". Refuse those. */
+  if (/\[native code\]/.test(Function.prototype.toString.call(fn))){ console.error('[action] refused built-in:', name); return; }
   /* Roughly a third of the actions dispatched here are `async`, and a synchronous
      try/catch cannot contain a rejected promise: a save, an import or a cast build
      that threw after its first `await` produced an unhandled rejection in the console
@@ -2482,9 +2571,26 @@ function surpriseMe(){
     if (sel) sel.value = "";
     onArchetypeChange(false);
     randomizeSliders('all');
+    /* A free roll sets every slider to a random magnitude (mean about 63), which measured at
+       14.6 strong or jarring conflicts per sheet against 8.2 for a default build. Pull the
+       unlocked ones in so the sheet is surprising rather than self-cancelling. */
+    ['verbositySlider', 'registerSlider', 'composureSlider'].concat(PERSONALITY_AXES.map(ax => 'pers_' + ax.id)).forEach(id=>{
+      const el = document.getElementById(id);
+      if (el && !isSliderLocked(id)) el.value = String(Math.round(intVal(el, 0) * 0.65));
+    });
     said = "Every slider rolled, sections rolled, and the wildcard turned on.";
   }
   randomizeProfileTypes();
+  /* The dice above force a random category into most sections, which overwrote the preset's
+     own hints (hint realisation fell from 56% to 19%). A preset roll is "this archetype,
+     pulled off its sliders", so the sections it hints go back to automatic and the hint
+     steers them again. */
+  if (mode === "preset" && typeof ARCHETYPE_PROFILE_HINTS !== 'undefined' && ARCHETYPE_PROFILE_HINTS[a]){
+    Object.keys(ARCHETYPE_PROFILE_HINTS[a]).forEach(id=>{
+      const tsel = document.getElementById('type_'+id);
+      if (tsel){ tsel.value = ""; if (typeof clearAutoProfileType === 'function') clearAutoProfileType(id); }
+    });
+  }
   // The anti-archetype keeps what drives the preset: its motivation-side hints stay.
   if (mode === "anti" && typeof ARCHETYPE_PROFILE_HINTS !== 'undefined' && ARCHETYPE_PROFILE_HINTS[a]){
     ['values', 'beliefs', 'goals', 'origins', 'motivation', 'contradiction'].forEach(id=>{
@@ -2494,7 +2600,8 @@ function surpriseMe(){
   }
   // divergence is a 0..1 range in steps of 0.05, not a 0..100 slider.
   const div = document.getElementById('divergence');
-  if (div) div.value = (0.35 + Math.round(rand() * 8) * 0.05).toFixed(2);
+  // A preset roll keeps divergence low: at 0.6 and above the preset's hints stop landing.
+  if (div) div.value = (mode === "preset" ? 0.15 + Math.round(rand() * 3) * 0.05 : 0.35 + Math.round(rand() * 8) * 0.05).toFixed(2);
   const wild = document.getElementById('wildcardToggle');
   if (wild) wild.checked = true;
   // Lens dice: none, one, or two — a clashing pair is allowed on purpose.
@@ -2517,6 +2624,7 @@ function surpriseMe(){
   invalidateSliderCache();
   onSliderChange();
   runGeneration();
+  showPhoneResultSheet('surprise');
   toast(said + " Everything is still yours to change.");
 }
 
@@ -2765,8 +2873,16 @@ async function importWorkspaceJSON(fileInput){
        toast) restores the constraints and settings this import replaced. */
     const prevSettings = captureSettings();
     if (p.settings){
+      validateSettingsBlock(p.settings);   // before anything is touched
+      const prevHistoryLength = history.length;
       snapshotHistory();
-      restoreSettings(merge ? mergeWorkspaceSettings(prevSettings, p.settings) : p.settings);
+      try { restoreSettings(merge ? mergeWorkspaceSettings(prevSettings, p.settings) : p.settings); }
+      catch(e){
+        // Put the workspace back and drop the history entry this attempt pushed.
+        if (history.length > prevHistoryLength) history.pop();
+        try { restoreSettings(prevSettings); refreshConstraintChips(); } catch(e2){ console.error(e2); }
+        throw e;
+      }
     }
     let saved = 0, skippedSame = [];
     for (const arch of archetypes){
@@ -3037,6 +3153,30 @@ function analyseRelationship(){
     notes.forEach(n=>{ h += `<div class="traitCard"><div class="traitMain"><div class="traitDesc">${escHTML(n)}</div></div></div>`; });
     h += `</div>`;
   }
+  const crossed = typeof crossedNeeds === 'function' ? crossedNeeds(A, B) : [];
+  if (crossed.length){
+    h += `<div class="axisGroup"><div class="axisTitle">Crossed needs</div>`;
+    crossed.forEach(c => { h += `<div class="traitCard"><div class="traitMain"><div class="traitDesc">${escHTML(c.text)}</div>
+      <div class="sub">${escHTML(c.from)}'s need: ${escHTML(c.need)} · in the way: ${escHTML(c.blocker)}</div></div></div>`; });
+    h += `</div>`;
+  }
+  const pp = typeof pairUnderPressure === 'function' ? pairUnderPressure(A, B) : null;
+  if (pp){
+    h += `<div class="axisGroup"><div class="axisTitle">When it gets bad</div>` + pp.lines.map(l => `<div class="traitCard"><div class="traitMain"><div class="traitDesc">${escHTML(l)}</div></div></div>`).join("") + `</div>`;
+  }
+  if (typeof voiceExchange === 'function'){
+    const sel = document.getElementById('relExchangePrompt');
+    const prompts = allVoicePrompts();
+    if (sel && sel.options.length !== prompts.length){
+      const keep = sel.value; sel.innerHTML = prompts.map(p => `<option value="${escHTML(p.id)}">${escHTML(p.label)}</option>`).join("");
+      if (prompts.some(p => p.id === keep)) sel.value = keep;
+    }
+    const ex = voiceExchange(A, B, strVal('relExchangePrompt', 'request'), voiceLabMode, strVal('voiceAudience', ''));
+    if (ex && ex.turns.length){
+      h += `<div class="axisGroup"><div class="axisTitle">Hear them talk</div>` + ex.turns.map(t => `<div class="traitCard"><div class="traitMain"><div class="traitName">${escHTML(t.who)} <span class="sub">${escHTML(t.act)}</span></div>
+        <blockquote class="voiceLine">${escHTML(t.text)}</blockquote></div></div>`).join("") + `</div>`;
+    }
+  }
   if (!clashes.length && !alignments.length && !notes.length){
     h += `<div class="charMeta">Not enough personality signal to compare — generate both characters with the personality profile enabled.</div>`;
   }
@@ -3090,12 +3230,12 @@ function suggestVoiceFromPersonality(){
 // spectrum for a 4-6 way category the way Personality axes have one, so these are
 // hand-picked "most narratively opposed" pairs rather than derived from anything).
 const OPPOSED_CATEGORIES = {
-  role: {"Leader":"Outsider","Outsider":"Leader","Peacemaker":"Instigator","Instigator":"Peacemaker","Caretaker":"Skeptic","Skeptic":"Caretaker"},
-  values: {"Rigid & Principled":"Self-Interested","Self-Interested":"Rigid & Principled","Pragmatic & Flexible":"Loyalty-Bound","Loyalty-Bound":"Pragmatic & Flexible"},
+  role: {"Leader":"Outsider","Outsider":"Leader","Peacemaker":"Instigator","Instigator":"Peacemaker","Caretaker":"Skeptic","Skeptic":"Caretaker", "Clown":"Skeptic","Scapegoat":"Leader","Gatekeeper":"Connector","Historian":"Newcomer","Newcomer":"Historian","Martyr":"Instigator","Lieutenant":"Rival","Rival":"Peacemaker"},
+  values: {"Rigid & Principled":"Self-Interested","Self-Interested":"Rigid & Principled","Pragmatic & Flexible":"Loyalty-Bound","Loyalty-Bound":"Pragmatic & Flexible", "Tradition & Rite":"Autonomy & Liberty","Purity & Sanctity":"Pragmatic & Flexible","Autonomy & Liberty":"Tradition & Rite","Fairness":"Self-Interested","Care & Protection":"Self-Interested","Hospitality":"Rigid & Principled"},
   attachment: {"Secure":"Disorganized","Disorganized":"Secure","Anxious":"Avoidant","Avoidant":"Anxious"},
   stress: {"Fight (attack the threat)":"Flight (remove yourself)","Flight (remove yourself)":"Fight (attack the threat)","Freeze (shut down)":"Fawn (appease the threat)","Fawn (appease the threat)":"Freeze (shut down)"},
-  humor: {"Warm & Playful":"Cruel & Barbed","Cruel & Barbed":"Warm & Playful","Dry & Deadpan":"Absurd & Chaotic","Absurd & Chaotic":"Dry & Deadpan"},
-  vices: {"Restraint & Discipline":"Risk & Escape","Risk & Escape":"Restraint & Discipline","Avoidance & Procrastination":"Restraint & Discipline"},
+  humor: {"Warm & Playful":"Cruel & Barbed","Cruel & Barbed":"Warm & Playful","Dry & Deadpan":"Absurd & Chaotic","Absurd & Chaotic":"Dry & Deadpan", "Innuendo & Double Meaning":"Dry & Deadpan"},
+  vices: {"Restraint & Discipline":"Risk & Escape","Risk & Escape":"Restraint & Discipline","Avoidance & Procrastination":"Restraint & Discipline", "Screens & Notifications":"Restraint & Discipline","Work & Busyness":"Avoidance & Procrastination","Keeping & Collecting":"Risk & Escape","Gossip & Information":"Restraint & Discipline"},
 };
 // New sub-groups get one-way opposition entries (asymmetric is fine — lookup is always
 // keyed off the SOURCE character's actual category, never requires the reverse to match).
@@ -3287,12 +3427,12 @@ function _generateFoilInner(seedLabel){
   note.className = "castCard";
   note.innerHTML = `<h3><span>Foil rationale</span></h3>
     <div class="traitDesc"><b>Premise:</b> ${escHTML(premise)}</div>
-    ${sheetPremise ? `<div class="sub" style="margin-top:4px;">Built from: ${escHTML(sheetPremise.from.join(" · "))}</div>` : ``}
-    <div class="traitDesc" style="margin-top:6px;"><b>Opposed on (personality):</b> ${escHTML(opposedNames)}</div>
-    ${profOpposedNames.length ? `<div class="traitDesc" style="margin-top:6px;"><b>Opposed on (profile):</b> ${escHTML(profOpposedNames.join(", "))}</div>` : ``}
-    <div class="traitDesc" style="margin-top:6px;"><b>Shared ground on:</b> ${escHTML(alignedNames||"—")}</div>
-    <div class="traitDesc" style="margin-top:6px;">Opposition on a few axes creates friction; shared ground on one or two keeps them plausibly in the same room — and the premise is what puts them in it. Check the Relationships tab for the full read.</div>
-    <div class="sub" style="margin-top:8px;">Foil seed: <b>${escHTML(seedLabel)}</b> — paste it into the foil seed field to rebuild this exact one.</div>`;
+    ${sheetPremise ? `<div class="sub" data-st="margin-top:4px;">Built from: ${escHTML(sheetPremise.from.join(" · "))}</div>` : ``}
+    <div class="traitDesc" data-st="margin-top:6px;"><b>Opposed on (personality):</b> ${escHTML(opposedNames)}</div>
+    ${profOpposedNames.length ? `<div class="traitDesc" data-st="margin-top:6px;"><b>Opposed on (profile):</b> ${escHTML(profOpposedNames.join(", "))}</div>` : ``}
+    <div class="traitDesc" data-st="margin-top:6px;"><b>Shared ground on:</b> ${escHTML(alignedNames||"—")}</div>
+    <div class="traitDesc" data-st="margin-top:6px;">Opposition on a few axes creates friction; shared ground on one or two keeps them plausibly in the same room — and the premise is what puts them in it. Check the Relationships tab for the full read.</div>
+    <div class="sub" data-st="margin-top:8px;">Foil seed: <b>${escHTML(seedLabel)}</b> — paste it into the foil seed field to rebuild this exact one.</div>`;
   grid.insertBefore(note, grid.firstChild);
   refreshRelSelectors();
 }
@@ -3409,7 +3549,7 @@ function checkEnsembleBalance(){
   // sliders would fill it — which is exactly the arithmetic this tool exists to do.
   if (clustered.length || profClustered.length){
     lastBalanceGaps = {clustered: clustered.map(c=>({id:c.axis.id, dir:c.dir})), profClustered: profClustered.map(c=>({section:c.section, cat:c.cat}))};
-    h += `<div class="actionRow" style="margin-top:14px;">
+    h += `<div class="actionRow" data-st="margin-top:14px;">
       <button class="btn-primary" ${actAttr('click', 'generateGapFiller')}>Generate a member who fills these gaps</button>
     </div>`;
   } else lastBalanceGaps = null;
@@ -3434,7 +3574,7 @@ function generateGapFiller(){
   lastBalanceGaps.profClustered.forEach(pc=>{
     const ps = PROFILE_SECTIONS.find(p=>p.label === pc.section);
     if (!ps) return;
-    const others = catsOf(ps.section).filter(c=>c !== pc.cat);
+    const others = allCatsOf(ps.section).filter(c=>c !== pc.cat);
     if (others.length) forcedProfileCats[ps.id] = others[Math.floor(rand()*others.length)];
   });
   const rarityPref = rarityPrefVal();
@@ -3467,7 +3607,7 @@ function buildProfileSectionUI(){
   if (!grid) return;   // container absent (embedded build, or a trimmed page)
   grid.innerHTML = "";
   PROFILE_SECTIONS.forEach(ps=>{
-    const cats = catsOf(ps.section);
+    const cats = allCatsOf(ps.section);   // the picker shows everything the bank holds, not just what a v1 build can reach
     const div = document.createElement('div');
     div.className = "profCard";
     const typeControl = ps.drawAll
@@ -3603,15 +3743,26 @@ function refreshProjectChip(){
 }
 
 async function loadPrefs(){
+  let raw = null;
   try {
     const res = await storage.get(PREF_KEY);
-    if (res && res.value){
-      const data = JSON.parse(res.value);
+    raw = res && res.value;
+    if (raw){
+      const data = JSON.parse(raw);
+      if (typeof validateSettingsBlock === 'function') validateSettingsBlock(data);   // before anything is applied
       PREF_VOLATILE_FIELDS.forEach(id=>{ if (data.fields) delete data.fields[id]; });
       delete data.rerollExclusions;
       restoreSettings(data);
     }
-  } catch(e){ /* no saved prefs, corrupt prefs, or storage unavailable */ }
+  } catch(e){
+    /* No saved prefs and unavailable storage are ordinary. A saved blob that exists but cannot be
+       read is not: the settings were silently dropped. Say so, and keep the unreadable copy under
+       its own key so it can be recovered by hand. */
+    if (raw){
+      try { storage.set(PREF_KEY + ':corrupt', raw); } catch(e2){}
+      try { toast("Your saved settings could not be read, so the defaults are in use. The unreadable copy was kept in browser storage.", "warn", 9000); } catch(e2){}
+    }
+  }
   prefsReady = true;
   try { onSliderChange(); } catch(e){}
   const ex = document.getElementById('examplesToggle');
@@ -3824,11 +3975,11 @@ async function askWhyNotHere(groupTitle){
   const inp = document.getElementById('whyNotSearch');
   if (inp) inp.value = t.trait;
   if (out){
-    out.innerHTML = `<div class="whyNote"><b>${escHTML(t.trait)}</b> — ${escHTML(t.category)}<div style="margin-top:6px;">${explainWhyNot(t)}</div></div>`;
+    out.innerHTML = `<div class="whyNote"><b>${escHTML(t.trait)}</b> — ${escHTML(t.category)}<div data-st="margin-top:6px;">${explainWhyNot(t)}</div></div>`;
     out.style.display = 'block';
   }
   // Show it where it was asked, not two tabs away.
-  toastHTML(`<b>${escHTML(t.trait)}</b> — ${escHTML(t.category)}<div style="margin-top:5px;">${explainWhyNot(t)}</div>`, 14000);
+  toastHTML(`<b>${escHTML(t.trait)}</b> — ${escHTML(t.category)}<div data-st="margin-top:5px;">${explainWhyNot(t)}</div>`, 14000);
 }
 
 function explainWhyNotFromInput(){
@@ -3840,10 +3991,10 @@ function explainWhyNotFromInput(){
   if (t.ambiguous){
     // Ambiguity is useful here rather than an error: show the matches as a shortlist.
     const list = t.ambiguous.slice(0, 8).map(x=>`<li>${escHTML(x.trait)} <span class="sub">— ${escHTML(x.category)}</span></li>`).join("");
-    out.innerHTML = `<div class="whyNote"><b>${t.ambiguous.length} traits match that.</b> Type more of a name to pick one:<ul style="margin:6px 0 0 18px;">${list}</ul></div>`;
+    out.innerHTML = `<div class="whyNote"><b>${t.ambiguous.length} traits match that.</b> Type more of a name to pick one:<ul data-st="margin:6px 0 0 18px;">${list}</ul></div>`;
     out.style.display = 'block'; return;
   }
-  out.innerHTML = `<div class="whyNote"><b>${escHTML(t.trait)}</b> — ${escHTML(t.category)}<div style="margin-top:6px;">${explainWhyNot(t)}</div></div>`;
+  out.innerHTML = `<div class="whyNote"><b>${escHTML(t.trait)}</b> — ${escHTML(t.category)}<div data-st="margin-top:6px;">${explainWhyNot(t)}</div></div>`;
   out.style.display = 'block';
 }
 
@@ -4028,7 +4179,9 @@ const SHARE_LINK_VERSION = 1;
 const SEED_CODEC_VERSION = parseInt(String(SEED_PREFIX).replace(/\D/g, ''), 10) || 1;
 function readShareFromHash(hash){
   const m = /(?:^#|&)share=([A-Za-z0-9_-]+)/.exec(hash || "");
-  if (!m) return null;
+  // "#share=" with nothing usable after it (or characters a link never contains) is a damaged
+  // link, not no link: say so instead of showing the ordinary first-run page.
+  if (!m){ if (/(?:^#|&)share=/.test(hash || "")) throw new Error("the link is incomplete or damaged."); return null; }
   const p = JSON.parse(_b64urlDecode(m[1]));
   if (!p || typeof p !== 'object' || typeof p.seed !== 'string' || !p.seed.trim()) throw new Error("the link has no seed.");
   /* Links carry a version and the seed carries the codec's: a link from another build of the app
@@ -4068,6 +4221,7 @@ function applyShareFromHash(){
     if (p.settings) restoreSettings(p.settings);
     applyAdvancedMode();
     setVal('seedInput', p.seed);
+    noteLoadedEngine(p.seed, p.settings);
     onSliderChange();
     // Seat the link's kept cards exactly as the sender had them.
     state = p.locked ? p.locked : {};
@@ -4403,9 +4557,9 @@ function toggleHistoryDrawer(){
 function restoreHistoryAt(i){
   if (!(i >= 0 && i < history.length)) return;
   const steps = history.length - i;
-  for (let k = 0; k < steps; k++) undoLast();
+  for (let k = 0; k < steps; k++) undoLast(true);
   renderHistoryDrawer();
-  toastUndo("Restored an earlier roll.", ()=>{ for (let k = 0; k < steps; k++) redoLast(); renderHistoryDrawer(); });
+  toastUndo("Restored an earlier roll.", ()=>{ for (let k = 0; k < steps; k++) redoLast(true); renderHistoryDrawer(); });
 }
 const _SLIDER_NAMES = {verbositySlider: "Verbosity", registerSlider: "Register", composureSlider: "Composure"};
 function sliderDiffHTML(before, after){
@@ -4413,7 +4567,7 @@ function sliderDiffHTML(before, after){
   const ids = [...new Set(Object.keys(before || {}).concat(Object.keys(after || {})))];
   const rows = ids.filter(id => String((before || {})[id]) !== String((after || {})[id]))
     .map(id => `<li><b>${escHTML(name(id))}</b> ${escHTML(String((before || {})[id] ?? "—"))} → ${escHTML(String((after || {})[id] ?? "—"))}</li>`);
-  return `<div class="sub" style="margin:10px 0 4px;"><b>Sliders</b> ${rows.length ? `— ${rows.length} moved` : "— unchanged"}</div>` + (rows.length ? `<ul class="sliderDiff">${rows.join("")}</ul>` : "");
+  return `<div class="sub" data-st="margin:10px 0 4px;"><b>Sliders</b> ${rows.length ? `— ${rows.length} moved` : "— unchanged"}</div>` + (rows.length ? `<ul class="sliderDiff">${rows.join("")}</ul>` : "");
 }
 // Two rolls side by side: the earlier one from the drawer against the sheet on screen.
 function compareWithHistory(i){
@@ -4435,7 +4589,12 @@ function compareWithHistory(i){
    each, opening a folded panel on the way. The hint explains keep / pin / toss once. */
 function jumpToPanel(id){
   const el = document.getElementById(id);
-  if (!el || el.style.display === 'none'){ toast("That part is not on the page yet — build a character first, or switch on the pressure sheet.", "warn"); return; }
+  if (!el || el.style.display === 'none'){
+    // A pointer to where to go, not a warning that waits to be dismissed: it used to sit on screen over the
+    // next click's result, which had worked.
+    toast(id === 'pressureSheet' ? "The pressure sheet is off. Switch on “Under pressure” and build to see it." : "Build a character first, then this part appears.", "ok", 4200);
+    return;
+  }
   if (el.tagName === 'DETAILS') el.open = true;
   const reduce = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
   el.scrollIntoView({behavior: reduce ? 'auto' : 'smooth', block: 'start'});
@@ -4511,7 +4670,62 @@ function watchForUpdates(reg){
 }
 
 // Keeps the sticky action bar honest about what the last generation used.
+/* Kept counter: how many cards are kept, with a one-tap release for all of them (undoable). */
+function updateKeptCounter(){
+  const btn = document.getElementById('keptBtn');
+  if (!btn) return;
+  const n = Object.values(state || {}).filter(s => s && s.trait && s.locked).length;
+  btn.style.display = n ? '' : 'none';
+  btn.textContent = `Kept: ${n} · Unkeep all`;
+}
+/* Mini header: name, label and seed, shown when the sheet's own title has scrolled away. */
+let _miniObserver = null;
+function updateMiniHeader(){
+  const box = document.getElementById('miniHeader');
+  if (!box) return;
+  const has = Object.keys(state || {}).length > 0;
+  const lab = typeof characterLabel === 'function' ? characterLabel(state, charMeta) : null;
+  setText('miniName', (charMeta && charMeta.name) || 'Character');
+  setText('miniLabel', lab ? ' · ' + lab.name : '');
+  setText('miniSeed', lastSeedUsed ? 'seed ' + lastSeedUsed : '');
+  if (!has){ box.hidden = true; return; }
+  const title = document.getElementById('sheetTitle');
+  if (title && typeof IntersectionObserver === 'function' && !_miniObserver){
+    _miniObserver = new IntersectionObserver(entries => { const e = entries[entries.length - 1]; box.hidden = !!(e && e.isIntersecting) || !Object.keys(state || {}).length; }, {threshold: 0});
+    _miniObserver.observe(title);
+  }
+}
+/* Phone result sheet: on a narrow screen Roll 5 and Surprise me show their result in a sheet, not by re-rendering a very long page. */
+function isPhoneWidth(){ try { return window.matchMedia('(max-width: 640px)').matches; } catch (e){ return false; } }
+function openResultSheet(title, html){
+  const dlg = document.getElementById('resultSheet');
+  if (!dlg || typeof dlg.showModal !== 'function') return false;
+  setText('resultSheetTitle', title); setHTML('resultSheetBody', html);
+  if (!dlg.open) dlg.showModal();
+  return true;
+}
+function closeResultSheet(){ const d = document.getElementById('resultSheet'); if (d && d.open) d.close(); }
+function showPhoneResultSheet(kind){
+  if (!isPhoneWidth()) return;
+  if (kind === 'batch'){
+    const tray = document.getElementById('batchTray');
+    if (tray && tray.innerHTML.trim()) openResultSheet('Five to choose from', tray.innerHTML);
+  } else if (typeof summaryCardHTML === 'function' && Object.keys(state || {}).length){
+    openResultSheet('Who you got', summaryCardHTML());
+  }
+}
+(function(){ const d = document.getElementById('resultSheet'); if (d) d.addEventListener('click', e => { if (e.target && e.target.closest && e.target.closest('[data-act]') && !/closeResultSheet/.test(e.target.closest('[data-act]').getAttribute('data-act'))) setTimeout(closeResultSheet, 0); }); })();
+/* Say which engine an old save or link was built with. A v1 or v2 seed replays exactly as it always did; new rolls use the current engine. */
+function noteLoadedEngine(seed, settings){
+  const m = /^v(\d+)-/.exec(String(seed || ''));
+  const v = m ? +m[1] : parseInt(settings && settings.fields && settings.fields.engineVersion, 10) || 1;
+  sheetEngineVersion = SUPPORTED_SEED_VERSIONS.includes(v) ? v : 1; syncEngineToSheet();
+  if (v < DEFAULT_ENGINE_V && typeof toast === 'function')
+    toast(`This one was built with engine ${v}, so it replays exactly as it was. New characters use engine ${DEFAULT_ENGINE_V}.`, "ok", 6000);
+}
+function copyLine(text, btnEl){ copyText(String(text == null ? '' : text), btnEl); }
 function updateStickyBar(){
+  updateKeptCounter(); updateMiniHeader();
   const el = document.getElementById('stickySeed');
   if (el) el.textContent = lastSeedUsed ? ("seed " + lastSeedUsed) : "no character yet";
   if (lastSeedUsed){

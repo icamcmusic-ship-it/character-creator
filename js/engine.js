@@ -39,7 +39,6 @@ function setEngineSettings(obj){
   ENGINE_SETTINGS = (obj && typeof obj === 'object') ? Object.assign({}, obj) : null;
   if (typeof invalidateSliderCache === 'function') invalidateSliderCache();
 }
-function getEngineSettings(){ return ENGINE_SETTINGS ? Object.assign({}, ENGINE_SETTINGS) : null; }
 function withEngineSettings(obj, fn){
   const prev = ENGINE_SETTINGS;
   setEngineSettings(obj ? Object.assign({}, prev || {}, obj) : null);
@@ -58,6 +57,10 @@ function settingEl(id){
 function entropySeed(){ return ((Date.now() ^ (Math.random()*0x7fffffff)) >>> 0); }
 
 // ---------- Static category maps ----------
+/* The engine version the build in progress runs under: 1 = the original build; 2 = the 2026 coverage changes (see generate.js).
+   Declared first because the pool and category lookups below read it: content tagged `since: 3` (the v2 packs) is invisible to a
+   v1 build, so every printed v1 seed and old share link still builds exactly the character it always did. */
+let ENGINE_V = 1;
 const AXES = {
   verbosityHigh: {section:"Verbosity Traits", category:"High-Volume & Wordy"},
   verbosityLow:  {section:"Verbosity Traits", category:"Minimal & Ultra-Brief"},
@@ -71,6 +74,7 @@ const AXES = {
 const TRAITS_BY_ID = new Map();       // id -> trait (undo/import re-linking)
 const TRAITS_BY_KEY = new Map();      // "section||category" -> trait[]
 const CATS_BY_SECTION = new Map();    // section -> category[] (first-seen order)
+const CATS_V1_BY_SECTION = new Map(); // the same, without categories that exist only in v2 content
 const SECTION_OF_CATEGORY = new Map(); // category -> section (categories are unique to one)
 /* ================= PACK INDEX =================
    TRAIT_PACKS (declared in traits-core.js, one manifest per data file) says which id
@@ -94,6 +98,7 @@ function setDisabledPacks(list){ disabledPacks = new Set(list || []); }
 (function indexTraits(){
   TRAITS.forEach(t=>{
     t.pack = packOfId(t.id);
+    t.since = (PACKS_BY_ID.get(t.pack) || {}).since || 0;
     // The editorial state of an entry. Everything the bank has ever shipped was written
     // and then treated as reviewed by default, which made "core vs secondary" mostly an
     // absence-of-annotation distinction — see the audit's 2.4% figure. Entries are now
@@ -108,6 +113,11 @@ function setDisabledPacks(list){ disabledPacks = new Set(list || []); }
     if (!CATS_BY_SECTION.has(t.section)) CATS_BY_SECTION.set(t.section, []);
     const cats = CATS_BY_SECTION.get(t.section);
     if (!cats.includes(t.category)) cats.push(t.category);
+    if (!t.since){
+      if (!CATS_V1_BY_SECTION.has(t.section)) CATS_V1_BY_SECTION.set(t.section, []);
+      const c1 = CATS_V1_BY_SECTION.get(t.section);
+      if (!c1.includes(t.category)) c1.push(t.category);
+    }
   });
 })();
 /* ================= CONSTRAINT MODE =================
@@ -124,7 +134,7 @@ function setDisabledPacks(list){ disabledPacks = new Set(list || []); }
      Emotional Capacity — Guarded & Shallow
         "Guarded" (deep but hidden)         vs  "Shallow" (no depth to hide)
      Intelligence — Instinctive & Unanalytical
-        "Street-smart / Gut-driven" (a competence) vs "Simple-minded" (a deficit)
+        "Street-smart / Gut-driven" (a competence) vs "Cannot see the second step from the first" (a limit)
 
    Rather than split the categories — which would break the bipolar axis model and
    every saved character — each trait is tagged with a variant, and each generated
@@ -157,6 +167,10 @@ const PRESENTATION_VARIANTS = {
   TRAITS.forEach(t=>{
     const spec = PRESENTATION_VARIANTS[t.category];
     if (!spec) return;
+    // A trait renamed after its tag was fixed by the old wording keeps that tag: `variantPin` is the
+    // variant the text used to read as, so the rename cannot move it between pools (and change what a
+    // seed built).
+    if (t.variantPin){ t.variant = t.variantPin; return; }
     const txt = (t.trait + " " + t.desc).toLowerCase();
     const mb = spec.b.re.test(txt), ma = spec.a.re.test(txt);
     // null = reads either way, stays eligible under both locks
@@ -193,7 +207,7 @@ let TIER_TAG_STATS = null;
   TRAITS.forEach(t=>{
     if (t.section !== "Personality Traits") return;
     if (secondary.has(t.trait.toLowerCase())){ t.tier = "secondary"; matched++; t.reviewStatus = 'reviewed'; }
-    else t.tier = "core";   // behaviourally core; editorially still whatever reviewStatus says
+    else t.tier = t.tierPin || "core";   // behaviourally core; editorially still whatever reviewStatus says (tierPin: kept across a rename)
   });
   TIER_TAG_STATS = {listed: SECONDARY_TRAIT_NAMES.length, matched};
 })();
@@ -221,20 +235,25 @@ let charVariants = {};
    right fix is authoring more of the thin side, and when that happens these weights
    move on their own. */
 const VARIANT_FLOOR = 0.25;   // the thin side never drops below this share
+/* Two tables: v1 counts only the older bank (a v1 seed's coin must not move when v2 content arrives), v2 counts everything. */
 let VARIANT_ODDS = {};
+let VARIANT_ODDS_V2 = {};
 (function computeVariantOdds(){
-  Object.keys(PRESENTATION_VARIANTS).forEach(cat=>{
+  const calc = (into, withNew) => Object.keys(PRESENTATION_VARIANTS).forEach(cat=>{
     let a = 0, b = 0, untagged = 0;
     TRAITS.forEach(t=>{
       if (t.category !== cat) return;
+      if (!withNew && t.since) return;
       if (t.variant === 'a') a++; else if (t.variant === 'b') b++; else untagged++;
     });
     // Untagged traits are eligible under BOTH locks, so they count toward each side's
     // realised pool — which is the quantity the coin should actually be weighing.
     const poolA = a + untagged, poolB = b + untagged;
     const raw = (poolA + poolB) ? poolA / (poolA + poolB) : 0.5;
-    VARIANT_ODDS[cat] = clamp(raw, VARIANT_FLOOR, 1 - VARIANT_FLOOR);
+    into[cat] = clamp(raw, VARIANT_FLOOR, 1 - VARIANT_FLOOR);
   });
+  calc(VARIANT_ODDS, false);
+  calc(VARIANT_ODDS_V2, true);
 })();
 
 /* Which presentation locks a set of protected (locked / required / pinned) slots
@@ -261,14 +280,14 @@ function variantsFromProtected(slots){
   return {want, conflicts};
 }
 let lastVariantConflicts = [];
-function getVariantConflicts(){ return lastVariantConflicts; }
 /* `required` is a map of category -> variant that this character is already committed
    to (see variantsFromProtected). Those categories are not rolled; the rest are. */
 function rollCharacterVariants(required){
   charVariants = {};
   Object.keys(PRESENTATION_VARIANTS).forEach(cat=>{
     if (required && required[cat]){ charVariants[cat] = required[cat]; return; }
-    const pA = VARIANT_ODDS[cat] === undefined ? 0.5 : VARIANT_ODDS[cat];
+    const _odds = ENGINE_V >= 3 ? VARIANT_ODDS_V2 : VARIANT_ODDS;
+    const pA = _odds[cat] === undefined ? 0.5 : _odds[cat];
     charVariants[cat] = rand() < pA ? "a" : "b";
   });
 }
@@ -426,12 +445,18 @@ let requiredTraitIds = [];          // trait ids force-included on every generat
 let requiredCategories = [];        // categories guaranteed at least one trait
 let exclusivePairs = [];            // [[idA, idB], ...] — never both on one sheet
 
+/* Fourteen older traits that are near-copies of a sibling (TF-IDF cosine 0.70-0.80 within one category). An engine-3 build no longer
+   draws them, so one sheet cannot hold both "Mentor-leader" and "Mentor-first leader"; earlier engines still can, because their seeds
+   depend on the pool as it was. The ids stay in the bank, so a saved sheet that holds one still resolves. */
+const V3_RETIRED_DUPES = new Set([4327, 4021, 4219, 110085, 2917, 3985, 3841, 4093, 92261, 4533, 5105, 2823, 4540, 2990]);
 function byFilter(section, category){
   let pool = TRAITS_BY_KEY.get(section+"||"+category) || [];
   if (bannedSections.has(section)) return [];
   if (bannedCategories.has(category)) return [];
   if (bannedTraitIds.size) pool = pool.filter(t=>!bannedTraitIds.has(t.id));
   if (disabledPacks.size) pool = pool.filter(t=>!disabledPacks.has(t.pack));
+  if (ENGINE_V < 3) pool = pool.filter(t=>!t.since);   // v3 content is invisible to a v1 or v2 build
+  else if (V3_RETIRED_DUPES.size) pool = pool.filter(t=>!V3_RETIRED_DUPES.has(t.id));   // near-copies of an older trait (tools/near-dups.js); a seated one still resolves by id
   // Variant lock (Phase 3): applied here so EVERY path — generation, reroll, pin
   // adjust, cast, foil — respects the character's committed presentation, with no
   // way for a mixed sheet to slip through a specialized pick path.
@@ -439,7 +464,10 @@ function byFilter(section, category){
   if (lock) pool = pool.filter(t => !t.variant || t.variant === lock);
   return pool;
 }
-function catsOf(section){ return CATS_BY_SECTION.get(section) || []; }
+/* The categories a build can draw from: under v1, only those that have v1 content. allCatsOf is for the interface
+   (pickers, validators), which should show everything the bank holds. */
+function catsOf(section){ return (ENGINE_V < 3 ? CATS_V1_BY_SECTION.get(section) : CATS_BY_SECTION.get(section)) || []; }
+function allCatsOf(section){ return CATS_BY_SECTION.get(section) || []; }
 
 /* ================= TRAIT SHAPE ASSERTIONS =================
    TRAITS entries are assumed everywhere to carry {id, section, category, trait, desc,
@@ -1466,6 +1494,25 @@ const ARCHETYPE_VARIATIONS = {
 Object.entries(ARCHETYPE_INTENT).forEach(([k, v])=>{ if (ARCHETYPES[k]) ARCHETYPES[k].intent = v; });
 Object.entries(ARCHETYPE_VARIATIONS).forEach(([k, v])=>{ if (ARCHETYPES[k]) ARCHETYPES[k].variations = v; });
 
+/* PRESETS V2 (js/data/presets-v2.js). New presets go straight into ARCHETYPES (a v1 link cannot name them, and nothing seeded enumerates the
+   list); the hint changes and themes for existing presets are held apart and applied by effectiveArchetype on a v2 build only. */
+const ARCHETYPE_HINTS_V2 = {}, ARCHETYPE_DROP_V2 = {}, ARCHETYPE_THEMES = {};
+if (typeof PRESETS_V2 !== 'undefined'){
+  Object.entries(PRESETS_V2.add || {}).forEach(([k, a])=>{
+    const {profile, intent, variations, theme, ...rest} = a;
+    ARCHETYPES[k] = Object.assign({}, rest, {profile: Object.assign({}, profile), intent, variations, since: 3});
+    ARCHETYPE_PROFILE_HINTS[k] = ARCHETYPES[k].profile;
+    const open = ["values", "vices", "role", "attachment"].find(id => !(id in profile));
+    ARCHETYPE_INTENT[k] = {must: (intent && intent.must) || [], nudge: Object.keys(profile).filter(id => id !== open), open: open ? [open] : []};
+    ARCHETYPES[k].intent = ARCHETYPE_INTENT[k];
+    if (variations){ ARCHETYPE_VARIATIONS[k] = variations; ARCHETYPES[k].variations = variations; }
+    if (theme) ARCHETYPE_THEMES[k] = theme;
+  });
+  Object.assign(ARCHETYPE_HINTS_V2, PRESETS_V2.hints || {});
+  Object.assign(ARCHETYPE_DROP_V2, PRESETS_V2.drop || {});
+  Object.entries(PRESETS_V2.themes || {}).forEach(([k, t])=>{ ARCHETYPE_THEMES[k] = Object.assign({}, ARCHETYPE_THEMES[k] || {}, t); });
+}
+
 /* The preset as it will actually be applied: the base numbers with the chosen
    variation's deltas folded in, the profile hints overridden where the variation says
    so, and — carried along — the intent so the blend can honour the `must` axes. Every
@@ -1476,6 +1523,12 @@ function effectiveArchetype(key, variationId){
   if (!base) return null;
   const out = Object.assign({}, base, {pers: Object.assign({}, base.pers || {}), profile: Object.assign({}, base.profile || {})});
   out.variation = null;
+  if (ENGINE_V >= 3){
+    (ARCHETYPE_DROP_V2[key] || []).forEach(id=>{ delete out.profile[id]; });
+    Object.assign(out.profile, ARCHETYPE_HINTS_V2[key] || {});
+    // Not enumerable: the profile is walked as {sectionId: category} in many places, and a theme is not a section.
+    if (ARCHETYPE_THEMES[key]) Object.defineProperty(out.profile, '_themes', {value: ARCHETYPE_THEMES[key], enumerable: false, configurable: true});
+  }
   if (variationId && variationId !== 'base' && Array.isArray(base.variations)){
     const v = base.variations.find(x=>x.id === variationId);
     if (v){
@@ -1593,14 +1646,22 @@ let _bucketRanksBuilt = false;
 const _bucketRank = new Map(); // trait.id -> {rank, size}
 function _buildBucketRanks(){
   const buckets = new Map();
+  // A trait's position must not depend on the engine version, or a v1 seed would move when the bank grew: older traits
+  // are ranked among older traits only, v2 traits among everything.
+  const oldBuckets = new Map();
   TRAITS.forEach(t=>{
     const k = t.section+"||"+t.category+"||"+t.intensity;
     if (!buckets.has(k)) buckets.set(k, []);
     buckets.get(k).push(t);
+    if (!t.since){ if (!oldBuckets.has(k)) oldBuckets.set(k, []); oldBuckets.get(k).push(t); }
   });
-  buckets.forEach(list=>{
+  oldBuckets.forEach(list=>{
     list.sort((a,b)=>a.id-b.id); // stable, deterministic regardless of load order
     list.forEach((t,i)=> _bucketRank.set(t.id, {rank:i, size:list.length}));
+  });
+  buckets.forEach(list=>{
+    list.sort((a,b)=>a.id-b.id);
+    list.forEach((t,i)=>{ if (t.since) _bucketRank.set(t.id, {rank:i, size:list.length}); });
   });
   _bucketRanksBuilt = true;
 }
@@ -1765,8 +1826,32 @@ function rememberGeneration(st){
   recentFamilies.push(fams);
   while (recentFamilies.length > RECENT_WINDOW) recentFamilies.shift();
   rememberSlotDraws(st);
+  rememberFrame(st);
 }
-function forgetRecentTraits(){ recentTraitIds = []; recentFamilies = []; }
+function forgetRecentTraits(){ recentTraitIds = []; recentFamilies = []; recentFrames = []; }
+/* PROSE-FRAME MEMORY (engine 3). The recent-traits memory counts single cards; what a reader feels as "the same character again" is the same
+   Motivation cards and the same label. The last five sheets' Motivation card ids and the first two words of their label are kept, and best of
+   three charges a candidate for reusing them. */
+let recentFrames = [];
+function frameTokens(st){
+  const t = new Set();
+  Object.keys(st || {}).forEach(k => { if (k.startsWith('prof_motivation_') && st[k] && st[k].trait) t.add('m:' + st[k].trait.id); });
+  const em = typeof emergentArchetypeName === 'function' ? emergentArchetypeName(st) : null;
+  if (em && em.name) t.add('l:' + em.name.toLowerCase().split(/\s+/).slice(0, 2).join(' '));
+  return t;
+}
+function frameOverlapShare(st){
+  if (ENGINE_V < 3 || !recentFrames.length) return 0;
+  const mine = frameTokens(st); if (!mine.size) return 0;
+  const seen = new Set(); recentFrames.forEach(s => s.forEach(x => seen.add(x)));
+  let n = 0; mine.forEach(x => { if (seen.has(x)) n++; });
+  return n / mine.size;
+}
+function rememberFrame(st){
+  const t = frameTokens(st); if (!t.size) return;
+  recentFrames.push(t); while (recentFrames.length > 5) recentFrames.shift();
+}
+const FRAME_PICK_WEIGHT = 0.6;
 /* Which traits keep coming back across the session's recent window. recentTraitIds has
    held this the whole time and nothing ever showed it to anyone. */
 function recurringTraits(minCount){
@@ -2138,6 +2223,7 @@ function proximityWeights(list, centre, half, flatten){
 // Set for the duration of a single draw when divergence's coin comes up — see the
 // note in pickCategoryWeighted and the affinity inversion below.
 let _divergeThisDraw = false;
+const VOICE_TEXTURE_SECTIONS = new Set(["Vocabulary Traits","Dialogue Grammar Traits","Mannerisms","Verbosity Traits","Humor Style"]);
 function pickInRange(pool, rarityPref, target, minCount, flatten){
   if (!pool || !pool.length) return null;
   const div = divergenceLevel();
@@ -2190,7 +2276,10 @@ function _pickInRangeInner(pool, rarityPref, target, minCount, flatten){
       // affinity untouched, so a diverged category still drew its most
       // posture-agreeable member — half the mechanism, doing a quarter of the work.
       // The same coin now flips the trait-level fit too.
-      if (fit) w *= clamp(1 + aff*fit*(_divergeThisDraw ? -1 : 1), 0.15, 3);
+      // Engine 3: the voice-texture sections answered the personality sliders at r = 0.19 because most of their traits were untagged; with the
+      // overlay tags in place their fit counts double, so a warm character's words, gestures and sentence shapes lean warm.
+      const _k = ENGINE_V >= 3 && VOICE_TEXTURE_SECTIONS.has(t.section) ? 2.2 : 1;
+      if (fit) w *= clamp(1 + aff*_k*fit*(_divergeThisDraw ? -1 : 1), 0.15, 3);
     }
     w *= recentPenalty(t) * slotRepeatPenalty(t) * worldTagMultiplier(t) * favouriteMultiplier(t);
     return w;
@@ -2199,12 +2288,6 @@ function _pickInRangeInner(pool, rarityPref, target, minCount, flatten){
   let r = rand() * total;
   for (let i=0;i<list.length;i++){ r -= weights[i]; if (r <= 0) return list[i]; }
   return list[list.length-1];
-}
-
-// Kept as a thin shim: a few call sites still think in integer buckets, and this
-// keeps them honest without reintroducing rounding into the main path.
-function computeTargetIntensity(levelAbs){
-  return clamp(Math.round(1 + (levelAbs/2)*4), 1, 5);
 }
 
 // ================= UNIFIED WEIGHT MATRIX =================
@@ -2365,17 +2448,16 @@ const WEIGHT_MATRIX = {
   },
 
   // Resolved profile-section categories feed forward into voice AND other profile sections.
-  "role:Leader": { grammar:{"Turn-Taking Grammar":TIER_MODERATE} },
-  "role:Outsider": { vocab:{"Directness & Literalness":TIER_WEAK}, humor:{"Absurd & Chaotic":TIER_WEAK} },
-  "role:Caretaker": { manner:{"Social & Boundary Mannerisms":TIER_MODERATE} },
+  
+  
+  
   /* Adding stress->humor links (see below) gave four of the seven humor categories a
      cascade inbound at neutral sliders and left three without one, which starved
      Intellectual & Wordplay to 9% of a seven-way split. The three that were missing get
      one here, from sections that resolve before Humor does: a skeptic's humour is
      precision, an outsider's is the wrong shape on purpose, and an idealist's is warm
      even when nothing else is. Every humor category now has somewhere to arrive from. */
-  "role:Skeptic": { vocab:{"Precision & Specificity Level":TIER_MODERATE},
-    humor:{"Intellectual & Wordplay":TIER_MODERATE} },
+  
   "role:Instigator": { humor:{"Absurd & Chaotic":TIER_WEAK} },
   "role:Peacemaker": { humor:{"Warm & Playful":TIER_WEAK} },
 
@@ -2386,30 +2468,28 @@ const WEIGHT_MATRIX = {
      structural thumb on the scale toward damaged characters, on top of the measured
      80/20 insecure split. A category that can be arrived at but never argued from is
      half-wired; these are the missing halves. */
-  "attachment:Secure": { role:{"Leader":TIER_WEAK,"Connector":TIER_WEAK},
-    grammar:{"Turn-Taking Grammar":TIER_WEAK}, humor:{"Warm & Playful":TIER_WEAK} },
+  
   "values:Pragmatic & Flexible": { vocab:{"Pragmatic Focus & Speech Functions":TIER_WEAK},
     role:{"Connector":TIER_WEAK}, stress:{"Flight":TIER_WEAK} },
-  "humor:Self-Deprecating": { manner:{"Emotional Affectations":TIER_WEAK},
-    attachment:{"Anxious":TIER_WEAK} },
+  
   "humor:Humorless & Absent": { manner:{"Eye & Facial Expressions":TIER_WEAK},
     vices:{"Restraint & Discipline":TIER_WEAK} },
 
   "humor:Cruel & Barbed": { vocab:{"Affective & Emotional Intensity":TIER_WEAK} },
-  "humor:Warm & Playful": { vocab:{"Affective & Emotional Intensity":TIER_WEAK} },
+  
   "humor:Dry & Deadpan": { vocab:{"Precision & Specificity Level":TIER_WEAK} },
-  "humor:Absurd & Chaotic": { grammar:{"Structural Shifts":TIER_WEAK} },
+  
 
-  "vices:Compulsion & Ritual": { manner:{"Micro-Physical Tics":TIER_MODERATE} },
-  "vices:Substance & Consumption": { manner:{"Physical Vocalizations & Noises":TIER_MODERATE} },
-  "vices:Risk & Escape": { stress:{"Flight":TIER_WEAK} },
-  "vices:Restraint & Discipline": { values:{"Rigid & Principled":TIER_WEAK} },
+  
+  
+  
+  
 
-  "values:Rigid & Principled": { vocab:{"Register & Formality Spectrum":TIER_WEAK}, grammar:{"Structural Shifts":TIER_WEAK} },
-  "values:Self-Interested": { vocab:{"Pragmatic Focus & Speech Functions":TIER_MODERATE} },
-  "attachment:Anxious": { manner:{"Emotional Affectations":TIER_WEAK}, vocab:{"Temporal Orientation & Tense Usage":TIER_WEAK} },
-  "attachment:Avoidant": { manner:{"Postural & Spatial Dynamics":TIER_WEAK} },
-  "attachment:Disorganized": { grammar:{"Disfluencies & Flow":TIER_MODERATE,"Repetition & Echo Patterns":TIER_WEAK} },
+  
+  
+  
+  
+  
 
   /* "Temporal Orientation & Tense Usage" (50 traits) was used by three archetypes'
      vocabPref but no axis and no resolved category pointed at it — the matrix was the
@@ -2418,49 +2498,46 @@ const WEIGHT_MATRIX = {
      present in the wrong tense; Motivation & Wound would be the most natural driver of
      all, but it is a drawAll section and so never resolves to a single category for
      the cross-link table to key on. These three do. */
-  "values:Loyalty-Bound": { role:{"Caretaker":TIER_WEAK}, vocab:{"Temporal Orientation & Tense Usage":TIER_WEAK} },
+  
 
   // BUG FIX: the 4 newer sub-groups (Connector, Idealistic & Visionary, Intellectual
   // & Wordplay, Avoidance & Procrastination) got PROFILE_CATEGORY_POLARITY entries
   // earlier but were never given resolved-category cross-links here — so once a
   // character actually resolved to one of them, that fact fed nothing forward into
   // vocab/grammar/manner or any other profile section, unlike every original category.
-  "role:Connector": { vocab:{"Pragmatic Focus & Speech Functions":TIER_WEAK}, humor:{"Warm & Playful":TIER_WEAK} },
+  
   "values:Idealistic & Visionary": { vocab:{"Directness & Literalness":TIER_WEAK}, grammar:{"Structural Shifts":TIER_WEAK}, humor:{"Warm & Playful":TIER_WEAK},
                                      goals:{"The Longer Aim":TIER_WEAK} },
   /* ---- Links INTO the §6 sections, so a competence, an origin or a repair style is
      nudged by the facts already resolved rather than rolled blind. Deliberately light
      (mostly WEAK): the point of these sections is to widen who a character can be,
      and a strong cascade would just re-derive the wound from the other side. */
-  "attachment:Secure":        { origins:{"Stable Care":TIER_MODERATE,"Learned Trust":TIER_WEAK}, repair:{"Apology":TIER_WEAK},
-                                texture:{"Preferences & Small Pleasures":TIER_WEAK} },
-  "attachment:Avoidant":      { repair:{"Avoidance & Humour":TIER_MODERATE,"Restitution & Practical Care":TIER_WEAK},
-                                contradiction:{"Exceptions & Detachment":TIER_WEAK} },
-  "attachment:Anxious":       { repair:{"Apology":TIER_MODERATE}, origins:{"Repaired Conflict":TIER_WEAK} },
-  "attachment:Disorganized":  { repair:{"Changed Boundaries & Failed Repair":TIER_MODERATE} },
-  "stress:Fight (attack the threat)":   { repair:{"Changed Boundaries & Failed Repair":TIER_WEAK}, competence:{"Hands & Materials":TIER_WEAK} },
-  "stress:Fawn (appease the threat)":   { repair:{"Apology":TIER_MODERATE,"Restitution & Practical Care":TIER_WEAK},
-                                          contradiction:{"Protective Hypocrisy":TIER_WEAK} },
-  "stress:Flight (remove yourself)":    { repair:{"Avoidance & Humour":TIER_MODERATE} },
-  "stress:Freeze (shut down)":          { repair:{"Avoidance & Humour":TIER_WEAK} },
-  "role:Leader":       { competence:{"Systems & Logistics":TIER_MODERATE,"People & Rooms":TIER_WEAK}, origins:{"Earned Success":TIER_WEAK} },
-  "role:Caretaker":    { competence:{"People & Rooms":TIER_MODERATE}, origins:{"Stable Care":TIER_WEAK}, repair:{"Restitution & Practical Care":TIER_MODERATE} },
-  "role:Skeptic":      { competence:{"Craft & Knowledge":TIER_WEAK}, contradiction:{"Aspirational Values":TIER_WEAK} },
-  "role:Connector":    { competence:{"People & Rooms":TIER_MODERATE} },
-  "role:Outsider":     { competence:{"Craft & Knowledge":TIER_WEAK,"Hands & Materials":TIER_WEAK} },
-  "vices:Restraint & Discipline": { competence:{"Systems & Logistics":TIER_MODERATE}, contradiction:{"Aspirational Values":TIER_WEAK} },
-  "vices:Compulsion & Ritual":    { texture:{"Routines":TIER_MODERATE} },
-  "vices:Avoidance & Procrastination": { repair:{"Avoidance & Humour":TIER_MODERATE}, texture:{"Practised Badly":TIER_WEAK} },
-  "humor:Warm & Playful":         { texture:{"Affiliations":TIER_WEAK}, repair:{"Avoidance & Humour":TIER_WEAK} },
-  "humor:Absurd & Chaotic":       { texture:{"Practised Badly":TIER_WEAK} },
-  "vices:Substance & Consumption": { texture:{"Preferences & Small Pleasures":TIER_WEAK} },
-  "vices:Risk & Escape":          { texture:{"Practised Badly":TIER_WEAK}, origins:{"Earned Success":TIER_WEAK} },
-  "humor:Self-Deprecating":       { repair:{"Avoidance & Humour":TIER_WEAK}, contradiction:{"Aspirational Values":TIER_WEAK} },
-  "values:Loyalty-Bound":         { contradiction:{"Protective Hypocrisy":TIER_MODERATE}, texture:{"Affiliations":TIER_WEAK} },
-  "values:Rigid & Principled":    { contradiction:{"Exceptions & Detachment":TIER_WEAK}, repair:{"Changed Boundaries & Failed Repair":TIER_WEAK} },
-  "values:Self-Interested":       { goals:{"The Price & The Competing Claim":TIER_WEAK} },
+  "attachment:Secure": { role:{"Leader":TIER_WEAK,"Connector":TIER_WEAK}, grammar:{"Turn-Taking Grammar":TIER_WEAK}, humor:{"Warm & Playful":TIER_WEAK}, origins:{"Stable Care":TIER_MODERATE,"Learned Trust":TIER_WEAK}, repair:{"Apology":TIER_WEAK}, texture:{"Preferences & Small Pleasures":TIER_WEAK} },
+  "attachment:Avoidant": { manner:{"Postural & Spatial Dynamics":TIER_WEAK}, repair:{"Avoidance & Humour":TIER_MODERATE,"Restitution & Practical Care":TIER_WEAK}, contradiction:{"Exceptions & Detachment":TIER_WEAK} },
+  "attachment:Anxious": { manner:{"Emotional Affectations":TIER_WEAK}, vocab:{"Temporal Orientation & Tense Usage":TIER_WEAK}, repair:{"Apology":TIER_MODERATE}, origins:{"Repaired Conflict":TIER_WEAK} },
+  "attachment:Disorganized": { grammar:{"Disfluencies & Flow":TIER_MODERATE,"Repetition & Echo Patterns":TIER_WEAK}, repair:{"Changed Boundaries & Failed Repair":TIER_MODERATE} },
+  
+  
+  
+  
+  "role:Leader": { grammar:{"Turn-Taking Grammar":TIER_MODERATE}, competence:{"Systems & Logistics":TIER_MODERATE,"People & Rooms":TIER_WEAK}, origins:{"Earned Success":TIER_WEAK} },
+  "role:Caretaker": { manner:{"Social & Boundary Mannerisms":TIER_MODERATE}, competence:{"People & Rooms":TIER_MODERATE}, origins:{"Stable Care":TIER_WEAK}, repair:{"Restitution & Practical Care":TIER_MODERATE} },
+  "role:Skeptic": { vocab:{"Precision & Specificity Level":TIER_MODERATE}, humor:{"Intellectual & Wordplay":TIER_MODERATE}, competence:{"Craft & Knowledge":TIER_WEAK}, contradiction:{"Aspirational Values":TIER_WEAK} },
+  "role:Connector": { vocab:{"Pragmatic Focus & Speech Functions":TIER_WEAK}, humor:{"Warm & Playful":TIER_WEAK}, competence:{"People & Rooms":TIER_MODERATE} },
+  "role:Outsider": { vocab:{"Directness & Literalness":TIER_WEAK}, humor:{"Absurd & Chaotic":TIER_WEAK}, competence:{"Craft & Knowledge":TIER_WEAK,"Hands & Materials":TIER_WEAK} },
+  "vices:Restraint & Discipline": { values:{"Rigid & Principled":TIER_WEAK}, competence:{"Systems & Logistics":TIER_MODERATE}, contradiction:{"Aspirational Values":TIER_WEAK} },
+  "vices:Compulsion & Ritual": { manner:{"Micro-Physical Tics":TIER_MODERATE}, texture:{"Routines":TIER_MODERATE} },
+  
+  "humor:Warm & Playful": { vocab:{"Affective & Emotional Intensity":TIER_WEAK}, texture:{"Affiliations":TIER_WEAK}, repair:{"Avoidance & Humour":TIER_WEAK} },
+  "humor:Absurd & Chaotic": { grammar:{"Structural Shifts":TIER_WEAK}, texture:{"Practised Badly":TIER_WEAK} },
+  "vices:Substance & Consumption": { manner:{"Physical Vocalizations & Noises":TIER_MODERATE}, texture:{"Preferences & Small Pleasures":TIER_WEAK} },
+  "vices:Risk & Escape": { stress:{"Flight":TIER_WEAK}, texture:{"Practised Badly":TIER_WEAK}, origins:{"Earned Success":TIER_WEAK} },
+  "humor:Self-Deprecating": { manner:{"Emotional Affectations":TIER_WEAK}, attachment:{"Anxious":TIER_WEAK}, repair:{"Avoidance & Humour":TIER_WEAK}, contradiction:{"Aspirational Values":TIER_WEAK} },
+  "values:Loyalty-Bound": { role:{"Caretaker":TIER_WEAK}, vocab:{"Temporal Orientation & Tense Usage":TIER_WEAK}, contradiction:{"Protective Hypocrisy":TIER_MODERATE}, texture:{"Affiliations":TIER_WEAK} },
+  "values:Rigid & Principled": { vocab:{"Register & Formality Spectrum":TIER_WEAK}, grammar:{"Structural Shifts":TIER_WEAK}, contradiction:{"Exceptions & Detachment":TIER_WEAK}, repair:{"Changed Boundaries & Failed Repair":TIER_WEAK} },
+  "values:Self-Interested": { vocab:{"Pragmatic Focus & Speech Functions":TIER_MODERATE}, goals:{"The Price & The Competing Claim":TIER_WEAK} },
   "humor:Intellectual & Wordplay": { vocab:{"Morphological & Structural Lexicon":TIER_WEAK,"Precision & Specificity Level":TIER_WEAK} },
-  "vices:Avoidance & Procrastination": { grammar:{"Disfluencies & Flow":TIER_WEAK}, stress:{"Flight":TIER_WEAK} },
+  "vices:Avoidance & Procrastination": { repair:{"Avoidance & Humour":TIER_MODERATE}, texture:{"Practised Badly":TIER_WEAK}, grammar:{"Disfluencies & Flow":TIER_WEAK}, stress:{"Flight":TIER_WEAK} },
 
   // BUG FIX: these four keys previously read "stress:Fight" / "stress:Flight" / etc, but
   // WEIGHT_MATRIX lookups by resolved category are an EXACT key match (unlike the
@@ -2491,12 +2568,8 @@ const WEIGHT_MATRIX = {
      stress response points somewhere different, because that is the observation — the
      warm one goes barbed, the one who leaves goes quiet, the one who freezes gets very
      dry, the one who appeases turns it on themselves. */
-  "stress:Fight (attack the threat)": { vocab:{"Affective & Emotional Intensity":TIER_WEAK},
-    role:{"Instigator":TIER_STRONG,"Leader":TIER_MODERATE}, values:{"Self-Interested":TIER_WEAK},
-    attachment:{"Secure":TIER_STRONG}, humor:{"Cruel & Barbed":TIER_MODERATE} },
-  "stress:Flight (remove yourself)": { grammar:{"Spoken Compression":TIER_WEAK},
-    role:{"Outsider":TIER_STRONG}, values:{"Pragmatic & Flexible":TIER_WEAK},
-    attachment:{"Avoidant":TIER_STRONG}, humor:{"Humorless & Absent":TIER_MODERATE} },
+  "stress:Fight (attack the threat)": { repair:{"Changed Boundaries & Failed Repair":TIER_WEAK}, competence:{"Hands & Materials":TIER_WEAK}, vocab:{"Affective & Emotional Intensity":TIER_WEAK}, role:{"Instigator":TIER_STRONG,"Leader":TIER_MODERATE}, values:{"Self-Interested":TIER_WEAK}, attachment:{"Secure":TIER_STRONG}, humor:{"Cruel & Barbed":TIER_MODERATE} },
+  "stress:Flight (remove yourself)": { repair:{"Avoidance & Humour":TIER_MODERATE}, grammar:{"Spoken Compression":TIER_WEAK}, role:{"Outsider":TIER_STRONG}, values:{"Pragmatic & Flexible":TIER_WEAK}, attachment:{"Avoidant":TIER_STRONG}, humor:{"Humorless & Absent":TIER_MODERATE} },
   /* Same asymmetry as attachment above, in Social Role. Flight and Freeze BOTH fed
      Outsider while Skeptic and Connector were the target of no stress link at all, so at
      neutral sliders — where stress is the only signal actually firing — Outsider took
@@ -2504,19 +2577,64 @@ const WEIGHT_MATRIX = {
      freeze response is watching and doubting rather than acting, which is what the
      Skeptic role describes) and Fawn gained Connector, social glue being the same
      impulse as appeasement pointed outward. Every role now has some stress inbound. */
-  "stress:Freeze (shut down)": { grammar:{"Disfluencies & Flow":TIER_MODERATE},
-    role:{"Skeptic":TIER_MODERATE}, values:{"Pragmatic & Flexible":TIER_WEAK},
-    attachment:{"Disorganized":TIER_STRONG}, humor:{"Dry & Deadpan":TIER_MODERATE} },
-  "stress:Fawn (appease the threat)": { vocab:{"Pragmatic Focus & Speech Functions":TIER_WEAK},
-    role:{"Peacemaker":TIER_STRONG,"Caretaker":TIER_MODERATE,"Connector":TIER_WEAK}, values:{"Loyalty-Bound":TIER_MODERATE},
-    attachment:{"Anxious":TIER_STRONG}, humor:{"Self-Deprecating":TIER_MODERATE} },
+  "stress:Freeze (shut down)": { repair:{"Avoidance & Humour":TIER_WEAK}, grammar:{"Disfluencies & Flow":TIER_MODERATE}, role:{"Skeptic":TIER_MODERATE}, values:{"Pragmatic & Flexible":TIER_WEAK}, attachment:{"Disorganized":TIER_STRONG}, humor:{"Dry & Deadpan":TIER_MODERATE} },
+  "stress:Fawn (appease the threat)": { repair:{"Apology":TIER_MODERATE,"Restitution & Practical Care":TIER_WEAK}, contradiction:{"Protective Hypocrisy":TIER_WEAK}, vocab:{"Pragmatic Focus & Speech Functions":TIER_WEAK}, role:{"Peacemaker":TIER_STRONG,"Caretaker":TIER_MODERATE,"Connector":TIER_WEAK}, values:{"Loyalty-Bound":TIER_MODERATE}, attachment:{"Anxious":TIER_STRONG}, humor:{"Self-Deprecating":TIER_MODERATE} },
 };
+/* The links a duplicated key used to drop (see WEIGHT_MATRIX_V1 below). 39 links. Generated from the
+   pre-merge literal; a v1 seed has to keep drawing without them. */
+const WEIGHT_MATRIX_LEGACY_DROPPED = {
+  "role:Leader": {grammar:["Turn-Taking Grammar"]},
+  "role:Outsider": {vocab:["Directness & Literalness"], humor:["Absurd & Chaotic"]},
+  "role:Caretaker": {manner:["Social & Boundary Mannerisms"]},
+  "role:Skeptic": {vocab:["Precision & Specificity Level"], humor:["Intellectual & Wordplay"]},
+  "attachment:Secure": {role:["Leader","Connector"], grammar:["Turn-Taking Grammar"], humor:["Warm & Playful"]},
+  "humor:Self-Deprecating": {manner:["Emotional Affectations"], attachment:["Anxious"]},
+  "humor:Warm & Playful": {vocab:["Affective & Emotional Intensity"]},
+  "humor:Absurd & Chaotic": {grammar:["Structural Shifts"]},
+  "vices:Compulsion & Ritual": {manner:["Micro-Physical Tics"]},
+  "vices:Substance & Consumption": {manner:["Physical Vocalizations & Noises"]},
+  "vices:Risk & Escape": {stress:["Flight"]},
+  "vices:Restraint & Discipline": {values:["Rigid & Principled"]},
+  "values:Rigid & Principled": {vocab:["Register & Formality Spectrum"], grammar:["Structural Shifts"]},
+  "values:Self-Interested": {vocab:["Pragmatic Focus & Speech Functions"]},
+  "attachment:Anxious": {manner:["Emotional Affectations"], vocab:["Temporal Orientation & Tense Usage"]},
+  "attachment:Avoidant": {manner:["Postural & Spatial Dynamics"]},
+  "attachment:Disorganized": {grammar:["Disfluencies & Flow","Repetition & Echo Patterns"]},
+  "values:Loyalty-Bound": {role:["Caretaker"], vocab:["Temporal Orientation & Tense Usage"]},
+  "role:Connector": {vocab:["Pragmatic Focus & Speech Functions"], humor:["Warm & Playful"]},
+  "stress:Fight (attack the threat)": {repair:["Changed Boundaries & Failed Repair"], competence:["Hands & Materials"]},
+  "stress:Fawn (appease the threat)": {repair:["Apology","Restitution & Practical Care"], contradiction:["Protective Hypocrisy"]},
+  "stress:Flight (remove yourself)": {repair:["Avoidance & Humour"]},
+  "stress:Freeze (shut down)": {repair:["Avoidance & Humour"]},
+  "vices:Avoidance & Procrastination": {repair:["Avoidance & Humour"], texture:["Practised Badly"]}
+};
+
+/* WEIGHT_MATRIX above is the v2 table. For most of this app's life it was written with 24
+   keys twice, and the second literal silently replaced the first, so the links listed in
+   WEIGHT_MATRIX_LEGACY_DROPPED never fired. v1 seeds and old share links must keep building
+   the characters they always built, so v1 draws from this copy with those links removed;
+   v2 seeds get the table as it was written. weightEntry() picks the right one. */
+const WEIGHT_MATRIX_V1 = (()=>{
+  const out = {};
+  Object.entries(WEIGHT_MATRIX).forEach(([key, kinds])=>{
+    const drop = WEIGHT_MATRIX_LEGACY_DROPPED[key] || {};
+    out[key] = {};
+    Object.entries(kinds).forEach(([kind, frags])=>{
+      const gone = drop[kind] || [];
+      out[key][kind] = {};
+      Object.entries(frags).forEach(([frag, w])=>{ if (!gone.includes(frag)) out[key][kind][frag] = w; });
+    });
+  });
+  return out;
+})();
+
 // Inbound links for the §6 gap sections live beside their content (js/data/traits-gaps.js)
 // and are merged here, so a trimmed build without that pack simply has no such links.
+[WEIGHT_MATRIX, WEIGHT_MATRIX_V1].forEach(WM=>{
 if (typeof GAP_WEIGHT_LINKS !== 'undefined'){
   const GAP_TIER = {S:TIER_STRONG, M:TIER_MODERATE, W:TIER_WEAK};
   Object.entries(GAP_WEIGHT_LINKS).forEach(([ax, poles])=>{
-    const e = WEIGHT_MATRIX[ax] = WEIGHT_MATRIX[ax] || {};
+    const e = WM[ax] = WM[ax] || {};
     Object.entries(poles).forEach(([pole, kinds])=>{
       const p = e[pole] = e[pole] || {};
       Object.entries(kinds).forEach(([kind, frags])=>{
@@ -2526,13 +2644,35 @@ if (typeof GAP_WEIGHT_LINKS !== 'undefined'){
     });
   });
   if (typeof GAP_SECTION_LINKS !== 'undefined') Object.entries(GAP_SECTION_LINKS).forEach(([key, kinds])=>{
-    const e = WEIGHT_MATRIX[key] = WEIGHT_MATRIX[key] || {};
+    const e = WM[key] = WM[key] || {};
     Object.entries(kinds).forEach(([kind, frags])=>{
       const k = e[kind] = e[kind] || {};
       Object.entries(frags).forEach(([frag, t])=>{ if (!(frag in k)) k[frag] = GAP_TIER[t] || TIER_WEAK; });
     });
   });
 }
+});
+
+/* Engine 3 draws from the v3 pack, and the v3 table adds the slider links for its new categories (V2.link in js/data/traits-v2-lib.js).
+   Engine 2 keeps the table exactly as it shipped, engine 1 its own copy. */
+const WEIGHT_MATRIX_V3 = (()=>{
+  const out = JSON.parse(JSON.stringify(WEIGHT_MATRIX));
+  if (typeof GAP_V2_LINKS !== 'undefined'){
+    const TIERS = {S:TIER_STRONG, M:TIER_MODERATE, W:TIER_WEAK};
+    Object.entries(GAP_V2_LINKS).forEach(([ax, poles])=>{
+      const entry = out[ax] = out[ax] || {};
+      Object.entries(poles).forEach(([pole, kinds])=>{
+        const p = entry[pole] = entry[pole] || {};
+        Object.entries(kinds).forEach(([kind, frags])=>{
+          const k = p[kind] = p[kind] || {};
+          Object.entries(frags).forEach(([frag, t])=>{ if (!(frag in k)) k[frag] = TIERS[t] || TIER_WEAK; });
+        });
+      });
+    });
+  }
+  return out;
+})();
+function weightEntry(key){ return (ENGINE_V >= 3 ? WEIGHT_MATRIX_V3 : ENGINE_V >= 2 ? WEIGHT_MATRIX : WEIGHT_MATRIX_V1)[key]; }
 
 // Guarded: this is called from pickCategoryWeighted, which runs on every category
 // draw, including from code paths that have no DOM at all (tests, and any future
@@ -2576,12 +2716,6 @@ function persLevel(id, overrides){
   })();
   return rawToLevel(raw);
 }
-function personalitySignals(overrides){
-  const out = {};
-  PERSONALITY_AXES.forEach(a=> out[a.id] = persLevel(a.id, overrides));
-  return out;
-}
-
 // Walks every active signal (13 personality axes + any already-resolved profile categories)
 // and sums matrix weights into a fragment->strength map for the requested "kind".
 // ---------- Pick provenance ("why did I get this?") ----------------------
@@ -2598,7 +2732,7 @@ function attributedBoost(kind, profileCats, overrides){
   // VOICE_AXES above. Previously only personality drove this; voice sliders now
   // contribute exactly the same way, through the same matrix.
   SIGNAL_AXES.forEach(a=>{
-    const entry = WEIGHT_MATRIX[a.id];
+    const entry = weightEntry(a.id);
     if (!entry) return;
     const level = axisLevel(a.id, overrides);
     const dirMap = (level >= 0 ? entry.pos : entry.neg) || {};
@@ -2612,7 +2746,7 @@ function attributedBoost(kind, profileCats, overrides){
   if (profileCats){
     Object.entries(profileCats).forEach(([sectionId,cat])=>{
       if (!cat) return;
-      const entry = WEIGHT_MATRIX[sectionId+':'+cat];
+      const entry = weightEntry(sectionId+':'+cat);
       if (!entry) return;
       const kindMap = entry[kind];
       if (!kindMap) return;
@@ -2681,12 +2815,12 @@ function _explainPickInner(slotId, s){
   PROFILE_SECTIONS.forEach(ps=>{ const c = slotCat(state["prof_"+ps.id+"_0"]); if (c) currentProfileCats[ps.id] = c; });
 
   const pinNote = pinnedTargets[slotId] !== undefined
-    ? `<div class="whyExcl" style="border-left-color:var(--golden-deep); background:rgba(184,134,11,.08);"><b>Pinned</b> at intensity <b>${pinnedTargets[slotId].toFixed(1)}</b> — this overrides whatever the sliders below would otherwise target. Unpin to let it follow them again.</div>`
+    ? `<div class="whyExcl" data-st="border-left-color:var(--golden-deep); background:rgba(184,134,11,.08);"><b>Pinned</b> at intensity <b>${pinnedTargets[slotId].toFixed(1)}</b> — this overrides whatever the sliders below would otherwise target. Unpin to let it follow them again.</div>`
     : ``;
   const polNote = polFitNote(s.trait);
   const vLabel = variantLabelFor(s.trait.category);
   const variantNote = vLabel
-    ? `<div class="whyExcl" style="border-left-color:var(--dusk-blue); background:rgba(74,107,138,.08);">This category covers two different presentations of the same pole. This character is locked to <b>${vLabel}</b>, so the sheet stays coherent instead of mixing them.</div>`
+    ? `<div class="whyExcl" data-st="border-left-color:var(--dusk-blue); background:rgba(74,107,138,.08);">This category covers two different presentations of the same pole. This character is locked to <b>${vLabel}</b>, so the sheet stays coherent instead of mixing them.</div>`
     : ``;
 
   // Personality slots map 1:1 to their own slider — no matrix needed.
@@ -2871,6 +3005,34 @@ const MOTIVATION_CROSSLINKS = [
 /* Reads the cross-link fragments off whatever Motivation traits a build has seated.
    Returns the same {kind -> Map(fragment -> weight)} shape accumulateBoost builds, so
    the two merge without either knowing about the other. */
+/* Rules for the v2 motivation traits (js/data/traits-v2-want.js … ghost/defence): their wording is plainer than the older
+   pack's keyword style, so they get their own broader themes. Applied only by a v2 build, after the rules above, so a v1 seed's
+   cross-links are untouched. */
+const MOTIVATION_CROSSLINKS_V2 = [
+  [/alone|nobody|left\b|leaving|waits|waiting|silence|voicemail|phone|message/i,
+   {attachment:{"Anxious":TIER_MODERATE}, role:{"Connector":TIER_WEAK}}],
+  [/family|sibling|parent|mother|father|child|school|house|\bhome\b/i,
+   {role:{"Caretaker":TIER_MODERATE}, values:{"Loyalty-Bound":TIER_MODERATE, "Tradition":TIER_WEAK}, attachment:{"Secure":TIER_WEAK}}],
+  [/\bask(ed|ing)?\b|request|offers?\b|\bhelp\b|accept/i,
+   {attachment:{"Avoidant":TIER_MODERATE}, stress:{"Freeze":TIER_WEAK}, vices:{"Restraint & Discipline":TIER_WEAK}}],
+  [/verdict|\bwrong\b|blame|apolog|sorry|fault|guilt|\bowe|debt|deserv/i,
+   {stress:{"Fawn":TIER_MODERATE}, values:{"Rigid & Principled":TIER_WEAK, "Fairness":TIER_WEAK}, role:{"Caretaker":TIER_WEAK}}],
+  [/prove|proof|\bfirst\b|\bwin\b|\bbest\b|rank|compar|\bbetter\b|only one|famous|title/i,
+   {role:{"Leader":TIER_MODERATE,"Rival":TIER_MODERATE}, values:{"Self-Interested":TIER_WEAK}, humor:{"Cruel & Barbed":TIER_WEAK}}],
+  [/secret|hide|hidden|pretend|mask|unsaid|keeps from|quietly|never says/i,
+   {humor:{"Dry & Deadpan":TIER_MODERATE}, attachment:{"Avoidant":TIER_MODERATE}, stress:{"Freeze":TIER_WEAK}}],
+  [/\bplan|checks?\b|counts?\b|\brule|exact|ritual|schedule|\blist\b|label/i,
+   {vices:{"Compulsion & Ritual":TIER_MODERATE,"Restraint & Discipline":TIER_WEAK}, values:{"Rigid & Principled":TIER_WEAK}}],
+  [/drink|bottle|pills|\blate\b|escape|away|abroad|\brun\b|town|leave\b/i,
+   {vices:{"Risk & Escape":TIER_MODERATE,"Avoidance & Procrastination":TIER_WEAK}, role:{"Outsider":TIER_WEAK}, stress:{"Flight":TIER_WEAK}}],
+  [/control|resist|refuses|own way|independen|no one tells|nobody tells|\bfree\b/i,
+   {role:{"Outsider":TIER_MODERATE}, values:{"Autonomy":TIER_MODERATE}, vices:{"Risk & Escape":TIER_WEAK}}],
+  [/belong|table|friend|group|together|welcome|\bstay|neighbour|guest/i,
+   {role:{"Connector":TIER_MODERATE}, attachment:{"Secure":TIER_MODERATE}, humor:{"Warm & Playful":TIER_WEAK}, values:{"Hospitality":TIER_WEAK}}],
+  [/afraid|dread|panic|danger|\bsafe|protect|watch(es|ed)? over|night/i,
+   {values:{"Care & Protection":TIER_MODERATE}, stress:{"Freeze":TIER_WEAK}, vices:{"Compulsion & Ritual":TIER_WEAK}}],
+];
+function motivationRules(){ return ENGINE_V >= 3 ? MOTIVATION_CROSSLINKS.concat(MOTIVATION_CROSSLINKS_V2) : MOTIVATION_CROSSLINKS; }
 function motivationCrosslinkMap(motivationTraits){
   const out = {};
   if (!motivationTraits || !motivationTraits.length) return out;
@@ -2882,7 +3044,7 @@ function motivationCrosslinkMap(motivationTraits){
     /* A life-defining wound should pull harder than a small old hurt. The intensity is
        already on the trait and said nothing to anything outside its own card. */
     const weight = clamp((t.intensity || 3) / 3, 0.4, 1.6);
-    MOTIVATION_CROSSLINKS.forEach(([re, kinds], ruleIdx)=>{
+    motivationRules().forEach(([re, kinds], ruleIdx)=>{
       if (!re.test(text)) return;
       /* A rule fires once per build however many of the seven categories match it.
          Without this, a character whose Want, Fear, Wound AND Lie all circle the same
@@ -2961,7 +3123,7 @@ function accumulateBoost(kind, profileCats, overrides){
     add(CURRENT_ARCHETYPE_PROFILE[kind], ARCHETYPE_HINT_STRENGTH);
   }
   SIGNAL_AXES.forEach(a=>{
-    const entry = WEIGHT_MATRIX[a.id];
+    const entry = weightEntry(a.id);
     if (!entry) return;
     const level = axisLevel(a.id, overrides);
     const dirMap = (level >= 0 ? entry.pos : entry.neg) || {};
@@ -2987,7 +3149,7 @@ function accumulateBoost(kind, profileCats, overrides){
        what follows rather than dictating it. */
     Object.entries(profileCats).forEach(([sectionId,cat])=>{
       if (!cat) return;
-      const entry = WEIGHT_MATRIX[sectionId+':'+cat];
+      const entry = weightEntry(sectionId+':'+cat);
       if (!entry) return;
       const kindMap = entry[kind];
       if (!kindMap) return;
@@ -3395,8 +3557,6 @@ function getSuppressedContextTags(){ return [...CONTEXT_SUPPRESSED]; }
 // Matches that were found but NOT applied, with the reason — so "why didn't it read
 // this as military?" has an answer on screen.
 let CONTEXT_REJECTED = [];
-function getRejectedContextTags(){ return CONTEXT_REJECTED.slice(); }
-
 function buildContextBias(contextText, ageText){
   CONTEXT_BIAS = new Map();
   CONTEXT_AXIS_NUDGE = {};
@@ -3623,7 +3783,7 @@ function inferredPolarity(t){
 let polForConflicts = t => (t.pol && Object.keys(t.pol).length) ? t.pol : inferredPolarity(t);
 const TRAIT_CLASH_PAIRS = [
   [/^(whisper-thin|whispered|whisper-soft|breathy-whisper swell)\b/i, /booming|bellow|thunder/i, "one speaks at the edge of hearing, the other fills the room"],
-  [/^never-apologizes\b/i, /\b(over-apologetic|instant-apologizer|apology-flooding|apology-prefacing|anticipatory apologist|apology-and-repeat|apologetic-funny)/i, "one will not say sorry, the other says it for everything"],
+  [/^never-apologi[sz]es\b/i, /\b(over-apologetic|instant-apologi[sz]er|apology-flooding|apology-prefacing|anticipatory apologist|apology-and-repeat|apologetic-funny)/i, "one will not say sorry, the other says it for everything"],
   [/Minimal & Ultra-Brief$/i, /\b(rambl|monologu|long-winded|holds forth)/i, "one gives a word, the other a speech"],
   [/\bTalks About Family Constantly\b/i, /\bNever Mentions Family\b/i, "one talks about family constantly, the other never mentions it"],
 ];
@@ -3654,25 +3814,29 @@ const TRAIT_CLASH_PAIRS = [
    an axis with six times the material on one side stops contributing six times the
    signal for the same character. It is a normalisation, not a correction — when the
    content arrives, the divisors move on their own and the shapes stay right. */
-let POL_COUNTS = {};
+let POL_COUNTS = {};      // older bank only: what a v1 build normalises by
 let POL_NORM = {};
+let POL_COUNTS_V2 = {};   // everything: what a v2 build normalises by
+let POL_NORM_V2 = {};
 (function countPolarity(){
   TRAITS.forEach(t=>{
     if (!t.pol) return;
     Object.entries(t.pol).forEach(([ax, v])=>{
       if (!v) return;
+      if (!POL_COUNTS_V2[ax]) POL_COUNTS_V2[ax] = {pos:0, neg:0};
+      if (v > 0) POL_COUNTS_V2[ax].pos++; else POL_COUNTS_V2[ax].neg++;
+      if (t.since) return;
       if (!POL_COUNTS[ax]) POL_COUNTS[ax] = {pos:0, neg:0};
       if (v > 0) POL_COUNTS[ax].pos++; else POL_COUNTS[ax].neg++;
     });
   });
-  Object.entries(POL_COUNTS).forEach(([ax, c])=>{
-    POL_NORM[ax] = Math.sqrt(c.pos + c.neg) || 1;
-  });
+  Object.entries(POL_COUNTS).forEach(([ax, c])=>{ POL_NORM[ax] = Math.sqrt(c.pos + c.neg) || 1; });
+  Object.entries(POL_COUNTS_V2).forEach(([ax, c])=>{ POL_NORM_V2[ax] = Math.sqrt(c.pos + c.neg) || 1; });
 })();
 // Normalised axis contribution. Sign is preserved exactly; only the magnitude is put
 // on a comparable footing across axes with very different amounts of tagged material.
 function polNormalise(ax, raw){
-  const d = POL_NORM[ax];
+  const d = (ENGINE_V >= 3 ? POL_NORM_V2 : POL_NORM)[ax];
   return d ? raw / d : raw;
 }
 /* The bank's expected value per tagged draw on an axis, in -1..1. This is the "prior"
@@ -3680,11 +3844,23 @@ function polNormalise(ax, raw){
    default rather than in absolute tag counts — see the note there. Calibrated from the
    bank once at load; it is a property of the CONTENT, not of any character. */
 function polarityPrior(ax){
-  const c = POL_COUNTS[ax];
+  const c = (ENGINE_V >= 3 ? POL_COUNTS_V2 : POL_COUNTS)[ax];
   if (!c || !(c.pos + c.neg)) return 0;
   return (c.pos - c.neg) / (c.pos + c.neg);
 }
 
+/* Alternates for fixed prose (js/data/prose-pools-v2.js). A v2 build picks among the original and its alternates by a hash of a stable
+   key (axis and trait ids, never the dice), so the same sheet always reads the same and a v1 build never leaves the original. */
+function proseAlt(base, alts, key){
+  if (ENGINE_V < 3 || !alts || !alts.length) return base;
+  const all = [base].concat(alts);
+  return all[hashSeedString(String(key)) % all.length];
+}
+function _proseAlts(pool, k){ return typeof PROSE_POOLS_V2 !== 'undefined' && PROSE_POOLS_V2[pool] ? PROSE_POOLS_V2[pool][k] : null; }
+function exceptionSurvives(fn, key){
+  const base = EXCEPTION_SURVIVES[fn] || EXCEPTION_SURVIVES.default;
+  return proseAlt(base, _proseAlts('exceptionSurvives', EXCEPTION_SURVIVES[fn] ? fn : 'default'), 'es|' + fn + '|' + key);
+}
 /* ================= CONTRADICTION AS CONTENT =================
    checkConflictsFor already finds every pair of seated traits that pull opposite ways
    on an axis, and reports them as something to be aware of — a warning, softened by
@@ -3765,7 +3941,7 @@ function contradictionFor(stateObj){
           const hi = pa === 1 ? a : b, lo = pa === 1 ? b : a;
           best = {severity, axis, axisLabel: AXIS_LABELS[axis], hi, lo,
                   tier: conflictTier(severity).label,
-                  question: CONTRADICTION_QUESTIONS[axis] || "When does each of these come out, and what decides it?"};
+                  question: proseAlt(CONTRADICTION_QUESTIONS[axis] || "When does each of these come out, and what decides it?", _proseAlts('contradictionQuestions', axis), 'cq|' + axis + '|' + hi.id + '|' + lo.id)};
         }
       }
     }
@@ -3927,6 +4103,30 @@ let PERSONALITY_POLE_STATS = null;
   });
   PERSONALITY_POLE_STATS = {tagged, keptExplicit};
 })();
+
+/* ENGINE-V2 POLARITY OVERLAY. The older voice-texture traits are mostly untagged, so polarityFit is inert on them. Tagging them
+   changes what a slider draws, which would move every v1 seed, so the extra tags (js/data/pol-overlay-v2-*.js, POL_OVERLAY_V2)
+   live beside the original: `t.pol` is swapped between the two when the engine version changes (setEngineV). A trait with an
+   explicit tag of its own on an axis keeps it. */
+const POL_OVERLAY_IDS = [];
+(function buildPolOverlay(){
+  if (typeof POL_OVERLAY_V2 === 'undefined') return;
+  Object.entries(POL_OVERLAY_V2).forEach(([id, p])=>{
+    const t = TRAITS_BY_ID.get(+id);
+    if (!t || t.since) return;
+    const merged = Object.assign({}, p, t.pol || {});
+    Object.keys(merged).forEach(k=>{ if (!merged[k]) delete merged[k]; });
+    t.polV1 = t.pol || {}; t.polV2 = merged; POL_OVERLAY_IDS.push(t.id);
+  });
+})();
+let _polOverlayV = 1;
+function setEngineV(v){
+  ENGINE_V = v;
+  const want = v >= 3 ? 2 : 1;
+  if (want === _polOverlayV) return;
+  _polOverlayV = want;
+  POL_OVERLAY_IDS.forEach(id=>{ const t = TRAITS_BY_ID.get(id); t.pol = want === 2 ? t.polV2 : t.polV1; });
+}
 
 function liveAxisVector(overrides){
   const vec = {};
@@ -4201,6 +4401,25 @@ const PROFILE_SECTIONS = [
    blurb:"How much, and how, family comes into their conversation."},
   {id:"conflictstyle", section:"Conflict Style", label:"Conflict Style", drawAll:false, defaultOn:false,
    blurb:"How they fight: stonewalling, passive-aggression, arguing the record, smoothing, escalating then apologising, sulking, triangulating."},
+  /* ---- Engine-v2 sections (js/data/traits-v2-*.js, since:3) ------------------------
+     Eight more opt-in sections for the behaviours the 2026-10 audit found had no home. Their
+     traits carry since:3, so a v1 or v2 seed never draws them even if the section is switched on. */
+  {id:"persuasion", section:"Persuasion & Influence", label:"Persuasion & Influence", drawAll:false, defaultOn:false,
+   blurb:"How they get a yes: the small ask first, the guilt with a smile, the idea planted until it is yours."},
+  {id:"feedback", section:"Feedback & Praise", label:"Feedback & Praise", drawAll:false, defaultOn:false,
+   blurb:"How criticism, praise and compliments are given and taken."},
+  {id:"decision", section:"Decision Style", label:"Decision Style", drawAll:false, defaultOn:false,
+   blurb:"How they choose: consulting then ignoring, deciding in the corridor, waiting for someone else to order."},
+  {id:"boundaries", section:"Boundaries & Refusals", label:"Boundaries & Refusals", drawAll:false, defaultOn:false,
+   blurb:"How a no is said and defended, and how help is asked for and offered."},
+  {id:"emotion", section:"Emotion Display Rules", label:"Emotion Display Rules", drawAll:false, defaultOn:false,
+   blurb:"Which feelings are shown, hidden, performed or swapped for another, and how grief is talked about."},
+  {id:"hospitality", section:"Hospitality & Gifts", label:"Hospitality & Gifts", drawAll:false, defaultOn:false,
+   blurb:"Hosting, being a guest, giving and receiving."},
+  {id:"greetings", section:"Greetings & Farewells", label:"Greetings & Farewells", drawAll:false, defaultOn:false,
+   blurb:"The first line, the last line, and the long goodbye in between."},
+  {id:"digital", section:"Digital Voice", label:"Digital Voice", drawAll:false, defaultOn:false,
+   blurb:"Texts, email, voicemail, video calls, and the wellness register."},
 ];
 
 
@@ -4225,8 +4444,21 @@ function archetypeSectionsEnabled(){
 function archetypeOptsIn(ps){
   return ps.defaultOn === false && !!CURRENT_ARCHETYPE_PROFILE && !!CURRENT_ARCHETYPE_PROFILE[ps.id] && archetypeSectionsEnabled();
 }
+/* ROTATION (engine 3). A blank roll used to draw only the sections that ship on, so thirteen sections (and now eight more) were never
+   met unless someone opened the panel. About half of v3 blank rolls bring one of the switched-off sections in for that roll alone, chosen
+   from the seeded stream, so the same seed always rotates in the same one. Off for presets, and one box turns it off. */
+let ROTATED_SECTION_ID = null;
+function rotatedSectionEnabled(){ const el = settingEl('rotateSection'); return el ? !!el.checked : true; }
+function rollRotatedSection(){
+  if (ENGINE_V < 3 || !rotatedSectionEnabled() || CURRENT_ARCHETYPE_PROFILE) return null;
+  const pool = PROFILE_SECTIONS.filter(ps => ps.defaultOn === false && !profileSectionChecked(ps) && catsOf(ps.section).length);
+  if (!pool.length || rand() >= 0.55) return null;
+  return pool[Math.floor(rand() * pool.length)].id;
+}
 function profileSectionEnabled(ps){
-  return profileSectionChecked(ps) || archetypeOptsIn(ps);
+  // A section whose every trait is since:3 has nothing a v1 build may draw, and must not take a step of the stream.
+  if (ENGINE_V < 3 && !catsOf(ps.section).length) return false;
+  return profileSectionChecked(ps) || archetypeOptsIn(ps) || ps.id === ROTATED_SECTION_ID;
 }
 // The sections the SELECTED preset switches on that the panel shows as off — for the
 // in-force strip and the "why not" tool, which run outside a build.
@@ -4239,6 +4471,16 @@ function archetypeAddedSections(){
   return prof ? PROFILE_SECTIONS.filter(ps => ps.defaultOn === false && prof[ps.id] && !profileSectionChecked(ps)) : [];
 }
 
+/* A v2 preset can carry keyword themes for the sections that draw every category (Motivation, Goals, Contradiction): about half the
+   time the draw narrows to the traits that match, when at least three do. v1 builds never take this branch (and never spend its rand). */
+function themedPool(pool, ps){
+  if (ENGINE_V < 3 || !CURRENT_ARCHETYPE_PROFILE || !CURRENT_ARCHETYPE_PROFILE._themes) return pool;
+  const src = CURRENT_ARCHETYPE_PROFILE._themes[ps.id];
+  if (!src) return pool;
+  let re; try { re = new RegExp(src, 'i'); } catch (e){ return pool; }
+  const hit = pool.filter(t => re.test(ps.id === MOTIVATION_SECTION_ID ? motivationText(t) : t.trait + ' ' + t.desc));
+  return hit.length >= 3 && rand() < 0.5 ? hit : pool;
+}
 // Resolves which TYPE each profile section lands on, one section at a time, in the order
 // PROFILE_SECTIONS is defined — so a later section (say, Values) can be biased by an
 // earlier section's already-decided type (say, Social Role) via the matrix above, not just
@@ -4389,7 +4631,7 @@ function pickProfileSlots(rarityPref, resolvedCats, onlySectionId, skipSectionId
       const dropIdx = droppable.length && rand() < 0.33 ? droppable[Math.floor(rand() * droppable.length)] : -1;
       cats.forEach((cat,i)=>{
         if (i === dropIdx) return;
-        const pool = byFilter(ps.section, cat);
+        const pool = themedPool(byFilter(ps.section, cat), ps);
         const slotId = `prof_${ps.id}_${i}`;
         const tgt = spreadAll(target, i);
         const first = _drawUnique(()=>withSlotMemory(slotId, ()=>pickInRange(pool, rarityPref, tgt, 10, true)));
@@ -4959,7 +5201,6 @@ function _coherenceScoreInner(st, OV){
    A default sheet drops from ~38 rangeSelect calls per render to roughly the number of
    distinct pools it actually draws from. */
 const _loudPCache = new Map();
-function _invalidateLoudCache(){ _loudPCache.clear(); }
 function expectedLoudCount(st){
   let expected = 0, variance = 0, measurable = 0;
   Object.values(st || {}).forEach(s=>{
@@ -5116,7 +5357,7 @@ function explainWhyNot(trait){
   }
   const pool = TRAITS_BY_KEY.get(trait.section+"||"+cat) || [];
   out.push(`For scale: "${e(cat)}" holds ${pool.length} traits, so even when everything lines up this one is competing with ${pool.length-1} others.`);
-  return out.map(x=>`<div style="margin:4px 0;">${x}</div>`).join("");
+  return out.map(x=>`<div data-st="margin:4px 0;">${x}</div>`).join("");
 }
 
 // ================= DEPTH-FIRST STAGED GENERATION =================
@@ -5618,6 +5859,11 @@ function _snapshotNow(){
       lastReplay: arcLastReplay ? compressSlots(arcLastReplay) : null,
     } : null,
     viewContext: (typeof viewContext !== 'undefined') ? viewContext : null,
+    // The seed chip and the share link belong to the sheet too: after Undo they named the
+    // roll you had just undone away from.
+    seed: (typeof lastSeedUsed !== 'undefined') ? lastSeedUsed : null,
+    metaSeed: (typeof charMetaSeed !== 'undefined') ? charMetaSeed : null,
+    engineV: (typeof sheetEngineVersion !== 'undefined') ? sheetEngineVersion : 1,
   };
 }
 function updateUndoButtons(){
@@ -5653,6 +5899,12 @@ function _restoreSnapshot(prev){
   if (prev.viewContext && typeof viewContext !== 'undefined') viewContext = prev.viewContext;
   restoreSliders(prev.sliders);
   lastGeneratedSliders = prev.sliders; // the restored state now corresponds to these again
+  if ('seed' in prev && typeof lastSeedUsed !== 'undefined'){
+    lastSeedUsed = prev.seed; charMetaSeed = prev.metaSeed; if (prev.engineV) sheetEngineVersion = prev.engineV; syncEngineToSheet();
+    const seedOut = document.getElementById('lastSeedReadout');
+    if (seedOut) seedOut.textContent = lastSeedUsed ? "Seed: " + lastSeedUsed : "";
+    if (typeof updateStickyBar === 'function') updateStickyBar();
+  }
   setVal('charName', charMeta.name || "");
   setVal('charAge', charMeta.age || "");
   setVal('charContext', charMeta.context || "");
@@ -5664,17 +5916,21 @@ function _restoreSnapshot(prev){
   if (typeof renderArc === 'function') renderArc();
   updateUndoButtons();
 }
-function undoLast(){
+/* Undo and redo changed the sheet and said nothing, on a page tens of thousands of pixels tall where the card that moved can
+   be off screen. `quiet` is for callers that run several steps and announce once (the history drawer). */
+function undoLast(quiet){
   if (!history.length) return;
   redoStack.push(_snapshotNow());
   if (redoStack.length > HISTORY_MAX) redoStack.shift();
   _restoreSnapshot(history.pop());
+  if (quiet !== true && typeof toast === 'function') toast("Undid the last change" + (lastSeedUsed ? " (seed " + lastSeedUsed + ")." : "."), "ok", 2200);
 }
-function redoLast(){
+function redoLast(quiet){
   if (!redoStack.length) return;
   history.push(_snapshotNow());
   if (history.length > HISTORY_MAX) history.shift();
   _restoreSnapshot(redoStack.pop());
+  if (quiet !== true && typeof toast === 'function') toast("Redid the change" + (lastSeedUsed ? " (seed " + lastSeedUsed + ")." : "."), "ok", 2200);
 }
 
 // Builds one of the sheet's fixed-spine slots, per the empty-slot convention above:
@@ -5683,7 +5939,6 @@ function mkSlot(slotId, label, target, trait, extra){
   if (!trait) return emptySlot(slotId, label, Object.assign({target}, extra || {}));
   return Object.assign({slotId, locked:false, label, target, trait}, extra || {});
 }
-let ENGINE_V = 1;   // 1 = the original build; 2 = the 2026 coverage changes (see generate.js)
 function pickVerbositySlot(verbLevel, rarityPref){
   // Crossover narrowed from ±0.3 (raw ±15) to ±0.12 (raw ±6): the old dead band
   // meant nearly a third of the slider produced identical pacing-pool draws.
@@ -5799,7 +6054,7 @@ function pickFromCategoryIntensityAware(section, category, boostMap, rarityPref)
 function pickVocabSlots(archetypePref, verbLevel, regLevel, rarityPref, count, profileCats, overrides){
   const boosted = boostedVocabCats(verbLevel, regLevel, profileCats, overrides);
   const pool = archetypePref && archetypePref.length ? archetypePref : VOCAB_CATS;
-  const targetCount = count || 2;
+  const targetCount = Number.isFinite(count) ? Math.max(0, count) : 2;   // a count of 0 means none (it used to become 2)
   const chosenCats = []; const usedCats = new Set();
   // BUG FIX: this loop had no attempt cap, so with an unlucky weighted draw it
   // could spin for a long time; and its `else if` branch was unreachable because
@@ -6011,7 +6266,7 @@ function pickWildcardSlot(rarityPref, index, partial){
   const why = contradicts
     ? `Cuts against the sheet's strongest lean (${AXIS_LABELS[lean.ax]}, ${lean.v > 0 ? 'high' : 'low'}) — ` + (typeof wildcardSurvivesBecause === 'function'
         ? wildcardSurvivesBecause(trait, lean, partial)
-        : (EXCEPTION_SURVIVES[trait.behaviorFunction] || EXCEPTION_SURVIVES.default) + '.')
+        : exceptionSurvives(trait.behaviorFunction, trait.id) + '.')
     : `A far-tail draw from ${cat}; nothing in that category opposes the sheet's strongest lean, so this is texture rather than a contradiction.`;
   return {slotId, locked:false, wildcard:true, target,
           label: (contradicts ? "The exception — " : "Doesn't fit the rest — ") + cat, trait,
@@ -6023,7 +6278,11 @@ function wildcardEnabled(){
 }
 
 const MOTIVATION_SECTION_ID = "motivation";
+/* The rotated section lives only for the build that rolled it (see rollRotatedSection): nothing before or after may see it. */
 function buildCharacterState(opts){
+  try { return _buildCharacterStateInner(opts); } finally { ROTATED_SECTION_ID = null; }
+}
+function _buildCharacterStateInner(opts){
   if (opts && opts.drawContext){
     const inner = Object.assign({}, opts); delete inner.drawContext;
     return withDrawContext(opts.drawContext, () => buildCharacterState(inner));
@@ -6054,6 +6313,7 @@ function buildCharacterState(opts){
     composure: Math.round(clamp(compLevel,-2,2)*50),
   });
   setAffinityVec(fullOverrides);
+  ROTATED_SECTION_ID = rollRotatedSection();
   /* §5 plans, rolled up front on the seeded stream — each only when its own setting is
      on, so a build with both off consumes exactly the draws it always did. */
   CURRENT_SHAPE = sheetShapeEnabled() ? rollSheetShape() : null;
@@ -6163,9 +6423,9 @@ function pressureTrigger(st){
   const fear = find(/Core Fear/i), wound = find(/Core Wound/i), lie = find(/The Lie/i);
   if (!fear && !wound) return null;
   let out = fear
-    ? `Anything that looks like <b>${escHTML(fear.trait)}</b>${wound ? ` — especially when it rhymes with <b>${escHTML(wound.trait)}</b>` : ``}.`
-    : `Anything that reopens <b>${escHTML(wound.trait)}</b>.`;
-  if (lie) out += ` Underneath it, they are still working from <b>${escHTML(lie.trait)}</b>.`;
+    ? `Anything that looks like <b>${escHTML(_nm(fear))}</b>${wound ? ` — especially when it rhymes with <b>${escHTML(_nm(wound))}</b>` : ``}.`
+    : `Anything that reopens <b>${escHTML(_nm(wound))}</b>.`;
+  if (lie) out += ` Underneath it, they are still working from <b>${escHTML(_nm(lie))}</b>.`;
   return out;
 }
 
@@ -6230,6 +6490,12 @@ const STRATEGY_BY_VALUES = {
   "Loyalty-Bound": "the people they have decided are theirs",
   "Self-Interested": "their own position first",
   "Idealistic & Visionary": "a picture of how it ought to be",
+  "Tradition & Rite": "the way it has always been done",
+  "Purity & Sanctity": "what must be kept apart and what must not be profaned",
+  "Autonomy & Liberty": "nobody else deciding for them",
+  "Fairness": "an even share, counted out loud",
+  "Care & Protection": "whoever in the room is smallest",
+  "Hospitality": "the person at the door",
 };
 /* ---------- TRAIT NAMES INSIDE PROSE ----------
    Trait names are labels, not grammar: "Keeps a spreadsheet for everything",
@@ -6241,6 +6507,24 @@ const _PROSE_PAST = /^(was|were|shamed|mocked|dismissed|overlooked|replaced|chea
 const _PROSE_MODAL = /^(can|cannot|can't|could|will|won't|would|never|always|only|rarely|still|mildly|quietly|secretly|slightly)$/i;
 const _PROSE_BARE = /^(live|stay|talk|finally|put|send|bring|teach|lose|give|take|run|hold|look|walk|sleep|quit|get|make|be|keep|find|win|see|have|build|learn|retire|fix|finish|sell|say|leave|clear|go|prove|become|earn|pay|buy|save|stop|start|help|protect|return|move|write|tell|hear|reach|open|close|repair|raise|marry|own|visit|meet|beat|escape|survive|forgive|matter|belong|land|pass|finally)$/i;
 const _PROSE_NOT_VERB = /^(parents|adults|mastery|recognition|belonging|nothing|always|others|debts|less|loss|access|process|success|progress|business|kindness|bus|status|chaos|focus|bonus|plus|this|its|his|hers|yes|us|thus|as|is)$/i;
+/* A trait's name for a place in a sentence that is not a clause slot: a name stored as one
+   hyphen-joined run ("Fear-of-a-specific-person") is a phrase, and printed raw it read as a
+   slug in prose. Capitalisation is kept; use traitPhrase where the name must start lower case. */
+/* Category names carry a parenthetical gloss for the controls ("Core Want (conscious goal)"); in a sentence
+   the gloss reads as a debug dump, so it is dropped. */
+function _plainCat(c){ return String(c || "").replace(/\s*\([^)]*\)\s*$/, ""); }
+/* A description pasted after an em-dash continues the sentence, so it starts lower case ("— needs to be first
+   for somebody"), except for "I" and a word that is already capitalised throughout. */
+function _lc1(d){
+  const s = String(d || "");
+  const w = (/^[A-Za-z']+/.exec(s) || [""])[0];
+  if (!w || /^I(['’].*)?$/.test(w) || (w.length > 1 && w === w.toUpperCase())) return s;
+  return s[0].toLowerCase() + s.slice(1);
+}
+function _nm(t){
+  const s = String((t && t.trait) || t || "");
+  return (!/\s/.test(s) && (s.match(/-/g) || []).length >= 2) ? s.replace(/-/g, " ") : s;
+}
 function traitPhrase(t){
   let s = String((t && t.trait) || t || "").trim().replace(/^['"‘“]+|['"’”]+$/g, "").replace(/[.!]+$/, "");
   // A name that is one hyphen-joined run of three or more words is a phrase, not a compound.
@@ -6299,7 +6583,9 @@ function asReportedBelief(t){
     .replace(/\bI am\b/g, "they are").replace(/\bI was\b/g, "they were").replace(/\bI\b/g, "they")
     .replace(/\bmyself\b/gi, "themselves").replace(/\bmy\b/gi, "their").replace(/\bmine\b/gi, "theirs").replace(/\bme\b/gi, "them")
     .replace(/\bthey has\b/g, "they have").replace(/\bthey does\b/g, "they do").replace(/\bthey is\b/g, "they are");
-  return s ? s[0].toLowerCase() + s.slice(1) : s;
+  // A Lie named "That they are the reasonable one" is spliced after "that": drop the doubled word.
+  const u = s.replace(/^that\s+/i, "");
+  return u ? u[0].toLowerCase() + u.slice(1) : u;
 }
 function motivationChain(st){
   const want = _profTrait(st, "motivation", /Core Want/i);
@@ -6321,7 +6607,7 @@ function motivationChain(st){
   // the same sentence on every one of 200 sheets.
   let _h = 7; Object.keys(st || {}).sort().forEach(k => { if (st[k] && st[k].trait) _h = (_h * 31 + st[k].trait.id) >>> 0; });
   const pk = (salt, arr) => arr[hashSeedString(_h + "|mc|" + salt) % arr.length];
-  if (want) add("want", `The conscious goal is ${asAim(want)}${want.desc ? ` — ${want.desc}` : ``}`, [want]);
+  if (want) add("want", `The conscious goal is ${asAim(want)}${want.desc ? ` — ${_lc1(want.desc)}` : ``}`, [want]);
   if (lie && want) add("belief", `They chase it because they believe ${asBelief(lie)}: the want is what that belief makes look like the answer.`, [lie, want]);
   else if (lie) add("belief", `Underneath, they believe ${asBelief(lie)}.`, [lie]);
   if (wound) add("origin", `The belief was learned from ${asNounPhrase(wound)}${ghost ? `, and it is still attached to ${asNounPhrase(ghost)}` : ``}.`, [wound, ghost]);
@@ -6344,6 +6630,7 @@ function motivationChain(st){
   if (need && lie) shapes.push("need");
   if (lie && wound) shapes.push("inverted");
   if (origin && wound) shapes.push("origin");
+  if (ENGINE_V >= 3){ if (fear) shapes.push("fear"); if (defence && (wound || want)) shapes.push("defence"); }   // engine 3: two more ways to open the chain
   const shape = shapes.length > 1 && hashSeedString(_h + "|shape") % 5 < 3 ? shapes[1 + hashSeedString(_h + "|shape2") % (shapes.length - 1)] : "wound";
   const L = k => links.find(l => l.key === k);
   const place = (key, before) => { const l = L(key), b = L(before); if (!l || !b) return; links.splice(links.indexOf(l), 1); links.splice(links.indexOf(b), 0, l); };
@@ -6353,11 +6640,18 @@ function motivationChain(st){
     n.from = [need, lie].filter(Boolean).map(t => t.trait);
     if (b){ b.text = `${pk("nb", ["The belief is why", "What stops them is the belief", "The belief that gets in the way:"])} ${asBelief(lie)}${want ? " — it makes the want look like the safe answer" : ""}.`; b.from = [lie, want].filter(Boolean).map(t => t.trait); place("belief", "want"); }
     place("need", "want");
-    const w = L("want"); if (w) w.text = `So they chase ${asAim(want)} instead${want && want.desc ? ` — ${want.desc}` : ``}`;
+    const w = L("want"); if (w) w.text = `So they chase ${asAim(want)} instead${want && want.desc ? ` — ${_lc1(want.desc)}` : ``}`;
   } else if (shape === "inverted"){
     const b = L("belief"), o = L("origin");
     if (b) b.text = `${asBelief(lie)} was once simply accurate. It was a fair reading of the room they learned it in.`;
     if (o) o.text = `${pk("iv", ["The room changed and the belief did not", "The room is long gone; the belief outlived it", "They left the room years ago and carried the rule out with them"])}: it came from ${asNounPhrase(wound)}${ghost ? `, and it is still attached to ${asNounPhrase(ghost)}` : ``}.`;
+  } else if (shape === "fear"){
+    const f = L("fear");
+    if (f){ f.text = `${pk("fl", ["It begins with what they refuse to meet:", "Start from the thing they will not stand next to:", "Everything is arranged around one avoidance:"])} ${asNounPhrase(fear)}. The rest is arrangement around it.`; f.from = [fear].map(t => t.trait); place("fear", links[0].key); }
+    const w = L("want"); if (w && want) w.text = `So the want, ${asAim(want)}, is partly a way of staying out of its reach${want.desc ? ` — ${_lc1(want.desc)}` : ``}`;
+  } else if (shape === "defence"){
+    const s = L("strategy");
+    if (s){ s.text = `${pk("dl", ["What the room sees first is the strategy:", "The visible part is the strategy:", "Most of what people meet is a defence:"])} ${traitPhrase(defence)}. It is built over ${wound ? asNounPhrase(wound) : "something older"}${need ? `, and it is why ${asAim(need)} never gets asked for` : ``}.`; s.from = [defence, wound, need].filter(Boolean).map(t => t.trait); place("strategy", links[0].key); }
   } else if (shape === "origin"){
     const c = L("counterweight");
     if (c){ c.text = `It started somewhere good: ${traitPhrase(origin)}. ${origin.desc || ""}`.trim(); place("counterweight", links[0].key); }
@@ -6372,10 +6666,10 @@ function motivationChain(st){
    shifts happen, or what the repair looks like. Each stage names the base trait it is
    grounded in; a stage with nothing to ground it is omitted rather than invented. */
 const APPRAISAL_BY_ATTACHMENT = {
-  "Secure": "reads it as a problem to solve, not a verdict on them",
-  "Anxious": "reads it as the first sign of being left",
-  "Avoidant": "reads it as a demand, and demands are the thing to get away from",
-  "Disorganized": "reads it two ways at once and acts on whichever arrives first",
+  "Secure": "read it as a problem to solve, not a verdict on them",
+  "Anxious": "read it as the first sign of being left",
+  "Avoidant": "read it as a demand, and demands are the thing to get away from",
+  "Disorganized": "read it two ways at once and act on whichever arrives first",
 };
 const THRESHOLD_BY_VALUES = {
   "Rigid & Principled": "when a rule is broken in front of them",
@@ -6383,6 +6677,12 @@ const THRESHOLD_BY_VALUES = {
   "Loyalty-Bound": "the moment one of their people is touched",
   "Self-Interested": "when it starts to cost them personally",
   "Idealistic & Visionary": "when the picture of how it should be is mocked",
+  "Tradition & Rite": "when the way it has always been done is skipped in front of them",
+  "Purity & Sanctity": "the moment two things they keep apart are allowed to touch",
+  "Autonomy & Liberty": "when a decision of theirs is put to someone else's vote",
+  "Fairness": "when a share is cut unevenly and nobody says so",
+  "Care & Protection": "when someone smaller than the room is spoken to unkindly",
+  "Hospitality": "when a guest is made to feel they are in the way",
 };
 function pressureChain(st, pst){
   const fear = _profTrait(st, "motivation", /Core Fear/i);
@@ -6395,20 +6695,27 @@ function pressureChain(st, pst){
   const level = pst && pst.__pressure ? pst.__pressure.level : 1;
   const stages = [];
   const add = (key, title, text, from) => stages.push({key, title, text, from: from.filter(Boolean).map(t => t.trait)});
-  if (fear || wound) add("trigger", "Trigger", fear
-    ? `Anything that looks like ${fear.trait}${wound ? `, especially when it rhymes with ${wound.trait}` : ``}.`
-    : `Anything that reopens ${wound.trait}.`, [fear, wound]);
+  const _ck = (fear ? fear.id : 0) + '|' + (wound ? wound.id : 0) + '|' + (lie ? lie.id : 0);
+  const _scene = typeof settingScene === 'function' ? settingScene(st) : null;
+  if (fear || wound) add("trigger", proseAlt("Trigger", ["What sets it off", "The trigger"], 'pt|' + _ck), (fear
+    ? proseAlt(`Anything that looks like ${traitPhrase(fear)}${wound ? `, especially when it rhymes with ${asNounPhrase(wound)}` : ``}.`,
+        [`What sets it off is ${traitPhrase(fear)}${wound ? `, and more so when it echoes ${asNounPhrase(wound)}` : ``}.`,
+         `The trigger is anything that smells of ${traitPhrase(fear)}${wound ? ` — worse if it brings back ${asNounPhrase(wound)}` : ``}.`], 'ptx|' + _ck)
+    : `Anything that reopens ${asNounPhrase(wound)}.`) + (_scene && _scene.thing ? ` In this setting it tends to arrive as ${_scene.thing}.` : ``), [fear, wound]);
   if (attach || lie){
     const a = attach ? APPRAISAL_BY_ATTACHMENT[attach.category] : null;
-    add("appraisal", "How they read it", `${a ? `They ${a}` : `They read it through the belief`}${lie ? `, because underneath they still hold that ${lie.trait}` : ``}.`, [attach, lie]);
+    add("appraisal", proseAlt("How they read it", ["The reading", "What they think it means"], 'pa|' + _ck),
+      `${a ? `They ${a}` : `They read it through the belief`}${lie ? `${proseAlt(", because underneath they still hold that", [", since under it all they still believe that", ", and the belief they never put down does the reading: that"], 'pal|' + _ck)} ${asReportedBelief(lie)}` : ``}.`, [attach, lie]);
   }
   if (stress){
-    const shifted = pst ? Object.values(pst).filter(s => s && s.shifted).map(s => `${s.fromCat} → ${s.toCat}`) : [];
-    add("tactic", "First move", `${stress.trait}: ${stress.desc || STRATEGY_BY_STRESS[stress.category] || ""}${shifted.length ? ` Under load the profile shifts: ${shifted.join("; ")}.` : ``}`.trim(), [stress]);
+    const shifted = pst ? Object.values(pst).filter(s => s && s.shifted).map(s => `${_plainCat(s.fromCat)} becomes ${_plainCat(s.toCat)}`) : [];
+    add("tactic", proseAlt("First move", ["What they do first", "The first move"], 'pm|' + _ck), `${_nm(stress)}: ${stress.desc || STRATEGY_BY_STRESS[stress.category] || ""}${shifted.length ? ` Under load the profile shifts: ${shifted.join("; ")}.` : ``}`.trim(), [stress]);
   }
   if (values || level !== undefined){
     const v = values ? THRESHOLD_BY_VALUES[values.category] : null;
-    add("threshold", "Where it tips", `${v ? `It tips ${v}` : `It tips when the pressure passes their composure`}${level < 0.99 ? ` — the sheet shows them at ${Math.round(level*100)}%, short of that` : ` — the sheet shows them past it`}.`, [values]);
+    const _k = 'tip|' + (values ? values.id : 0) + '|' + (stress ? stress.id : 0);
+    const _lead = proseAlt("It tips", ["It gives way", "The tipping point comes", "They turn"], _k);
+    add("threshold", proseAlt("Where it tips", ["The breaking point", "What turns it", "The tipping line"], _k + '|t'), `${v ? `${_lead} ${v}` : `${_lead} when the pressure passes their composure`}${level < 0.99 ? ` — the sheet shows them at ${Math.round(level*100)}%, short of that` : ` — the sheet shows them past it`}.`, [values]);
   }
   const rec = pressureRecovery(st);
   if (rec) add("aftermath", "Afterwards", rec, [stress, attach]);
@@ -6440,10 +6747,10 @@ function structuredContradiction(st, meta){
   const attach = _profTrait(st, "attachment");
   const derived = {
     when: hiWhen.length || loWhen.length
-      ? `${base.hi.trait} ${hiWhen.length ? hiWhen.join(" or ") : "by default"}; ${base.lo.trait} ${loWhen.length ? loWhen.join(" or ") : "the rest of the time"}.`
+      ? `${_nm(base.hi)} ${hiWhen.length ? hiWhen.join(" or ") : "by default"}; ${_nm(base.lo)} ${loWhen.length ? loWhen.join(" or ") : "the rest of the time"}.`
       : null,
-    who: roles.length ? `The context roles give the likely split: ${roles.map(r => `${r.category.toLowerCase()} they are ${r.trait}`).join("; ")}.` : (attach ? `${attach.category} attachment decides who gets which face.` : null),
-    change: `On ${base.axisLabel.toLowerCase()} they move from ${base.hi.trait} to ${base.lo.trait} — a ${base.tier.toLowerCase()} swing.`,
+    who: roles.length ? `The context roles give the likely split: ${roles.map(r => `${r.category.toLowerCase()} they are ${_nm(r)}`).join("; ")}.` : (attach ? `${attach.category} attachment decides who gets which face.` : null),
+    change: `On ${base.axisLabel.toLowerCase()} they move from ${_nm(base.hi)} to ${_nm(base.lo)} — a ${base.tier.toLowerCase()} swing.`,
     cost: fn ? `${fn.trait}: ${fn.desc || ""}`.trim() : null,
     fn,
   };
@@ -6534,7 +6841,17 @@ const CONTEXT_MODES = [
   {id:"threat",    label:"Under threat",  tags:["threat","fatigue"],   blurb:"Something has gone wrong. The stress response takes the wheel."},
 ];
 const CONTEXT_MODE_IDS = CONTEXT_MODES.map(m => m.id);
-function contextMode(id){ return CONTEXT_MODES.find(m => m.id === id) || CONTEXT_MODES[0]; }
+/* STATE CONTEXTS. Rooms say who is watching; states say what has happened to the person. Each is a lens exactly like the five above
+   (a few tags, amplify and suppress rules read off section and polarity), kept apart so the five-room strip and the exports stay as they were. */
+const STATE_CONTEXT_MODES = [
+  {id:"exhausted",  label:"Exhausted",       tags:["fatigue"],            blurb:"Days without enough sleep. Effort drops out; the habits and the temper are what is left."},
+  {id:"drunk",      label:"Intoxicated",     tags:["private"],            blurb:"The guard is down and so is the brake. Talk gets louder, looser and more honest."},
+  {id:"bereaved",   label:"Newly bereaved",  tags:["private","home"],     blurb:"A death this week. The wound is the whole room; jokes, plans and small pleasures go quiet."},
+  {id:"inlove",     label:"Newly in love",   tags:["intimacy","private"], blurb:"Everything bends toward one person. Warmth and hope rise; discipline and edge soften."},
+  {id:"online",     label:"Watched online",  tags:["public","stranger"],  blurb:"Performing for a feed. The curated face comes forward; the interior and the lapses stay off camera."},
+];
+function allContextModes(){ return CONTEXT_MODES.concat(STATE_CONTEXT_MODES); }
+function contextMode(id){ return allContextModes().find(m => m.id === id) || CONTEXT_MODES[0]; }
 
 /* Per-context rules on section and polarity. Each entry is {test, status, why}; the
    first matching rule after the authored ones wins, so the order is the priority. */
@@ -6580,6 +6897,53 @@ const CONTEXT_LENS_RULES = {
     {test:(t,d)=> t.pol && t.pol.agr === -1, status:"amplified", why:"the hard edge shows"},
     {test:(t,d)=> d.persistence <= 2 && t.pol && t.pol.warm === 1, status:"suppressed", why:"a passing warmth is the first thing to go"},
     {test:(t,d)=> t.section === "Values & Moral Line", status:"active", why:"what they will and will not do is being tested, not changed"},
+  ],
+  exhausted: [
+    {test:(t,d)=> t.pol && t.pol.mood === -1, status:"amplified", why:"tension and low mood are what tiredness leaves"},
+    {test:(t,d)=> t.pol && t.pol.disc === 1, status:"suppressed", why:"discipline is spent first"},
+    {test:(t,d)=> t.pol && (t.pol.act === 1 || t.pol.pace === 1), status:"suppressed", why:"energy and speed are gone"},
+    {test:(t,d)=> t.pol && (t.pol.pace === -1 || t.pol.act === -1), status:"amplified", why:"slowness shows"},
+    {test:(t,d)=> t.section === "Humor Style" && t.category !== "Dry & Deadpan" && t.category !== "Gallows", status:"suppressed", why:"there is no spare energy for performing a joke"},
+    {test:(t,d)=> t.section === "Habits & Vices", status:"amplified", why:"the vices are how they get through"},
+    {test:(t,d)=> t.section === "Conflict & Stress Response", status:"amplified", why:"the stress response has a lower threshold when tired"},
+    {test:(t,d)=> t.pol && t.pol.intel === 1, status:"suppressed", why:"careful analysis is a rested person's habit"},
+  ],
+  drunk: [
+    {test:(t,d)=> t.pol && t.pol.disc === -1, status:"amplified", why:"the impulse has no brake"},
+    {test:(t,d)=> t.pol && t.pol.disc === 1, status:"suppressed", why:"control is the first thing to slip"},
+    {test:(t,d)=> t.pol && (t.pol.vol === 1 || t.pol.emo === 1), status:"amplified", why:"louder and more open"},
+    {test:(t,d)=> t.pol && (t.pol.man === 1 || t.pol.form === 1), status:"suppressed", why:"manners and formality loosen"},
+    {test:(t,d)=> t.category === "Substance & Consumption", status:"amplified", why:"the habit is in the room"},
+    {test:(t,d)=> _INTERIOR_SECTIONS.has(t.section), status:"amplified", why:"interior material gets said aloud"},
+    {test:(t,d)=> t.category === "Restraint & Discipline" || t.category === "Masking", status:"suppressed", why:"restraint and masking are what drink dissolves"},
+  ],
+  bereaved: [
+    {test:(t,d)=> t.section === "Motivation & Wound" && /Core Wound|The Ghost/.test(t.category), status:"amplified", why:"the loss sits on every old one"},
+    {test:(t,d)=> t.section === "Humor Style" && t.category !== "Gallows", status:"suppressed", why:"jokes stop; only the gallows kind survives grief"},
+    {test:(t,d)=> t.section === "Ordinary Texture" || t.section === "Positive Origins", status:"suppressed", why:"small pleasures and good history are out of reach this week"},
+    {test:(t,d)=> t.pol && t.pol.pos === 1, status:"suppressed", why:"optimism is hard to hold"},
+    {test:(t,d)=> t.pol && t.pol.emo === 1, status:"amplified", why:"feeling is closer to the surface"},
+    {test:(t,d)=> t.pol && t.pol.emo === -1, status:"amplified", why:"a guarded person goes quieter, not louder"},
+    {test:(t,d)=> t.section === "Recovery & Repair", status:"suppressed", why:"nothing is being repaired yet"},
+    {test:(t,d)=> t.section === "Attachment & Intimacy Style", status:"amplified", why:"who they reach for, and who they push off, shows"},
+  ],
+  inlove: [
+    {test:(t,d)=> t.pol && (t.pol.pos === 1 || t.pol.warm === 1 || t.pol.emo === 1), status:"amplified", why:"warmth, hope and openness all rise"},
+    {test:(t,d)=> t.section === "Romance & Desire", status:"amplified", why:"attraction comes out in speech"},
+    {test:(t,d)=> t.pol && t.pol.warm === -1, status:"suppressed", why:"the cool front thaws for one person"},
+    {test:(t,d)=> t.pol && t.pol.disc === 1, status:"suppressed", why:"routine slips under distraction"},
+    {test:(t,d)=> t.section === "Attachment & Intimacy Style", status:"amplified", why:"their attachment style is being tested in earnest"},
+    {test:(t,d)=> t.section === "Humor Style" && /Warm|Teasing/.test(t.category), status:"amplified", why:"play comes easily"},
+    {test:(t,d)=> t.section === "Humor Style" && t.category === "Cruel & Barbed", status:"suppressed", why:"the edge softens"},
+  ],
+  online: [
+    {test:(t,d)=> _SURFACE_SECTIONS.has(t.section), status:"amplified", why:"surface behaviour is the product"},
+    {test:(t,d)=> t.section === "Digital Voice", status:"amplified", why:"this is exactly the room it is for"},
+    {test:(t,d,dim)=> t.pol && t.pol.ego === 1, status:"amplified", why:"the confident face comes forward for an audience"},
+    {test:(t,d)=> _INTERIOR_SECTIONS.has(t.section), status:"suppressed", why:"nobody online sees the interior"},
+    {test:(t,d)=> t.pol && t.pol.hon === -1, status:"amplified", why:"curation is a mild kind of evasion"},
+    {test:(t,d)=> t.pol && (t.pol.emo === 1 || t.pol.mood === -1), status:"suppressed", why:"raw feeling and lapses stay off camera"},
+    {test:(t,d)=> t.section === "Habits & Vices", status:"suppressed", why:"unwatched habits stay unwatched"},
   ],
 };
 
@@ -6699,11 +7063,12 @@ function edgeDefaults(fromState, toState, roleId){
   const contraB = contradictionFor(toState);
   const woundB = _profTrait(toState, "motivation", /Core Wound/i);
   const sharp = (pa.intel || 0) > 0.2 || (pa.cur || 0) > 0.2;
-  const knows = contraB ? (sharp ? `Has noticed that they are ${contraB.hi.trait} and also ${contraB.lo.trait}.` : `Has not noticed the contradiction the reader can see.`)
+  const knows = contraB ? (sharp ? `Has noticed that they are ${_nm(contraB.hi)} and also ${_nm(contraB.lo)}.` : `Has not noticed the contradiction the reader can see.`)
               : woundB ? (sharp ? `Suspects ${woundB.trait}.` : `Knows nothing of ${woundB.trait}.`) : "";
-  const wants = want ? `${want.trait} — and this person is in the way of it, or the route to it.` : "";
-  const conceals = lie ? `That underneath it they believe ${lie.trait}.` : defence ? `${defence.trait}.` : "";
-  const obligation = role ? ({mentor:"To make them ready and then let go.", protege:"To become worth the time.", confidant:"To keep what they were told.", dependant:"To be there when it counts.", ally:"To hold the line when it costs.", ex:"None that either will admit to.", rival:"Only to fight fair, and only if watched.", antagonist:"None."})[role.id] || "" : "";
+  const wants = want ? `${_nm(want)} — and this person is in the way of it, or the route to it.` : "";
+  const conceals = lie ? `That underneath it they believe ${asReportedBelief(lie)}.` : defence ? `${_nm(defence)}.` : "";
+  const obligation0 = role ? ({mentor:"To make them ready and then let go.", protege:"To become worth the time.", confidant:"To keep what they were told.", dependant:"To be there when it counts.", ally:"To hold the line when it costs.", ex:"None that either will admit to.", rival:"Only to fight fair, and only if watched.", antagonist:"None."})[role.id] || "" : "";
+  const obligation = role && obligation0 ? proseAlt(obligation0, _proseAlts('edgeObligation', role.id), 'eo|' + role.id + '|' + (want ? want.id : 0) + '|' + (lie ? lie.id : 0) + '|' + (defence ? defence.id : 0)) : obligation0;
   return {trust, dependence, status, obligation, knows, wants, conceals, why};
 }
 
@@ -6832,7 +7197,7 @@ function proposeArcChanges(st, event, priorEvents){
       const cat = _oppositeCategory(chosen.t, shape.dir);
       const pool = cat ? byFilter(SECTION_OF_CATEGORY.get(cat) || chosen.t.section, cat) : [];
       push(chosen.k, pickInRange(pool, "balanced", clamp((chosen.t.intensity || 3) - 0.5, 1, 5), 3),
-        `${shape.label.toLowerCase()} on ${chosen.t.category.split("—")[0].trim()}: they move from "${chosen.t.trait}" toward the other pole`);
+        `${_cap(shape.label.toLowerCase())} on ${chosen.t.category.split("—")[0].trim()}: they move from "${_nm(chosen.t)}" toward the other pole`);
     }
     // 2. The Lie loosens on growth; the Defence hardens on deterioration.
     const targetCat = shape.dir > 0 ? /The Lie/i : /The Defence/i;
@@ -6955,7 +7320,10 @@ function setUserVoicePrompts(list){
   return USER_VOICE_PROMPTS;
 }
 function getUserVoicePrompts(){ return USER_VOICE_PROMPTS.map(p => Object.assign({}, p)); }
-function allVoicePrompts(){ return VOICE_PROMPTS.concat(USER_VOICE_PROMPTS); }
+/* Nine more speech acts (js/data/voice-acts-v2.js) for engine 3: thanking, congratulating, criticising, comforting, taking a compliment, breaking bad
+   news, greeting, saying goodbye and confessing. Each brings its own clause table; a v1 or v2 sheet's lab lists the original seven. */
+const VOICE_PROMPTS_V3 = [];
+function allVoicePrompts(){ return VOICE_PROMPTS.concat(ENGINE_V >= 3 ? VOICE_PROMPTS_V3 : [], USER_VOICE_PROMPTS); }
 
 /* The rules, read off the sheet once. Everything the composer uses comes from here, so
    the "which rules shaped this" list can never drift from what actually shaped it. */
@@ -7073,52 +7441,6 @@ const PRESSURE_TAIL = {
 };
 
 function _pickFrag(list, rng){ return list && list.length ? list[Math.floor(rng() * list.length)] : null; }
-/* The original fragment composer, kept as the backing table's reference reader (and for
-   comparison): composeVoiceLine below is the compositional generator that replaced it. */
-function composeVoiceLineFragments(st, promptId, mode, opts){
-  const prompt = allVoicePrompts().find(p => p.id === promptId);
-  if (!prompt) return null;
-  opts = opts || {};
-  const r = voiceRules(st);
-  const underPressure = mode === "pressure";
-  let seed = 11;
-  Object.values(st || {}).forEach(s => { if (s && s.trait) seed = (seed * 31 + s.trait.id) >>> 0; });
-  /* The seed used to hash the trait ids alone (plus the prompt id), so two prompts with
-     the same fragment table and a sheet with few voice traits read identically, and
-     there was no way to ask for another take. Prompt index and a reroll counter join
-     it; at index/reroll absent the line is what it has always been. */
-  const idx = Number.isInteger(opts.index) ? opts.index : -1, reroll = Number.isInteger(opts.reroll) ? opts.reroll : 0;
-  const rng = mulberry32(hashSeedString(String(seed) + "|" + promptId + "|" + (mode || "baseline") + (idx >= 0 || reroll ? "|" + idx + "|" + reroll : "")));
-  const parts = [], used = [];
-  const take = frag => { if (!frag) return; if (frag.text) parts.push(frag.text); used.push(frag.rule); };
-  const table = VOICE_FRAGMENTS[prompt.like || promptId];
-  /* Pressure strips the politeness layer first — the opener and the manners are the
-     first things to go when someone is holding themselves together. */
-  if (!underPressure){
-    // The mannered openers thank someone for asking, so they only belong where someone
-    // has actually asked — otherwise an apology opens by thanking the injured party.
-    const kind = prompt.like || promptId;
-    const asked = kind === "refuse" || kind === "request" || kind === "askhelp";
-    if (r.mannered && asked) take(_pickFrag(VOICE_FRAGMENTS.opener.mannered, rng));
-    else if (r.formal) take(_pickFrag(VOICE_FRAGMENTS.opener.formal, rng));
-    else if (r.casual) take(_pickFrag(VOICE_FRAGMENTS.opener.casual, rng));
-  }
-  const pick = (...keys) => { for (const k of keys){ if (r[k] && table[k]) return _pickFrag(table[k], rng); } return _pickFrag(table.mid || table.straight || Object.values(table)[0], rng); };
-  take(pick("direct","yielding","slippery","straight","open","guarded","warm","cold","mannered","blunt","terse"));
-  if (!underPressure && r.long) take(_pickFrag(VOICE_FRAGMENTS.tail.long, rng));
-  if (!underPressure && r.warm) take(_pickFrag(VOICE_FRAGMENTS.tail.warm, rng));
-  if (underPressure && r.stress) take(_pickFrag(PRESSURE_TAIL[r.stress.category], rng));
-  /* A vocabulary trait's own example is the one genuinely authored thing available, so
-     it rides along as the character's habitual device rather than being paraphrased. */
-  const device = r.vocab.filter(t => t.example)[0] || r.grammar;
-  const text = parts.join(" ").replace(/\s+/g, " ").trim();
-  return {
-    prompt: prompt.label, promptId, setup: prompt.setup, mode: underPressure ? "pressure" : "baseline",
-    text: text || "(this sheet has no voice traits to compose from)",
-    rules: used.filter(Boolean),
-    device: device ? {label: device.trait, example: device.example || ""} : null,
-  };
-}
 function voiceLab(st, mode, reroll, meta){
   // One `recent` across the seven situations, so the same tail, joke or stage direction
   // does not turn up in all of them.
@@ -7177,8 +7499,10 @@ function voiceCollisionMatrix(members, mode, reroll){
   return {names: list.map(m => (m.meta && m.meta.name) || "Unnamed"), matrix, totals, max, worst,
     shared: shared.map(r => r.map(set => [...set]))};
 }
-function voiceLabToMarkdown(st, mode){
-  return voiceLab(st, mode).map(l =>
+/* `reroll` and `meta` are what the panel itself passes to voiceLab; without them the copy and the
+   export were a different take from the one on screen. */
+function voiceLabToMarkdown(st, mode, reroll, meta){
+  return voiceLab(st, mode, reroll, meta).map(l =>
     `### ${l.prompt}\n\n_${l.setup}_\n\n> ${l.text}\n\n- Rules: ${l.rules.join("; ") || "none"}${l.device ? `\n- Habitual device: ${l.device.label}` : ""}`
   ).join("\n\n");
 }
@@ -7345,6 +7669,17 @@ function lensReading(t, lenses){
   return null;
 }
 function lensTaboos(){ const out = []; activeLenses().forEach(l => (l.taboo || []).forEach(x => out.push(x))); return out; }
+/* SETTING LENS REACH (engine 3). A setting lens used to stay in the voice and the draw; it now also gives the prose a place: the room, the
+   person watching and the thing the trouble arrives as, picked by the sheet's hash from the lens's own topics. Backstory beats, the
+   pressure chain's trigger and the recovery sheet use it. Null on older engines and when no setting lens is on. */
+function settingScene(st){
+  if (ENGINE_V < 3 || typeof activeLenses !== 'function') return null;
+  const ls = activeLenses().filter(l => l && l.kind === 'setting' && l.topics);
+  if (!ls.length) return null;
+  let h = 7; Object.values(st || {}).forEach(s => { if (s && s.trait) h = (h * 31 + s.trait.id) >>> 0; });
+  const l = ls[h % ls.length], pk = (arr, salt) => arr && arr.length ? arr[hashSeedString(h + '|' + salt) % arr.length] : null;
+  return {lens: l.label, place: pk(l.topics.place, 'p'), person: pk(l.topics.person, 'q'), thing: pk(l.topics.thing, 't')};
+}
 
 /* ---------- 3. VARIABLE SHEET SHAPE (the signature budget) ----------
    Every sheet was the same template: one card per profile section, the same outlier
@@ -7376,6 +7711,15 @@ function rollSheetShape(){
   }
   let r = rand(), wild = 0;
   for (let i = 0; i < SHAPE_WILD_ODDS.length; i++){ r -= SHAPE_WILD_ODDS[i]; if (r <= 0){ wild = i; break; } }
+  /* The outlier checkbox and the "how many" slider were ignored whenever Sheet shape was on,
+     which is the default: the shape's own roll decided. They apply from v2 (a v1 seed has to
+     keep drawing what it always drew). The roll above is still made, so the random stream is
+     the same either way; the controls then override its result. Off means none. A count other
+     than the default of 1 fixes the number; 1 leaves it to the sheet, which varies from 0 to 3. */
+  if (ENGINE_V >= 2){
+    if (!wildcardEnabled()) wild = 0;
+    else { const n = wildcardCount(); if (n !== 1) wild = n; }
+  }
   return {double, drop, wild};
 }
 function shapeSummary(shape){
@@ -7465,18 +7809,18 @@ function seatedContradictions(st){
     const who = ghost ? `Around anything that touches ${ghost.trait.toLowerCase()}.`
       : role ? `${role.category}: they are ${role.trait.toLowerCase()} there.`
       : attach ? `With the people their ${attach.category.toLowerCase()} attachment lets close.` : `With strangers, who have no earlier version to compare it to.`;
-    const change = face ? `${face.trait} gives way to ${ex.trait} — ${AXIS_LABELS[c.axis].toLowerCase()} flips.` : `${ex.trait}, against the rest of the sheet on ${AXIS_LABELS[c.axis].toLowerCase()}.`;
-    const cost = fnT ? `${fnT.trait}${fnT.desc ? `: ${fnT.desc}` : ``}${price ? ` And it is paid out of ${price.trait.toLowerCase()}.` : wound ? ` It keeps ${wound.trait.toLowerCase()} covered.` : ``}`
+    const change = face ? `${_nm(face)} gives way to ${_nm(ex)} — ${AXIS_LABELS[c.axis].toLowerCase()} flips.` : `${_nm(ex)}, against the rest of the sheet on ${AXIS_LABELS[c.axis].toLowerCase()}.`;
+    const cost = fnT ? `${_nm(fnT)}${fnT.desc ? `: ${fnT.desc}` : ``}${price ? ` And it is paid out of ${price.trait.toLowerCase()}.` : wound ? ` It keeps ${wound.trait.toLowerCase()} covered.` : ``}`
       : price ? `It is paid out of ${price.trait.toLowerCase()}.` : `Someone eventually sees both faces.`;
     const answers = [
-      {key:"for", prompt:"What is it for?", answer:(EXCEPTION_SURVIVES[c.fn] || EXCEPTION_SURVIVES.default).replace(/^it survives because /, ""), from:[fnT && fnT.trait].filter(Boolean)},
+      {key:"for", prompt:"What is it for?", answer:exceptionSurvives(c.fn, id).replace(/^it survives because /, ""), from:[fnT && fnT.trait].filter(Boolean)},
       {key:"when", prompt:"When does the second face appear?", answer:when, from:[words(ex).length ? ex.trait : fear && fear.trait].filter(Boolean)},
       {key:"who", prompt:"With whom?", answer:who, from:[(ghost || role || attach || {}).trait].filter(Boolean)},
       {key:"change", prompt:"What actually changes?", answer:change, from:[face && face.trait, ex.trait].filter(Boolean)},
       {key:"cost", prompt:"What does it cost them?", answer:cost, from:[fnT && fnT.trait, (price || wound || {}).trait].filter(Boolean)},
     ];
     return {slotId:id, axis:c.axis, axisLabel:AXIS_LABELS[c.axis], fn:c.fn, face, exception:ex, fnTrait:fnT || null, answers,
-      question: CONTRADICTION_QUESTIONS[c.axis] || "When does each of these come out, and what decides it?"};
+      question: proseAlt(CONTRADICTION_QUESTIONS[c.axis] || "When does each of these come out, and what decides it?", _proseAlts('contradictionQuestions', c.axis), 'cq|' + c.axis + '|' + id)};
   });
 }
 
@@ -7529,7 +7873,7 @@ function selectDistinctCandidate(cands, references){
   const scored = cands.map((c, i) => {
     const co = c.coherence !== undefined ? c.coherence : ((typeof coherenceScore === 'function' && coherenceScore(c.state)) || {pct:0}).pct;
     const d = (references && references.length ? diversityScore(c.state, references).score : 0) - TALLY_WEIGHT * tallyOveruse(c.state)
-      - RECENT_PICK_WEIGHT * recentOverlapShare(c.state);
+      - RECENT_PICK_WEIGHT * recentOverlapShare(c.state) - RETIRED_PICK_WEIGHT * retiredShare(c.state) - FRAME_PICK_WEIGHT * frameOverlapShare(c.state);
     return Object.assign({}, c, {index:i, coherence:co, diversity:d});
   });
   const best = Math.max(...scored.map(c => c.coherence));
@@ -7542,6 +7886,16 @@ function selectDistinctCandidate(cands, references){
    The draw runs in replay mode so a printed seed always rebuilds its character; the
    recent window instead steers which of the three seeded candidates is kept. */
 const RECENT_PICK_WEIGHT = 0.5;
+/* Retire-for-project lives here too. retirePenalty() above is a per-trait weight, which only
+   acts outside replay mode, and every build is a replay, so retiring a trait changed nothing.
+   A retired trait now costs the candidate that carries it: the build keeps the one of its
+   three that uses the fewest. Never a ban, and a pasted seed (no candidates) still replays. */
+const RETIRED_PICK_WEIGHT = 3;
+function retiredShare(st){
+  if (!RETIRED_IDS.size) return 0;
+  const ids = Object.values(st || {}).filter(s => s && s.trait).map(s => s.trait.id);
+  return ids.length ? ids.filter(id => RETIRED_IDS.has(id)).length / ids.length : 0;
+}
 function recentOverlapShare(st){
   if (typeof avoidRecentEnabled === 'function' && !avoidRecentEnabled()) return 0;
   if (!recentTraitIds || !recentTraitIds.length) return 0;
@@ -7624,6 +7978,8 @@ function backstoryBeats(st, meta){
      "now" is what is left unsaid. Settings lenses stay in the voice and the draw. */
   const lensIds = typeof activeLensIds === "function" ? activeLensIds() : [];
   const fl = beats.find(b => b.key === "failure"), nw = beats.find(b => b.key === "now");
+  const scene = settingScene(st);
+  if (fl && scene && scene.place && scene.person) fl.text = fl.text.replace(/\.?$/, "") + `. The setting was ${scene.place}, and ${scene.person} saw it.`;
   if (lensIds.includes("child") || lensIds.includes("adolescent")){
     if (fl){
       const home = lensIds.includes("child");
@@ -7714,6 +8070,15 @@ const VOICE_CLAUSES = {
     mid:     _VT(["Something like that.","More or less.","I was at {place}, I think."], "no strong lean"),
   },
 };
+// Register the v3 speech acts now that VOICE_CLAUSES and _VT exist.
+if (typeof VOICE_ACTS_V2 !== 'undefined'){
+  VOICE_ACTS_V2.forEach(a => {
+    VOICE_PROMPTS_V3.push({id: a.id, label: a.label, setup: a.setup});
+    const table = {};
+    Object.entries(a.clauses).forEach(([lean, c]) => { table[lean] = _VT(c.templates, c.rule); });
+    VOICE_CLAUSES[a.id] = table;
+  });
+}
 const VOICE_ELABORATIONS = ["{person} was there {time}, if you want to check.","It's to do with {thing}, mostly.","And before you say it — yes, I know about {place}.","I've been thinking about it since {time}.","Which is more than {person} ever did."];
 // Pull noun phrases out of the sheet's own vocabulary examples, so the words a
 // character reaches for turn up in what they talk about.
@@ -7732,7 +8097,6 @@ function _exampleSentences(t){
   if (!t || !t.example) return [];
   return String(t.example).split(/(?<=[.!?])\s+/).map(s => s.trim()).filter(s => s.split(/\s+/).length >= 3 && s.length <= 60 && !/[()]/.test(s));
 }
-function _exampleSentence(t){ return _exampleSentences(t)[0] || null; }
 const _sentences = s => s.split(/(?<=[.!?])\s+/).filter(Boolean);
 const _cap = s => s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
 const _lowerFirst = s => /^(I\b|I'|[A-Z]{2})/.test(s) ? s : s.charAt(0).toLowerCase() + s.slice(1);
@@ -7829,18 +8193,18 @@ function _innerLine(kind, r, rng, underPressure, terse){
     const src = inn.ghost || inn.wound;
     const G = src && _spoken(src, {the: !!inn.ghost, noun: !inn.ghost});
     if (!G) return null;
-    return {text: _cap(pick(terse ? _VOICE_INNER.concealShort : _VOICE_INNER.conceal).replace("{G}", G)), rule: `motivation: ${src.trait} — the line circles what they are not saying`};
+    return {text: _cap(pick(terse ? _VOICE_INNER.concealShort : _VOICE_INNER.conceal).replace("{G}", G)), rule: `motivation: ${_nm(src)} — the line circles what they are not saying`};
   }
   if (kind === "lie" || kind === "persuade"){
     const W = _spoken(inn.want);
     if (!W) return null;
     return {text: _cap(pick(_VOICE_INNER[kind]).replace("{W}", W).replace("{Wc}", _cap(W))),
-      rule: `motivation: ${inn.want.trait} — ${kind === "lie" ? "the lie protects the want" : "the ask is about the want"}`};
+      rule: `motivation: ${_nm(inn.want)} — ${kind === "lie" ? "the lie protects the want" : "the ask is about the want"}`};
   }
   if (kind === "askhelp" && inn.defence){
     const mode = _DEFENCE_MODES.find(m => m.re.test(`${inn.defence.trait} ${inn.defence.desc || ""}`));
     if (!mode) return null;
-    return {mode, rule: `motivation: ${inn.defence.trait} — ${mode.tell}`};
+    return {mode, rule: `motivation: ${_nm(inn.defence)} — ${mode.tell}`};
   }
   return null;
 }
@@ -7856,7 +8220,7 @@ const _VOICE_HUMOR = {
   "Intellectual & Wordplay": ["A matter of {thing}, as it were.", "And that, as they say, is the rub.", "Call it a question of syntax.", "There's a pun in there somewhere; I'll spare you."],
   "Observational": ["Funny how nobody ever says it out loud.", "It's always {thing}, isn't it.", "People do that, don't they."],
   "Pun-Groaner": ["Sorry. That one wrote itself.", "I'd say more, but I'd be pushing my luck. Or my pun.", "That's the good one and I know it."],
-  "Callback & Running Bit": ["Like {thing}. Again.", "Which is the {thing} business all over again."],
+  "Callback & Running Bit": ["Like {thing}. Again.", "Which is {thing} business all over again."],
   "Gallows": ["Well, nobody's died. Yet.", "On the bright side, it can't get worse. Famous last words.", "Put it on my headstone."],
   "Physical & Slapstick": ["— and then I walked into the door, naturally.", "[nearly trips over nothing and carries on]"],
   "Teasing as Affection": ["Don't get sentimental on me.", "You're lucky I like you.", "Look at you, being competent."],
@@ -7879,11 +8243,32 @@ function _stageDirections(manner){
   });
   return out;
 }
+/* AUDIENCE. Who the line is said to changes it as much as the situation does: the same refusal is one thing to a boss, another to a child
+   or a stranger, another again to a partner. The audience nudges the character's own leans (never replaces them): a boss makes the
+   register formal and the voice yielding, a child makes it warm and plain, a stranger makes it mannered and guarded, someone close makes
+   it casual and open. Empty means the old behaviour exactly. */
+const VOICE_AUDIENCES = [
+  {id:"",          label:"Whoever (as before)"},
+  {id:"authority", label:"Someone with power over them",  set:{formal:true, casual:false, mannered:true, blunt:false, yielding:true, direct:false}, note:"audience: authority — the register goes formal and the voice yields"},
+  {id:"peer",      label:"A peer they get on with",       set:{casual:true, formal:false, open:true}, note:"audience: a peer — the register relaxes"},
+  {id:"child",     label:"A child",                       set:{warm:true, cold:false, blunt:false, formal:false, mannered:false}, note:"audience: a child — warmer, plainer, no edge"},
+  {id:"stranger",  label:"A stranger",                    set:{mannered:true, guarded:true, open:false, formal:true, casual:false}, note:"audience: a stranger — polite and guarded"},
+  {id:"intimate",  label:"Someone close",                 set:{casual:true, formal:false, open:true, guarded:false, warm:true}, note:"audience: someone close — casual, open, warm"},
+];
+function voiceAudienceRules(r, audienceId){
+  const a = VOICE_AUDIENCES.find(x => x.id === audienceId && x.id);
+  if (!a) return r;
+  const out = Object.assign({}, r, a.set);
+  // Two leans on one axis cannot both stand: the one the audience set wins and its opposite is dropped.
+  out.rules = r.rules.concat([{key:"audience", label:a.label, why:a.note}]);
+  return out;
+}
 function composeVoiceLine(st, promptId, mode, opts){
   const prompt = allVoicePrompts().find(p => p.id === promptId);
   if (!prompt) return null;
   opts = opts || {};
-  const r = voiceRules(st);
+  const audience = opts.audience !== undefined ? opts.audience : strVal('voiceAudience', '');
+  const r = voiceAudienceRules(voiceRules(st), audience);
   const underPressure = mode === "pressure";
   let seed = 11;
   Object.values(st || {}).forEach(s => { if (s && s.trait) seed = (seed * 31 + s.trait.id) >>> 0; });
@@ -7893,10 +8278,11 @@ function composeVoiceLine(st, promptId, mode, opts){
   // so ten takes do not close with the same line.
   const recent = Array.isArray(opts.recent) ? opts.recent : null;
   const rng = mulberry32(hashSeedString(String(seed) + "|" + promptId + "|" + (mode || "baseline") + "|c2" +
-    (idx >= 0 || reroll ? "|" + idx + "|" + reroll : "") + (take ? "|t" + take : "")));
+    (idx >= 0 || reroll ? "|" + idx + "|" + reroll : "") + (take ? "|t" + take : "") + (audience ? "|a:" + audience : "")));
   const kind = prompt.like || promptId;
   const table = VOICE_CLAUSES[kind];
   const used = [];
+  { const aud = VOICE_AUDIENCES.find(x => x.id && x.id === audience); if (aud) used.push(aud.note); }
   // Goals, jargon, family, money and texture cards lend their own phrases to the topic pools.
   const profMany = id => Object.keys(st || {}).filter(k => k.startsWith("prof_" + id + "_") && st[k] && st[k].trait).map(k => st[k].trait);
   const vocabPhrases = _examplePhrases(r.vocab).concat(
@@ -7993,7 +8379,7 @@ function composeVoiceLine(st, promptId, mode, opts){
     if (ev && ev.title && ev.title.length < 40){ extra.push(`Not since ${_lowerFirst(ev.title.replace(/[.!?]+$/, ""))}.`); rule(`arc: ${ev.title} — the line is dated by the event`); }
   }
   if (typeof innerConflictLeak === 'function' && rng() < (underPressure ? (minimal ? 0.45 : 0.6) : (minimal ? 0 : 0.12))){
-    const lk = innerConflictLeak(st, rng, {short: minimal, meta: opts.meta});
+    const lk = innerConflictLeak(st, rng, {short: minimal, meta: opts.meta, already: [opener, core].concat(extra).filter(Boolean).join(" ")});
     if (lk){ extra.push(lk.text); rule(lk.rule); }
   }
   if (!minimal && !underPressure && (r.long || vcat === "High-Volume & Wordy")){
@@ -8075,7 +8461,11 @@ function composeVoiceLine(st, promptId, mode, opts){
     }
   }
   let text = [opener, core].concat(extra).filter(Boolean).join(" ").replace(/\s+/g, " ").trim()
-    .replace(/([^.][.!?] )([a-z])/g, (m, a, b) => a + b.toUpperCase());
+    .replace(/([^.][.!?] )([a-z])/g, (m, a, b) => a + b.toUpperCase())
+    // Two trailing-off devices (a stammer's ellipsis and a freeze's "...I don't know") can land side by
+    // side: "anything... ...I don't know." Keep one; and an article never doubles ("the the").
+    .replace(/(\.\.\.|…)\s*(\.\.\.|…)/g, "...")
+    .replace(/\b(the|a|an) \1\b/gi, "$1");
   // Register: formal speech drops its contractions, casual speech takes them. Not under
   // pressure — the politeness layer is the first thing to go.
   if (!underPressure && r.formal && !r.casual){
@@ -8327,7 +8717,12 @@ const escHTML = (v) => String(v==null?"":v)
 // survive twice: once as a JS string literal, and then as an HTML attribute. Escape
 // for JS FIRST — the browser HTML-decodes the attribute before parsing it as JS, so
 // escaping in the other order turns O'Brien into a syntax error.
-const escAttr = (v) => escHTML(String(v==null?"":v).replace(/\\/g, "\\\\").replace(/'/g, "\\'"));
+/* Attribute escaping. This used to double backslashes and escape apostrophes as well, which is what an
+   inline `onclick="f('…')"` needs and what an ordinary attribute must not get: a name like O'Brien was
+   shown as O\'Brien, and a saved slider set with an apostrophe could not be loaded or deleted because
+   the option's value no longer matched its name. Nothing here is inline JavaScript any more (actions go
+   through data-act), so it is plain HTML escaping. Kept as a name so call sites need not change. */
+const escAttr = (v) => escHTML(String(v==null?"":v));
 /* Builds the declarative-action attributes for a template. JSON first (so a trait id
    stays a number and an apostrophe in a section title stays an apostrophe), then
    attribute escaping — in that order, because the reverse produces an attribute that
@@ -8372,7 +8767,7 @@ function refreshConstraintChips(){
          + ` <b ${actAttr('click', 'favouriteTrait', id)} title="Remove from saved">&times;</b></span>`;
     });
   }
-  box.innerHTML = h || '<span class="sub" style="margin:0;">No constraints active.</span>';
+  box.innerHTML = h || '<span class="sub" data-st="margin:0;">No constraints active.</span>';
   renderRuleConflicts();
   refreshActiveRuleStrip();
 }
@@ -9022,6 +9417,32 @@ function resolveRelativeCaps(obj){
    `opts.carryLocked` is the previous sheet whose locked slots survive this build.
    `opts.applyBudgets === false` opts a path out of budgets explicitly — the point is
    that opting out is now a stated decision rather than an omission. */
+/* COUNTER AXES (engine 3). A preset like "loud but insecure" asks for two axes that the rest of the sheet pulls together: the Leader role,
+   the Fight response and the status habits all carry confident tags, so the requested insecurity was swamped (realised +0.18 against a
+   request of -50). After the draw, if a counter axis still reads the wrong way, the loudest trait pushing it that way is swapped for one
+   from its own category that does not, drawn near the same intensity. At most three swaps per axis; deterministic (the seeded stream). */
+function enforceCounterAxes(obj, counters, rarityPref){
+  if (ENGINE_V < 3 || !counters || !counters.length || typeof axisProfile !== 'function') return 0;
+  let swaps = 0;
+  counters.forEach(c => {
+    const code = AXIS_TO_POLCODE[c.axis]; if (!code) return;
+    const sign = c.sign < 0 ? -1 : 1;
+    for (let pass = 0; pass < 3; pass++){
+      if (((axisProfile(obj)[code]) || 0) * sign >= 0.3) break;
+      const seated = new Set(Object.values(obj).filter(s => s && s.trait).map(s => s.trait.id));
+      const bad = Object.keys(obj).filter(id => /^(pers_|prof_)/.test(id) && obj[id] && obj[id].trait && !obj[id].locked && obj[id].trait.pol && Math.sign(obj[id].trait.pol[code] || 0) === -sign)
+        .sort((a, b) => (obj[b].trait.intensity || 3) - (obj[a].trait.intensity || 3))[0];
+      if (!bad) break;
+      const s = obj[bad];
+      const pool = byFilter(s.trait.section, s.trait.category).filter(t => !seated.has(t.id) && Math.sign((t.pol && t.pol[code]) || 0) !== -sign);
+      const pick = pool.length ? pickInRange(pool, rarityPref || 0, s.target || s.trait.intensity || 3, 4, true) : null;
+      if (!pick) break;
+      obj[bad] = Object.assign({}, s, {trait: pick});
+      swaps++;
+    }
+  });
+  return swaps;
+}
 function finalizeSheet(obj, opts){
   opts = opts || {};
   const rarityPref = (opts.rarityPref === undefined) ? 0 : opts.rarityPref;

@@ -15,6 +15,8 @@ function check(name, fn){
   const t0 = Date.now();
   try {
     const detail = fn();
+    try { ctx.evalIn('setEngineV(1)'); } catch (e) {}
+    try { G.evalIn('setEngineV(1)'); } catch (e) {}   // outside a build the engine version follows the last sheet; every check starts on v1
     const ms = Date.now() - t0;
     if (ms > 5000) console.log('  \x1b[2m(slow: ' + Math.round(ms / 1000) + 's)\x1b[0m');
     if (detail === false) throw new Error('returned false');
@@ -39,7 +41,7 @@ const ctx = loadEngine([
   'rarityNorm','proximityWeights','profileTarget','applyBudgets','budgetCapacity',
   'BUDGET_GROUPS','BUDGET_PRESETS','applyBudgetPreset','clearBudgets','rarityCaps',
   'intensityCaps','getBudgetMode','setBudgetMode','getBudgetReport','getCharVariants',
-  'SECTION_OF_CATEGORY','forgetSlotDraws','withRng','buildStressVariant','categoryWeights','tierMultiplier','ARCHETYPE_PROFILE_HINTS','withArchetypeProfile','predictProfileCategories','rand','entropySeed','withSpeculativeGeneration',
+  'SECTION_OF_CATEGORY','forgetSlotDraws','withRng','buildStressVariant','categoryWeights','tierMultiplier','ARCHETYPE_PROFILE_HINTS','ARCHETYPE_HINTS_V2','ARCHETYPE_DROP_V2','withArchetypeProfile','predictProfileCategories','rand','entropySeed','withSpeculativeGeneration',
   'rarityTier','rarityWeight','rarityPrefValue','polarityFit','buildContextBias','parseAgeHint',
   'traitBand','CURVE_EXP','clamp','SECTION_COLORS','loudnessCheck','recentPenalty',
   'rememberGeneration','forgetRecentTraits','_drawUnique','_buildUsedIds','explainWhyNot',
@@ -49,7 +51,7 @@ const ctx = loadEngine([
   'axisProfile','analyseRelationship','checkEnsembleBalance','randomAxisLevel','secondOrderTensions',
   'suggestVoiceFromPersonality','intensityWord','axisPoleWord','voiceSliderWord','assertAxisTables',
   'strVal','boolVal','rarityPrefVal','ARCHETYPES','sheetToText','sheetToHTML','quantile','emptySlot',
-  'MOTIVATION_CROSSLINKS','motivationCrosslinkMap','motivationText','setMotivationLinks','resolveProfileCategories',
+  'MOTIVATION_CROSSLINKS','MOTIVATION_CROSSLINKS_V2','motivationCrosslinkMap','motivationText','setMotivationLinks','resolveProfileCategories',
   'WILDCARD_SECTIONS','PRESSURE_SHIFT_SECTIONS','DEPTH_TO_PERSONALITY','clearContextBias',
   // Added with the audit fixes: the shared finalizer, the seed codec, the decoders and
   // the diagnostics that had to become pure.
@@ -911,9 +913,10 @@ check('archetype profile hints are valid and actually nudge', ()=>{
      silent, because an unmatched fragment simply contributes nothing), and a hint must
      move the draw without deciding it. */
   const valid = {};
-  A.PROFILE_SECTIONS.forEach(ps=> valid[ps.id] = new Set(A.catsOf(ps.section)));
+  A.PROFILE_SECTIONS.forEach(ps=> valid[ps.id] = new Set(A.CATS_BY_SECTION.get(ps.section) || []));   // v2 hints may name v2 categories
   const bad = [];
-  Object.entries(A.ARCHETYPE_PROFILE_HINTS).forEach(([k, profile])=>{
+  const mergedHints = Object.entries(A.ARCHETYPE_PROFILE_HINTS).map(([k, p])=> [k, Object.assign({}, p, A.ARCHETYPE_HINTS_V2[k] || {})]);
+  mergedHints.forEach(([k, profile])=>{
     if (!A.ARCHETYPES[k]) bad.push(k + ' hints an archetype that does not exist');
     Object.entries(profile).forEach(([sec, cat])=>{
       if (!valid[sec]) bad.push(`${k}: no profile section "${sec}"`);
@@ -1442,7 +1445,11 @@ check('the motivation keyword rules reach the section they are written for', ()=
      every rule is written in prose, so a rule reading /becoming a burden/ never once
      matched the trait it was written for. */
   const mt = T.filter(t=>t.section === 'Motivation & Wound');
-  const linked = mt.filter(t=> A.MOTIVATION_CROSSLINKS.some(([re])=> re.test(A.motivationText(t))));
+  /* v1 rules against the older pack (what a v1 seed uses), then v1 + v2 rules against the whole section. */
+  const linkedOld = mt.filter(t=> !t.since && A.MOTIVATION_CROSSLINKS.some(([re])=> re.test(A.motivationText(t))));
+  assert(linkedOld.length / mt.filter(t=>!t.since).length >= 0.35, `v1 rules reach only ${linkedOld.length} of the older motivation traits`);
+  const allRules = A.MOTIVATION_CROSSLINKS.concat(A.MOTIVATION_CROSSLINKS_V2);
+  const linked = mt.filter(t=> allRules.some(([re])=> re.test(A.motivationText(t))));
   const untagged = mt.filter(t=> !Object.keys(t.pol||{}).some(k=>t.pol[k]));
   assert(linked.length / mt.length >= 0.35,
     `only ${linked.length}/${mt.length} motivation traits match any cross-link rule`);
@@ -1692,7 +1699,8 @@ check('the service worker precaches exactly what index.html loads', ()=>{
   const listed = [...body[1].matchAll(/['"]([^'"]+)['"]/g)].map(x=>x[1]);
   const missing = wanted.filter(w=>!listed.includes(w));
   // './' and './index.html' are the shell itself and have no tag to match.
-  const extra = listed.filter(l=> l !== './' && l !== './index.html' && !wanted.includes(l));
+  // The font files are not tags in index.html (css/fonts.css names them), but they are precached so the page works offline.
+  const extra = listed.filter(l=> l !== './' && l !== './index.html' && !/^\.\/css\/fonts\/[\w.-]+\.woff2$/.test(l) && !wanted.includes(l));
   assert(!missing.length, 'sw.js does not precache: ' + missing.join(', '));
   assert(!extra.length, 'sw.js precaches files index.html does not load: ' + extra.join(', '));
   return wanted.length + ' scripts/styles precached';
@@ -3252,7 +3260,7 @@ check('§4: single-slot profile sections reach most of their pool', ()=>{
   const out = [];
   Object.entries(seen).forEach(([k, set])=>{
     const ps = A.PROFILE_SECTIONS.find(p=>p.id===k);
-    const pool = A.TRAITS.filter(t=>t.section === ps.section).length;
+    const pool = A.TRAITS.filter(t=>t.section === ps.section && !t.since).length;   // a v1 build cannot see the v2 pack
     const share = set.size / pool;
     out.push(`${k} ${(100*share).toFixed(0)}%`);
     assert(share >= 0.6, `${k} drew only ${set.size} of ${pool}`);
@@ -3723,6 +3731,7 @@ check('§6 trait-bank gap sections stay grown, opt-in, and conceptFamily coverag
 });
 
 require('./regressions')({check, group, assert});
+require('./regressions-2026-10')({check, group, assert});
 
 console.log('\n' + (failed ? '\x1b[31m' : '\x1b[32m') + passed + ' passed, ' + failed + ' failed\x1b[0m');
 if (failed){

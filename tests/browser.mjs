@@ -28,11 +28,11 @@ if (process.env.CSP){
     const res = await route.fetch();
     const body = await res.text();
     await route.fulfill({ body, headers: Object.assign({}, res.headers(), {
-      'content-security-policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:;"
+      'content-security-policy': "default-src 'self'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data:;"
     })});
   });
 }
-const VOICE_PROMPT_COUNT = 7;   // VOICE_PROMPTS in js/engine.js
+const VOICE_PROMPT_COUNT = 16;   // VOICE_PROMPTS (7) plus VOICE_PROMPTS_V3 (9) in js/engine.js: a blank roll builds with engine 3
 page.on('console', m => { if (/Content Security Policy/i.test(m.text())) csp.push(m.text()); });
 await page.goto(base + '/index.html', {waitUntil:'networkidle'});
 
@@ -43,6 +43,12 @@ console.log('Browser checks');
 await step('page loads with a trait bank', async ()=>{
   const n = await page.evaluate(()=> TRAITS.length);
   if (!n || n < 7000) throw new Error('bank size ' + n);
+});
+await step('inline styles were all applied through the CSSOM (no data-st left, no style-src violation)', async ()=>{
+  const left = await page.evaluate(()=> document.querySelectorAll('[data-st]').length);
+  if (left) throw new Error(left + ' elements still carry data-st');
+  const hid = await page.evaluate(()=>{ const el = document.getElementById('suggestNote'); return el ? getComputedStyle(el).display : 'missing'; });
+  if (hid !== 'none') throw new Error('suggestNote should be display:none, got ' + hid);
 });
 await step('no inline on* handlers remain in the DOM', async ()=>{
   const found = await page.evaluate(()=>{
@@ -855,7 +861,16 @@ await step('find on the sheet filters the cards and opens folded sections; folds
   await page.evaluate(()=> { generateCharacter(); });
   await page.waitForTimeout(700);
   const total = await page.locator('#sheetBody .traitCard').count();
-  const word = await page.evaluate(()=> Object.values(state).find(s => s && s.trait).trait.trait.split(' ').find(w => w.length > 3) || 'a');
+  // A word that is on some cards and not all: a trait that starts "Keeps…" would match every card's own Keep button.
+  const word = await page.evaluate(()=> {
+    const cards = [...document.querySelectorAll('#sheetBody .traitCard')].map(c => c.textContent.toLowerCase());
+    for (const s of Object.values(state)){
+      if (!s || !s.trait) continue;
+      const w = s.trait.trait.split(/\s+/).map(x => x.replace(/[^A-Za-z]/g, '').toLowerCase()).find(x => x.length > 4 && cards.some(c => c.includes(x)) && !cards.every(c => c.includes(x)));
+      if (w) return w;
+    }
+    return 'a';
+  });
   await page.fill('#sheetFind', word);
   await page.waitForTimeout(300);
   const shown = await page.locator('#sheetBody .traitCard:not([hidden])').count();
@@ -957,6 +972,79 @@ await step('§5 lens row fits a phone width', async ()=>{
   const over = await page.evaluate(()=> document.documentElement.scrollWidth - window.innerWidth);
   await page.setViewportSize({width: 1280, height: 900});
   if (over > 1) throw new Error('page scrolls horizontally by ' + over + 'px');
+});
+/* Audit 2026-10 regressions that only a real page can answer. */
+await step('H1 a trait name that is markup shows as text in the conflict box and runs nothing', async ()=>{
+  const r = await page.evaluate(()=>{
+    const mk = (id, name, v) => ({slotId: 's' + id, label: 'x', trait: {id: -id, section: 'Personality Traits', category: 'Friendliness - Warm', trait: name, desc: 'd', example: 'e',
+      intensity: 5, rarity: 'common', pol: {warm: v}}});
+    state = {s1: mk(1, '<img src=x onerror="window.__pwn=1">', 1), s2: mk(2, '<img src=x onerror="window.__pwn=2">', -1)};
+    checkConflicts();
+    const box = document.getElementById('warnBox');
+    return {shown: box.classList.contains('show'), imgs: box.querySelectorAll('img').length, text: box.innerText, pwn: window.__pwn};
+  });
+  if (!r.shown) throw new Error('the two orphan traits raised no conflict, so this check proves nothing');
+  if (r.imgs || r.pwn) throw new Error('markup from a trait name reached the page: ' + JSON.stringify(r));
+  if (!/<img/.test(r.text)) throw new Error('the name was not shown as text: ' + r.text.slice(0, 120));
+});
+await step('M11 Roll 5 as the first action shows the candidates alone, and Discard all brings the empty state back', async ()=>{
+  await page.reload(); await page.waitForTimeout(800);
+  await page.locator('[data-act="generateBatch"]:visible').first().click();
+  await page.waitForSelector('#batchTray .batchGrid', {timeout: 15000});
+  const r = await page.evaluate(()=>({
+    stubs: (document.getElementById('sheet').innerText.match(/Nothing was drawable/g) || []).length,
+    titleShown: !!document.getElementById('sheetTitle').offsetParent,
+    cards: document.querySelectorAll('#batchTray .batchCard').length,
+  }));
+  if (r.stubs || r.titleShown) throw new Error('the empty sheet chrome is showing around the candidates: ' + JSON.stringify(r));
+  if (r.cards < 2) throw new Error('only ' + r.cards + ' candidates');
+  await page.locator('#batchTray').getByText('Discard all').click();
+  const back = await page.evaluate(()=> getComputedStyle(document.getElementById('emptyState')).display !== 'none' && !document.getElementById('sheet').classList.contains('show'));
+  if (!back) throw new Error('the empty state did not return after discarding every candidate');
+});
+await step('M2 Undo puts the seed chip back', async ()=>{
+  await page.reload(); await page.waitForTimeout(800);
+  const r = await page.evaluate(async ()=>{
+    generateCharacter(); await new Promise(r => setTimeout(r, 600)); const a = lastSeedUsed;
+    generateCharacter(); await new Promise(r => setTimeout(r, 600)); const b = lastSeedUsed;
+    undoLast(); await new Promise(r => setTimeout(r, 200));
+    return {a, b, after: lastSeedUsed, chip: document.getElementById('stickySeed').textContent};
+  });
+  if (r.a === r.b) throw new Error('two builds printed the same seed');
+  if (r.after !== r.a || !r.chip.includes(r.a)) throw new Error('after undo the seed reads ' + r.after + ' / chip "' + r.chip + '", expected ' + r.a);
+});
+await step('B-4 the first screen does not shift after first paint (layout shift under 0.1 at 390, 768 and 1440 wide)', async ()=>{
+  for (const w of [390, 768, 1440]){
+    const pg = await b.newPage({viewport: {width: w, height: 900}});
+    await pg.addInitScript(()=>{ window.__cls = 0; new PerformanceObserver(l => { for (const e of l.getEntries()) if (!e.hadRecentInput) window.__cls += e.value; }).observe({type: 'layout-shift', buffered: true}); });
+    await pg.goto(base + '/index.html', {waitUntil: 'load'}); await pg.waitForTimeout(1200);
+    const cls = await pg.evaluate(()=> window.__cls);
+    await pg.close();
+    if (cls >= 0.1) throw new Error('layout shift ' + cls.toFixed(3) + ' at ' + w + 'px wide');
+  }
+});
+await step('fonts come from this origin: no third-party request, and the faces load', async ()=>{
+  const pg = await b.newPage(); const outside = [];
+  pg.on('request', r => { if (!r.url().startsWith(base)) outside.push(r.url()); });
+  await pg.goto(base + '/index.html', {waitUntil: 'networkidle'});
+  const loaded = await pg.evaluate(async ()=>{ await document.fonts.ready; return [...document.fonts].filter(f => f.status === 'loaded').map(f => f.family); });
+  await pg.close();
+  if (outside.length) throw new Error('requests to other origins: ' + outside.slice(0, 3).join(', '));
+  if (!loaded.some(f => /Jakarta/.test(f))) throw new Error('the body font did not load: ' + loaded.join(', '));
+});
+await step('E-1 after a build the character leads: the diagnostics are folded, and the first card is within a screen and a half', async ()=>{
+  const pg = await b.newPage({viewport: {width: 1440, height: 900}});
+  await pg.goto(base + '/index.html', {waitUntil: 'load'}); await pg.waitForTimeout(600);
+  await pg.evaluate(async ()=>{ document.getElementById('seedInput').value = 'v2-e1first'; generateCharacter(); await new Promise(r => setTimeout(r, 900)); });
+  const r = await pg.evaluate(()=>{
+    const fold = document.querySelector('#insightPanel details.insightFold');
+    const title = document.getElementById('sheetTitle').getBoundingClientRect().top;
+    const card = document.querySelector('#sheetBody .traitCard').getBoundingClientRect().top;
+    return {fold: !!fold, open: fold && fold.open, gap: Math.round(card - title), vh: innerHeight};
+  });
+  await pg.close();
+  if (!r.fold || r.open) throw new Error('the "Why this character?" fold is missing or open: ' + JSON.stringify(r));
+  if (r.gap > r.vh * 1.5) throw new Error('the first card is ' + r.gap + 'px below the title: ' + JSON.stringify(r));
 });
 await b.close();
 if (process.env.CSP) console.log(csp.length ? '\nCSP violations:\n' + csp.slice(0,6).map(v=>'  '+v).join('\n') : '\nNo CSP violations under script-src \'self\'.');

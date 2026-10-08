@@ -22,6 +22,17 @@ jobs:
           node-version: '20'
       - run: node tests/run.js
 
+  # A narrow lint (eslint.config.js): duplicate object keys, duplicate cases, unreachable code. js/engine.js once had a lookup
+  # table with 24 keys written twice, which silently disabled about 39 of its links and which no test could see.
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npx --yes eslint@9 -c eslint.config.js js sw.js tools
+
   # tests/browser.mjs held the only checks for the things a DOM stub cannot answer —
   # that the declarative dispatcher actually dispatches, that no inline handler has crept
   # back in, that the dark palette resolves, and that the app still works under a CSP
